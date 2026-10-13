@@ -1,0 +1,29 @@
+node_modules/
+dist/
+out/
+release/
+.vite/
+.cache/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+
+# Local SQLite databases
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Local private key files
+*.pem
+*.p12
+*.pfx

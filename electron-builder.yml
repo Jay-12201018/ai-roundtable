@@ -1,0 +1,29 @@
+appId: com.ai-roundtable.desktop
+productName: AI Roundtable
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+extraMetadata:
+  main: out/main/index.js
+npmRebuild: true
+beforeBuild: scripts/rebuild-native.cjs
+afterPack: scripts/verify-native.cjs
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
