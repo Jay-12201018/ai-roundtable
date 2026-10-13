@@ -12,6 +12,7 @@ const fixture = vi.hoisted(() => ({
   quit: vi.fn(),
   showErrorBox: vi.fn(),
   showMessageBoxSync: vi.fn(),
+  app: { isPackaged: false },
 }));
 
 vi.mock('electron', () => ({
@@ -33,7 +34,7 @@ vi.mock('electron', () => ({
     constructor(public options: Electron.BrowserWindowConstructorOptions) { fixture.windows.push(this); }
   },
   shell: { openExternal: fixture.openExternal },
-  app: { quit: fixture.quit },
+  app: Object.assign(fixture.app, { quit: fixture.quit }),
   dialog: { showErrorBox: fixture.showErrorBox, showMessageBoxSync: fixture.showMessageBoxSync },
 }));
 
@@ -41,6 +42,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.unstubAllEnvs();
   fixture.windows.length = 0;
+  fixture.app.isPackaged = false;
   fixture.load.mockResolvedValue(undefined);
   fixture.openExternal.mockResolvedValue(undefined);
   fixture.showMessageBoxSync.mockReturnValue(0);
@@ -89,6 +91,17 @@ describe('window navigation security', () => {
     for (const url of ['file:///tmp/attacker.html', trusted + '.evil', trusted + '?remote=1', trusted.replace('file:///', 'file://remote/')]) {
       expect(navigate(window, url)).toHaveBeenCalledOnce();
     }
+  });
+
+  it('ignores inherited development URLs in a packaged application', () => {
+    fixture.app.isPackaged = true;
+    vi.stubEnv('ELECTRON_RENDERER_URL', 'https://attacker.example/');
+    createMainWindow();
+    const window = fixture.windows[0];
+    const trusted = pathToFileURL(join(__dirname, '../../../src/main/renderer/index.html')).href;
+    expect(fixture.load).toHaveBeenCalledWith(join(__dirname, '../../../src/main/renderer/index.html'));
+    expect(navigate(window, trusted)).not.toHaveBeenCalled();
+    expect(navigate(window, 'https://attacker.example/')).toHaveBeenCalledOnce();
   });
 
   it('blocks untrusted redirects and every child frame navigation', () => {

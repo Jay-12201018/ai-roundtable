@@ -13,22 +13,24 @@ let window: BrowserWindow | undefined;
 let unregisterIpc: (() => void) | undefined;
 let runService: RunService | undefined;
 let shutdownRequested = false;
-let shutdownStarted = false;
+let shutdownPromise: Promise<void> | undefined;
+let shutdownExitCode = 0;
 
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    if (shutdownRequested) return;
     if (!window || window.isDestroyed()) {
       if (app.isReady() && runService) createAppWindow();
       return;
     }
     if (window.isMinimized()) window.restore();
-    window.show();
     window.focus();
   });
   app.whenReady().then(() => {
+    if (shutdownRequested) return;
     try {
       database = new Database(join(app.getPath('userData'), 'ai-roundtable.db'));
       database.initialize();
@@ -38,47 +40,91 @@ if (!hasLock) {
       runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }));
       createAppWindow();
       app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createAppWindow();
+        if (!shutdownRequested && BrowserWindow.getAllWindows().length === 0) createAppWindow();
       });
     } catch (error) {
       handleStartupFailure(error);
     }
   }).catch(handleStartupFailure);
   app.on('before-quit', (event) => {
-    if (shutdownStarted) return;
     event.preventDefault();
-    shutdownStarted = true;
-    shutdownRequested = true;
-    unregisterIpc?.();
-    Promise.resolve(runService?.shutdown()).finally(() => {
-      database?.close();
-      app.exit(0);
-    });
+    requestShutdown();
   });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 }
 
 function createAppWindow(): void {
-  if (!runService) throw new Error('Run service is not initialized');
-  unregisterIpc?.();
-  window = createMainWindow();
-  unregisterIpc = registerIpc(window, runService);
-  window.on('close', (event) => {
-    if (shutdownRequested || !runService || !runService.hasActiveRuns()) return;
-    const result = dialog.showMessageBoxSync(window!, { type: 'warning', buttons: ['取消', '退出并停止生成'], defaultId: 0, cancelId: 0, title: '正在生成', message: '仍有任务正在生成，确定退出吗？' });
-    event.preventDefault();
-    if (result !== 0) app.quit();
+  if (shutdownRequested) return;
+  try {
+    if (!runService) throw new Error('Run service is not initialized');
+    disposeCurrentIpc();
+    const createdWindow = createMainWindow();
+    window = createdWindow;
+    const dispose = registerIpc(createdWindow, runService);
+    unregisterIpc = dispose;
+    createdWindow.on('close', (event) => {
+      if (shutdownRequested || !runService || !runService.hasActiveRuns()) return;
+      const result = dialog.showMessageBoxSync(createdWindow, { type: 'warning', buttons: ['取消', '退出并停止生成'], defaultId: 0, cancelId: 0, title: '正在生成', message: '仍有任务正在生成，确定退出吗？' });
+      event.preventDefault();
+      if (result !== 0) app.quit();
+    });
+    createdWindow.on('closed', () => {
+      if (unregisterIpc === dispose) disposeCurrentIpc();
+      if (window === createdWindow) window = undefined;
+    });
+  } catch (error) {
+    handleStartupFailure(error);
+  }
+}
+
+function disposeCurrentIpc(): void {
+  const dispose = unregisterIpc;
+  unregisterIpc = undefined;
+  dispose?.();
+}
+
+function requestShutdown(exitCode = 0): void {
+  shutdownRequested = true;
+  shutdownExitCode = Math.max(shutdownExitCode, exitCode);
+  if (shutdownPromise) return;
+  // Assign the barrier before calling cleanup, which may synchronously trigger another quit.
+  shutdownPromise = Promise.resolve().then(async () => {
+    try {
+      await runService?.shutdown();
+    } catch (error) {
+      shutdownExitCode = 1;
+      console.error('AI Roundtable shutdown failed', error);
+    } finally {
+      const closingDatabase = database;
+      database = undefined;
+      try {
+        closingDatabase?.close();
+      } catch (error) {
+        shutdownExitCode = 1;
+        console.error('AI Roundtable database close failed', error);
+      }
+      app.exit(shutdownExitCode);
+    }
   });
-  window.on('closed', () => {
-    unregisterIpc?.();
-    unregisterIpc = undefined;
-    window = undefined;
-  });
+  try {
+    disposeCurrentIpc();
+  } catch (error) {
+    shutdownExitCode = 1;
+    console.error('AI Roundtable IPC cleanup failed', error);
+  }
+  const closingWindow = window;
+  window = undefined;
+  try {
+    if (closingWindow && !closingWindow.isDestroyed()) closingWindow.destroy();
+  } catch (error) {
+    shutdownExitCode = 1;
+    console.error('AI Roundtable window cleanup failed', error);
+  }
 }
 
 function handleStartupFailure(error: unknown): void {
+  if (shutdownRequested) return;
   console.error('AI Roundtable startup failed', error);
   dialog.showErrorBox('AI 圆桌启动失败', error instanceof Error ? error.message : String(error));
-  database?.close();
-  app.quit();
+  requestShutdown(1);
 }

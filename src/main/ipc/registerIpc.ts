@@ -2,14 +2,30 @@ import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import type { StartRunInput } from '../../shared/contracts/run';
 import { RunService } from '../services/RunService';
+import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
 
 const idSchema = z.string().min(1);
 const cursorSchema = z.object({ runId: idSchema, cursor: z.number().int().nonnegative() }).strict();
 const startSchema = z.object({ roomId: idSchema, task: z.string().min(1), workflowSnapshot: z.record(z.string(), z.unknown()), mode: z.enum(['automatic', 'step']).optional(), maxTurns: z.number().int().positive().optional(), maxDurationMs: z.number().int().positive().optional(), outputTokenLimit: z.number().int().positive().optional() }).strict();
+let currentDisposer: (() => void) | undefined;
 
 export function registerIpc(window: BrowserWindow, service: RunService): () => void {
+  currentDisposer?.();
+  let disposed = false;
+  let unsubscribe: (() => void) | undefined;
+  const registered: string[] = [];
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    try { unsubscribe?.(); }
+    finally {
+      for (const channel of registered) ipcMain.removeHandler(channel);
+      if (currentDisposer === dispose) currentDisposer = undefined;
+    }
+  };
+  currentDisposer = dispose;
   const ensureSender = (event: IpcMainInvokeEvent) => {
-    if (event.sender !== window.webContents) throw new Error('Unauthorized IPC sender');
+    if (disposed || !isTrustedIpcSender(window, event)) throw new Error('Unauthorized IPC sender');
   };
   const handlers: Array<[string, (...args: any[]) => unknown]> = [
     ['room.createDemo', (event, objective: unknown) => { ensureSender(event); const value = z.string().trim().min(1).parse(objective); return { roomId: service.createDemoRoom(value) }; }],
@@ -25,12 +41,17 @@ export function registerIpc(window: BrowserWindow, service: RunService): () => v
     ['run.continueMessage', async (event, input: unknown) => { ensureSender(event); const parsed = z.object({ runId: idSchema, messageId: idSchema }).parse(input); await service.continueMessage(parsed.runId, parsed.messageId); }],
     ['run.recoverInterruptedRun', async (event, input: unknown) => { ensureSender(event); const parsed = z.object({ runId: idSchema, decision: z.enum(['inspect', 'retry', 'discard']) }).parse(input); await service.recoverInterruptedRun(parsed.runId, parsed.decision); }],
   ];
-  for (const [channel, handler] of handlers) ipcMain.handle(channel, handler);
-  const unsubscribe = service.onEvent((event) => {
-    if (!window.isDestroyed()) window.webContents.send('run.event', event);
-  });
-  return () => {
-    unsubscribe();
-    for (const [channel] of handlers) ipcMain.removeHandler(channel);
-  };
+  try {
+    for (const [channel, handler] of handlers) {
+      ipcMain.handle(channel, handler);
+      registered.push(channel);
+    }
+    unsubscribe = service.onEvent((event) => {
+      if (!disposed && isTrustedRenderer(window)) window.webContents.send('run.event', event);
+    });
+    return dispose;
+  } catch (error) {
+    dispose();
+    throw error;
+  }
 }

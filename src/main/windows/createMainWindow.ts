@@ -28,7 +28,7 @@ export function isTrustedIpcSender(window: BrowserWindow, event: IpcMainInvokeEv
 
 export function createMainWindow(): BrowserWindow {
   const rendererFile = join(__dirname, '../renderer/index.html');
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL;
+  const rendererUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL;
   let trusted: URL;
   try {
     trusted = new URL(rendererUrl ?? pathToFileURL(rendererFile).href);
@@ -44,11 +44,10 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 680,
     backgroundColor: '#0f172a',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      // electron-vite emits an ESM preload; Electron sandboxed preloads cannot import ESM.
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
     },
   });
