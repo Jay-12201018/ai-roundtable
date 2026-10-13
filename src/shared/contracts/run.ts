@@ -5,15 +5,7 @@ import type {
   RunSubscription,
 } from '../types/run';
 
-export interface StartRunInput {
-  roomId: string;
-  task: string;
-  workflowSnapshot: Record<string, unknown>;
-  mode?: 'automatic' | 'step';
-  maxTurns?: number;
-  maxDurationMs?: number;
-  outputTokenLimit?: number;
-}
+export type StartRunInput = import('zod').infer<typeof import('../schemas/run').startRunInputSchema>;
 
 export interface RunApiContract {
   getSnapshot(runId: string): Promise<RunSnapshot>;

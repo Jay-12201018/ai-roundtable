@@ -82,6 +82,7 @@ export function App() {
     let cursor = lastSequence.current;
     for (const event of events) {
       if (event.sequence !== cursor + 1 || event.type === 'snapshot_required') {
+        if (event.type === 'snapshot_required') bufferedEvents.current.delete(event.sequence);
         if (selectedRun.current) void syncRun(selectedRun.current);
         return;
       }

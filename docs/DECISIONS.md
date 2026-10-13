@@ -48,3 +48,15 @@ D001–D015 为 R00 阶段记录，后续落地与授权变化见追加决策及
 main 的实际合并文件树与获批集成候选一致；本轮在 main 重新运行类型、133 项全套回归、生产构建、Electron SQLite ABI139、隔离生产页面/Preload 与退出后只读 SQLite，均通过，再将 R01 verified、R02 ready。具体命令见 [主线验收证据](verification/2026-10-13-r01-main.md)。状态更新为独立文档提交，业务代码、协议、Schema、migration 和依赖不另改。
 
 R01 验收不表示 V1 发布完成。正式 E2E、跨平台、签名/公证、真实模型/Key 等限制继续保留；不响应 abort 的收尾策略留 R04。R02 ready 仅表示依赖满足，未授权创建 Worktree/实施，不自动开展其他任务。
+
+## R02 分支接口决策（2026-10-14，待总控审核）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D022 | 用户授权当前独立 codex/r02-contracts；R02 主代理独占共享文件，协作者只读 | 基于已验收 R01 的 b690a1e；沿用已有 Worktree，不合 main、不改总控状态看板 | 本分支交付待审核，不能标 merged/verified |
+| D023 | Schema 派生 DTO；IPC 成功/错误 envelope 和 RunEvent.version=1，Preload 双端校验后保持原 Bridge API | 消除重复输入/恢复定义、unknown payload；拒绝未知字段及错误身份，固定错误消息/field | Main/Preload/Renderer 必须同构建交付，非混合版本兼容；无 DB migration |
+| D024 | 保留 v0 数据，RunService 只在输出边界补关联/脱敏；无法安全适配就快照重同步 | 不重写原文、请求 ID、部分输出或序号，不自动重试 | 损坏 JSON 恢复仍 R03；一行 App 控制标记消费修复记录 R02-CONSUMER-01 |
+| D025 | Provider 全部方法与六类事件统一；Main requestId 贯穿，error 也是终态 | Mock 可替换为未来四类供应商，标准化取消/可重试性；不新增真实 API | fixture/编译期/Mock 只证明协议；真实 Token/调度/计费留后续任务 |
+| D026 | Shared Zod jitless，保持 R01 CSP/sandbox/有限 Bridge | 校验不生成动态代码；不放宽 unsafe-eval 或 Node 能力 | 单文件 CJS 构建与隔离 Electron 另验证；Node ObjectWrap 原生回归独立记录，不归因于 Zod |
+
+本轮实际命令、环境失败及限制见 [R02 验证与交接](verification/2026-10-14-r02-contracts.md)。总控须审查以上 wire shape 和必要消费接线，再集成复验。本分支未授权其他模块实施。

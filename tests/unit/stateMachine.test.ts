@@ -92,7 +92,7 @@ describe('run synchronization schemas', () => {
     workflowSnapshot: { name: 'draft-review-finalize', version: 1 },
     currentTurnId: 'turn-1',
     activeAgentId: 'agent-a',
-    turns: [],
+    turns: [{ turnId: 'turn-1', runId: 'run-1', agentId: 'agent-a', status: 'running', requestId: 'request-1' }],
     messages: [{ id: 'message-1', senderName: '起草者', content: 'draft', status: 'streaming' }],
     startedAt: timestamp,
     updatedAt: timestamp,
@@ -120,11 +120,11 @@ describe('run synchronization schemas', () => {
 
   it('requires an integer sequence and rejects malformed events', () => {
     const event = {
-      runId: 'run-1',
-      turnId: 'turn-1',
+      version: 1, runId: 'run-1',
+      turnId: 'turn-1', requestId: 'request-1',
       sequence: 5,
       type: 'text_delta',
-      payload: { text: 'draft' },
+      payload: { turnId: 'turn-1', messageId: 'message-1', senderName: '起草者', text: 'draft' },
       timestamp,
     };
     expect(runEventSchema.parse(event)).toEqual(event);

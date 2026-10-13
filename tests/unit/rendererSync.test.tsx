@@ -12,7 +12,7 @@ function snapshot(runId: string, sequence = 0, content = ''): RunSnapshot {
 }
 
 function delta(runId: string, sequence: number, text: string): RunEvent {
-  return { runId, sequence, type: 'text_delta', timestamp: new Date().toISOString(), payload: { messageId: `${runId}-message`, senderName: '起草者', text } };
+  return { version: 1, runId, turnId: `${runId}-turn`, requestId: `${runId}-request`, sequence, type: 'text_delta', timestamp: new Date().toISOString(), payload: { turnId: `${runId}-turn`, messageId: `${runId}-message`, senderName: '起草者', text } };
 }
 
 describe('Renderer run synchronization', () => {
@@ -79,6 +79,17 @@ describe('Renderer run synchronization', () => {
     act(() => listener(delta('gap', 4, '缺口后的尾部')));
     await waitFor(() => expect(screen.getByText('完整恢复文本')).toBeTruthy());
     expect(screen.queryByText('缺口后的尾部')).toBeNull();
+  });
+
+  it('consumes snapshot_required once when the authoritative cursor has not advanced', async () => {
+    localStorage.setItem('roundtable.runId', 'resync');
+    const unchanged = { snapshot: snapshot('resync', 4, '保留文本'), events: [], nextCursor: 4, resyncRequired: false };
+    subscribe.mockResolvedValueOnce(unchanged).mockResolvedValueOnce(unchanged).mockRejectedValue(new Error('Repeated resynchronization'));
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('4')).toBeTruthy());
+    act(() => listener({ version: 1, runId: 'resync', sequence: 5, type: 'snapshot_required', payload: { reason: 'invalid_event' }, timestamp: new Date().toISOString() }));
+    await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('保留文本')).toBeTruthy();
   });
 
   it('starts only once while the start command is pending and releases its listener', async () => {

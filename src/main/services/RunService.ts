@@ -1,18 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { RunEvent, RunSnapshot, RunSubscription, RunStatus } from '../../shared/types/run';
 import { assertRunCommand } from '../orchestrator/stateMachine';
-import type { Database } from '../database/Database';
+import type { StartRunInput } from '../../shared/contracts/run';
+import type { InterruptedRunDecision } from '../../shared/types/run';
+import { ContractError, toPublicError } from '../../shared/contracts/errors';
+import { resyncEvent } from '../../shared/contracts/events';
+import { publicError } from '../../shared/schemas/error';
+import { runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
+import { roomMessagesSchema } from '../../shared/schemas/app';
+import { PROTOCOL_VERSION } from '../../shared/schemas/common';
+import { normalizedChunkSchema } from '../../shared/schemas/provider';
+import type { Database, RunEventRecord } from '../database/Database';
 import type { ProviderAdapter, StreamChatInput } from '../providers/types';
-
-export type StartRunInput = {
-  roomId: string;
-  task: string;
-  workflowSnapshot: Record<string, unknown>;
-  mode?: 'automatic' | 'step';
-  maxTurns?: number;
-  maxDurationMs?: number;
-  outputTokenLimit?: number;
-};
 
 type RunContext = {
   runId: string;
@@ -54,6 +53,9 @@ export class RunService {
   }
 
   async start(input: StartRunInput): Promise<RunSnapshot> {
+    const parsed = startRunInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    input = parsed.data;
     if (this.activeRooms.has(input.roomId)) throw new Error('Room already has an active run');
     if (this.activeRooms.size > 0) throw new Error('Another room already has an active run');
     if (!this.database.getRoom(input.roomId)) throw new Error('Room not found');
@@ -96,31 +98,32 @@ export class RunService {
       const events = this.database.listRunEvents(runId, 0);
       const messages = this.database.listMessages(run.roomId).filter((message) => message.runId === runId);
       const lastEvent = events.at(-1);
-      return {
+      return runSnapshotSchema.parse({
         runId: run.id,
         roomId: run.roomId,
-        status: run.status as RunSnapshot['status'],
+        status: run.status,
         sequence: lastEvent?.sequence ?? 0,
         workflowSnapshot: run.workflowSnapshot,
         currentTurnId: turns.find((turn) => turn.status === 'running')?.id,
         activeAgentId: turns.find((turn) => turn.status === 'running')?.agentId,
-        turns: turns.map((turn) => ({ turnId: turn.id, runId: turn.runId, agentId: turn.agentId, status: normalizeTurnStatus(turn.status), requestId: turn.requestId, outputText: turn.partialContent })),
-        messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: (message.status ?? 'completed') as RunSnapshot['messages'][number]['status'] })),
+        turns: turns.map((turn) => ({ turnId: turn.id, runId: turn.runId, agentId: turn.agentId, status: turn.status, requestId: turn.requestId, messageId: messages.find((message) => message.turnId === turn.id)?.id, outputText: turn.partialContent })),
+        messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed' })),
         updatedAt: new Date().toISOString(),
-      };
+      });
     });
   }
 
   getMessages(roomId: string) {
-    return this.database.listMessages(roomId);
+    return roomMessagesSchema.parse(this.database.listMessages(roomId).map((message) => ({ ...message, status: message.status ?? 'completed' })));
   }
 
   subscribe(runId: string, cursor: number): RunSubscription {
     const snapshot = this.getSnapshot(runId);
-    const events = this.database.listRunEvents(runId, cursor) as RunEvent[];
-    const firstSequence = events[0]?.sequence;
-    const resyncRequired = cursor > snapshot.sequence || (firstSequence !== undefined && firstSequence > cursor + 1);
-    return { snapshot, events: resyncRequired ? [] : events, nextCursor: snapshot.sequence, resyncRequired };
+    const records = this.database.listRunEvents(runId, cursor);
+    const events = records.map((record) => this.toRunEvent(record));
+    const resyncRequired = cursor > snapshot.sequence || events.some((event, index) => !event || event.sequence !== cursor + index + 1)
+      || (cursor < snapshot.sequence && records.at(-1)?.sequence !== snapshot.sequence);
+    return runSubscriptionSchema.parse({ snapshot, events: resyncRequired ? [] : events, nextCursor: snapshot.sequence, resyncRequired });
   }
 
   onEvent(listener: EventListener): () => void {
@@ -196,33 +199,25 @@ export class RunService {
     await context.promise;
   }
 
-  async retryTurn(runId: string, turnId: string): Promise<void> {
-    const run = this.database.getRun(runId);
-    const turn = this.database.getTurn(turnId);
-    if (!run || !turn || turn.runId !== runId) throw new Error('Turn not found');
-    if (!['error', 'cancelled'].includes(run.status)) throw new Error('retryTurn requires an error or cancelled run');
-    if (!['failed', 'aborted'].includes(turn.status)) throw new Error('retryTurn requires a failed or aborted turn');
-    throw new Error('retryTurn requires a new request context and is not available after process restart');
+  async retryTurn(_runId: string, _turnId: string): Promise<void> {
+    throw new ContractError('unsupported');
   }
 
-  async continueMessage(runId: string, messageId: string): Promise<void> {
-    const run = this.database.getRun(runId);
-    const message = this.database.getMessage(messageId);
-    if (!run || !message || message.runId !== runId) throw new Error('Message not found');
-    if (!['aborted', 'failed'].includes(message.status ?? '')) throw new Error('continueMessage requires an aborted or failed message');
-    throw new Error('continueMessage requires an explicit new generation request');
+  async continueMessage(_runId: string, _messageId: string): Promise<void> {
+    throw new ContractError('unsupported');
   }
 
-  async recoverInterruptedRun(runId: string, decision: 'inspect' | 'retry' | 'discard'): Promise<void> {
+  async recoverInterruptedRun(runId: string, decision: InterruptedRunDecision): Promise<void> {
     const run = this.database.getRun(runId);
-    if (!run || run.status !== 'interrupted') throw new Error('recoverInterruptedRun requires an interrupted run');
+    if (!run) throw new ContractError('not_found');
+    if (run.status !== 'interrupted') throw new ContractError('invalid_state');
     if (decision === 'inspect') return;
     if (decision === 'discard') {
       this.database.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
       this.appendAndNotify(runId, 'run_state_changed', { status: 'cancelled', reason: 'discarded after interruption' });
       return;
     }
-    throw new Error('Interrupted requests require a new explicit retry decision');
+    throw new ContractError('unsupported');
   }
 
   private async runLoop(context: RunContext): Promise<void> {
@@ -254,7 +249,7 @@ export class RunService {
       if (context.stopRequested || /cancel/i.test(String(error))) {
         this.finishRun(context, 'cancelled');
       } else {
-        this.database.updateRun(context.runId, { status: 'error', lastError: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() });
+        this.database.updateRun(context.runId, { status: 'error', lastError: toPublicError(error).message, finishedAt: new Date().toISOString() });
         this.appendAndNotify(context.runId, 'run_state_changed', { status: 'error' });
       }
       this.activeRooms.delete(context.roomId);
@@ -273,11 +268,25 @@ export class RunService {
     });
     let content = '';
     try {
-      const input: StreamChatInput = { agentRole: agent.roleTemplateId, turnIndex, messages: [{ role: 'user', content: context.task }], signal: context.abortController.signal };
+      const input: StreamChatInput = { requestId, modelId: 'mock', outputTokenLimit: context.outputTokenLimit, agentRole: agent.roleTemplateId, turnIndex, messages: [{ role: 'user', content: context.task }], signal: context.abortController.signal };
       let outputTokens = 0;
-      for await (const chunk of this.provider.streamChat(input)) {
+      let started = false;
+      let finished = false;
+      let locallyLimited = false;
+      for await (const value of this.provider.streamChat(input)) {
+        const parsed = normalizedChunkSchema.safeParse(value);
+        if (!parsed.success || parsed.data.requestId !== requestId || finished) throw new ContractError('invalid_response');
+        const chunk = parsed.data;
+        if (chunk.type === 'error') throw new ContractError(chunk.error.code);
+        if (chunk.type === 'start') {
+          if (started) throw new ContractError('invalid_response');
+          started = true;
+          continue;
+        }
+        if (!started) throw new ContractError('invalid_response');
+        if (chunk.type === 'finish') { finished = true; continue; }
         if (chunk.type === 'text_delta') {
-          if (outputTokens >= context.outputTokenLimit) break;
+          if (outputTokens >= context.outputTokenLimit) { locallyLimited = true; break; }
           outputTokens += 1;
           content += chunk.text;
           this.database.transaction(() => {
@@ -286,10 +295,13 @@ export class RunService {
             this.appendEvent(context.runId, 'text_delta', { turnId, messageId, senderName: agent.displayName, text: chunk.text });
           });
           this.notifyLastEvent(context.runId);
+        } else if (chunk.type === 'reasoning_summary_delta') {
+          this.appendAndNotify(context.runId, 'reasoning_summary_delta', { turnId, messageId, senderName: agent.displayName, text: chunk.text });
         } else if (chunk.type === 'usage') {
           this.appendAndNotify(context.runId, 'usage_updated', { turnId, inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens });
         }
       }
+      if (!finished && !locallyLimited) throw new ContractError('invalid_response');
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, 'completed');
         this.database.updateTurn(turnId, { status: 'completed', partialContent: content });
@@ -301,7 +313,7 @@ export class RunService {
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, cancelled ? 'aborted' : 'failed');
         this.database.updateTurn(turnId, { status: cancelled ? 'aborted' : 'failed', partialContent: content });
-        this.appendEvent(context.runId, cancelled ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: error instanceof Error ? error.message : String(error) });
+        this.appendEvent(context.runId, cancelled ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: toPublicError(error, cancelled ? 'cancelled' : 'internal_error') });
       });
       this.notifyLastEvent(context.runId);
       throw error;
@@ -320,11 +332,43 @@ export class RunService {
   }
 
   private appendEvent(runId: string, type: RunEvent['type'], payload: unknown): void {
-    this.database.appendRunEvent({ runId, type, payload });
+    const event = this.toRunEvent({ runId, type, payload, sequence: 1, timestamp: new Date().toISOString() });
+    if (!event) throw new ContractError('invalid_response');
+    this.database.appendRunEvent({ runId, type, turnId: event.turnId, payload: event.payload, timestamp: event.timestamp });
+  }
+
+  private toRunEvent(record: RunEventRecord & { sequence: number }): RunEvent | undefined {
+    const payload = record.payload;
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined;
+    let requestId: string | undefined;
+    let turnId = record.turnId;
+    let safePayload = payload;
+    if ('turnId' in payload) {
+      if (typeof payload.turnId !== 'string') return undefined;
+      turnId ??= payload.turnId;
+      const turn = this.database.getTurn(turnId);
+      if (!turn || turn.runId !== record.runId || turn.id !== payload.turnId) return undefined;
+      requestId = turn.requestId;
+      if ('requestId' in payload && payload.requestId !== requestId || 'agentId' in payload && payload.agentId !== turn.agentId) return undefined;
+      if ('messageId' in payload) {
+        if (typeof payload.messageId !== 'string') return undefined;
+        const message = this.database.getMessage(payload.messageId);
+        if (!message || message.runId !== record.runId || message.turnId !== turnId
+          || 'senderName' in payload && payload.senderName !== message.senderName) return undefined;
+      }
+      // v0 stored raw failure strings; replace only at the output boundary, preserving history.
+      if ((record.type === 'turn_failed' || record.type === 'turn_aborted') && 'error' in payload && typeof payload.error === 'string') {
+        safePayload = { ...payload, error: publicError(record.type === 'turn_aborted' ? 'cancelled' : 'internal_error') };
+      }
+    }
+    const parsed = runEventSchema.safeParse({ ...record, version: PROTOCOL_VERSION, turnId, requestId, payload: safePayload });
+    return parsed.success ? parsed.data : undefined;
   }
 
   private notifyLastEvent(runId: string): void {
-    const event = this.database.listRunEvents(runId, 0).at(-1) as RunEvent | undefined;
+    const record = this.database.listRunEvents(runId, 0).at(-1);
+    if (!record) return;
+    const event = this.toRunEvent(record) ?? resyncEvent(record, 'invalid_event');
     if (event) for (const listener of this.listeners) listener(event);
   }
 
@@ -333,8 +377,4 @@ export class RunService {
     if (!context) throw new Error('Run is not active in this process');
     return context;
   }
-}
-
-function normalizeTurnStatus(status: string): 'pending' | 'running' | 'completed' | 'failed' | 'aborted' | 'interrupted' | 'cancelled' {
-  return status as ReturnType<typeof normalizeTurnStatus>;
 }
