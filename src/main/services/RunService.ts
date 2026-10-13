@@ -133,11 +133,15 @@ export class RunService {
   }
 
   async shutdown(): Promise<void> {
-    for (const context of this.contexts.values()) {
+    const contexts = [...this.contexts.values()];
+    for (const context of contexts) {
       context.stopRequested = true;
       context.abortController.abort();
     }
-    await Promise.all([...this.contexts.values()].map((context) => context.promise));
+    await Promise.all(contexts.map((context) => context.promise));
+    for (const context of contexts) {
+      if (this.database.getRun(context.runId)?.status === 'paused') this.finishRun(context, 'cancelled');
+    }
     this.contexts.clear();
     this.activeRooms.clear();
   }

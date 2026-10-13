@@ -26,3 +26,15 @@
 - 只改文档、忽略规则和两处空测试配置；不改 src、已有测试、lockfile、原生脚本和业务逻辑。
 - native 重编译仅用于已安装依赖的 Node/Electron ABI 切换，不安装或升级依赖。其结果必须独立验证；build 本身不证明 ABI。
 - 主提交为 a17c649422c69696da91df081cb21d6d260a54cb，已在 STATUS 固定。提交后发现原主题查询的末尾锚点无法匹配提交消息，追加仅文档修正提交并在最终交付报告其 SHA；保留已创建提交和原始历史，不 amend/reset。
+
+## R01 集成候选决策（2026-10-13，待最终审核）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D016 | R01 在最新 main `462a43a` 的独立 `codex/integrate-r01` 集成，保留原子项目提交/Worktree；本轮不合 main | 用户本轮明确授权共享接线、回归修复和验证；R02 未启动 | 总控单一文件归属；候选保持 review，需用户后续合并授权 |
+| D017 | 以单文件 CJS Preload 取代 R00 的 `.mjs + sandbox:false` 临时方案（D013） | Electron sandboxed preload 不支持 ESM；bundle 后仅依赖 electron，Bridge wire shape 不变 | build、实际 file/Bridge 与 macOS 未签名目录包路径分别验证，不等于签名发布或跨平台 |
+| D018 | 正常退出使用同步门禁、一次清理 Promise 和逐实例 disposer；paused 在等待后转 cancelled | 补齐 D007 的正常退出部分，避免重复关库、旧窗口释放新资源、晚到加载再显示及活动锁遗留 | 原消息/Turn/请求 ID 保留；异常退出恢复仍 R03，完整调度与不响应 abort 的 Provider 收尾策略仍 R04 |
+| D019 | 统一准确 URL/mainFrame IPC 来源，并在每次推送前重新验证；外链仅 HTTPS 且原生确认 | 只比较 webContents 不足以保护页面导航后的敏感信息；不把模型文本或 popup disposition 当授权 | 全部 channel、子/空 frame、伪装地址、事件与 disposer 回归；真实系统浏览器未打开 |
+| D020 | 生产 CSP 禁网络/frame/object/base，开发仅精确 loopback/HMR 与脚本 nonce | 生产不保留开发通配来源；现有 React 内联样式暂保留 style-src unsafe-inline | 开发固定 127.0.0.1:5173/strictPort，端口占用明确失败；脚本无 unsafe-inline/unsafe-eval，实际开发连接另验证 |
+
+官方依据：[Electron ESM](https://www.electronjs.org/docs/latest/tutorial/esm)、[Process Sandboxing](https://www.electronjs.org/docs/latest/tutorial/sandbox)、[Vite html.cspNonce](https://vite.dev/config/shared-options.html#html-cspnonce)。实现与运行证据以本仓库 Electron 38.8.6 / Vite 7.3.7 和 [本轮记录](verification/2026-10-13-r01-integration.md)为准。
