@@ -50,7 +50,7 @@ Run 状态：idle/running/pausing/paused/cancelling/cancelled/completed/error/in
 
 ## R01-SHARED-01 集成接线登记（2026-10-13）
 
-总控在 `codex/integrate-r01` 引入子项目 `d956279949baa0992be5e0cb093f59ef96a9e205` 并实施以下接线；这是待用户最终审核的候选，未合入 main。上文 `135bf82` 接口表为历史基线，当前候选的来源检查已由下面规则取代。
+总控在 `codex/integrate-r01` 引入子项目 `d956279949baa0992be5e0cb093f59ef96a9e205` 并实施以下接线，集成提交为 `0ad1701a47222315158e7be00d29afe1c9ef1767`。用户批准后以 `4149590d28296ab3520b70606dcb161ba16a6b39` 正式合入 main，主线本轮复验通过，规则已生效；证据见 [合并后验收](verification/2026-10-13-r01-main.md)。上文 `135bf82` 接口表为历史基线，其来源检查由下面规则取代。此次验收不新增 wire shape/Schema/migration，也不实施 R02。
 
 - 所有现有 invoke channel 使用窗口模块的 `isTrustedIpcSender(window, event)`：活窗口、活 webContents、创建时固定的准确页面 URL、同 sender、非空且等于当前 mainFrame 的 senderFrame；子 frame 和不可信页面拒绝。仅 fragment 可变，不接受 credentials。
 - 生产页面只信任构建相对位置 `../renderer/index.html`；已打包应用忽略 `ELECTRON_RENDERER_URL`。开发地址固定到本次窗口创建时配置，集成开发服务为 `http://127.0.0.1:5173/`，端口占用明确失败，不自动换端口。

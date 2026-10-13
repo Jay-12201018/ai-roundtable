@@ -2,6 +2,8 @@
 
 2026-10-13 R00 建立。每条记录日期、决定、理由、影响和验证边界；改变决定须追加替代记录，不能把目标改写为历史事实。
 
+D001–D015 为 R00 阶段记录，后续落地与授权变化见追加决策及 [STATUS](STATUS.md)，保留历史阶段事实。
+
 | ID | 决定 | 理由与影响 | 当前状态 |
 | --- | --- | --- | --- |
 | D001 | 保留 main 原始提交 135bf82；渐进升级现有工程 | 保留可回溯基线、源码和测试，不重新初始化 | 已执行基线核对；R00 在 main 文档提交是用户明确例外 |
@@ -38,3 +40,11 @@
 | D020 | 生产 CSP 禁网络/frame/object/base，开发仅精确 loopback/HMR 与脚本 nonce | 生产不保留开发通配来源；现有 React 内联样式暂保留 style-src unsafe-inline | 开发固定 127.0.0.1:5173/strictPort，端口占用明确失败；脚本无 unsafe-inline/unsafe-eval，实际开发连接另验证 |
 
 官方依据：[Electron ESM](https://www.electronjs.org/docs/latest/tutorial/esm)、[Process Sandboxing](https://www.electronjs.org/docs/latest/tutorial/sandbox)、[Vite html.cspNonce](https://vite.dev/config/shared-options.html#html-cspnonce)。实现与运行证据以本仓库 Electron 38.8.6 / Vite 7.3.7 和 [本轮记录](verification/2026-10-13-r01-integration.md)为准。
+
+## D021 — R01 正式合并与主线验收（2026-10-13 合并验证，2026-10-14 收尾）
+
+用户批准集成提交 `0ad1701a47222315158e7be00d29afe1c9ef1767` 后，总控仅合并 `codex/integrate-r01`，实际合并提交 `4149590d28296ab3520b70606dcb161ba16a6b39`；保留原子项目分支/Worktree，不重复合原分支，不重写历史。此授权取代 D016 的候选阶段停止边界。
+
+main 的实际合并文件树与获批集成候选一致；本轮在 main 重新运行类型、133 项全套回归、生产构建、Electron SQLite ABI139、隔离生产页面/Preload 与退出后只读 SQLite，均通过，再将 R01 verified、R02 ready。具体命令见 [主线验收证据](verification/2026-10-13-r01-main.md)。状态更新为独立文档提交，业务代码、协议、Schema、migration 和依赖不另改。
+
+R01 验收不表示 V1 发布完成。正式 E2E、跨平台、签名/公证、真实模型/Key 等限制继续保留；不响应 abort 的收尾策略留 R04。R02 ready 仅表示依赖满足，未授权创建 Worktree/实施，不自动开展其他任务。

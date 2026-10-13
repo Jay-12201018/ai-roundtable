@@ -64,4 +64,4 @@ git grep -Il -E '(BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY|sk-[A-Za-z0-9_-]{20
 
 R00 只修自身文档、配置和验证环境问题。业务失败保留证据交给对应任务，不修改 Agent 逻辑；不隐藏失败或只展示后一次成功。R00 交付可记录基线缺陷，但适用检查未通过时不能称验证全部通过。
 
-STATUS 的 review 表示交付待用户检查，verified 表示总控已确认任务验收；两者不等于发布就绪。本次后续任务均未启动，R01 仍需用户单独授权。
+STATUS 的 review 表示交付待用户检查，verified 表示总控已确认任务验收；两者不等于发布就绪。R00 建立时后续任务均未启动；当前授权和阶段以 [STATUS](STATUS.md) 为准。R01 合并后重新运行的主线证据见 [本次验收](verification/2026-10-13-r01-main.md)，不复用集成分支历史 PASS。R02 ready 不等于创建/实施授权。

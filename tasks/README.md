@@ -1,6 +1,6 @@
 # AI Roundtable 任务索引
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。当前只有 R00 获实施授权，后续文件是范围/归属/验收定义，不代表任务已启动。状态、授权和实际结果以 [STATUS](../docs/STATUS.md) 与对应 [验证记录](../docs/verification/2026-10-13-r00-baseline.md) 为准。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01 已验收，R01 已合 main；R02 前置满足、仅 ready，未授权创建 Worktree 或实施。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 及 [R01 主线验证](../docs/verification/2026-10-13-r01-main.md) 为准，历史 R00/R01 集成记录保留。
 
 ## 入口与共同约束
 
@@ -14,9 +14,9 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 
 | ID / 固定文件 | 目标 | 前置 | 并行与验收门槛 |
 | --- | --- | --- | --- |
-| [R00-baseline-governance.md](R00-baseline-governance.md) | 基线治理与真实验证 | 无 | 当前唯一已授权；本次 main 文档提交例外 |
-| [R01-startup-lifecycle-security.md](R01-startup-lifecycle-security.md) | 启动、退出与窗口安全边界 | R00 审核 | 需用户单独授权 |
-| [R02-contracts.md](R02-contracts.md) | 统一契约与排他文件归属 | R01 | 共享协议/归属基线 |
+| [R00-baseline-governance.md](R00-baseline-governance.md) | 基线治理与真实验证 | 无 | 已 verified；原始治理提交保留 |
+| [R01-startup-lifecycle-security.md](R01-startup-lifecycle-security.md) | 启动、退出与窗口安全边界 | R00 审核 | 已合 main、主线复验后 verified |
+| [R02-contracts.md](R02-contracts.md) | 统一契约与排他文件归属 | R01 | ready；共享协议/归属基线，仍需单独实施授权 |
 | [R03-persistence-backup-recovery.md](R03-persistence-backup-recovery.md) | 持久化、可靠备份与恢复数据 | R02 | 数据接口/迁移先合入 |
 | [R04-run-turn-mock.md](R04-run-turn-mock.md) | Run/Turn 状态机与 Mock 执行 | R03 | 可与 R05/R06 并行 |
 | [R05-public-context-limits.md](R05-public-context-limits.md) | 公共上下文与基本限制 | R03 | 可与 R04/R06 并行；不改 RunService |
