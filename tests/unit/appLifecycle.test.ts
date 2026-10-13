@@ -9,8 +9,13 @@ const fixture = vi.hoisted(() => {
     show = vi.fn();
     focus = vi.fn();
     restore = vi.fn();
+    hide = vi.fn();
+    loadFile = () => fixture.windowLoad();
+    loadURL = () => fixture.windowLoad();
+    webContents = { on: vi.fn(), setWindowOpenHandler: vi.fn(), isDestroyed: () => this.destroyed, mainFrame: { url: '' } };
     isMinimized = vi.fn(() => false);
     isDestroyed = () => this.destroyed;
+    static getAllWindows() { return fixture.windows.filter((window) => !window.destroyed); }
     on(name: string, listener: Listener) {
       this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
     }
@@ -34,12 +39,13 @@ const fixture = vi.hoisted(() => {
     database: { initialize: vi.fn(), markInFlightRunsInterrupted: vi.fn(), close: vi.fn() },
     service: { shutdown: vi.fn(), hasActiveRuns: vi.fn() },
     createWindow: vi.fn(),
+    windowLoad: vi.fn(),
     registerIpc: vi.fn(),
     unregister: [] as ReturnType<typeof vi.fn>[],
   };
 });
 
-vi.mock('electron', () => ({ app: fixture.app, dialog: fixture.dialog, BrowserWindow: { getAllWindows: () => fixture.windows.filter((window) => !window.destroyed) } }));
+vi.mock('electron', () => ({ app: fixture.app, dialog: fixture.dialog, BrowserWindow: fixture.Window, shell: { openExternal: vi.fn() } }));
 vi.mock('../../src/main/database/Database', () => ({ Database: vi.fn(function () { return fixture.database; }) }));
 vi.mock('../../src/main/security/electronSafeStorage', () => ({ createElectronKeyBackend: vi.fn() }));
 vi.mock('../../src/main/security/KeyService', () => ({ KeyService: vi.fn(function () { return { getStatus: async () => ({}) }; }) }));
@@ -49,7 +55,9 @@ vi.mock('../../src/main/windows/createMainWindow', () => ({ createMainWindow: fi
 vi.mock('../../src/main/ipc/registerIpc', () => ({ registerIpc: fixture.registerIpc }));
 
 function emit(name: string) {
-  fixture.listeners.get(name)?.forEach((listener) => listener({ preventDefault: vi.fn() }));
+  const event = { preventDefault: vi.fn() };
+  fixture.listeners.get(name)?.forEach((listener) => listener(event));
+  return event;
 }
 
 async function startApp() {
@@ -62,6 +70,7 @@ async function startApp() {
 beforeEach(() => {
   vi.resetModules();
   vi.resetAllMocks();
+  vi.unstubAllEnvs();
   fixture.listeners.clear();
   fixture.windows.length = 0;
   fixture.unregister.length = 0;
@@ -78,6 +87,7 @@ beforeEach(() => {
   fixture.app.quit.mockImplementation(() => emit('before-quit'));
   fixture.service.shutdown.mockResolvedValue(undefined);
   fixture.service.hasActiveRuns.mockReturnValue(false);
+  fixture.windowLoad.mockResolvedValue(undefined);
   fixture.createWindow.mockImplementation(() => {
     const window = new fixture.Window();
     fixture.windows.push(window);
@@ -102,6 +112,25 @@ describe('application lifecycle', () => {
     expect(fixture.app.exit).toHaveBeenCalledWith(0);
     expect(fixture.createWindow).not.toHaveBeenCalled();
     errorLog.mockRestore();
+  });
+
+  it.each([undefined, 'http://localhost:5173/'])('cleans up after the real window module rejects loading: %s', async (url) => {
+    if (url) vi.stubEnv('ELECTRON_RENDERER_URL', url);
+    const { createMainWindow } = await vi.importActual<typeof import('../../src/main/windows/createMainWindow')>('../../src/main/windows/createMainWindow');
+    fixture.createWindow.mockImplementation(() => {
+      const window = createMainWindow();
+      fixture.windows.push(window as unknown as InstanceType<typeof fixture.Window>);
+      return window;
+    });
+    fixture.windowLoad.mockRejectedValue(new Error('load failed'));
+    await startApp();
+    await Promise.resolve();
+    expect(fixture.dialog.showErrorBox).toHaveBeenCalledWith('AI 圆桌启动失败', expect.stringContaining('加载'));
+    expect(fixture.windows[0]?.hide).toHaveBeenCalledOnce();
+    expect(fixture.service.shutdown).toHaveBeenCalledOnce();
+    expect(fixture.database.close).toHaveBeenCalledOnce();
+    expect(fixture.unregister[0]).toHaveBeenCalledOnce();
+    expect(fixture.app.exit).toHaveBeenCalledWith(0);
   });
 
   it('finishes quitting even before RunService has initialized', async () => {
@@ -148,5 +177,102 @@ describe('application lifecycle', () => {
     expect(fixture.service.shutdown).toHaveBeenCalledTimes(1);
     expect(fixture.database.close).toHaveBeenCalledTimes(1);
     expect(fixture.app.exit).toHaveBeenCalledWith(0);
+  });
+
+  // Shared Main/RunService integration gates: keep failing until the controller fixes them.
+  it('prevents every quit attempt until the same cleanup barrier finishes', async () => {
+    await startApp();
+    let finish!: () => void;
+    fixture.service.shutdown.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const first = emit('before-quit');
+    const second = emit('before-quit');
+    try {
+      expect(first.preventDefault).toHaveBeenCalledOnce();
+      expect(second.preventDefault).toHaveBeenCalledOnce();
+      expect(fixture.database.close).not.toHaveBeenCalled();
+      expect(fixture.app.exit).not.toHaveBeenCalled();
+    } finally {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    expect(fixture.service.shutdown).toHaveBeenCalledOnce();
+    expect(fixture.database.close).toHaveBeenCalledOnce();
+    expect(fixture.app.exit).toHaveBeenCalledOnce();
+  });
+
+  it('closes the database only once after an initialization failure', async () => {
+    fixture.database.initialize.mockImplementation(() => { throw new Error('Migration failed'); });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await startApp();
+      expect(fixture.database.close).toHaveBeenCalledOnce();
+    } finally { errorLog.mockRestore(); }
+  });
+
+  it('does not initialize services when readiness arrives after quit', async () => {
+    await import('../../src/main/index');
+    emit('before-quit');
+    fixture.resolveReady();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fixture.database.initialize).not.toHaveBeenCalled();
+    expect(fixture.createWindow).not.toHaveBeenCalled();
+  });
+
+  it.each(['activate', 'second-instance'])('does not reopen a window during shutdown: %s', async (eventName) => {
+    await startApp();
+    fixture.windows[0]!.close();
+    let finish!: () => void;
+    fixture.service.shutdown.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    emit('before-quit');
+    emit(eventName);
+    finish();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fixture.createWindow).toHaveBeenCalledOnce();
+  });
+
+  it('keeps generation active when the user cancels window close', async () => {
+    await startApp();
+    fixture.service.hasActiveRuns.mockReturnValue(true);
+    fixture.dialog.showMessageBoxSync.mockReturnValue(0);
+    fixture.windows[0]!.close();
+    expect(fixture.windows[0]!.destroyed).toBe(false);
+    expect(fixture.service.shutdown).not.toHaveBeenCalled();
+    expect(fixture.database.close).not.toHaveBeenCalled();
+  });
+
+  it('reopens and rebinds IPC on a second instance after macOS window close', async () => {
+    await startApp();
+    fixture.windows[0]!.close();
+    emit('second-instance');
+    expect(fixture.unregister[0]).toHaveBeenCalledOnce();
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], fixture.service);
+    expect(fixture.windows.filter((window) => !window.destroyed)).toHaveLength(1);
+  });
+});
+
+describe('shutdown with real SQLite and MockProvider', () => {
+  it('terminates a paused run without changing its saved text', async () => {
+    const { Database } = await vi.importActual<typeof import('../../src/main/database/Database')>('../../src/main/database/Database');
+    const { RunService } = await vi.importActual<typeof import('../../src/main/services/RunService')>('../../src/main/services/RunService');
+    const { MockProvider } = await vi.importActual<typeof import('../../src/main/providers/mock/MockProvider')>('../../src/main/providers/mock/MockProvider');
+    const database = new Database(':memory:');
+    database.initialize();
+    const service = new RunService(database, new MockProvider({ tokenDelayMs: 0 }));
+    try {
+      const roomId = service.createDemoRoom('shutdown fixture');
+      const run = await service.start({ roomId, task: 'fixture task', workflowSnapshot: {}, mode: 'step', maxTurns: 3 });
+      await service.waitForIdle(run.runId);
+      const before = service.getSnapshot(run.runId);
+      expect(before.status).toBe('paused');
+      expect(before.messages[0]?.content.length).toBeGreaterThan(0);
+      await service.shutdown();
+      const after = service.getSnapshot(run.runId);
+      expect(after.messages).toEqual(before.messages);
+      expect(after.status).toBe('cancelled');
+      expect(service.hasActiveRuns()).toBe(false);
+    } finally { await service.shutdown(); database.close(); }
   });
 });
