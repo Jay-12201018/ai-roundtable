@@ -6,7 +6,7 @@
 
 | ID | 名称 | 依赖 | 负责人 | 状态 | 授权 | 分支/Worktree | 提交 | 验收证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| R00 | 基线治理与验证 | 无 | 总控（本聊天） | review | 已授权 | main；不创建 Worktree | 本次提交主题见下文 | [本轮记录](verification/2026-10-13-r00-baseline.md)：类型/52测试/空集/build/ABI通过，独立审查通过；待用户检查 |
+| R00 | 基线治理与验证 | 无 | 总控（本聊天） | review | 已授权 | main；不创建 Worktree | a17c649422c69696da91df081cb21d6d260a54cb；收尾文档修正见下文 | [本轮记录](verification/2026-10-13-r00-baseline.md)：类型/52测试/空集/build/ABI通过，独立审查通过；待用户检查 |
 | R01 | 启动、退出、安全边界 | R00 审核 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R02 | 契约与归属 | R01 | 总控，实施未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R03 | 持久化、备份、恢复 | R02 | 数据负责人未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
@@ -29,7 +29,9 @@
 
 ## R00 提交引用
 
-本次唯一提交主题为 `chore: establish R00 governance baseline`。完成提交后使用 `git rev-parse ':/^chore: establish R00 governance baseline$'` 取得完整 SHA，最终交付报告也提供真实 SHA。文档不嵌入所属提交自身的 hash；下一次总控更新本表时将该引用固定为完整 SHA。提交前该引用尚不存在，不作为完成证据。
+治理主提交为 `a17c649422c69696da91df081cb21d6d260a54cb`，主题 `chore: establish R00 governance baseline`，直接父提交为原始 135bf82。提交后查询发现原先带末尾 `$` 的主题表达式不能匹配 Git 提交消息，已填入实际 SHA；将追加仅文档修正的提交，完成后保留两次提交与原始历史。修正随本文件所属收尾提交生效，最终 SHA 与 clean 以交付现场检查为准。
+
+可使用 `git rev-parse ':/^chore: establish R00 governance baseline'` 查询主提交；文档修正提交通过 `git log -1 --format=%H -- docs/STATUS.md` 查询，最终交付报告提供其完整 SHA。路径查询表示最近修改本文件的提交，后续看板更新后须以交付报告的固定 SHA 为准。
 
 ## 并行与集成门槛
 
