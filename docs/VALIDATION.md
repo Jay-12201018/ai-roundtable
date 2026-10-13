@@ -1,0 +1,67 @@
+# 真实验证与数据隔离
+
+## 证据要求
+
+每次记录执行日期、基线/受检文件、平台、架构、实际 Node/pnpm/Electron 版本、精确命令、退出码、关键输出、失败原因和未运行项。PASS 仅来自本轮对应命令；历史报告不得替代。预期失败测试只有确认预期原因时才算守卫通过。
+
+类型、单元、集成、build、native ABI、应用启动、Electron E2E、打包、安装和跨平台分别判断。截图不证明交互正确，build 不证明 SQLite 能在 Electron 加载，Mock 不证明真实模型协作。
+
+## 隔离与命令安全
+
+- 当前 DB 测试使用 `:memory:`，appLifecycle mock app/DB，rendererSync mock IPC/localStorage，集成测试使用 MockProvider；执行前检查新增测试未破坏此边界。
+- 文件数据库/导出测试只能用测试创建的临时目录；关闭后仅清理本测试创建的数据，不操作真实 userData 或密钥链。
+- 桌面 E2E 必须先实现独立 userData 配置并证明隔离；当前 tests/e2e 不存在，R00 不启动 app/dev/preview/包内主入口。
+- 自动网络测试用 fixture/Mock；真实模型验收由用户明确触发并记录模型和限制，不打印 Key。
+- 如检查会运行真实应用入口、访问用户 DB/Key 或不明路径，停止该项，记录原因和触发路径。
+
+## R00 检查顺序
+
+在仓库根目录执行，每项独立记录退出码；shell 不以最后一个命令成功掩盖前项失败。
+
+```bash
+pnpm --version
+pnpm exec node -p 'JSON.stringify({node:process.version,modules:process.versions.modules,platform:process.platform,arch:process.arch})'
+pnpm run typecheck
+pnpm run test --reporter=dot
+pnpm exec vitest run __r00_no_test_should_match__
+pnpm run build
+pnpm run native:electron
+```
+
+`pnpm test` 的 pretest 会重编译已安装 better-sqlite3 为 Node ABI；一次运行包含 tests/unit 和 tests/integration，不重复执行相同测试。空筛选应明确输出 No test files found 且 exit 1。package test 与 Vitest 配置均禁止 passWithNoTests。
+
+native:electron 强制重编译为 Electron ABI，恢复开发环境。缺少 headers/toolchain、平台签名限制或下载失败必须记录；不擅自 install/upgrade，不静默使用历史临时 runtime。若选用其他已安装 Node 解决 ABI/签名问题，应先核实版本/来源，显式指定 PATH 并记录新命令和第一次失败。
+
+macOS arm64 当前依赖可用时，重编译后独立内存自检：
+
+```bash
+ELECTRON_RUN_AS_NODE=1 ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron -e 'const assert = require("node:assert/strict"); const Database = require("./node_modules/better-sqlite3"); const db = new Database(":memory:"); try { db.exec("CREATE TABLE smoke (value TEXT)"); db.prepare("INSERT INTO smoke VALUES (?)").run("sqlite-ready"); assert.equal(db.prepare("SELECT value FROM smoke").get().value, "sqlite-ready"); console.log("Electron SQLite PASS: Electron " + process.versions.electron + ", ABI " + process.versions.modules); } finally { db.close(); }'
+```
+
+该命令不导入 Main 入口，不启动桌面，不接触用户 DB/Provider/Key；它只验证已安装 Electron 加载 SQLite 并进行内存读写。其他平台使用其安装的 Electron 可执行文件，不把 macOS 结果外推。
+
+当前没有 lint 脚本、Electron E2E 测试和 CI，不运行假命令或自动补业务实现；R17 负责完善。R00 不运行 pack/dist/应用 launch，也不验证安装或签名。
+
+## 文档、范围与提交检查
+
+- SPEC 来源必须实际可读；若无法读原文停止导入并报告，不凭记忆造完整需求。
+- Markdown 仓库内链接和 task/STATUS 清单对应；不依赖外部 Downloads 路径。
+- 核对 R00–R18/R10A/R10B 依赖无环、文件归属明确、未把后续 ready 当授权。
+- git diff --check；确认 src、原有 tests、lockfile、原生脚本无差异。
+- 查看暂存清单和完整 diff；敏感扫描仅输出文件名/数量，不输出匹配明文。
+- 核对无数据库、备份、Key、环境文件或敏感日志入库；.env.example 若出现须人工确认只有占位值。
+
+```bash
+git diff --check
+git diff --cached --name-only
+git ls-files -- '*.db' '*.db-*' '*.sqlite' '*.sqlite-*' '*.sqlite3' '*.sqlite3-*' '.env' '.env.*' '*.pem' '*.p12' '*.pfx' '*.key'
+git grep -Il -E '(BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY|sk-[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{25,}|gh[pousr]_[A-Za-z0-9_]{20,})'
+```
+
+扫描无命中时 git grep exit 1 是正常结果，不等于业务测试失败；模式扫描不能证明所有秘密形式都不存在，仍须查看文件归属和内容。
+
+## 失败与任务结论
+
+R00 只修自身文档、配置和验证环境问题。业务失败保留证据交给对应任务，不修改 Agent 逻辑；不隐藏失败或只展示后一次成功。R00 交付可记录基线缺陷，但适用检查未通过时不能称验证全部通过。
+
+STATUS 的 review 表示交付待用户检查，verified 表示总控已确认任务验收；两者不等于发布就绪。本次后续任务均未启动，R01 仍需用户单独授权。

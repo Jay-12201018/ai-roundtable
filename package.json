@@ -12,7 +12,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "typecheck": "tsc --noEmit --pretty false",
     "pretest": "pnpm native:node",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
     "prepreview": "pnpm native:electron",

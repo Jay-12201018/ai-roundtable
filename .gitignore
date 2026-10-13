@@ -5,6 +5,9 @@ release/
 .vite/
 .cache/
 coverage/
+.pnpm-store/
+test-results/
+playwright-report/
 *.log
 *.tsbuildinfo
 .DS_Store
@@ -22,6 +25,9 @@ coverage/
 *.sqlite-wal
 *.sqlite3-shm
 *.sqlite3-wal
+*.db.backup-*
+*.sqlite.backup-*
+*.sqlite3.backup-*
 
 # Local private key files
 *.pem
