@@ -3,3 +3,4 @@ export * from './common';
 export * from './app';
 export * from './error';
 export * from './provider';
+export * from './persistence';

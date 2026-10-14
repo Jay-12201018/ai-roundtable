@@ -86,3 +86,13 @@ main 合并 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 后，本次重新执行 
 本次命令没有再带 raw 数值覆盖，没有重新安装依赖或复制旧 node_modules；上一阶段两次全新冻结安装是已审核的历史证据，不能算本次新的安装 PASS。默认 Node 24.21.0 的 ObjectWrap 风险仍未修复；普通未受控 pnpm test 会重编译原生文件，须继续显式控制真实 pnpm runtime 与同版 headers。最终 main 原生文件恢复为 Electron ABI139。
 
 额外 `pnpm list --depth=0 --json` 在受限环境 exit1：pnpm11.25.0 的 inspection/tree-builder 直接读取 `.modules.yaml` 的 storeDir，创建会写入 WAL/建表的 StoreIndex，忽略本次 CLI store 覆盖。trace 证实仍打开原全局 store；独立 immutable URI 只读查询同一索引成功，写打开失败与沙箱限制一致，但未提权执行写打开来直接证明。该辅助清单失败单列保留；以只读 package/锁文件/安装 manifest 逐项核对，不修改全局 store 或项目配置，不把它归因于应用 SQLite/安装停滞，也不声明 list 已通过。完整命令和退出码见[本次报告](verification/2026-10-14-r02-main.md)。
+
+## R03 独立集成环境（2026-10-15）
+
+本次在 `codex/integrate-r03` 使用独立 node_modules、store/cache、测试 TMPDIR 和 Electron userData；实际 Node24.18.1 ABI137/arm64 及同发行包 include/config 重新核验，pnpm11.25.0 的入口/bundle/worker.js/package.json 与官方缓存包一致。未改变系统 Node、package/lock 或真实数据。
+
+从无 node_modules 起点，以独立 inode 的内容缓存与源索引只读备份准备新 store，`pnpm install --frozen-lockfile --offline --package-import-method=copy --side-effects-cache=false --reporter=append-only` 第一次缺 metadata exit1，补齐独立 metadata 缓存后 exit0，646 reused/0 downloaded，安装脚本和源码编译实际执行。独立依赖不等于本轮冷缓存联网安装；没有复制原 node_modules、共享可变 store 或关闭供应链策略。ENV-R02-INSTALL-01 保持已解决，不使用 `--config.fetch-timeout=60000` raw 字符串覆盖。
+
+本次 pnpm list 读取自己的 store，32 直接依赖实际 exit0；这不改写 R02 主线清单命令历史失败。锁文件/安装锁一致，三个 Worktree 原生文件 inode 不同。Node 完整回归后另用 Electron38.8.6 严格对应 headers 重编译 SQLite 并实际加载 ABI139。最终原生文件留在 Electron 目标；后续 Node 测试必须先以受控 Node 同版 headers 执行 native:node/pretest，再恢复 Electron。
+
+逐命令、退出码、source SHA、隔离启动及限制见 [R03 集成报告](verification/2026-10-15-r03-integration.md)。本轮没有重新验证 Node24.21.0 或宣称其上游异常已修复；正式 E2E、跨平台、发布包/安装升级仍未验证。

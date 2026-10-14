@@ -80,7 +80,7 @@ describe('Database legacy disk migration', () => {
     }
   });
 
-  it('adopts the original schema without a migration ledger and keeps existing execution evidence', () => {
+  it('adopts the original schema without a migration ledger and keeps existing execution evidence', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'roundtable-legacy-migration-'));
     const filename = join(directory, 'legacy.db');
     let raw: DatabaseDriver.Database | undefined;
@@ -94,19 +94,19 @@ describe('Database legacy disk migration', () => {
       raw = undefined;
 
       database = new Database(filename);
-      database.initialize();
-      database.initialize();
+      await database.initialize();
+      await database.initialize();
       expect(database.getRoom('legacy-room')).toEqual({ id: 'legacy-room', name: 'Legacy discussion', objective: 'Keep historical evidence' });
       expect(database.getRun('legacy-run')).toMatchObject({ id: 'legacy-run', roomId: 'legacy-room', status: 'paused', workflowSnapshot: { templateId: 'draft-review-finalize', members: [{ agentId: 'legacy-agent' }] } });
       expect(database.getTurn('legacy-turn')).toEqual({ id: 'legacy-turn', runId: 'legacy-run', agentId: 'legacy-agent', status: 'running', requestId: 'legacy-request', turnIndex: 0, partialContent: '旧的部分输出\nstill unfinished' });
       expect(database.getMessage('legacy-message')).toEqual({ id: 'legacy-message', roomId: 'legacy-room', runId: 'legacy-run', turnId: 'legacy-turn', senderType: 'agent', senderName: 'Legacy author', content: '旧的部分输出\nstill unfinished', status: 'streaming' });
-      expect(database.listRunEvents('legacy-run', 0)).toEqual([{ runId: 'legacy-run', turnId: 'legacy-turn', sequence: 1, type: 'text_delta', payload: { text: '旧的部分输出\nstill unfinished' }, timestamp: '2026-10-13T01:00:00.000Z' }]);
+      expect(database.listRunEvents('legacy-run', 0)).toEqual([{ runId: 'legacy-run', turnId: 'legacy-turn', sequence: 1, type: 'text_delta', payload: { text: '旧的部分输出\nstill unfinished' }, timestamp: '2026-10-13T01:00:00.000Z',protocolVersion:0,requestId:undefined }]);
       database.close();
       database = undefined;
 
       raw = new DatabaseDriver(filename, { readonly: true, fileMustExist: true });
       const appliedVersions = raw.prepare('SELECT version, applied_at FROM schema_migrations ORDER BY version').all();
-      expect(appliedVersions).toEqual([{ version: 1, applied_at: expect.any(String) }]);
+      expect(appliedVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)}]);
       expect(raw.prepare('SELECT mode, max_turns, max_duration_ms, output_token_limit, current_turn_id, current_agent_id FROM workflow_runs WHERE id = ?').get('legacy-run')).toEqual({ mode: 'step', max_turns: 5, max_duration_ms: 45000, output_token_limit: 96, current_turn_id: 'legacy-turn', current_agent_id: 'legacy-agent' });
       expect(raw.pragma('integrity_check', { simple: true })).toBe('ok');
       expect(raw.pragma('foreign_key_check')).toEqual([]);
@@ -114,7 +114,7 @@ describe('Database legacy disk migration', () => {
       raw = undefined;
 
       database = new Database(filename);
-      database.initialize();
+      await database.initialize();
       expect(database.getTurn('legacy-turn')?.requestId).toBe('legacy-request');
       expect(database.getMessage('legacy-message')?.content).toBe('旧的部分输出\nstill unfinished');
       database.close();
@@ -128,7 +128,7 @@ describe('Database legacy disk migration', () => {
     }
   });
 
-  it('rolls back migration-created tables and indexes without recording a version when existing schema conflicts', () => {
+  it('rejects incomplete conflicting schemas before changing any data or creating a ledger', () => {
     const directory = mkdtempSync(join(tmpdir(), 'roundtable-migration-rollback-'));
     const filename = join(directory, 'conflict.db');
     let raw: DatabaseDriver.Database | undefined;
@@ -147,7 +147,7 @@ describe('Database legacy disk migration', () => {
 
       database = new Database(filename);
       try {
-        expect(() => database!.initialize()).toThrow(/Database migration failed:.*no such column: (?:room_id|created_at)/);
+        expect(() => database!.initialize()).toThrow(/Recovery schema is incomplete/);
         expect(() => database!.getRoom('old-room')).toThrow('Database has not been initialized');
       } finally {
         database.close();
@@ -155,10 +155,10 @@ describe('Database legacy disk migration', () => {
       }
 
       raw = new DatabaseDriver(filename, { readonly: true, fileMustExist: true });
-      // initialize creates the ledger outside its migration transaction.
-      expect(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()).toEqual([{ name: 'messages' }, { name: 'rooms' }, { name: 'schema_migrations' }]);
+      // Preflight now refuses this partial schema before creating any migration objects.
+      expect(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()).toEqual([{ name: 'messages' }, { name: 'rooms' }]);
       expect(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'").all()).toEqual([]);
-      expect(raw.prepare('SELECT version, applied_at FROM schema_migrations').all()).toEqual([]);
+      expect(raw.prepare("SELECT name FROM sqlite_schema WHERE name='schema_migrations'").all()).toEqual([]);
       expect(raw.prepare('SELECT id, name, objective, created_at, updated_at FROM rooms').all()).toEqual([{ id: 'old-room', name: 'Old room', objective: 'Preserve me', created_at: '2026-10-13T01:00:00.000Z', updated_at: '2026-10-13T01:00:00.000Z' }]);
       expect(raw.prepare('SELECT id, content FROM messages').all()).toEqual([{ id: 'old-message', content: 'Existing partial output' }]);
       expect(raw.pragma('integrity_check', { simple: true })).toBe('ok');

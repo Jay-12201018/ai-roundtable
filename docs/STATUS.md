@@ -1,6 +1,6 @@
 # R00–R18 状态与授权看板
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02 已验收。用户批准后，R02 以 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 合入 main，并通过[本次主线复验](verification/2026-10-14-r02-main.md)。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险仍保留，采用严格配对的官方 24.18.1。R03 为 ready，但未获实施或创建 Worktree 授权。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02 已验收；R02 主线证据见[复验记录](verification/2026-10-14-r02-main.md)。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险仍保留，采用严格配对的官方 24.18.1。本记录位于 R03 集成候选分支：用户已授权 R03 子项目及总控共享接线，现为 review / 待最终合并审核，尚未合 main 或 verified。
 
 状态定义：not_started 未开始；ready 依赖满足但仍需实施授权；in_progress 正在执行；review 交付待审核；merged 已由总控集成；verified 验收确认；blocked 前置未满足或存在阻塞。状态与授权分列，不能推断。
 
@@ -9,7 +9,7 @@
 | R00 | 基线治理与验证 | 无 | 总控（本聊天） | verified | 已授权；用户文档验收通过 | main；不创建 Worktree | a17c649422c69696da91df081cb21d6d260a54cb；769a9519b969b7897d3af314bc981ac2fb7f64d2 | [R00 实际执行记录](verification/2026-10-13-r00-baseline.md)：类型/52测试/空集/build/ABI通过，独立审查通过；2026-10-13 用户批准文档验收 |
 | R01 | 启动、退出、安全边界 | R00 已 verified | 总控（本聊天） | verified | 用户批准最终合并与验收；主线复验通过 | 已合 main；codex/integrate-r01 与原子项目 Worktree/分支保留 | 集成 0ad1701a47222315158e7be00d29afe1c9ef1767；合并 4149590d28296ab3520b70606dcb161ba16a6b39；原子项目 d956279949baa0992be5e0cb093f59ef96a9e205 | [合并后实际验证](verification/2026-10-13-r01-main.md)：类型、12文件/133测试、build、ABI139、隔离生产页面/Preload、退出后SQLite通过；10月13日批准/复验，10月14日验收登记 |
 | R02 | 契约与归属 | R01 已合 main 且 verified | 总控（本聊天） | verified | 用户批准最终合并与验收；本次 main 复验通过 | 已合 main；codex/integrate-r02、原 codex/r02-contracts 及 Worktree 均保留 | 原14f07a22b44bcd2459dd44f579230792033d9301；引入bafa84f55b6c77aeaffe26b27caae56fb67cbcf0；安全审核8ec1d2b834ba94a5df60a21e0615d1fcb21fd48f；ENV候选5b8f771bfa0fd1823b7efe6488179e15aea436a5；合并6aff174e6cf397eb49b9b4ceadb3387f207b84a6 | [本次 main 验收](verification/2026-10-14-r02-main.md)：6文件94契约/18文件228全回归、类型/生产构建、Node源码编译/内存/压力5次、Electron源码编译/ABI139、隔离页面/Bridge/退出数据均exit0；ENV保持已解决，历史干净安装见[ENV证据](verification/2026-10-14-r02-environment.md) |
-| R03 | 持久化、备份、恢复 | R02 已合 main 且 verified | 数据负责人未分派 | ready | 仅前置满足；未授权实施/创建 Worktree | 未创建 | 无 | 未运行 |
+| R03 | 持久化、备份、恢复 | R02 已合 main 且 verified | 子项目交付；总控（本聊天）独占共享接线 | review | 已授权独立集成/迁移/验证；未授权合 main | codex/integrate-r03；原 codex/r03-persistence-backup-recovery 保留 | 原212808f780cc87d2827a977743f3fc16a028f5b5；引入f144ace84f7861c4f8cf577d0d0d40aa3aae8110；共享接线为本记录所属交付提交 | [本次集成验证](verification/2026-10-15-r03-integration.md)：实际结果、命令和限制；待用户最终合并审核 |
 | R04 | Run/Turn Mock | R03 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R05 | 公共上下文与基本限制 | R03 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R06 | Renderer 状态与订阅 | R03 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |

@@ -65,7 +65,7 @@ describe('Database', () => {
       database = new Database(filename);
       database.initialize();
       expect(database.getRoom('room-disk')).toEqual({ id: 'room-disk', name: 'Disk discussion', objective: 'Keep the draft' });
-      expect(database.listAgents('room-disk')).toEqual([{ id: 'agent-disk', roomId: 'room-disk', displayName: 'Draft author', roleTemplateId: 'author', displayOrder: 0 }]);
+      expect(database.listAgents('room-disk')).toEqual([{ id: 'agent-disk', roomId: 'room-disk', displayName: 'Draft author', roleTemplateId: 'author', displayOrder: 0,systemPrompt:'',providerId:null,modelId:null }]);
       expect(database.getRun('run-disk')).toMatchObject({
         id: 'run-disk', roomId: 'room-disk', status: 'paused',
         workflowSnapshot: { templateId: 'draft-review-finalize', rounds: 2, members: [{ agentId: 'agent-disk', modelId: 'mock' }] },
@@ -102,24 +102,24 @@ describe('Database', () => {
       database.insertRoom({ id: 'room-events', name: 'Events', objective: '' });
       database.insertRun({ id: 'run-a', roomId: 'room-events', status: 'running', workflowSnapshot: {} });
       database.insertRun({ id: 'run-b', roomId: 'room-events', status: 'running', workflowSnapshot: {} });
-      expect(database.appendRunEvent({ runId: 'run-a', type: 'run_state_changed', payload: { status: 'running' }, timestamp })).toBe(1);
-      expect(database.appendRunEvent({ runId: 'run-b', type: 'run_state_changed', payload: { status: 'running' }, timestamp })).toBe(1);
-      expect(database.appendRunEvent({ runId: 'run-a', type: 'text_delta', payload: { text: 'A first' }, timestamp })).toBe(2);
-      expect(database.appendRunEvent({ runId: 'run-b', type: 'text_delta', payload: { text: 'B only' }, timestamp })).toBe(2);
-      expect(database.appendRunEvent({ runId: 'run-a', type: 'text_delta', payload: { text: 'A second' }, timestamp })).toBe(3);
+      expect(database.appendRunEvent({ runId: 'run-a', type: 'run_state_changed', payload: { status: 'running' }, timestamp }).sequence).toBe(1);
+      expect(database.appendRunEvent({ runId: 'run-b', type: 'run_state_changed', payload: { status: 'running' }, timestamp }).sequence).toBe(1);
+      expect(database.appendRunEvent({ runId: 'run-a', type: 'text_delta', payload: { text: 'A first' }, timestamp,protocolVersion:0,requestId:undefined }).sequence).toBe(2);
+      expect(database.appendRunEvent({ runId: 'run-b', type: 'text_delta', payload: { text: 'B only' }, timestamp,protocolVersion:0,requestId:undefined }).sequence).toBe(2);
+      expect(database.appendRunEvent({ runId: 'run-a', type: 'text_delta', payload: { text: 'A second' }, timestamp,protocolVersion:0,requestId:undefined }).sequence).toBe(3);
       database.close();
       database = undefined;
 
       database = new Database(filename);
       database.initialize();
       expect(database.listRunEvents('run-a', 1)).toEqual([
-        { runId: 'run-a', turnId: undefined, sequence: 2, type: 'text_delta', payload: { text: 'A first' }, timestamp },
-        { runId: 'run-a', turnId: undefined, sequence: 3, type: 'text_delta', payload: { text: 'A second' }, timestamp },
+        { runId: 'run-a', turnId: undefined, sequence: 2, type: 'text_delta', payload: { text: 'A first' }, timestamp,protocolVersion:0,requestId:undefined },
+        { runId: 'run-a', turnId: undefined, sequence: 3, type: 'text_delta', payload: { text: 'A second' }, timestamp,protocolVersion:0,requestId:undefined },
       ]);
-      expect(database.listRunEvents('run-a', 2)).toEqual([{ runId: 'run-a', turnId: undefined, sequence: 3, type: 'text_delta', payload: { text: 'A second' }, timestamp }]);
+      expect(database.listRunEvents('run-a', 2)).toEqual([{ runId: 'run-a', turnId: undefined, sequence: 3, type: 'text_delta', payload: { text: 'A second' }, timestamp,protocolVersion:0,requestId:undefined }]);
       expect(database.listRunEvents('run-a', 3)).toEqual([]);
       expect(database.listRunEvents('run-a', 4)).toEqual([]);
-      expect(database.listRunEvents('run-b', 1)).toEqual([{ runId: 'run-b', turnId: undefined, sequence: 2, type: 'text_delta', payload: { text: 'B only' }, timestamp }]);
+      expect(database.listRunEvents('run-b', 1)).toEqual([{ runId: 'run-b', turnId: undefined, sequence: 2, type: 'text_delta', payload: { text: 'B only' }, timestamp,protocolVersion:0,requestId:undefined }]);
       expect(database.listRunEvents('run-b', 2)).toEqual([]);
     } finally {
       database?.close();
@@ -141,7 +141,7 @@ describe('Database', () => {
       database = undefined;
       reader = new DatabaseDriver(filename, { readonly: true, fileMustExist: true });
       const firstVersions = reader.prepare('SELECT version, applied_at FROM schema_migrations ORDER BY version').all();
-      expect(firstVersions).toEqual([{ version: 1, applied_at: expect.any(String) }]);
+      expect(firstVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)}]);
       reader.close();
       reader = undefined;
 

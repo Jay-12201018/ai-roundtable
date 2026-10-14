@@ -104,6 +104,35 @@ beforeEach(() => {
 });
 
 describe('application lifecycle', () => {
+  it('waits for disk initialization before closing and never opens a window after quit', async () => {
+    let finish!: () => void;
+    fixture.database.initialize.mockImplementation(() => new Promise<void>(resolve => {finish=resolve;}));
+    await startApp();
+    emit('before-quit'); emit('before-quit');
+    await Promise.resolve();
+    expect(fixture.database.close).not.toHaveBeenCalled();
+    expect(fixture.createWindow).not.toHaveBeenCalled();
+    finish();
+    await vi.waitFor(()=>expect(fixture.app.exit).toHaveBeenCalledWith(0));
+    expect(fixture.database.close).toHaveBeenCalledOnce();
+    expect(fixture.database.markInFlightRunsInterrupted).not.toHaveBeenCalled();
+    expect(fixture.createWindow).not.toHaveBeenCalled();
+  });
+
+  it('exits with failure when initialization rejects during shutdown', async () => {
+    let fail!: (error: Error) => void;
+    const pending = new Promise<void>((_resolve,reject)=>{fail=reject;});
+    void pending.catch(()=>{});
+    fixture.database.initialize.mockReturnValue(pending);
+    const log = vi.spyOn(console,'error').mockImplementation(()=>{});
+    try {
+      await startApp(); emit('before-quit'); fail(new Error('Backup validation failed'));
+      await vi.waitFor(()=>expect(fixture.app.exit).toHaveBeenCalledWith(1));
+      expect(fixture.database.close).toHaveBeenCalledOnce();
+      expect(fixture.createWindow).not.toHaveBeenCalled();
+    } finally {log.mockRestore();}
+  });
+
   it('reports database initialization failures and exits instead of leaving a windowless process', async () => {
     fixture.database.initialize.mockImplementation(() => { throw new Error('Migration failed'); });
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});

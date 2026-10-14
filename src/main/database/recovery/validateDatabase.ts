@@ -1,6 +1,8 @@
 import type Sqlite from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { messageStatusValues, runStatusValues, turnStatusValues } from '../../../shared/types/run';
+import { requestAttemptSchema,executionMetadataSchema } from '../../../shared/schemas/persistence';
+import { runEventSchema } from '../../../shared/schemas/run';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
 
@@ -17,6 +19,8 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
     // An intact original schema may predate the ledger; report unknown version 0 without adding one.
     const versions = tables.includes('schema_migrations') ? db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all() as number[] : [];
     if (versions.some((version, index) => version !== index + 1)) throw new Error('Invalid migration ledger');
+    const modern = (versions.at(-1)??0)>=2;
+    if (modern && !tables.includes('request_attempts')) throw new Error('Recovery v2 schema is incomplete');
 
     for (const [table, statuses] of [['workflow_runs', runStatusValues], ['turns', turnStatusValues], ['messages', messageStatusValues]] as const) {
       if (db.prepare(`SELECT 1 FROM ${table} WHERE status NOT IN (${statuses.map(() => '?').join(',')}) LIMIT 1`).get(...statuses)) throw new Error('Invalid persisted status');
@@ -39,11 +43,48 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
     // v0 stored Turn identity only in payload; validate it without rewriting history.
     assertNoRows(db, `SELECT 1 FROM run_events e LEFT JOIN turns t ON t.id = COALESCE(e.turn_id, json_extract(e.payload_json, '$.turnId'))
       LEFT JOIN messages m ON m.id = json_extract(e.payload_json, '$.messageId')
-      WHERE (COALESCE(e.turn_id, json_extract(e.payload_json, '$.turnId')) IS NOT NULL AND (t.id IS NULL OR t.run_id <> e.run_id))
+      WHERE ${modern?'e.protocol_version=0 AND':''} ((COALESCE(e.turn_id, json_extract(e.payload_json, '$.turnId')) IS NOT NULL AND (t.id IS NULL OR t.run_id <> e.run_id))
       OR (json_type(e.payload_json, '$.turnId') IS NOT NULL AND (t.id IS NULL OR json_extract(e.payload_json, '$.turnId') IS NOT t.id))
       OR (json_type(e.payload_json, '$.requestId') IS NOT NULL AND (t.id IS NULL OR json_extract(e.payload_json, '$.requestId') IS NOT t.request_id))
       OR (json_type(e.payload_json, '$.agentId') IS NOT NULL AND (t.id IS NULL OR json_extract(e.payload_json, '$.agentId') IS NOT t.agent_id))
-      OR (json_type(e.payload_json, '$.messageId') IS NOT NULL AND (m.id IS NULL OR m.run_id IS NOT e.run_id OR m.turn_id IS NOT t.id)) LIMIT 1`, 'Invalid event identity');
+      OR (json_type(e.payload_json, '$.messageId') IS NOT NULL AND (m.id IS NULL OR m.run_id IS NOT e.run_id OR m.turn_id IS NOT t.id))) LIMIT 1`, 'Invalid event identity');
+
+    if (modern) {
+      assertNoRows(db,"SELECT 1 FROM run_events WHERE typeof(protocol_version)<>'integer' OR protocol_version<0 OR protocol_version>9007199254740991 LIMIT 1",'Invalid event protocol');
+      assertNoRows(db,`SELECT 1 FROM run_events e LEFT JOIN turns t ON t.id=e.turn_id LEFT JOIN request_attempts a ON a.request_id=e.request_id
+        WHERE (e.turn_id IS NOT NULL AND (t.id IS NULL OR t.run_id<>e.run_id)) OR (e.request_id IS NOT NULL AND (a.request_id IS NULL OR a.run_id<>e.run_id OR (e.turn_id IS NOT NULL AND a.turn_id<>e.turn_id))) LIMIT 1`,'Invalid event record identity');
+      assertNoRows(db,`SELECT 1 FROM request_attempts a JOIN turns t ON t.id=a.turn_id JOIN messages m ON m.id=a.message_id JOIN workflow_runs r ON r.id=a.run_id
+        WHERE t.run_id<>a.run_id OR m.run_id<>a.run_id OR m.turn_id<>a.turn_id OR m.room_id<>r.room_id LIMIT 1`,'Invalid Attempt identity');
+      const attempts = db.prepare(`SELECT request_id AS requestId,run_id AS runId,turn_id AS turnId,message_id AS messageId,attempt_index AS attemptIndex,status,input_snapshot AS inputSnapshot,
+        provider_request_id AS providerRequestId,created_at AS createdAt,started_at AS startedAt,finished_at AS finishedAt,updated_at AS updatedAt FROM request_attempts`).iterate() as Iterable<Record<string,unknown>>;
+      for (const row of attempts) {
+        let input: unknown = null;
+        try { if(row.inputSnapshot!==null) input=JSON.parse(row.inputSnapshot as string); } catch {throw new Error('Invalid Attempt JSON');}
+        if(!requestAttemptSchema.safeParse({...row,inputSnapshot:input}).success) throw new Error('Invalid Attempt evidence');
+      }
+      const runs=db.prepare(`SELECT task,members_snapshot AS membersSnapshot,next_turn_index AS nextTurnIndex,elapsed_execution_ms AS elapsedExecutionMs,mode,max_turns AS maxTurns,
+        max_duration_ms AS maxDurationMs,output_token_limit AS outputTokenLimit,current_turn_id AS currentTurnId,current_agent_id AS currentAgentId,started_at AS startedAt,finished_at AS finishedAt,
+        created_at AS createdAt,updated_at AS updatedAt FROM workflow_runs`).iterate() as Iterable<Record<string,unknown>>;
+      for(const row of runs) {
+        let members:unknown=null;
+        try {if(row.membersSnapshot!==null) members=JSON.parse(row.membersSnapshot as string);} catch {throw new Error('Invalid member JSON');}
+        if(!executionMetadataSchema.safeParse({...row,membersSnapshot:members}).success) throw new Error('Invalid Run execution metadata');
+      }
+      assertNoRows(db,"SELECT 1 FROM messages WHERE sort_key IS NULL OR typeof(sort_key)<>'integer' OR sort_key<1 LIMIT 1",'Invalid Message order');
+      assertNoRows(db,"SELECT 1 WHERE (SELECT value FROM persistence_counters WHERE name='message') IS NULL OR (SELECT value FROM persistence_counters WHERE name='message')<COALESCE((SELECT MAX(sort_key) FROM messages),0)",'Invalid Message counter');
+      const events=db.prepare('SELECT run_id,turn_id,request_id,sequence,type,payload_json,timestamp FROM run_events WHERE protocol_version=1').iterate() as Iterable<{run_id:string;turn_id:string|null;request_id:string|null;sequence:number;type:string;payload_json:string;timestamp:string}>;
+      for(const row of events) {
+        const result=runEventSchema.safeParse({version:1,runId:row.run_id,turnId:row.turn_id??undefined,requestId:row.request_id??undefined,sequence:row.sequence,type:row.type,payload:JSON.parse(row.payload_json),timestamp:row.timestamp});
+        if(!result.success) throw new Error('Invalid v1 event');
+        const event=result.data;
+        if(event.turnId) {
+          const attempt=db.prepare('SELECT run_id AS runId,turn_id AS turnId,message_id AS messageId FROM request_attempts WHERE request_id=?').get(event.requestId) as {runId:string;turnId:string;messageId:string}|undefined;
+          const turn=db.prepare('SELECT agent_id FROM turns WHERE id=?').get(event.turnId) as {agent_id:string}|undefined;
+          if(!attempt || attempt.runId!==event.runId || attempt.turnId!==event.turnId || !turn || 'messageId' in event.payload && event.payload.messageId!==attempt.messageId || 'agentId' in event.payload && event.payload.agentId!==turn.agent_id) throw new Error('Invalid event Attempt identity');
+          if('senderName' in event.payload && event.payload.senderName!==db.prepare('SELECT sender_name FROM messages WHERE id=?').pluck().get(attempt.messageId)) throw new Error('Invalid event sender identity');
+        }
+      }
+    }
 
     const hash = createHash('sha256');
     const schema = db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type, name').raw().all();

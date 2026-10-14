@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { messageStatusValues, runStatusValues, turnStatusValues } from '../types/run';
 import { idSchema, PROTOCOL_VERSION, sequenceSchema, timestampSchema, workflowSnapshotSchema } from './common';
 import { apiErrorSchema } from './error';
+import { executionMetadataSchema, attemptSnapshotSchema } from './persistence';
 
 export const startRunInputSchema = z.object({
   roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema,
@@ -29,6 +30,7 @@ export const runSnapshotSchema = z.object({
   workflowSnapshot: workflowSnapshotSchema, currentTurnId: idSchema.optional(), activeAgentId: idSchema.optional(),
   turns: z.array(turnSnapshotSchema), messages: z.array(messageSnapshotSchema),
   startedAt: timestampSchema.optional(), updatedAt: timestampSchema,
+  execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
 }).strict().superRefine((snapshot, ctx) => {
   const current = snapshot.turns.find((turn) => turn.turnId === snapshot.currentTurnId);
   if (snapshot.turns.some((turn) => turn.runId !== snapshot.runId)
@@ -36,7 +38,9 @@ export const runSnapshotSchema = z.object({
     || new Set(snapshot.messages.map((message) => message.id)).size !== snapshot.messages.length
     || (snapshot.currentTurnId !== undefined && (!current || current.status !== 'running'))
     || (snapshot.activeAgentId !== undefined && snapshot.activeAgentId !== current?.agentId)
-    || snapshot.turns.some((turn) => turn.messageId !== undefined && !snapshot.messages.some((message) => message.id === turn.messageId))) {
+    || snapshot.turns.some((turn) => turn.messageId !== undefined && !snapshot.messages.some((message) => message.id === turn.messageId))
+    || new Set(snapshot.attempts?.map(a=>a.requestId)).size !== (snapshot.attempts?.length ?? 0)
+    || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent snapshot identities' });
   }
 });
@@ -76,8 +80,9 @@ export const runSubscriptionSchema = z.object({
     || subscription.events.some((event) => {
       if (event.type === 'run_state_changed' || event.type === 'snapshot_required') return false;
       const turn = subscription.snapshot.turns.find((turn) => turn.turnId === event.turnId);
-      return !turn || turn.requestId !== event.requestId
-        || 'messageId' in event.payload && turn.messageId !== event.payload.messageId
+      const attempt = subscription.snapshot.attempts?.find(a=>a.requestId===event.requestId);
+      return !turn || (attempt ? attempt.turnId!==turn.turnId || attempt.runId!==event.runId : turn.requestId!==event.requestId)
+        || 'messageId' in event.payload && (attempt ? attempt.messageId : turn.messageId) !== event.payload.messageId
         || 'agentId' in event.payload && turn.agentId !== event.payload.agentId;
     })) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent subscription cursor' });

@@ -8,7 +8,7 @@ describe('recovery database validation', () => {
     const f = diskFixture();
     try {
       const report = validateDatabase(f.db);
-      expect(report.schemaVersion).toBe(1);
+      expect(report.schemaVersion).toBe(2);
       expect(report.counts).toEqual({ runs: 1, turns: 1, messages: 1, events: 1 });
       expect(report.evidenceSha256).toMatch(/^[a-f0-9]{64}$/);
       f.db.prepare('UPDATE turns SET request_id = ?').run('other-request');
@@ -27,7 +27,7 @@ describe('recovery database validation', () => {
     ["UPDATE workflow_runs SET status = 'unknown'", /status/i],
     ["UPDATE turns SET status = 'unknown'", /status/i],
     ["UPDATE messages SET status = 'unknown'", /status/i],
-    ["UPDATE schema_migrations SET version = 2", /migration/i],
+    ["UPDATE schema_migrations SET version = 3 WHERE version = 2", /migration/i],
   ])('rejects damaged evidence: %s', (sql, error) => {
     const f = diskFixture();
     try {
@@ -42,7 +42,7 @@ describe('recovery database validation', () => {
   it('detects cross-run message links despite valid SQLite foreign keys', () => {
     const f = diskFixture();
     try {
-      f.db.exec("INSERT INTO workflow_runs SELECT 'other-run', room_id, status, mode, workflow_snapshot, current_turn_id, current_agent_id, max_turns, max_duration_ms, output_token_limit, started_at, finished_at, last_error, created_at, updated_at FROM workflow_runs");
+      f.db.exec("INSERT INTO workflow_runs(id,room_id,status,mode,workflow_snapshot,current_turn_id,current_agent_id,max_turns,max_duration_ms,output_token_limit,started_at,finished_at,last_error,created_at,updated_at) SELECT 'other-run', room_id, status, mode, workflow_snapshot, current_turn_id, current_agent_id, max_turns, max_duration_ms, output_token_limit, started_at, finished_at, last_error, created_at, updated_at FROM workflow_runs");
       f.db.exec("UPDATE messages SET run_id = 'other-run'");
       expect(f.db.pragma('foreign_key_check')).toEqual([]);
       expect(() => validateDatabase(f.db)).toThrow(/identity/i);

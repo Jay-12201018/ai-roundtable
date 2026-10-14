@@ -15,6 +15,7 @@ let runService: RunService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
 let shutdownExitCode = 0;
+let initializationPromise: Promise<void> | undefined;
 
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
@@ -29,11 +30,16 @@ if (!hasLock) {
     if (window.isMinimized()) window.restore();
     window.focus();
   });
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (shutdownRequested) return;
     try {
       database = new Database(join(app.getPath('userData'), 'ai-roundtable.db'));
-      database.initialize();
+      const pending = database.initialize();
+      if (pending) {
+        initializationPromise = pending;
+        await pending;
+      }
+      if (shutdownRequested) return;
       database.markInFlightRunsInterrupted();
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
@@ -90,6 +96,7 @@ function requestShutdown(exitCode = 0): void {
   // Assign the barrier before calling cleanup, which may synchronously trigger another quit.
   shutdownPromise = Promise.resolve().then(async () => {
     try {
+      if (initializationPromise) await initializationPromise;
       await runService?.shutdown();
     } catch (error) {
       shutdownExitCode = 1;

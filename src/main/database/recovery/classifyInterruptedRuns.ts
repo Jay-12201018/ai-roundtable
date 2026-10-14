@@ -2,7 +2,7 @@ import type { RunRecord } from '../Database';
 import { idSchema } from '../../../shared/schemas/common';
 import { runSnapshotSchema } from '../../../shared/schemas/run';
 
-export function classifyInterruptedRuns(runs: readonly Pick<RunRecord, 'id' | 'status'>[]): string[] {
+export function classifyInterruptedRuns(runs: readonly (Pick<RunRecord, 'id'> & {status:unknown})[]): string[] {
   const seen = new Set<string>();
   const interruptedIds: string[] = [];
   for (const run of runs) {
