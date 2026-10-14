@@ -7,8 +7,36 @@ import { runEventSchema, runSubscriptionSchema } from '../../../src/shared/schem
 import type { NormalizedChunk, StreamChatInput } from '../../../src/shared/contracts/provider';
 import { publicError } from '../../../src/shared/schemas/error';
 import { ContractError } from '../../../src/shared/contracts/errors';
+import type { StartRunInput } from '../../../src/shared/contracts/run';
 
 describe('Main persistence and Provider contract wiring', () => {
+  it('rejects workflow credential fields before any run is persisted', async () => {
+    const db = new Database(':memory:'); db.initialize();
+    const service = new RunService(db, new MockProvider());
+    try {
+      const roomId = service.createDemoRoom('fixture');
+      const workflowSnapshots: StartRunInput['workflowSnapshot'][] = [{ apiKey: 'fixture-secret' }, { steps: [{ provider: { access_token: 'fixture-secret' } }] }];
+      for (const workflowSnapshot of workflowSnapshots) {
+        await expect(service.start({ roomId, task: 'fixture', workflowSnapshot })).rejects.toMatchObject({ code: 'invalid_input' });
+      }
+      expect(db['db'].prepare('SELECT COUNT(*) AS count FROM workflow_runs').get()).toEqual({ count: 0 });
+      expect(db.listMessages(roomId)).toEqual([]);
+      expect(service.hasActiveRuns()).toBe(false);
+    } finally { await service.shutdown(); db.close(); }
+  });
+  it('rejects legacy credential configuration in snapshots without rewriting the stored record', async () => {
+    const db = new Database(':memory:'); db.initialize();
+    const service = new RunService(db, new MockProvider());
+    try {
+      const roomId = service.createDemoRoom('fixture');
+      db.insertRun({ id: 'legacy-run', roomId, status: 'interrupted', workflowSnapshot: { provider: { apiKey: 'fixture-secret' } } });
+      const stored = db.getRun('legacy-run');
+      expect(() => service.getSnapshot('legacy-run')).toThrow();
+      expect(() => service.subscribe('legacy-run', 0)).toThrow();
+      expect(db.getRun('legacy-run')).toEqual(stored);
+      expect(db.listRunEvents('legacy-run', 0)).toEqual([]);
+    } finally { await service.shutdown(); db.close(); }
+  });
   it('correlates every streamed event with the persisted Main request and message', async () => {
     const db = new Database(':memory:'); db.initialize();
     const inputs: StreamChatInput[] = [];

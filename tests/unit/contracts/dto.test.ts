@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runCommandSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../../src/shared/schemas/run';
+import { runCommandSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../../src/shared/schemas/run';
 
 const snapshot = {
   runId: 'run-1', roomId: 'room-1', status: 'running', sequence: 1,
@@ -15,6 +15,32 @@ describe('shared boundary DTOs', () => {
   it('accepts the current snapshot and discriminated text event', () => {
     expect(runSnapshotSchema.parse(snapshot)).toEqual(snapshot);
     expect(runEventSchema.parse(delta)).toEqual(delta);
+  });
+  it.each([
+    'apiKey', 'api_key', 'API-KEY', 'accessToken', 'refreshToken', 'authToken', 'bearerToken', 'token',
+    'password', 'secret', 'clientSecret', 'apiSecret', 'credentials', 'authorization', 'privateKey', 'secretKey',
+  ])('rejects the %s credential field in workflow input and snapshot output', (field) => {
+    const workflowSnapshot = { [field]: 'fixture-secret' };
+    expect(startRunInputSchema.safeParse({ roomId: 'room-1', task: 'fixture', workflowSnapshot }).success).toBe(false);
+    expect(runSnapshotSchema.safeParse({ ...snapshot, workflowSnapshot }).success).toBe(false);
+  });
+  it.each([
+    { provider: { apiKey: 'fixture-secret' } },
+    { steps: [{ config: { 'ACCESS-TOKEN': 'fixture-secret' } }] },
+    { nested: [[{ authorization: 'fixture-secret' }]] },
+  ])('rejects nested workflow credential fields %#', (workflowSnapshot) => {
+    expect(startRunInputSchema.safeParse({ roomId: 'room-1', task: 'fixture', workflowSnapshot }).success).toBe(false);
+    expect(runSnapshotSchema.safeParse({ ...snapshot, workflowSnapshot }).success).toBe(false);
+  });
+  it('preserves ordinary JSON configuration and credential references without scanning text', () => {
+    const workflowSnapshot = {
+      templateId: 'draft-review-finalize', version: 1, limits: { maxTurns: 3 },
+      provider: { keyReference: 'key-1', apiKeyReference: 'key-1', keyStatus: 'configured' },
+      steps: [{ tokenReference: 'token-1', enabled: true, optional: null }],
+      notes: 'apiKey is a forbidden field; fixture-secret is only text here',
+    };
+    expect(startRunInputSchema.parse({ roomId: 'room-1', task: 'fixture', workflowSnapshot }).workflowSnapshot).toEqual(workflowSnapshot);
+    expect(runSnapshotSchema.parse({ ...snapshot, workflowSnapshot }).workflowSnapshot).toEqual(workflowSnapshot);
   });
   it.each([
     { ...snapshot, extra: 'secret fixture' }, { ...snapshot, runId: ' ' },

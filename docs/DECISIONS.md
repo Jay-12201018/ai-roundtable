@@ -60,3 +60,12 @@ R01 验收不表示 V1 发布完成。正式 E2E、跨平台、签名/公证、�
 | D026 | Shared Zod jitless，保持 R01 CSP/sandbox/有限 Bridge | 校验不生成动态代码；不放宽 unsafe-eval 或 Node 能力 | 单文件 CJS 构建与隔离 Electron 另验证；Node ObjectWrap 原生回归独立记录，不归因于 Zod |
 
 本轮实际命令、环境失败及限制见 [R02 验证与交接](verification/2026-10-14-r02-contracts.md)。总控须审查以上 wire shape 和必要消费接线，再集成复验。本分支未授权其他模块实施。
+
+## R02 集成审核追加（2026-10-14）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D027 | workflowSnapshot 同一 Schema 递归拒绝明确凭据字段，保留普通配置/Key 引用 | 修复普通 JSON 可明文落库/普通快照返回 apiKey 等的 P1 边界；不实施历史数据迁移或任意文本秘密识别 | DTO红绿、持久化/历史记录保护和228项全回归通过；不实现任意文本秘密识别或R03数据迁移 |
+| D028 | 不将同 ABI 跨补丁头文件绕法作为常规环境；受控验证必须完整 runtime/headers/平台匹配，再做 SQLite GC/全回归/Electron检查 | 官方24.21.0严格配对的独立ObjectWrap 5/5崩溃；24.18.1严格配对5/5通过，ABI均137。证明仅ABI号不足、仅版本匹配也不自动证明稳定 | 严格24.18.1项目SQLite重编译/压力5/5、94项契约/228项全回归、类型/构建、Electron ABI139/隔离Bridge通过；默认干净安装尚未证明，ENVIRONMENT记录约束，不升级依赖/全局Node |
+
+本次只读契约/服务审查及实际验证见 [R02 集成审核](verification/2026-10-14-r02-integration.md)，环境复现条件见 [ENVIRONMENT](ENVIRONMENT.md)。main 与原子项目 Worktree/分支保持不变，R02 不标 verified，不启动 R03。

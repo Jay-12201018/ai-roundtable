@@ -1,6 +1,6 @@
 # R00–R18 状态与授权看板
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见 [任务索引](../tasks/README.md)，原始产品状态见 [V0 审查](V0_AUDIT.md)。R00/R01 已验收，R01 已按用户授权合入 main 并完成主线复验；R02 为 ready，尚未授权创建 Worktree 或实施，未启动。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见 [任务索引](../tasks/README.md)，原始产品状态见 [V0 审查](V0_AUDIT.md)。R00/R01 已验收。本看板属于独立 `codex/integrate-r02` 集成候选：R02 子项目已交付并获本轮独立审查/验证授权，代码/类型/228项回归/构建及Electron验证通过，干净安装复现停滞，保留环境阻塞，暂不 verified；main 保持 b690a1e 不变，未授权合 main，R03 未启动。
 
 状态定义：not_started 未开始；ready 依赖满足但仍需实施授权；in_progress 正在执行；review 交付待审核；merged 已由总控集成；verified 验收确认；blocked 前置未满足或存在阻塞。状态与授权分列，不能推断。
 
@@ -8,7 +8,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | R00 | 基线治理与验证 | 无 | 总控（本聊天） | verified | 已授权；用户文档验收通过 | main；不创建 Worktree | a17c649422c69696da91df081cb21d6d260a54cb；769a9519b969b7897d3af314bc981ac2fb7f64d2 | [R00 实际执行记录](verification/2026-10-13-r00-baseline.md)：类型/52测试/空集/build/ABI通过，独立审查通过；2026-10-13 用户批准文档验收 |
 | R01 | 启动、退出、安全边界 | R00 已 verified | 总控（本聊天） | verified | 用户批准最终合并与验收；主线复验通过 | 已合 main；codex/integrate-r01 与原子项目 Worktree/分支保留 | 集成 0ad1701a47222315158e7be00d29afe1c9ef1767；合并 4149590d28296ab3520b70606dcb161ba16a6b39；原子项目 d956279949baa0992be5e0cb093f59ef96a9e205 | [合并后实际验证](verification/2026-10-13-r01-main.md)：类型、12文件/133测试、build、ABI139、隔离生产页面/Preload、退出后SQLite通过；10月13日批准/复验，10月14日验收登记 |
-| R02 | 契约与归属 | R01 已合 main 且 verified | 总控，实施未分派 | ready | 仅前置满足；未授权创建 Worktree 或实施 | 未创建 | 无 | R01 主线验收证据可读取；R02 检查未运行 |
+| R02 | 契约与归属 | R01 已合 main 且 verified | 总控（本聊天） | blocked | 子项目已交付；独立集成审核/验证已授权；未授权合 main | codex/integrate-r02；原 codex/r02-contracts Worktree/分支保留 | 原14f07a22b44bcd2459dd44f579230792033d9301；等价引入bafa84f55b6c77aeaffe26b27caae56fb67cbcf0；补充提交见交付报告 | [本轮审核](verification/2026-10-14-r02-integration.md)：严格Node24.18.1：94项契约/228项回归、类型/构建、SQLite压力5/5及Electron ABI139/隔离Preload/IPC/退出数据核对通过；默认干净安装无下载/两次有界实验124，保留ENV-R02-INSTALL-01阻塞 |
 | R03 | 持久化、备份、恢复 | R02 | 数据负责人未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R04 | Run/Turn Mock | R03 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R05 | 公共上下文与基本限制 | R03 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
@@ -72,6 +72,6 @@ R00 文档验收后，状态更新提交 `462a43a5cd0d341d91c64e28cfc2a903479ecd
 
 ### R02 启动边界
 
-R02 的 R01 主线合入/验收前置已满足，因此 ready。创建 R02 Worktree、分派执行者、修改共享契约/消费接线仍需用户单独授权；本轮未执行 [R02 任务](../tasks/R02-contracts.md) 的任何步骤，也未启动 R17 或其他任务。
+R01 验收轮将 R02 标 ready；用户随后授权原子项目并于本轮授权总控创建独立集成 Worktree，审核 [R02 任务](../tasks/R02-contracts.md) 的实际交付。此看板不改 main 的历史准备状态。早先自动审批额度失败已恢复并获准继续。严格配对24.18.1环境及现有独立依赖验证通过，但干净安装复现仍未确认；不能据现有环境PASS或交接的206项PASS推进 R03。环境后续验证项见 [ENVIRONMENT](ENVIRONMENT.md)；不创建 R03 Worktree或启动R17/其他任务。
 
 R00/R01 不表示 V1 功能已完成。异常退出恢复、完整调度竞态、契约漂移、真正公共上下文、真实 Provider、Key 链路、产物与导出、正式 E2E 和跨平台等仍按任务记录未解决。

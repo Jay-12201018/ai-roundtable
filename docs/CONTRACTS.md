@@ -116,3 +116,11 @@ Mock 补齐模型列表/分级测试、使用 Main requestId、输出限制及�
 沿用任务索引排他归属：Shared、IPC/Preload 注册、Provider 公共协议/registry、Main/App 组装、package/lock 和 migration 编号由总控；R04 接管 RunService/stateMachine 的状态机，R06 接管 store/subscriptions 状态拆分，完成后 App 组装恢复总控。R03 用现有 DTO 并申请任何持久化/migration 变化；R05/R11/R12/R13 只申请 Run 输入/调度接线；R07/R08 申请房间/成员/配置/安全 Key 引用契约；R09/R10A/R10B 仅在自己的供应商目录消费同一 Adapter；R14/R15 申请产物/导出可信命令；R16 消费状态与组件接口；R17 消费统一 Bridge 但须另获授权；R18 在 V1 完成后单独授权。
 
 任何新增可选字段、事件、枚举或能力均提交任务 ID、需求、调用方、兼容版本、migration、测试、安全影响；总控批准并先合入共享变更、登记唯一写入人，再由模块消费。未知新增事件和版本默认拒绝/重同步；不得在模块内复制 Schema、抢 migration 号或另开通用 invoke。没有因本轮定义而启动 R03–R18。
+
+## R02 集成审核补充（2026-10-14，未合 main）
+
+总控在 `codex/integrate-r02` 引入原交付 `14f07a22b44bcd2459dd44f579230792033d9301`，等价提交 `bafa84f55b6c77aeaffe26b27caae56fb67cbcf0`。发现 workflowSnapshot 的任意 JSON record 可携带明确凭据字段，经普通输入持久化并随快照返回；当前 UI 不主动传 Key，因此不声称已经泄漏真实密钥。
+
+R02-INTEGRATION-01：同一 Shared workflowSnapshotSchema 递归拒绝 apiKey、accessToken、refreshToken、authToken、bearerToken、token、password、secret、clientSecret、apiSecret、credentials、authorization、privateKey、secretKey；字段比较忽略大小写及 `-`/`_`，包括嵌套对象和数组。保留普通 JSON 配置及 keyReference 等引用字段，不扫描任意文本内容，也不声称具备通用秘密识别能力。新输入在落库前拒绝，输出 Schema 同样拒绝旧敏感配置，保留原数据库记录；本轮不做 R03 历史恢复/迁移或自动删除。未来真实 Key 输入只能走专用可信 KeyService 链路，配置扩展仍需统一批准。
+
+DTO 红测已实际出现19失败，修复后48项通过；随后严格配对Node24.18.1执行全部契约94项及全单元/集成228项通过，包括新增service持久化/旧记录保护测试。类型、构建、SQLite压力和Electron隔离验证也通过；干净安装可靠性仍待确认，不把现有环境PASS外推完整发布验收。原生环境及本次失败记录见 [本轮审核记录](verification/2026-10-14-r02-integration.md)，当前不标 merged/verified，不启动 R03。
