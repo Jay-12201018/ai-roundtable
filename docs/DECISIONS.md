@@ -69,3 +69,14 @@ R01 验收不表示 V1 发布完成。正式 E2E、跨平台、签名/公证、�
 | D028 | 不将同 ABI 跨补丁头文件绕法作为常规环境；受控验证必须完整 runtime/headers/平台匹配，再做 SQLite GC/全回归/Electron检查 | 官方24.21.0严格配对的独立ObjectWrap 5/5崩溃；24.18.1严格配对5/5通过，ABI均137。证明仅ABI号不足、仅版本匹配也不自动证明稳定 | 严格24.18.1项目SQLite重编译/压力5/5、94项契约/228项全回归、类型/构建、Electron ABI139/隔离Bridge通过；默认干净安装尚未证明，ENVIRONMENT记录约束，不升级依赖/全局Node |
 
 本次只读契约/服务审查及实际验证见 [R02 集成审核](verification/2026-10-14-r02-integration.md)，环境复现条件见 [ENVIRONMENT](ENVIRONMENT.md)。main 与原子项目 Worktree/分支保持不变，R02 不标 verified，不启动 R03。
+
+## R02 正式合并与主线验收（2026-10-14）
+
+上述未合入/干净安装待证明为各阶段历史状态；ENV 专项已解决安装阻塞，用户随后批准最终合并。
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D029 | 只将获批集成候选 5b8f771 以 non-ff merge 6aff174 合入 main，保留原分支/Worktree；主线复验通过后登记 R02 verified、R03 ready | 完整保留 bafa84f/8ec1d2b/5b8f771 历史，不重复合原子项目，不覆盖 R01；无新的 wire shape/migration/业务修改 | main 本次94契约/228全回归、类型/构建、严格Node原生/压力、Electron ABI139/隔离IPC/退出数据通过；R03仍未获实施授权 |
+| D030 | 保留辅助 pnpm list 的真实失败，以只读安装 manifest/锁文件盘点依赖，不为清单扩大全局 store 写权限 | pnpm11.25.0 list 固定打开 modules.storeDir 的可写 StoreIndex，CLI store 覆盖无效；trace与只读索引查询支持沙箱限制解释 | 主线32直接依赖实际版本/锁文件匹配；list未通过，不把辅助诊断失败改写为安装或业务测试 PASS |
+
+完整本次命令、退出码、数据隔离和限制见[主线验收](verification/2026-10-14-r02-main.md)。D028 的上游 Node 24.21.0 风险保留；继续使用官方 24.18.1/严格同版 headers 和独立依赖，正式 E2E/跨平台/发布/真实模型能力不在本轮验证结论内。

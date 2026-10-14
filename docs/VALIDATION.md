@@ -75,3 +75,9 @@ STATUS 的 review 表示交付待用户检查，verified 表示总控已确认�
 有界执行并分别记录：冻结安装/lock字节与依赖清单→Node SQLite源码重编译/内存/压力及正常退出→契约/默认pool全回归→类型/生产构建→Electron源码重编译/ABI→ready前隔离的有限生产页面/Bridge/退出后只读数据核对。适用时构建目录包、查ASAR Main/CJS Preload/Renderer及unpacked SQLite，并在最终签名后再跑包内内存SQLite。pack PASS不能替代正式E2E/安装/跨平台/发布签名。
 
 本轮全部新鲜结果见[环境修复与可复现性报告](verification/2026-10-14-r02-environment.md)；旧228项和上一轮blocked记录保持历史身份，不能充当本次复验。未修改package/lock、源码或既有tests。
+
+## R02 合并后证据
+
+获批集成候选已以 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 合入 main；[本次主线验收](verification/2026-10-14-r02-main.md)单独记录重新执行的命令/退出码，不能复用上节环境专项 PASS。R02 verified；R03 ready 仅表示依赖满足，不是实施授权。
+
+pnpm11.25.0 的辅助 list 会按已安装 `.modules.yaml` 的 storeDir 写打开索引，即使 CLI 覆盖 store 也不改变该路径。受限环境下失败须保留，不为盘点清单擅自写全局 store；可只读比较已安装锁文件与仓库锁文件及全部直接依赖的实际版本，明确该核对不等于新干净安装。主线有限 Electron probe仍须在ready前隔离，并在实际退出后只读核对本次临时数据库。

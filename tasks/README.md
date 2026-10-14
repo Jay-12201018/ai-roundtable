@@ -1,6 +1,6 @@
 # AI Roundtable 任务索引
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01 已验收，R01 已合 main；R02 已由用户在独立 Worktree 授权实施，本分支交付待总控审核，未合 main；总控状态看板保留 main 历史状态。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 及 [R01 主线验证](../docs/verification/2026-10-13-r01-main.md) 为准，历史 R00/R01 集成记录保留。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02 已验收；R02 已按用户批准合入 main，并通过[本次主线复验](../docs/verification/2026-10-14-r02-main.md)。R03 ready，但未获实施或创建 Worktree 授权。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
 
 ## 入口与共同约束
 
@@ -16,8 +16,8 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 | --- | --- | --- | --- |
 | [R00-baseline-governance.md](R00-baseline-governance.md) | 基线治理与真实验证 | 无 | 已 verified；原始治理提交保留 |
 | [R01-startup-lifecycle-security.md](R01-startup-lifecycle-security.md) | 启动、退出与窗口安全边界 | R00 审核 | 已合 main、主线复验后 verified |
-| [R02-contracts.md](R02-contracts.md) | 统一契约与排他文件归属 | R01 | 本分支已授权实施，交付待审核；未合 main，见 R02 任务与验证记录 |
-| [R03-persistence-backup-recovery.md](R03-persistence-backup-recovery.md) | 持久化、可靠备份与恢复数据 | R02 | 数据接口/迁移先合入 |
+| [R02-contracts.md](R02-contracts.md) | 统一契约与排他文件归属 | R01 | 已合 main，主线复验后 verified |
+| [R03-persistence-backup-recovery.md](R03-persistence-backup-recovery.md) | 持久化、可靠备份与恢复数据 | R02 | ready/未授权；启动时登记数据负责人，数据接口/迁移统一管理 |
 | [R04-run-turn-mock.md](R04-run-turn-mock.md) | Run/Turn 状态机与 Mock 执行 | R03 | 可与 R05/R06 并行 |
 | [R05-public-context-limits.md](R05-public-context-limits.md) | 公共上下文与基本限制 | R03 | 可与 R04/R06 并行；不改 RunService |
 | [R06-renderer-subscriptions.md](R06-renderer-subscriptions.md) | Renderer 状态与一致订阅 | R03 | 可与 R04/R05 并行；统一投影 |
@@ -103,3 +103,5 @@ PASS 必须来自本次实际执行。静态审查、历史测试、fixture、�
 R02 唯一写入人为主代理，其他协作者仅做只读审查。基线 `b690a1e2cefb485e81b35292bfb875bd19b88a2b`，分支 `codex/r02-contracts`；没有建立第二个 Worktree。新增契约/协议测试和既有 fixture 的排他集合，以及一行 App `snapshot_required` 消费接线，详见 [R02 登记](../docs/CONTRACTS.md#r02-独立实施登记2026-10-14待总控审核未合-main)。
 
 未来契约/migration 变更仍先提交需求、调用方、兼容性、迁移、测试与安全申请，由总控分配版本并合入，再允许模块消费；本轮没有把 R03–R18 的 ready 当实施授权。R02 [验证与完整交接](../docs/verification/2026-10-14-r02-contracts.md)独立记录本次实际命令和失败原因；总控应在自己的隔离依赖/测试数据上重新集成验证，不共享本 Worktree 的 node_modules。
+
+上述交接段落为原子项目历史；最终候选 `5b8f771bfa0fd1823b7efe6488179e15aea436a5` 已以 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 合入 main，并完成[本次主线验收](../docs/verification/2026-10-14-r02-main.md)。原子项目和集成 Worktree/分支保留。R03 可在后续明确授权、登记排他范围后从最新 main 创建独立 Worktree；本轮未创建或实施。

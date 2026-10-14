@@ -1,6 +1,6 @@
 # R02 统一契约与排他文件归属实施任务计划
 
-> 本分支已获用户明确授权实施 R02；基线 b690a1e，当前 codex/r02-contracts，待总控审核且未合 main。总控 [STATUS](../docs/STATUS.md)保留 main 历史状态，本轮不自行标 merged/verified。
+> 当前 R02 已由总控合入 main 并完成[本次主线验收](../docs/verification/2026-10-14-r02-main.md)，状态 verified；最新授权见 [STATUS](../docs/STATUS.md)。下文实施/交接段落记录原 codex/r02-contracts 自 b690a1e 开发时的历史，不表示 R03 已获实施授权。
 > 执行时按工程规范选择已授权的执行方式；各项以复选框记录进度，不能因任务文件存在而标完成。
 
 **Goal:** 让 Main、Preload、Renderer、Provider 与持久化边界消费一份可校验契约，冻结后续模块归属。
@@ -93,3 +93,9 @@ pnpm run test -- tests/unit/contracts；pnpm run typecheck；pnpm run build。�
 按既有任务书执行 Schema/fixture → IPC/Preload → Provider/RunService → 治理/回归/提交的步骤，不另建功能路线。源文件唯一写入人为 R02 主代理，范围和 R02-CONSUMER-01 的 App 一行修复见 [契约登记](../docs/CONTRACTS.md)。既有五份测试文件只更新新协议 fixture，保留原 133 项测试，并新增 Renderer 控制标记消费回归；新增 tests/unit/contracts 六份测试覆盖 DTO、IPC、Preload、Provider、持久化适配与层依赖。
 
 验收结论必须读取 [本轮验证与完整交接](../docs/verification/2026-10-14-r02-contracts.md)，尤其 Node ObjectWrap 原生构建环境失败与隔离头文件绕法，不能只看复选框或历史 PASS。未来 R03 状态应由总控合入 R02 并完成新鲜复验后更新；本轮停止在 R02 提交边界。
+
+## 总控最终验收（2026-10-14）
+
+上节为原子项目历史交接。环境治理已采用官方 Node 24.18.1/严格同版 headers，不沿用跨补丁头文件绕法；ENV-R02-INSTALL-01 已解决。用户批准最终候选 `5b8f771bfa0fd1823b7efe6488179e15aea436a5`，总控以 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 正式合入 main，并在主线独立依赖/临时数据上重新完成必要验证，登记 verified，详见[本次验收](../docs/verification/2026-10-14-r02-main.md)。
+
+本次仅合入获批候选及更新验收文档，没有继续修改业务/测试/依赖/数据库 Schema。R03 标 ready，但未获实施或创建 Worktree 授权；原 R02 和集成分支/Worktree 均保留。

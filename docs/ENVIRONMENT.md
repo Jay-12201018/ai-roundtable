@@ -1,6 +1,6 @@
 # 原生模块与干净安装环境治理
 
-2026-10-14，R02 集成审核建立，仅限受控验证环境；不升级项目依赖、不修改全局 Node，不表示此版本已通过项目完整验收。证据见 [集成审核](verification/2026-10-14-r02-integration.md)。
+2026-10-14，R02 集成审核建立。当前 R02 已按用户批准合入 main，并在严格配对的官方 Node 24.18.1 环境通过[本次主线验收](verification/2026-10-14-r02-main.md)；ENV-R02-INSTALL-01 保持已解决。以下各阶段证据按历史保留，不把 R02 验收外推为 V1/发布验收；不升级项目依赖、不修改全局 Node。
 
 ## 原则与本轮发现
 
@@ -40,7 +40,7 @@ Node runtime 版本、同版 headers、CPU/平台构建配置、better-sqlite3 �
 
 这些证据确认本机现有独立依赖在受控环境下工作，不能将其外推默认Node24.21.0或干净安装/跨平台/发布稳定性。普通`pnpm test`的pretest会按当前PATH重建SQLite，未经控制的24.21头文件可能重新引入崩溃。
 
-## ENV-R02-INSTALL-01：已解决，待R02最终合并审核
+## ENV-R02-INSTALL-01：已解决（环境专项阶段记录）
 
 本节取代上一轮未明停滞结论，原失败命令及原生ObjectWrap证据保留。完整命令、退出码和干净依赖复验见[环境修复报告](verification/2026-10-14-r02-environment.md)。
 
@@ -78,3 +78,11 @@ npm_config_nodedir="$R02_NODE_DIST" npm_config_build_from_source=true \
 外部timeout监督不可省略；本轮安装上限300秒，正常完成并非等到上限。详细原生、全回归、构建、Electron及目录包顺序在报告中。Electron源码编译不带Node的npm_config_nodedir，使用对应38.8.6 headers；本轮其构建config与实际运行均ABI139/arm64。
 
 第二次干净安装产生的依赖通过94项契约、228项完整回归、类型、生产构建、SQLite压力5/5、Electron源码编译/ABI/隔离Bridge/退出数据核对、macOS arm64目录包及最终签名后包内SQLite/ASAR路径。ENV阻塞关闭，建议R02进入最终合并审核；未合main、未标R02 verified，不启动R03。跨平台、正式E2E、安装升级、发布签名/公证及真实Provider/Key仍未验证。
+
+## R02 合并后环境确认（2026-10-14）
+
+main 合并 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 后，本次重新执行 Node 24.18.1/同版 darwin-arm64 include/config 的源码编译、内存 SQL、30 万次 prepare/get 压力五次、94 项契约、228 项完整回归、类型和生产构建，随后以 Electron 38.8.6 headers 源码重建，实际 ABI139/隔离生产 Bridge/正常退出数据检查均 exit0。主线已安装锁文件与仓库逐字节相同，32 个直接依赖的实际版本匹配锁文件。main、原 R02、集成 R02、环境专项依赖的 SQLite 原生文件 inode 各不相同，没有共享可变依赖。
+
+本次命令没有再带 raw 数值覆盖，没有重新安装依赖或复制旧 node_modules；上一阶段两次全新冻结安装是已审核的历史证据，不能算本次新的安装 PASS。默认 Node 24.21.0 的 ObjectWrap 风险仍未修复；普通未受控 pnpm test 会重编译原生文件，须继续显式控制真实 pnpm runtime 与同版 headers。最终 main 原生文件恢复为 Electron ABI139。
+
+额外 `pnpm list --depth=0 --json` 在受限环境 exit1：pnpm11.25.0 的 inspection/tree-builder 直接读取 `.modules.yaml` 的 storeDir，创建会写入 WAL/建表的 StoreIndex，忽略本次 CLI store 覆盖。trace 证实仍打开原全局 store；独立 immutable URI 只读查询同一索引成功，写打开失败与沙箱限制一致，但未提权执行写打开来直接证明。该辅助清单失败单列保留；以只读 package/锁文件/安装 manifest 逐项核对，不修改全局 store 或项目配置，不把它归因于应用 SQLite/安装停滞，也不声明 list 已通过。完整命令和退出码见[本次报告](verification/2026-10-14-r02-main.md)。

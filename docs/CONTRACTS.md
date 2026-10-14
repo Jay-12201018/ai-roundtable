@@ -124,3 +124,9 @@ Mock 补齐模型列表/分级测试、使用 Main requestId、输出限制及�
 R02-INTEGRATION-01：同一 Shared workflowSnapshotSchema 递归拒绝 apiKey、accessToken、refreshToken、authToken、bearerToken、token、password、secret、clientSecret、apiSecret、credentials、authorization、privateKey、secretKey；字段比较忽略大小写及 `-`/`_`，包括嵌套对象和数组。保留普通 JSON 配置及 keyReference 等引用字段，不扫描任意文本内容，也不声称具备通用秘密识别能力。新输入在落库前拒绝，输出 Schema 同样拒绝旧敏感配置，保留原数据库记录；本轮不做 R03 历史恢复/迁移或自动删除。未来真实 Key 输入只能走专用可信 KeyService 链路，配置扩展仍需统一批准。
 
 DTO 红测已实际出现19失败，修复后48项通过；随后严格配对Node24.18.1执行全部契约94项及全单元/集成228项通过，包括新增service持久化/旧记录保护测试。类型、构建、SQLite压力和Electron隔离验证也通过；干净安装可靠性仍待确认，不把现有环境PASS外推完整发布验收。原生环境及本次失败记录见 [本轮审核记录](verification/2026-10-14-r02-integration.md)，当前不标 merged/verified，不启动 R03。
+
+## R02 main 生效登记（2026-10-14）
+
+上述独立实施、集成审核段落保留各自交付时的历史状态。环境阻塞随后解决，用户批准候选 `5b8f771bfa0fd1823b7efe6488179e15aea436a5`，以 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 合入 main。合并树与候选完全一致；main 本次 94 项契约、228 项全回归、类型/生产构建、Node/Electron SQLite 及隔离生产 Preload/IPC/退出验证通过，R02 verified，证据见[主线验收](verification/2026-10-14-r02-main.md)。
+
+本次合并/验收没有继续改变 wire shape、数据库 Schema/migration、依赖版本或业务逻辑。后续模块应消费已合入 Shared v1 和同构建 Main/Preload/Renderer，不混用原 v0 Bridge。R03 为 ready，尚未获实施授权；任何持久化契约或 migration 扩展仍由总控审批、分配版本及登记唯一写入人，不能因 ready 自行修改公共文件。
