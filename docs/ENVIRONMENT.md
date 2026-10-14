@@ -1,4 +1,4 @@
-# 原生模块环境治理与待验证项
+# 原生模块与干净安装环境治理
 
 2026-10-14，R02 集成审核建立，仅限受控验证环境；不升级项目依赖、不修改全局 Node，不表示此版本已通过项目完整验收。证据见 [集成审核](verification/2026-10-14-r02-integration.md)。
 
@@ -28,7 +28,7 @@ Node runtime 版本、同版 headers、CPU/平台构建配置、better-sqlite3 �
 
 仅下载到本任务临时目录 `/private/tmp/roundtable-r02-integration-b0c3ktgt`。原 Node、全局配置、main和原子项目依赖未改；未来重新下载仍须重新验官方清单，不依赖临时目录永久存在。
 
-## 本轮已完成的受控项目验证
+## 上一轮受控项目验证（已有独立依赖的历史证据）
 
 使用完整官方24.18.1 darwin-arm64 runtime 的 include/config，而非另版头文件。pnpm11.25.0，node-gyp12.3.0，Python3.14.5，Apple clang21.0.0；SQLite12.11.1与Electron38.8.6沿用锁文件。实际build/config.gypi为arm64、ABI137；node-gyp日志确认node_root_dir和common.gypi均来自同版完整runtime。
 
@@ -40,12 +40,41 @@ Node runtime 版本、同版 headers、CPU/平台构建配置、better-sqlite3 �
 
 这些证据确认本机现有独立依赖在受控环境下工作，不能将其外推默认Node24.21.0或干净安装/跨平台/发布稳定性。普通`pnpm test`的pretest会按当前PATH重建SQLite，未经控制的24.21头文件可能重新引入崩溃。
 
-## ENV-R02-INSTALL-01（总控环境待项，不启动其他业务任务）
+## ENV-R02-INSTALL-01：已解决，待R02最终合并审核
 
-干净安装使用全新临时目录、未改的package/lock/allowBuilds、独立store/cache；未访问原依赖或用户数据。Node24.18.1默认安装长期停在646 resolved / 0 downloaded，结束的只有经PID/命令核对的本任务进程（exit143）。官方registry的curl HEAD与Node GET均exit0/HTTP200；只读进程诊断发现临时pnpm store SQLite连接、无网络连接，具体停滞原因未定，不能据此断言Node或pnpm缺陷。
+本节取代上一轮未明停滞结论，原失败命令及原生ObjectWrap证据保留。完整命令、退出码和干净依赖复验见[环境修复报告](verification/2026-10-14-r02-environment.md)。
 
-追加有界安装实验的最终结果见[本轮记录](verification/2026-10-14-r02-integration.md)：24.21.0仅安装依赖、禁安装脚本；24.18.1采用pnpm已有的PNPM_MAX_WORKERS=1、保留安装脚本。两个追加实验均180秒超时、exit124，依赖下载仍为0。禁用安装脚本的实验只是定位，不能当可运行安装验收；单worker只影响安装，不改变本轮通过的默认Vitest pool。
+### 已证实的原因及最小修复
 
-待办：在可观察且隔离的环境定位pnpm11.25.0新store停滞；固定lock/受控runtime重新完成干净安装→严格配对原生编译→默认全回归→生产构建→Electron ABI/Preload；若检查发布，则另验证目录包、native hook和ASAR路径。先提出有证据的环境固定方案，再决定合main，不擅自升级依赖/全局Node，不启动R03。当前package/lock未修改。
+总控上一轮临时安装命令使用 `--config.fetch-timeout=60000`；pnpm11.25.0的通用 `--config.*` 路径不应用数值Schema，得到字符串。pnpm在异步retry callback的try外调用AbortSignal.timeout，字符串触发ERR_INVALID_ARG_TYPE，callback Promise未被retry处理，外层fetch悬挂。未处理拒绝仅在退出时打印，空闲worker MessagePort使进程持续存活。因此0 downloaded并非这次网络/SQLite store故障的证明，错误参数由总控引入。
 
-早先原生重编译提权请求曾因自动审批账号额度失败而未执行；后续独立构建审批恢复后，原生请求重新接受并完成上述验证。未绕过审批，也不把第一次未执行计为PASS。R02保持待审核/环境阻塞，不标verified。
+移除这些临时raw数值参数、采用默认数字60000即可；若需要自定义，使用正式 `--fetch-timeout=60000 --fetch-retries=1`。已独立验证正式参数为number、raw参数为string，两次全新store/cache的冻结安装实际exit0（22.79/37.01秒）。未关闭年龄/完整性策略或安装脚本，未升级依赖、改package/lock或全局Node。
+
+### 后续Worktree的受控环境规则
+
+- 本机受控Node为官方24.18.1/darwin-arm64、ABI137；源码重编译使用同一个完整runtime的include/config。Node24.21.0的已确认ObjectWrap异常仍保留，不作为支持环境，不混用跨补丁头文件。
+- pnpm11.25.0与当前lockfileVersion9.0通过本轮冻结安装。已安装pnpm入口、主bundle、worker、package.json与官方同版tarball逐字节一致。默认Codex fallback/pnpm硬编码自己的Node，不能只看PATH中的node版本；须显式调用受控Node+该pnpm入口，递归pnpm脚本也用仅指向这两个已核验路径的临时shim。不要引入额外raw数字/布尔配置覆盖。
+- 官方24.18.1发行包还含Corepack0.35.0/npm11.16.0，本轮仅读取版本，没有enable/prepare或全局安装；实际安装直接使用已核验pnpm11.25.0。默认shell未找到Corepack与受控发行包包含Corepack是不同事实。
+- 每个Worktree独立node_modules/store/cache/userData；干净验证起点仅原package.json、pnpm-lock.yaml、pnpm-workspace.yaml，禁止复制node_modules。Node源码编译和Electron38.8.6/ABI139必须分别执行、实际加载后记录，不能以build或ABI号单独替代。
+- 网络访问需获运行环境许可；本轮沙箱DNS失败与提权后成功分别记录。未改变宿主代理、DNS或TLS；抽查6个实际tarball经curl/https.get/内建fetch均全量HTTP200且SHA512匹配，完整安装也成功。
+- 每个安装/检查有外部进程上限，默认下载timeout60000或正式数值选项；禁止无限重试或扩大并发掩盖故障。诊断内存hook只用于取证，正式复验不注入代码。
+
+可复用安装形式（参数中的路径由各Worktree准备，不依赖本轮临时目录长期存在）：
+
+```sh
+# R02_NODE_DIST：已验SHA的完整官方24.18.1 darwin-arm64目录。
+# R02_PNPM_CLI：已核验pnpm11.25.0的bin/pnpm.mjs。
+# R02_VALIDATION_ROOT：该Worktree独有验证根目录。
+# PATH最前的临时pnpm shim仅exec上述Node和pnpm入口，确保嵌套脚本一致。
+"$R02_NODE_DIST/bin/node" "$R02_PNPM_CLI" --version
+npm_config_nodedir="$R02_NODE_DIST" npm_config_build_from_source=true \
+  "$R02_NODE_DIST/bin/node" "$R02_PNPM_CLI" \
+  --config.store-dir="$R02_VALIDATION_ROOT/store" \
+  --config.cache-dir="$R02_VALIDATION_ROOT/cache" \
+  --config.state-dir="$R02_VALIDATION_ROOT/state" \
+  install --frozen-lockfile --fetch-timeout=60000 --fetch-retries=1
+```
+
+外部timeout监督不可省略；本轮安装上限300秒，正常完成并非等到上限。详细原生、全回归、构建、Electron及目录包顺序在报告中。Electron源码编译不带Node的npm_config_nodedir，使用对应38.8.6 headers；本轮其构建config与实际运行均ABI139/arm64。
+
+第二次干净安装产生的依赖通过94项契约、228项完整回归、类型、生产构建、SQLite压力5/5、Electron源码编译/ABI/隔离Bridge/退出数据核对、macOS arm64目录包及最终签名后包内SQLite/ASAR路径。ENV阻塞关闭，建议R02进入最终合并审核；未合main、未标R02 verified，不启动R03。跨平台、正式E2E、安装升级、发布签名/公证及真实Provider/Key仍未验证。
