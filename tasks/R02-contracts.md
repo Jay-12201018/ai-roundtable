@@ -1,6 +1,6 @@
 # R02 统一契约与排他文件归属实施任务计划
 
-> 当前状态见 [STATUS](../docs/STATUS.md)。未来范围定义；本轮未获实施授权，不得自动启动。
+> 本分支已获用户明确授权实施 R02；基线 b690a1e，当前 codex/r02-contracts，待总控审核且未合 main。总控 [STATUS](../docs/STATUS.md)保留 main 历史状态，本轮不自行标 merged/verified。
 > 执行时按工程规范选择已授权的执行方式；各项以复选框记录进度，不能因任务文件存在而标完成。
 
 **Goal:** 让 Main、Preload、Renderer、Provider 与持久化边界消费一份可校验契约，冻结后续模块归属。
@@ -46,7 +46,7 @@ R01 已由总控合入并验收；R02 获实施授权。
 
 ## Worktree 可独立与可并行
 
-可独立 codex/r02-contracts Worktree；与 R01 串行。共享文件不可拆给多线程。R17 仅在本任务接口合入后单独获授权才可创建 E2E 骨架。
+可独立 codex/r02-contracts Worktree；与 R01 串行。共享文件由本轮用户授权的 R02 主代理单一写入，不拆给多线程；协作代理仅只读审查。R17 仅在本任务接口合入后单独获授权才可创建 E2E 骨架。
 
 ## 共享依赖与接线规则
 
@@ -56,19 +56,19 @@ R01 已由总控合入并验收；R02 获实施授权。
 
 ## 实施步骤
 
-- [ ] 列出现有重复、漂移和受影响调用方，建立协议 fixture。
-- [ ] 总控实现共享 schema/type/契约和现有消费接线。
-- [ ] 运行正负输入、响应、事件和 Provider 契约测试。
-- [ ] 登记固定文件归属、迁移规则和后续扩展流程，交付公共接口基线。
+- [x] 列出现有重复、漂移和受影响调用方，建立协议 fixture。
+- [x] 总控实现共享 schema/type/契约和现有消费接线。
+- [x] 运行正负输入、响应、事件和 Provider 契约测试。
+- [x] 登记固定文件归属、迁移规则和后续扩展流程，交付公共接口基线。
 
 ## 详细验收
 
-- [ ] StartRunInput、恢复决策、Room DTO 和 API 没有重复事实来源；Preload 编译期满足完整共享契约。
-- [ ] IPC 输入严格验证；响应和事件以公共 Schema 校验；非法 payload 不直接进入 Renderer。
-- [ ] RunEvent 按 type 判别，runId/turnId/requestId/sequence 关系明确；未知/版本不兼容事件可触发安全重同步。
-- [ ] Provider 契约覆盖 listModels、分级 testConnection、streamChat 和 start/text_delta/reasoning_summary_delta/usage/finish/error；Main requestId、输出上限、AbortSignal 可传递。
-- [ ] 明文 Key 不属于普通 DTO；配置仅含引用/状态，错误脱敏；Shared 不依赖 Electron/SDK/DB。
-- [ ] 文件归属准确到单文件或不重叠子目录，明确 RunService/stateMachine→R04、App/store→R06；migration 编号仅总控分配。
+- [x] StartRunInput、恢复决策、Room DTO 和 API 没有重复事实来源；Preload 编译期满足完整共享契约。
+- [x] IPC 输入严格验证；响应和事件以公共 Schema 校验；非法 payload 不直接进入 Renderer。
+- [x] RunEvent 按 type 判别，runId/turnId/requestId/sequence 关系明确；未知/版本不兼容事件可触发安全重同步。
+- [x] Provider 契约覆盖 listModels、分级 testConnection、streamChat 和 start/text_delta/reasoning_summary_delta/usage/finish/error；Main requestId、输出上限、AbortSignal 可传递。
+- [x] 明文 Key 不属于普通 DTO；配置仅含引用/状态，错误脱敏；Shared 不依赖 Electron/SDK/DB。
+- [x] 文件归属准确到单文件或不重叠子目录，明确 RunService/stateMachine→R04、App/store→R06；migration 编号仅总控分配。
 
 ## 具体测试情景
 
@@ -87,3 +87,9 @@ pnpm run test -- tests/unit/contracts；pnpm run typecheck；pnpm run build。�
 ## 交付格式
 
 交付包含：任务 ID 与基线/分支；逐项文件清单；行为和操作说明；精确测试命令、日期、退出码、关键输出与未运行项；契约申请和数据库影响；遗留问题；本模块 Commit SHA；总控接线与集成建议。只提交本任务获准文件，不向 main 自行合并。总控集成后复验才更新 merged/verified。
+
+## 本轮实施与最小兼容接线（2026-10-14）
+
+按既有任务书执行 Schema/fixture → IPC/Preload → Provider/RunService → 治理/回归/提交的步骤，不另建功能路线。源文件唯一写入人为 R02 主代理，范围和 R02-CONSUMER-01 的 App 一行修复见 [契约登记](../docs/CONTRACTS.md)。既有五份测试文件只更新新协议 fixture，保留原 133 项测试，并新增 Renderer 控制标记消费回归；新增 tests/unit/contracts 六份测试覆盖 DTO、IPC、Preload、Provider、持久化适配与层依赖。
+
+验收结论必须读取 [本轮验证与完整交接](../docs/verification/2026-10-14-r02-contracts.md)，尤其 Node ObjectWrap 原生构建环境失败与隔离头文件绕法，不能只看复选框或历史 PASS。未来 R03 状态应由总控合入 R02 并完成新鲜复验后更新；本轮停止在 R02 提交边界。

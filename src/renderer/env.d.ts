@@ -1,9 +1,6 @@
-import type { RoundtableApi } from '../preload';
+import type { RoundtableApiContract } from '../shared/contracts/app';
 
 declare global {
-  interface Window {
-    roundtable: RoundtableApi;
-  }
+  interface Window { roundtable: RoundtableApiContract; }
 }
-
 export {};

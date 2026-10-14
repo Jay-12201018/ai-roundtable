@@ -65,3 +65,13 @@ git grep -Il -E '(BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY|sk-[A-Za-z0-9_-]{20
 R00 只修自身文档、配置和验证环境问题。业务失败保留证据交给对应任务，不修改 Agent 逻辑；不隐藏失败或只展示后一次成功。R00 交付可记录基线缺陷，但适用检查未通过时不能称验证全部通过。
 
 STATUS 的 review 表示交付待用户检查，verified 表示总控已确认任务验收；两者不等于发布就绪。R00 建立时后续任务均未启动；当前授权和阶段以 [STATUS](STATUS.md) 为准。R01 合并后重新运行的主线证据见 [本次验收](verification/2026-10-13-r01-main.md)，不复用集成分支历史 PASS。R02 ready 不等于创建/实施授权。
+
+## ENV-R02-INSTALL-01：干净环境复验规则（2026-10-14）
+
+按[ENVIRONMENT](ENVIRONMENT.md)固定runtime与pnpm真实执行入口，先核对版本/来源/headers/arch，再准备独立store/cache和冻结锁文件。默认Codex pnpm入口可能硬编码另一Node，PATH中的node版本不能替代实际pnpm进程证据。不得以复制node_modules作为干净安装。
+
+数值设置使用正式 `--fetch-timeout=60000 --fetch-retries=1` 或经实际类型校验的配置，不能使用本轮已证实保留string的 `--config.fetch-timeout=60000`。安装原生脚本的npm_config_nodedir必须对应完整同版Node runtime；Electron阶段清除此Node设置，以目标Electron headers重建。保持全部安装脚本、年龄/完整性策略与测试断言。
+
+有界执行并分别记录：冻结安装/lock字节与依赖清单→Node SQLite源码重编译/内存/压力及正常退出→契约/默认pool全回归→类型/生产构建→Electron源码重编译/ABI→ready前隔离的有限生产页面/Bridge/退出后只读数据核对。适用时构建目录包、查ASAR Main/CJS Preload/Renderer及unpacked SQLite，并在最终签名后再跑包内内存SQLite。pack PASS不能替代正式E2E/安装/跨平台/发布签名。
+
+本轮全部新鲜结果见[环境修复与可复现性报告](verification/2026-10-14-r02-environment.md)；旧228项和上一轮blocked记录保持历史身份，不能充当本次复验。未修改package/lock、源码或既有tests。

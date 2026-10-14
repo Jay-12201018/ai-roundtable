@@ -58,9 +58,9 @@ function bind(url = 'http://localhost:5173/') {
 }
 
 describe('registered IPC source boundary', () => {
-  it('accepts the trusted main renderer and releases handlers on disposal', () => {
+  it('accepts the trusted main renderer and releases handlers on disposal', async () => {
     const { invoke, dispose } = bind();
-    expect(invoke()).toEqual({ roomId: 'room-id' });
+    expect(await invoke()).toEqual({ version: 1, ok: true, data: { roomId: 'room-id' } });
     dispose();
     expect(fixture.handlers.size).toBe(0);
   });
@@ -109,18 +109,19 @@ describe('registered IPC source boundary', () => {
     expect(fixture.send).not.toHaveBeenCalled();
   });
 
-  it('keeps newer handlers and events intact when an older disposer runs again', () => {
+  it('keeps newer handlers and events intact when an older disposer runs again', async () => {
     const first = bind();
     const oldListener = fixture.onEvent.mock.calls[0]![0] as (event: unknown) => void;
     first.dispose();
     const second = bind();
     first.dispose();
-    expect(second.invoke()).toEqual({ roomId: 'room-id' });
+    expect(await second.invoke()).toEqual({ version: 1, ok: true, data: { roomId: 'room-id' } });
     oldListener({ runId: 'old-run' });
     expect(fixture.send).not.toHaveBeenCalled();
     const newListener = fixture.onEvent.mock.calls[1]![0] as (event: unknown) => void;
-    newListener({ runId: 'new-run' });
-    expect(fixture.send).toHaveBeenCalledWith('run.event', { runId: 'new-run' });
+    const event = { version: 1, runId: 'new-run', sequence: 1, type: 'run_state_changed', payload: { status: 'running' }, timestamp: '2026-10-14T00:00:00.000Z' };
+    newListener(event);
+    expect(fixture.send).toHaveBeenCalledWith('run.event', event);
     second.dispose();
   });
 
