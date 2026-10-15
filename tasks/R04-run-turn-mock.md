@@ -1,13 +1,13 @@
 # R04 Run/Turn 状态机与 Mock 执行实施任务计划
 
-> 当前状态见 [STATUS](../docs/STATUS.md)。原模块已由用户授权交付；当前是联合集成 review 候选，未合 main，不得自动启动后续任务。
+> 当前状态见 [STATUS](../docs/STATUS.md)。原模块及联合候选已按用户批准合main，并通过2026-10-16本次主线验收，状态verified；不得自动启动后续任务。
 > 执行时按工程规范选择已授权的执行方式；各项以复选框记录进度，不能因任务文件存在而标完成。
 
 **Goal:** 把 Mock 调度、Run/Turn 命令、请求尝试和真实停止限制统一到可持久重建的状态机。
 
 **Architecture:** RunService 是唯一调度 owner，状态变更统一经过状态机并事务持久化。公共上下文由 R05 模块提供；本任务预留已批准注入边界，总控负责联合接线。
 
-**Tech Stack:** Electron、React、TypeScript strict、electron-vite、SQLite、Zod；Renderer Zustand 是 V1 目标，使用前先核对已合入实现。
+**Tech Stack:** Electron、React、TypeScript strict、electron-vite、SQLite、Zod；Renderer Zustand 已由 R06 接入，后续扩展仍须核对已合入契约。
 
 **Spec:** [SPEC](../SPEC.md)，[V0 审查](../docs/V0_AUDIT.md)。
 
@@ -93,3 +93,8 @@ pnpm run test -- tests/unit/stateMachine.test.ts tests/unit/mockProvider.test.ts
 ## 2026-10-15 联合候选交付
 
 原模块提交和排他 Worktree 均保留。本次共享文件/Main/跨模块适配由总控唯一写入，任务原 Worktree 不修改；不是并发回写子项目。旧步骤/基线证据保留历史含义，当前实现与验收范围以[联合报告](../docs/verification/2026-10-15-r04-r05-r06-integration.md)、[共享登记](../docs/CONTRACTS.md)和 STATUS 的 review 行为准。三模块真实输入、状态/恢复/订阅/持久化须联合运行，不相加原模块历史测试。C类数据库/公开协议扩展及R07以后不在本轮授权。
+
+
+## 2026-10-16 最终主线验收
+
+用户批准候选d4a0d274后本次fast-forward合main；534完整/265专项及原生、页面/退出等实际复验通过，当前verified。上节保留原候选历史，不再代表当前授权或状态。见[本次主线报告](../docs/verification/2026-10-16-r04-r05-r06-main.md)；本轮未继续修改业务实现，未启动后续任务。

@@ -13,7 +13,7 @@ R00 是用户明确授权的例外：在当前 main 建立治理文档、任务�
 ## 架构与数据边界
 
 - Main：Provider、Run/Turn 调度、SQLite、KeyService、预算及文件写盘，是运行状态的唯一写入者。
-- Renderer：纯 UI 和状态投影；Zustand 是 V1 目标，当前未接入。不得直接调度模型或访问数据库。
+- Renderer：纯 UI 和状态投影；R06 已接入 Zustand，Main 仍是运行状态唯一权威。不得直接调度模型或访问数据库。
 - Preload：仅暴露受限 typed IPC，不暴露通用 invoke/send、Node 或文件系统能力。
 - Shared：纯 DTO、类型与 Zod Schema，不依赖 Electron、SDK 或数据库。
 - 主持人指令只来自可信 UI/IPC。模型文本、引用、摘要和产物没有主持人权限。

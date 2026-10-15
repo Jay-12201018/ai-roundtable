@@ -1,6 +1,6 @@
 # 真实验证与数据隔离
 
-R03 已按用户批准合入 main，最新实际主线验证见[主线报告](verification/2026-10-15-r03-main.md)。原[集成报告](verification/2026-10-15-r03-integration.md)和[集成命令台账](verification/2026-10-15-r03-commands.md)保持历史身份，不代替主线新鲜结果；下列历史阶段规则/结果保留。
+R04/R05/R06已按用户批准fast-forward合main，最新实际主线验证见[本次主线报告](verification/2026-10-16-r04-r05-r06-main.md)；R03等历史结果仍保留。原[集成报告](verification/2026-10-15-r03-integration.md)和[集成命令台账](verification/2026-10-15-r03-commands.md)保持历史身份，不代替主线新鲜结果；下列历史阶段规则/结果保留。
 
 ## 证据要求
 
@@ -94,3 +94,10 @@ pnpm11.25.0 的辅助 list 会按已安装 `.modules.yaml` 的 storeDir 写打�
 联合专项为`tests/integration/joint`，贯穿真实RunService、R05 builder、R06 session/App及临时SQLite，捕获实际Provider输入而不是相加各模块历史测试。`tests/probes/r01-electron.cjs --joint-ui`在既有ready前数据/网络隔离上增加真实DOM控件及刷新验证；退出后用同轮metadata执行r01-sqlite，只读核对自己的新profile。`--r03-recovery`仍独立运行旧迁移/恢复/安全回归。不得以Bridge暴露私有Attempt输入来取证，实际入口捕获在联合测试中断言。
 
 本次534完整/265专项/27新联合、类型/构建、压力/双ABI/有限桌面真实结果及所有中间失败见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)。这是review候选证据，不是主线verified；仍无正式tests/e2e，不把DOM脚本探针当跨平台或发布验收。
+
+
+## R04/R05/R06 主线验收（2026-10-16）
+
+本次main实际重新执行534全回归、265三模块/联合专项、112 Electron数据库/联合专项、类型/生产构建、Node严格配对压力及ElectronABI139，两个新的ready前隔离profile完成真实页面/刷新/Preload/IPC/退出与恢复/备份核对后才更新verified。具体精确argv/exit与指纹见[本次台账](verification/2026-10-16-r04-r05-r06-main-commands.md)，不能以10月15日候选PASS代替。
+
+新部署后复验仍按Node检查→Electron重建→实际ABI/隔离页面→退出后只读本轮profile顺序，禁止同时重建同一依赖树的两个ABI。本次有限DOM控件探针不是正式E2E；没有更新测试、删除失败或放宽安全断言。R07/R08 ready仍须分别获实施/Worktree授权。

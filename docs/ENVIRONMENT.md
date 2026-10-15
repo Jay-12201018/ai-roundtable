@@ -113,3 +113,12 @@ main 合并 `e642b96a8dded195be44749dd6f267798de95198` 后，在 main 自己已�
 Node源码重编译、534全回归/265模块专项、类型/生产构建、内存SQL/5进程各30万次压力通过后，单独以Electron38.8.6 headers源码重编译，实际ABI139/arm64读写及112项数据库+联合测试通过。两个新userData的生产页面探针、真实UI/刷新/IPC/退出和旧v1恢复/备份只读核验exit0。main、三个原模块及联合WT的原生文件inode各不同，最终联合WT原生文件留在ElectronABI139。
 
 详细路径/命令/退出码/警告及未验证边界见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)和[台账](verification/2026-10-15-r04-r05-r06-commands.md)。Node24.21.0风险保留，未测正式E2E/跨平台/发布/真实模型，main保持原样。
+
+
+## R04/R05/R06 合并后 main 环境确认（2026-10-16）
+
+本次main从37766666 fast-forward到获批d4a0d274后，使用main自身既有独立node_modules与新缓存/gyp/TMPDIR/userData，再次核验官方Node24.18.1 runtime/同发行包headers及pnpm11.25.0，源码编译SQLite ABI137/arm64；534完整/265专项、类型/生产构建、内存SQL与5进程各30万次压力均exit0。没有新install或复制子项目依赖，不把历史干净安装当本次结果。
+
+全部Node检查结束后，按对应Electron38.8.6缓存headers源码重建，实际38.8.6/内嵌Node22.22.0/ABI139/arm64 SQL、112专项、新隔离生产页面/控件/刷新/Bridge/正常退出数据以及旧v1恢复/备份验证均exit0。测试后native SHA不变，11份WT的native inode独立；main与候选WT最终均为ElectronABI139。原32直接依赖版本盘点、安装锁逐字节核对通过；未执行写全局store的pnpm list。
+
+ENV-R02-INSTALL-01保持已解决，不引入raw数字fetch参数；Node24.21.0风险保留。实际命令、警告/辅助诊断失败和未验证边界见[本次主线报告](verification/2026-10-16-r04-r05-r06-main.md)。后续Node测试仍须受控重编译，不能混用Electron native。

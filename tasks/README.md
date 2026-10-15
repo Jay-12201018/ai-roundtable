@@ -1,6 +1,6 @@
 # AI Roundtable 任务索引
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02/R03 已验收；R03已合main并通过[本次主线复验](../docs/verification/2026-10-15-r03-main.md)。R04/R05/R06前置满足、ready，尚未授权实施或创建Worktree。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02/R03 已验收；R03已合main并通过[本次主线复验](../docs/verification/2026-10-15-r03-main.md)。R04/R05/R06已按用户批准fast-forward合main并通过[本次主线验收](../docs/verification/2026-10-16-r04-r05-r06-main.md)，均verified；R07/R08仅ready、未授权创建/实施。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
 
 ## 入口与共同约束
 
@@ -18,11 +18,11 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 | [R01-startup-lifecycle-security.md](R01-startup-lifecycle-security.md) | 启动、退出与窗口安全边界 | R00 审核 | 已合 main、主线复验后 verified |
 | [R02-contracts.md](R02-contracts.md) | 统一契约与排他文件归属 | R01 | 已合 main，主线复验后 verified |
 | [R03-persistence-backup-recovery.md](R03-persistence-backup-recovery.md) | 持久化、可靠备份与恢复数据 | R02 | verified；已合main并通过本次主线复验 |
-| [R04-run-turn-mock.md](R04-run-turn-mock.md) | Run/Turn 状态机与 Mock 执行 | R03 | ready/未授权；可与 R05/R06 分模块并行 |
-| [R05-public-context-limits.md](R05-public-context-limits.md) | 公共上下文与基本限制 | R03 | ready/未授权；可与 R04/R06 并行，不改 RunService |
-| [R06-renderer-subscriptions.md](R06-renderer-subscriptions.md) | Renderer 状态与一致订阅 | R03 | ready/未授权；可与 R04/R05 并行，统一投影 |
-| [R07-rooms-agents-history.md](R07-rooms-agents-history.md) | 房间、成员与公共历史 | R04/R05/R06 | 联合 Mock 验收后；可与 R08 并行 |
-| [R08-key-provider-settings.md](R08-key-provider-settings.md) | Key 与 Provider 设置 | R04/R05/R06 | 联合 Mock 验收后；可与 R07 并行 |
+| [R04-run-turn-mock.md](R04-run-turn-mock.md) | Run/Turn 状态机与 Mock 执行 | R03 | 已合main并verified；实际本次证据见STATUS |
+| [R05-public-context-limits.md](R05-public-context-limits.md) | 公共上下文与基本限制 | R03 | 已合main并verified；来源审计持久化仍延期 |
+| [R06-renderer-subscriptions.md](R06-renderer-subscriptions.md) | Renderer 状态与一致订阅 | R03 | 已合main并verified；后续App/公共投影接线归总控 |
+| [R07-rooms-agents-history.md](R07-rooms-agents-history.md) | 房间、成员与公共历史 | R04/R05/R06 | ready/未授权；公共契约先统一后可与R08分模块并行 |
+| [R08-key-provider-settings.md](R08-key-provider-settings.md) | Key 与 Provider 设置 | R04/R05/R06 | ready/未授权；Provider/Key公共契约先统一后可与R07并行 |
 | [R09-openai-compatible-provider.md](R09-openai-compatible-provider.md) | OpenAI 与兼容端点真实闭环 | R07/R08 | 真实调用前确认公共历史/限制/安全链路 |
 | [R10A-anthropic-provider.md](R10A-anthropic-provider.md) | Anthropic Provider | R09 | 可与 R10B/R11 并行 |
 | [R10B-gemini-provider.md](R10B-gemini-provider.md) | Gemini Provider | R09 | 可与 R10A/R11 并行 |

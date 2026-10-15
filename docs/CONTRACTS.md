@@ -166,6 +166,8 @@ R04/R05/R06 可在各自另获实施授权后消费这些接口，同构建 Main
 
 ## R04/R05/R06 联合集成候选（2026-10-15，尚未合 main）
 
+本节为原候选历史阶段；用户随后已批准合入，当前生效登记见文末2026-10-16主线验收。
+
 本次用户已授权联合适配，总控为唯一共享文件写入人。三个原模块完整引入一次；状态为 review，后续模块不得将候选视为主线已验收。完整验证见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)。Shared Schema、IPC 注册、Preload、Database 和 migration1/2 均未改变。
 
 | Main 私有接线 | 规则与调用方 |
@@ -182,3 +184,10 @@ R04/R05/R06 可在各自另获实施授权后消费这些接口，同构建 Main
 共享申请分类：A 已接候选身份/事务顺序/最终预算/Main组装/既有恢复命令/同Turn多Attempt；B 延期可信持续指令生产来源、无Run房间发现、裁剪报告/usage展示；C 来源报告持久化、migration3、公开专用完成原因/持久失败投影必须另获用户批准。R05来源/裁剪报告当前只在构建器返回值中瞬时存在，适配器不保存、不暴露；只能审计最终 Attempt 输入，不能宣称完整来源审计已持久化。
 
 RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实际 Main 必须显式注入本门禁。未来真实 Provider 接入前须登记模型可靠计数能力，不得复用 Mock 词法或移除门禁。本轮不新增 Provider 网络调用。
+
+
+## R04/R05/R06 主线生效登记（2026-10-16）
+
+完整联合候选d4a0d2742eb28d2441e4d06e8154b8cdd6955336已按用户批准由37766666 fast-forward合main；没有重复合原模块、新merge commit、协议或migration修改。本次main534全回归/265专项/112 Electron专项、类型/构建/双ABI/隔离页面/退出数据均实际通过，见[主线报告](verification/2026-10-16-r04-r05-r06-main.md)，三模块及联合集成verified。上节私有builder/可靠计数/Repeat/Renderer接线现已主线生效，A类已完成，B/C延期边界不因verified自动取消。
+
+R07/R08的基础依赖满足，现仅ready；Room/Agent/History、Provider设置/Key引用等DTO/Schema/数据库/IPC仍需另获授权后由总控统一提出、审批、分配版本和接线。现有Adapter协议不等于设置CRUD或通用Key IPC已存在，子项目不能自行扩展公共接口或复用Mock词法发真实请求。

@@ -1,6 +1,6 @@
 # R00–R18 状态与授权看板
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。R04/R05/R06 原模块已由用户授权交付；当前总控联合接线与必要验证完成，三个任务均为 review 候选、未合main/未verified。详见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08仅ready，尚未授权创建/实施。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
 
 状态定义：not_started 未开始；ready 依赖满足但仍需实施授权；in_progress 正在执行；review 交付待审核；merged 已由总控集成；verified 验收确认；blocked 前置未满足或存在阻塞。状态与授权分列，不能推断。
 
@@ -10,11 +10,11 @@
 | R01 | 启动、退出、安全边界 | R00 已 verified | 总控（本聊天） | verified | 用户批准最终合并与验收；主线复验通过 | 已合 main；codex/integrate-r01 与原子项目 Worktree/分支保留 | 集成 0ad1701a47222315158e7be00d29afe1c9ef1767；合并 4149590d28296ab3520b70606dcb161ba16a6b39；原子项目 d956279949baa0992be5e0cb093f59ef96a9e205 | [合并后实际验证](verification/2026-10-13-r01-main.md)：类型、12文件/133测试、build、ABI139、隔离生产页面/Preload、退出后SQLite通过；10月13日批准/复验，10月14日验收登记 |
 | R02 | 契约与归属 | R01 已合 main 且 verified | 总控（本聊天） | verified | 用户批准最终合并与验收；本次 main 复验通过 | 已合 main；codex/integrate-r02、原 codex/r02-contracts 及 Worktree 均保留 | 原14f07a22b44bcd2459dd44f579230792033d9301；引入bafa84f55b6c77aeaffe26b27caae56fb67cbcf0；安全审核8ec1d2b834ba94a5df60a21e0615d1fcb21fd48f；ENV候选5b8f771bfa0fd1823b7efe6488179e15aea436a5；合并6aff174e6cf397eb49b9b4ceadb3387f207b84a6 | [本次 main 验收](verification/2026-10-14-r02-main.md)：6文件94契约/18文件228全回归、类型/生产构建、Node源码编译/内存/压力5次、Electron源码编译/ABI139、隔离页面/Bridge/退出数据均exit0；ENV保持已解决，历史干净安装见[ENV证据](verification/2026-10-14-r02-environment.md) |
 | R03 | 持久化、备份、恢复 | R02 已合 main 且 verified | 总控（本聊天） | verified | 用户批准最终合并/复验/状态更新；本次主线必要检查通过 | 已合 main；原分支和 codex/integrate-r03、两个 Worktree 均保留 | 原212808f780cc87d2827a977743f3fc16a028f5b5；引入f144ace84f7861c4f8cf577d0d0d40aa3aae8110；候选439e3c6cb58437298e94fe2536f26e22eae66f6c；合并e642b96a8dded195be44749dd6f267798de95198 | [本次 main 验收](verification/2026-10-15-r03-main.md)：26文件313全回归，Node/Electron专项各9文件85项，类型/构建、原生压力5次、ABI139、隔离恢复/Bridge/退出数据均exit0；限制分列 |
-| R04 | Run/Turn Mock | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | review | 用户批准本次联合适配/验证；未批准合main | codex/integrate-r04-r05-r06；原分支/WT保留 | 原63ef56e1cd9d4bb9d0793aa4e97e499b45574ecd；引入3c6ed2ff9f79b08a915d152dccd556c0df219090；接线提交为本联合候选，见报告Git定位 | [本次联合证据](verification/2026-10-15-r04-r05-r06-integration.md)：534全回归/265专项/27新联合、类型/构建、双ABI/压力、真实隔离UI/退出通过；未verified |
-| R05 | 公共上下文与基本限制 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | review | 用户批准本次联合适配/验证；未批准合main | codex/integrate-r04-r05-r06；原分支/WT保留 | 原1c5a2183f0c5d4f335b39b99aa27cac8fe7baad7；引入7586f023d373f38cbd08df623dcf0149abcebdcf；接线提交为本联合候选，见报告Git定位 | [本次联合证据](verification/2026-10-15-r04-r05-r06-integration.md)：534全回归/265专项/27新联合、类型/构建、双ABI/压力、真实隔离UI/退出通过；未verified |
-| R06 | Renderer 状态与订阅 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | review | 用户批准本次联合适配/验证；未批准合main | codex/integrate-r04-r05-r06；原分支/WT保留 | 原ed6d659734cea4169fb54a66bdb257439d6daa39；引入6fe8805bb96c6c41d9f4671260c64ed13c47a275；接线提交为本联合候选，见报告Git定位 | [本次联合证据](verification/2026-10-15-r04-r05-r06-integration.md)：534全回归/265专项/27新联合、类型/构建、双ABI/压力、真实隔离UI/退出通过；未verified |
-| R07 | 房间、成员、历史 | R04/R05/R06 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
-| R08 | Key 与 Provider 设置 | R04/R05/R06 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
+| R04 | Run/Turn Mock | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原63ef56e1cd9d4bb9d0793aa4e97e499b45574ecd；引入3c6ed2ff9f79b08a915d152dccd556c0df219090；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
+| R05 | 公共上下文与基本限制 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原1c5a2183f0c5d4f335b39b99aa27cac8fe7baad7；引入7586f023d373f38cbd08df623dcf0149abcebdcf；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
+| R06 | Renderer 状态与订阅 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原ed6d659734cea4169fb54a66bdb257439d6daa39；引入6fe8805bb96c6c41d9f4671260c64ed13c47a275；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
+| R07 | 房间、成员、历史 | R04/R05/R06已合main且verified | 未分派 | ready | 仅依赖满足；未授权创建Worktree或实施 | 未创建 | 无 | 未运行 |
+| R08 | Key 与 Provider 设置 | R04/R05/R06已合main且verified | 未分派 | ready | 仅依赖满足；未授权创建Worktree或实施 | 未创建 | 无 | 未运行 |
 | R09 | OpenAI 与兼容端点 | R07/R08；Mock 联合验收 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R10A | Anthropic | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R10B | Gemini | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
@@ -96,3 +96,12 @@ R04/R05/R06 都仅依赖已验收的 R03 数据基础与 R02 契约，因此标 
 上述R03阶段的ready/未授权说明保留历史。用户已另行完成三个模块独立授权交付，本轮明确批准总控联合Worktree及A类最小适配。原模块不回写，main实际仍为37766666且干净；本轮只在联合分支引入三提交和接线。总控独占RunService/context/Mock、Main、Renderer store/session/App、公共文档/验证探针，协作者只读审查；Shared/Database/migration/IPC/Preload/package/lock不变。
 
 三个任务review，等待用户最终审核/合main授权，不因候选PASS更新verified。R07/R08仍blocked且未授权。完整本次命令、失败修正、共享A/B/C及未验证事项见联合报告/命令台账；后续正式合main须重新执行主线验证。原R04/R05/R06分支和Worktree全部保留。
+
+
+## R04/R05/R06 正式合并与本次main验收（2026-10-16）
+
+上一节为10月15日历史review阶段。用户外部审核后明确批准完整候选，本次再次核实11个WT干净、main未偏离37766666、三模块各完整引入一次，使用git merge --ff-only将main推进d4a0d2742eb28d2441e4d06e8154b8cdd6955336；没有新merge commit，也未重复合子项目。
+
+随后在main自己的独立依赖和本轮新数据环境完成534全回归、265专项、112 Electron专项、类型/构建、双ABI/压力、真实UI/刷新/IPC及退出后只读校验，全部必要检查通过才更新三模块及联合集成为verified。完整真实命令、输入捕获和限制见[主线验收](verification/2026-10-16-r04-r05-r06-main.md)。治理提交仅文档；最终SHA随交付消息及该报告最新Git提交定位。
+
+R07/R08仅ready，需用户另行实施/Worktree授权及排他负责人登记；总控先统一Room/Agent/History与Provider/Key/endpoint的公共契约和数据/IPC接线，子项目不能自行改Shared/Database/migration/Main/App/store公共文件。本轮不创建新WT、不开发R07/R08，所有原任务/集成分支和WT保留。正式E2E、跨平台/发布、真实模型及已登记C类扩展仍未完成。
