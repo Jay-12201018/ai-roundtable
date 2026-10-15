@@ -9,7 +9,7 @@
 
 **Tech Stack:** Electron、React、TypeScript strict、electron-vite、SQLite、Zod；Renderer Zustand 是 V1 目标，使用前先核对已合入实现。
 
-**Spec:** [SPEC](../SPEC.md)，[V0 审查](../docs/V0_AUDIT.md)。
+**Spec:** [SPEC](../SPEC.md)，[V0 审查](../docs/V0_AUDIT.md)，[发布与授权政策](../docs/RELEASE_POLICY.md)。
 
 ## 目标与当前证据
 
@@ -23,6 +23,8 @@
 ## 范围与明确不做
 
 早期 Electron harness、独立 userData、fixture/provider 注入、安全数据隔离和少量基础场景；后期完整 V1 E2E、无空集/CI、native ABI、包内自检、三平台打包/安装/启动矩阵、发布说明与已知限制。
+
+最终发布另须满足“免费、源码公开、非商业授权”的许可/版权/贡献审查与个人 GitHub / 跨平台 Releases 准备。PolyForm Noncommercial 1.0.0 为优先候选，正式发布前核对全文并由用户确认；不把 MIT/Apache-2.0 当项目默认候选，不称 OSI 标准开源。软件免费、用户 BYOK/承担厂商费用，不开发收费、订阅、激活、支付或反盗版系统；原有功能、依赖和 Worktree 模式不变。
 
 明确不做：不以浏览器 mock 页面代替 Electron、不访问用户数据库/系统 Key、不在 CI 自动发付费请求、不为绿灯隐藏空集/失败；不擅自修业务、升级依赖、签名发布/上传。
 
@@ -43,6 +45,7 @@
 | 现存（135bf82） | playwright.config.ts | R17 | Electron harness 与串行/隔离 fixture；配置变更总控审核 |
 | 拟新增 | tests/e2e/**；tests/fixtures/e2e/** | R17 | 仅 E2E/fixture，用户数据完全隔离 |
 | 拟新增 | scripts/e2e/**；docs/release/**；.github/workflows/** | R17（脚本/CI总控审核集成） | 可重复验证与发布矩阵，CI 不含真实秘密 |
+| 现存或拟新增（以执行时核对为准） | docs/RELEASE_POLICY.md；README.md；LICENSE；第三方通知/贡献规则文件；GitHub 仓库与 Releases 设置 | 总控 | 用户确认最终许可/权属/贡献条款，统一接线随包通知；R17 提供清单与验收证据，不自行改许可或执行公开发布 |
 | 现存（135bf82） | package.json；pnpm-lock.yaml；electron-builder.yml；scripts/rebuild-native.cjs；scripts/verify-native.cjs；src/main/index.ts | 总控 | 启动隔离/fixture注入、ABI与打包组装 |
 | 依赖任务提供（当前拟新增） | src/main/providers/registry.ts | 总控 | 启动隔离/fixture注入、ABI与打包组装 |
 | 现存（135bf82） | src/**；tests/unit/**；tests/integration/** | 对应原 owner | E2E 发现业务缺陷回报原任务，不跨范围修改 |
@@ -63,6 +66,7 @@
 - [ ] 在最终依赖全部合入后增补完整 V1 checklist 的 E2E。
 - [ ] 总控按 ABI 顺序执行类型/测试/build/包内自检，并回传业务问题。
 - [ ] 各平台验证安装启动，汇总发行矩阵；不自动发布或进入 R18。
+- [ ] 按下列发布门槛完成许可、权属、历史扫描和仓库/Releases 材料，再由用户审核具体版本；未授权不创建/公开仓库或上传资产。
 
 ## 详细验收
 
@@ -74,6 +78,17 @@
 - [ ] Windows/macOS/Linux 在对应环境构建安装包并核对启动/关键流程/安全存储；不能把 macOS 输出外推为三平台通过。
 - [ ] 发行说明包含版本、完整任务/Commit、平台/架构、安装与升级/备份、已知问题和真实验证矩阵；未签名/公证/未验证状态写清。
 - [ ] 最终 V1 checklist 每条有对应新鲜证据；缺任一不可缩水能力或必需验证不能宣布 V1 完成，遗留业务问题交回 owner。
+
+### 最终发布与授权验收（本轮仅追加规划）
+
+- [ ] 用户确认准确许可证/版本、版权主体和适用范围；优先 PolyForm Noncommercial 1.0.0，核对官方全文，根目录及源码/安装包附全文和必要通知，不以本任务说明代替正式许可。
+- [ ] 审查自有代码权属、外部贡献授权及实际分发的直接/传递依赖、Electron/原生组件、字体/图标等素材；记录版本、来源、许可兼容性、版权及通知义务，第三方原许可各自保留。贡献规则须明确可提交权利、入站/出站授权及雇主/第三方/AI 来源；DCO/CLA 适用性由用户确认，不推定版权自动转让。
+- [ ] README 提供一致的中英文授权说明：软件免费、Source Available、非商业限制、BYOK/厂商费用、正式许可证全文与贡献规则入口；无 OSI 开源或默认 MIT/Apache-2.0 的误导表述。
+- [ ] 扫描当前树、拟公开 refs 的完整 Git 历史、分支/标签及发布资产中的 Key、真实数据库/备份、私有配置和敏感个人信息，记录范围、命令、结果与人工复核。发现秘密先停止公开并处理凭据，历史清理另获授权，不擅自破坏原始历史。
+- [ ] 准备用户个人 GitHub 仓库的账号/名称、公开范围、权限、贡献与安全反馈入口、待推 refs/tag 和隔离 CI 配置；用户审核后另行授权创建、推送与公开，不能从 ready 或 E2E PASS 推导发布许可。
+- [ ] Windows/macOS/Linux 的对应环境均有安装包、包内许可/通知、安装启动/关键流程证据及 Releases 资产清单；版本/tag/Commit、架构、校验和、签名/公证和限制明确。源码 zip/tar 不替代安装包，未验证平台不算跨平台发布完成；用户确认具体版本后才上传/发布。
+
+上述为最终发布验收的必要条件，不能由早期 E2E 骨架代替。详细停止条件、外部贡献与官方依据见 [发布政策](../docs/RELEASE_POLICY.md)。本轮没有实施以上项目。
 
 ## 具体测试情景
 

@@ -32,7 +32,7 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 | [R14-structured-artifacts.md](R14-structured-artifacts.md) | 结构化产物 | R11 | 可与 R12/R13 分模块并行 |
 | [R15-safe-code-export.md](R15-safe-code-export.md) | 安全代码导出 | R14 | 可与 R16 分目录并行 |
 | [R16-chat-ui-usability.md](R16-chat-ui-usability.md) | 聊天 UI 与可用性 | R06；主要交互稳定 | 整体 UI 在房间/设置/主持人/产物等语义稳定后实施 |
-| [R17-e2e-release.md](R17-e2e-release.md) | Electron E2E 与发布验收 | 骨架 R02；最终 R07–R16（含 R10A/R10B） | 骨架与最终 V1 验收分开授权/报告 |
+| [R17-e2e-release.md](R17-e2e-release.md) | Electron E2E 与发布验收 | 骨架 R02；最终 R07–R16（含 R10A/R10B） | 骨架与最终 V1 验收分开授权/报告；最终按[发布政策](../docs/RELEASE_POLICY.md)核查许可、权属、历史及 GitHub Releases |
 | [R18-v1-1-evaluations-adrs.md](R18-v1-1-evaluations-adrs.md) | V1.1 评测与 ADR 决策追踪 | R17 最终 V1 验收 | V1.1 可选，须另行明确选择与授权 |
 
 ## 实施顺序与联合门槛
