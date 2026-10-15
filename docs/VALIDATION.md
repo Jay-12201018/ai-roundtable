@@ -1,6 +1,6 @@
 # 真实验证与数据隔离
 
-R03 本次集成证据见 [报告](verification/2026-10-15-r03-integration.md)及[逐命令台账](verification/2026-10-15-r03-commands.md)。这是集成候选验证，不是尚未授权的 main 合并后 PASS；下列历史阶段规则/结果保留。
+R03 已按用户批准合入 main，最新实际主线验证见[主线报告](verification/2026-10-15-r03-main.md)。原[集成报告](verification/2026-10-15-r03-integration.md)和[集成命令台账](verification/2026-10-15-r03-commands.md)保持历史身份，不代替主线新鲜结果；下列历史阶段规则/结果保留。
 
 ## 证据要求
 
@@ -10,7 +10,7 @@ R03 本次集成证据见 [报告](verification/2026-10-15-r03-integration.md)�
 
 ## 隔离与命令安全
 
-- 当前 DB 测试使用 `:memory:`，appLifecycle mock app/DB，rendererSync mock IPC/localStorage，集成测试使用 MockProvider；执行前检查新增测试未破坏此边界。
+- 当前 DB 测试使用 `:memory:` 或每例独立临时目录，appLifecycle mock app/DB，rendererSync mock IPC/localStorage，集成测试使用 MockProvider；执行前检查新增测试未破坏此边界。
 - 文件数据库/导出测试只能用测试创建的临时目录；关闭后仅清理本测试创建的数据，不操作真实 userData 或密钥链。
 - 桌面 E2E 必须先实现独立 userData 配置并证明隔离；当前 tests/e2e 不存在，R00 不启动 app/dev/preview/包内主入口。
 - 自动网络测试用 fixture/Mock；真实模型验收由用户明确触发并记录模型和限制，不打印 Key。

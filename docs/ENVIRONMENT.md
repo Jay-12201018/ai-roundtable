@@ -96,3 +96,11 @@ main 合并 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 后，本次重新执行 
 本次 pnpm list 读取自己的 store，32 直接依赖实际 exit0；这不改写 R02 主线清单命令历史失败。锁文件/安装锁一致，三个 Worktree 原生文件 inode 不同。Node 完整回归后另用 Electron38.8.6 严格对应 headers 重编译 SQLite 并实际加载 ABI139。最终原生文件留在 Electron 目标；后续 Node 测试必须先以受控 Node 同版 headers 执行 native:node/pretest，再恢复 Electron。
 
 逐命令、退出码、source SHA、隔离启动及限制见 [R03 集成报告](verification/2026-10-15-r03-integration.md)。本轮没有重新验证 Node24.21.0 或宣称其上游异常已修复；正式 E2E、跨平台、发布包/安装升级仍未验证。
+
+## R03 合并后 main 环境确认（2026-10-15）
+
+main 合并 `e642b96a8dded195be44749dd6f267798de95198` 后，在 main 自己已安装的独立 node_modules 上重新源码编译 SQLite；官方24.18.1 runtime/headers同版同架构重新核验，Node ABI137内存/压力5次、313全回归、85专项、类型/生产构建均exit0。没有新安装依赖或复制子项目 node_modules，不把历史缓存安装当本次冷安装验证。
+
+本次另建私有cache/gyp/TMPDIR/userData，随后按严格对应的38.8.6 headers源码重编译，实际Electron ABI139加载/85专项/隔离恢复与Bridge/退出数据通过。Node/Electron构建config分别记录正确目标；main、原R03、集成R03原生文件inode不同。最终main原生文件留在Electron ABI139。32个直接依赖版本和安装锁文件只读盘点，锁文件与仓库逐字节相同；未执行可能写全局store的辅助pnpm list，不重写其R02历史失败。
+
+没有再次使用raw数字fetch参数，ENV-R02-INSTALL-01保持已解决；默认Node24.21.0上游异常仍不在支持结论内。本轮诊断警告及正式E2E/发布/跨平台等未验证事项见[主线报告](verification/2026-10-15-r03-main.md)。

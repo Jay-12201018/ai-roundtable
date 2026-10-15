@@ -1,6 +1,6 @@
 # AI Roundtable 任务索引
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02 已验收；R02 主线证据见[复验](../docs/verification/2026-10-14-r02-main.md)。当前分支为 R03 获授权的总控集成候选，review / 待最终合并审核，未合 main。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02/R03 已验收；R03已合main并通过[本次主线复验](../docs/verification/2026-10-15-r03-main.md)。R04/R05/R06前置满足、ready，尚未授权实施或创建Worktree。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
 
 ## 入口与共同约束
 
@@ -17,10 +17,10 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 | [R00-baseline-governance.md](R00-baseline-governance.md) | 基线治理与真实验证 | 无 | 已 verified；原始治理提交保留 |
 | [R01-startup-lifecycle-security.md](R01-startup-lifecycle-security.md) | 启动、退出与窗口安全边界 | R00 审核 | 已合 main、主线复验后 verified |
 | [R02-contracts.md](R02-contracts.md) | 统一契约与排他文件归属 | R01 | 已合 main，主线复验后 verified |
-| [R03-persistence-backup-recovery.md](R03-persistence-backup-recovery.md) | 持久化、可靠备份与恢复数据 | R02 | review；总控已在 codex/integrate-r03 接线/验证，待最终合并审核 |
-| [R04-run-turn-mock.md](R04-run-turn-mock.md) | Run/Turn 状态机与 Mock 执行 | R03 | 可与 R05/R06 并行 |
-| [R05-public-context-limits.md](R05-public-context-limits.md) | 公共上下文与基本限制 | R03 | 可与 R04/R06 并行；不改 RunService |
-| [R06-renderer-subscriptions.md](R06-renderer-subscriptions.md) | Renderer 状态与一致订阅 | R03 | 可与 R04/R05 并行；统一投影 |
+| [R03-persistence-backup-recovery.md](R03-persistence-backup-recovery.md) | 持久化、可靠备份与恢复数据 | R02 | verified；已合main并通过本次主线复验 |
+| [R04-run-turn-mock.md](R04-run-turn-mock.md) | Run/Turn 状态机与 Mock 执行 | R03 | ready/未授权；可与 R05/R06 分模块并行 |
+| [R05-public-context-limits.md](R05-public-context-limits.md) | 公共上下文与基本限制 | R03 | ready/未授权；可与 R04/R06 并行，不改 RunService |
+| [R06-renderer-subscriptions.md](R06-renderer-subscriptions.md) | Renderer 状态与一致订阅 | R03 | ready/未授权；可与 R04/R05 并行，统一投影 |
 | [R07-rooms-agents-history.md](R07-rooms-agents-history.md) | 房间、成员与公共历史 | R04/R05/R06 | 联合 Mock 验收后；可与 R08 并行 |
 | [R08-key-provider-settings.md](R08-key-provider-settings.md) | Key 与 Provider 设置 | R04/R05/R06 | 联合 Mock 验收后；可与 R07 并行 |
 | [R09-openai-compatible-provider.md](R09-openai-compatible-provider.md) | OpenAI 与兼容端点真实闭环 | R07/R08 | 真实调用前确认公共历史/限制/安全链路 |
@@ -108,4 +108,4 @@ R02 唯一写入人为主代理，其他协作者仅做只读审查。基线 `b6
 
 ## R03 总控候选交接
 
-上段是 R02 阶段历史。用户已另行授权 R03；本次唯一共享写入人为总控，原子项目只读保留。详见 [R03 实际集成报告](../docs/verification/2026-10-15-r03-integration.md)及 [R03-SHARED-01 契约](../docs/CONTRACTS.md#r03-shared-01-总控集成候选2026-10-15未合-main)。R04/R05/R06 要等待 R03 合 main 并通过主线验收，之后仍需各自实施授权；本轮不创建它们的 Worktree。
+上段是 R02 阶段历史。R03 集成阶段由总控独占共享文件、原子项目只读保留，见 [R03 实际集成报告](../docs/verification/2026-10-15-r03-integration.md)及 [R03-SHARED-01 契约](../docs/CONTRACTS.md#r03-shared-01-总控集成候选2026-10-15未合-main)。用户随后批准最终合并，本次 main 已通过[独立复验](../docs/verification/2026-10-15-r03-main.md)，R03 verified。R04/R05/R06 的数据/契约前置现已满足，ready只表示可准备，各自实施/创建Worktree仍需用户明确授权；本轮未创建、未启动。

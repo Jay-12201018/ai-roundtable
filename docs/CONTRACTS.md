@@ -133,6 +133,8 @@ DTO 红测已实际出现19失败，修复后48项通过；随后严格配对Nod
 
 ## R03-SHARED-01 总控集成候选（2026-10-15，未合 main）
 
+本节保留集成阶段登记；下面的“未合 main/未 verified”仅指当时阶段。当前已按用户批准合入并完成主线复验，生效信息见末尾“R03 主线生效登记”。
+
 上段是 R02 验收时的历史状态。用户现已授权 R03 总控接线；本节对应 `codex/integrate-r03`，依赖 main `be37fad9d05050a9bad1847e5008bc67752523f6`。共享写入人为本聊天总控，子项目原提交及 Worktree 保留。完整证据见 [R03 集成报告](verification/2026-10-15-r03-integration.md)。本候选未标 verified，后续模块不得提前实施或消费尚未合入的接口。
 
 | 唯一来源/接口 | 规则与调用方 |
@@ -154,3 +156,9 @@ DTO 红测已实际出现19失败，修复后48项通过；随后严格配对Nod
 恢复只作用于 running/pausing/paused/cancelling 父 Run 及其未终结证据；清指针并追加一次 interrupted，保留文本和请求。idle 保持 idle，终态不变，不产生 Provider 调用。Main 启动/退出等待与 R01 幂等屏障一致。
 
 R04 负责后续显式调度/重试与累计限制；R05 在 Main 形成真实上下文并保存 Attempt 输入；R06 消费安全快照/重同步信号。新增消息分页 Bridge、真实模型配置或恢复命令仍需独立总控申请。本次未修改 IPC 注册、Preload API、Renderer App 或 ProviderAdapter，也没有第二套 repository。
+
+## R03 主线生效登记（2026-10-15）
+
+用户批准候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 后，实际以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main；本次主线313全回归、Node/Electron各85专项、类型/构建/原生/隔离Bridge与退出数据均通过，见[主线证据](verification/2026-10-15-r03-main.md)。以上 R03-SHARED-01 和 migration2 现在生效，原 migration1 不变；本轮没有继续修改任何 wire shape/SQL/业务实现。
+
+R04/R05/R06 可在各自另获实施授权后消费这些接口，同构建 Main/Preload/Renderer 一起交付，不能提前开启模块或增加 IPC。后续公共变更仍由总控独占、先登记兼容性及测试再接线，不共享可变依赖/数据库/userData。
