@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
@@ -6,8 +7,8 @@ import type { RunEvent, RunSnapshot, RunSubscription } from '../../src/shared/ty
 function snapshot(runId: string, sequence = 0, content = ''): RunSnapshot {
   return {
     runId, roomId: 'room', status: 'running', sequence, workflowSnapshot: {},
-    turns: [], updatedAt: new Date().toISOString(),
-    messages: content ? [{ id: `${runId}-message`, senderName: '起草者', content, status: 'streaming' }] : [],
+    turns: [{ turnId: `${runId}-turn`, runId, agentId: 'agent', requestId: `${runId}-request`, messageId: `${runId}-message`, status: 'running', outputText: content }], updatedAt: new Date().toISOString(),
+    messages: [{ id: `${runId}-message`, senderName: '起草者', content, status: 'streaming' }],
   };
 }
 
@@ -116,9 +117,87 @@ describe('Renderer run synchronization', () => {
     localStorage.setItem('roundtable.runId', 'localized');
     const saved = snapshot('localized', 4, '定稿内容');
     saved.status = 'completed';
+    saved.turns.forEach(turn => { turn.status = 'completed'; });
     saved.messages[0].status = 'completed';
     subscribe.mockResolvedValue({ snapshot: saved, events: [], nextCursor: 4, resyncRequired: false });
     render(<App />);
     await waitFor(() => expect(screen.getAllByText('已完成')).toHaveLength(2));
+  });
+});
+
+describe('Renderer task identity and command feedback', () => {
+  afterEach(cleanup);
+  function setup(saved?: RunSnapshot) {
+    localStorage.clear();
+    if (saved) localStorage.setItem('roundtable.runId', saved.runId);
+    const events = new Set<(event: RunEvent) => void>();
+    const subscribe = vi.fn(async () => ({ snapshot: saved!, events: [], nextCursor: saved!.sequence, resyncRequired: false }));
+    window.roundtable = {
+      room: { createDemo: vi.fn(), getMessages: vi.fn() },
+      run: { subscribe, getSnapshot: vi.fn(), start: vi.fn(), onEvent: vi.fn(handler => { events.add(handler); return () => { events.delete(handler); }; }), pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn() },
+    };
+    return { subscribe, events };
+  }
+  it('does not change a durable task title when its editable draft changes', async () => {
+    const saved = snapshot('history', 4, '历史消息');
+    saved.status = 'completed';
+    saved.turns.forEach(turn => { turn.status = 'completed'; });
+    saved.execution = { task: '数据库中的真实目标', membersSnapshot: null, nextTurnIndex: 1, elapsedExecutionMs: 0, mode: 'automatic', maxTurns: 3, maxDurationMs: 1000, outputTokenLimit: 1000, currentTurnId: null, currentAgentId: null, startedAt: null, finishedAt: null, createdAt: saved.updatedAt, updatedAt: saved.updatedAt };
+    setup(saved);
+    render(<App />);
+    await screen.findByText('历史消息');
+    fireEvent.change(screen.getByLabelText('任务目标'), { target: { value: '这是另一份草稿' } });
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('数据库中的真实目标');
+    expect(screen.getAllByText('数据库中的真实目标')).toHaveLength(2);
+  });
+
+  it('locks repeated room creation and presents its captured title after success', async () => {
+    setup();
+    let finish!: (room: { roomId: string }) => void;
+    vi.mocked(window.roundtable.room.createDemo).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('任务目标'), { target: { value: '创建目标' } });
+    fireEvent.click(screen.getByText('新建任务'));
+    fireEvent.click(screen.getByText('新建任务'));
+    expect(window.roundtable.room.createDemo).toHaveBeenCalledTimes(1);
+    expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => finish({ roomId: 'created' }));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('创建目标');
+  });
+
+  it.each(['interrupted', 'error'] as const)('preserves partial messages and disables unavailable controls for %s', async (status) => {
+    const saved = snapshot('partial', 4, '必须保留的部分输出');
+    saved.status = status;
+    saved.turns.forEach(turn => { turn.status = status === 'interrupted' ? 'interrupted' : 'failed'; });
+    saved.currentTurnId = undefined; saved.activeAgentId = undefined;
+    saved.messages[0].status = status === 'interrupted' ? 'aborted' : 'failed';
+    setup(saved);
+    render(<App />);
+    await screen.findByText('必须保留的部分输出');
+    expect(screen.getByText(status === 'interrupted' ? '已中断' : '运行失败')).toBeTruthy();
+    for (const name of ['暂停', '继续', '下一步', '停止']) expect((screen.getByText(name) as HTMLButtonElement).disabled).toBe(true);
+    expect(window.roundtable.run.recoverInterruptedRun).not.toHaveBeenCalled();
+  });
+
+  it('releases the StrictMode test mount and the final listener without accumulating subscriptions', async () => {
+    const { events } = setup(snapshot('strict', 4, 'StrictMode恢复'));
+    const view = render(<StrictMode><App /></StrictMode>);
+    await screen.findByText('StrictMode恢复');
+    expect(window.roundtable.run.onEvent).toHaveBeenCalledTimes(2);
+    expect(events.size).toBe(1);
+    view.unmount();
+    expect(events.size).toBe(0);
+  });
+
+  it('displays sync failure, blocks commands and lets the user retry only the snapshot', async () => {
+    const { subscribe } = setup(snapshot('retry', 4, '恢复文本'));
+    subscribe.mockRejectedValueOnce(new Error('/private/database'));
+    render(<App />);
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert').textContent).not.toContain('/private');
+    expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText('重试同步'));
+    await screen.findByText('恢复文本');
+    expect(window.roundtable.run.start).not.toHaveBeenCalled();
   });
 });
