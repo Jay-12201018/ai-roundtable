@@ -4,7 +4,6 @@ import { assertRunCommand } from '../orchestrator/stateMachine';
 import type { StartRunInput } from '../../shared/contracts/run';
 import type { InterruptedRunDecision } from '../../shared/types/run';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
-import { resyncEvent } from '../../shared/contracts/events';
 import { publicError } from '../../shared/schemas/error';
 import { runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
 import { roomMessagesSchema } from '../../shared/schemas/app';
@@ -26,6 +25,9 @@ type RunContext = {
   stopRequested: boolean;
   nextAgentIndex: number;
   promise: Promise<void>;
+  members: ReturnType<Database['listAgents']>;
+  elapsedBefore: number;
+  segmentStartedAt: number;
 };
 
 type EventListener = (event: RunEvent) => void;
@@ -73,9 +75,11 @@ export class RunService {
       stopRequested: false,
       nextAgentIndex: 0,
       promise: Promise.resolve(),
+      members: this.database.listAgents(input.roomId), elapsedBefore: 0, segmentStartedAt: 0,
     };
     this.database.transaction(() => {
-      this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: input.workflowSnapshot, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit });
+      this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: input.workflowSnapshot, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
+        task: input.task, membersSnapshot:context.members.map(a=>({agentId:a.id,displayName:a.displayName,roleTemplateId:a.roleTemplateId,displayOrder:a.displayOrder,systemPrompt:'',providerId:null,modelId:'mock'})),nextTurnIndex:0,elapsedExecutionMs:0 });
       this.database.updateRun(runId, { status: 'running', startedAt: new Date().toISOString() });
       this.appendEvent(runId, 'run_state_changed', { status: 'running' });
     });
@@ -91,26 +95,30 @@ export class RunService {
   }
 
   getSnapshot(runId: string): RunSnapshot {
-    return this.database.transaction(() => {
-      const run = this.database.getRun(runId);
-      if (!run) throw new Error('Run not found');
-      const turns = this.database.listTurns(runId);
-      const events = this.database.listRunEvents(runId, 0);
-      const messages = this.database.listMessages(run.roomId).filter((message) => message.runId === runId);
-      const lastEvent = events.at(-1);
+    return this.snapshotFrom(this.database.readRunSnapshot(runId));
+  }
+
+  private snapshotFrom(data: ReturnType<Database['readRunSnapshot']>): RunSnapshot {
+      const {run,turns,messages,attempts,sequence} = data;
+      const {id,roomId,status,workflowSnapshot,lastError,...execution} = run;
       return runSnapshotSchema.parse({
         runId: run.id,
         roomId: run.roomId,
         status: run.status,
-        sequence: lastEvent?.sequence ?? 0,
+        sequence,
         workflowSnapshot: run.workflowSnapshot,
         currentTurnId: turns.find((turn) => turn.status === 'running')?.id,
         activeAgentId: turns.find((turn) => turn.status === 'running')?.agentId,
-        turns: turns.map((turn) => ({ turnId: turn.id, runId: turn.runId, agentId: turn.agentId, status: turn.status, requestId: turn.requestId, messageId: messages.find((message) => message.turnId === turn.id)?.id, outputText: turn.partialContent })),
+        turns: turns.map((turn) => {
+          const attempt = attempts.filter(a=>a.turnId===turn.id).at(-1);
+          const legacyMessages = messages.filter(m=>m.turnId===turn.id);
+          const message = attempt ? messages.find(m=>m.id===attempt.messageId) : legacyMessages.length===1?legacyMessages[0]:undefined;
+          return {turnId:turn.id,runId:turn.runId,agentId:turn.agentId,status:turn.status,requestId:attempt?.requestId??turn.requestId,messageId:message?.id,outputText:message?.content??turn.partialContent};
+        }),
         messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed' })),
-        updatedAt: new Date().toISOString(),
+        updatedAt: run.updatedAt,startedAt:run.startedAt??undefined,execution,
+        attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
       });
-    });
   }
 
   getMessages(roomId: string) {
@@ -118,12 +126,15 @@ export class RunService {
   }
 
   subscribe(runId: string, cursor: number): RunSubscription {
-    const snapshot = this.getSnapshot(runId);
-    const records = this.database.listRunEvents(runId, cursor);
+    return this.database.transaction(() => {
+    const data = this.database.readRunSubscription(runId,cursor);
+    const snapshot = this.snapshotFrom(data);
+    const records = data.events;
     const events = records.map((record) => this.toRunEvent(record));
-    const resyncRequired = cursor > snapshot.sequence || events.some((event, index) => !event || event.sequence !== cursor + index + 1)
+    const resyncRequired = data.resyncRequired || cursor > snapshot.sequence || events.some((event, index) => !event || event.sequence !== cursor + index + 1)
       || (cursor < snapshot.sequence && records.at(-1)?.sequence !== snapshot.sequence);
     return runSubscriptionSchema.parse({ snapshot, events: resyncRequired ? [] : events, nextCursor: snapshot.sequence, resyncRequired });
+    });
   }
 
   onEvent(listener: EventListener): () => void {
@@ -155,8 +166,7 @@ export class RunService {
     if (!status) throw new Error('Run not found');
     assertRunCommand('pause', status as RunStatus);
     context.pauseRequested = true;
-    this.database.updateRun(runId, { status: 'pausing' });
-    this.appendAndNotify(runId, 'run_state_changed', { status: 'pausing' });
+    this.setRunState(runId, { status: 'pausing' }, { status: 'pausing' });
   }
 
   async stop(runId: string): Promise<void> {
@@ -170,8 +180,7 @@ export class RunService {
       this.finishRun(context, 'cancelled');
       return;
     }
-    this.database.updateRun(runId, { status: 'cancelling' });
-    this.appendAndNotify(runId, 'run_state_changed', { status: 'cancelling' });
+    this.setRunState(runId, { status: 'cancelling' }, { status: 'cancelling' });
     await context.promise;
   }
 
@@ -181,8 +190,7 @@ export class RunService {
     if (status !== 'paused') throw new Error('Step requires a paused run');
     context.mode = 'step';
     context.pauseRequested = false;
-    this.database.updateRun(runId, { status: 'running' });
-    this.appendAndNotify(runId, 'run_state_changed', { status: 'running' });
+    this.setRunState(runId, { status: 'running',mode:'step' }, { status: 'running' });
     context.promise = this.runLoop(context);
     await context.promise;
   }
@@ -193,8 +201,7 @@ export class RunService {
     if (status !== 'paused') throw new Error('resumeRun requires a paused run');
     context.mode = 'automatic';
     context.pauseRequested = false;
-    this.database.updateRun(runId, { status: 'running' });
-    this.appendAndNotify(runId, 'run_state_changed', { status: 'running' });
+    this.setRunState(runId, { status: 'running',mode:'automatic' }, { status: 'running' });
     context.promise = this.runLoop(context);
     await context.promise;
   }
@@ -213,8 +220,7 @@ export class RunService {
     if (run.status !== 'interrupted') throw new ContractError('invalid_state');
     if (decision === 'inspect') return;
     if (decision === 'discard') {
-      this.database.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-      this.appendAndNotify(runId, 'run_state_changed', { status: 'cancelled', reason: 'discarded after interruption' });
+      this.setRunState(runId, { status: 'cancelled', finishedAt: new Date().toISOString() }, { status: 'cancelled', reason: 'discarded after interruption' });
       return;
     }
     throw new ContractError('unsupported');
@@ -222,8 +228,10 @@ export class RunService {
 
   private async runLoop(context: RunContext): Promise<void> {
     const startedAt = Date.now();
+    context.elapsedBefore = this.database.getRun(context.runId)?.elapsedExecutionMs??0;
+    context.segmentStartedAt = performance.now();
     try {
-      const agents = this.database.listAgents(context.roomId);
+      const agents = context.members;
       while (context.nextAgentIndex < agents.length && context.nextAgentIndex < context.maxTurns) {
         if (Date.now() - startedAt > context.maxDurationMs) {
           this.finishRun(context, 'paused', 'Maximum run duration reached');
@@ -249,26 +257,33 @@ export class RunService {
       if (context.stopRequested || /cancel/i.test(String(error))) {
         this.finishRun(context, 'cancelled');
       } else {
-        this.database.updateRun(context.runId, { status: 'error', lastError: toPublicError(error).message, finishedAt: new Date().toISOString() });
-        this.appendAndNotify(context.runId, 'run_state_changed', { status: 'error' });
+        this.setRunState(context.runId, { status: 'error', lastError: toPublicError(error).message, finishedAt: new Date().toISOString() }, { status: 'error' });
       }
       this.activeRooms.delete(context.roomId);
+    } finally {
+      this.persistElapsed(context);
     }
+  }
+
+  private persistElapsed(context: RunContext): void {
+    this.database.updateRunProgress(context.runId,{elapsedExecutionMs:context.elapsedBefore+Math.max(0,Math.floor(performance.now()-context.segmentStartedAt))});
   }
 
   private async executeTurn(context: RunContext, agent: { id: string; displayName: string; roleTemplateId: string }, turnIndex: number): Promise<void> {
     const turnId = randomUUID();
     const messageId = randomUUID();
     const requestId = randomUUID();
+    const input: StreamChatInput = { requestId, modelId: 'mock', outputTokenLimit: context.outputTokenLimit, agentRole: agent.roleTemplateId, turnIndex, messages: [{ role: 'user', content: context.task }], signal: context.abortController.signal };
+    const {signal,...inputSnapshot} = input;
     this.database.transaction(() => {
       this.database.insertTurn({ id: turnId, runId: context.runId, agentId: agent.id, status: 'running', requestId, turnIndex });
       this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: agent.displayName, content: '', status: 'streaming' });
+      this.database.createAttempt({requestId,runId:context.runId,turnId,messageId,attemptIndex:0,status:'pending',inputSnapshot});
       this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: agent.id });
       this.appendEvent(context.runId, 'turn_started', { turnId, messageId, agentId: agent.id, requestId });
     });
     let content = '';
     try {
-      const input: StreamChatInput = { requestId, modelId: 'mock', outputTokenLimit: context.outputTokenLimit, agentRole: agent.roleTemplateId, turnIndex, messages: [{ role: 'user', content: context.task }], signal: context.abortController.signal };
       let outputTokens = 0;
       let started = false;
       let finished = false;
@@ -281,6 +296,7 @@ export class RunService {
         if (chunk.type === 'start') {
           if (started) throw new ContractError('invalid_response');
           started = true;
+          this.database.updateAttempt(requestId,{status:'running',providerRequestId:chunk.providerRequestId});
           continue;
         }
         if (!started) throw new ContractError('invalid_response');
@@ -292,9 +308,9 @@ export class RunService {
           this.database.transaction(() => {
             this.database.updateMessage(messageId, content, 'streaming');
             this.database.updateTurn(turnId, { partialContent: content });
+            this.persistElapsed(context);
             this.appendEvent(context.runId, 'text_delta', { turnId, messageId, senderName: agent.displayName, text: chunk.text });
           });
-          this.notifyLastEvent(context.runId);
         } else if (chunk.type === 'reasoning_summary_delta') {
           this.appendAndNotify(context.runId, 'reasoning_summary_delta', { turnId, messageId, senderName: agent.displayName, text: chunk.text });
         } else if (chunk.type === 'usage') {
@@ -305,39 +321,50 @@ export class RunService {
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, 'completed');
         this.database.updateTurn(turnId, { status: 'completed', partialContent: content });
+        this.database.updateAttempt(requestId,{status:'completed'});
         this.appendEvent(context.runId, 'turn_completed', { turnId, messageId });
       });
-      this.notifyLastEvent(context.runId);
     } catch (error) {
       const cancelled = context.stopRequested || /cancel/i.test(String(error));
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, cancelled ? 'aborted' : 'failed');
         this.database.updateTurn(turnId, { status: cancelled ? 'aborted' : 'failed', partialContent: content });
+        this.database.updateAttempt(requestId,{status:cancelled?'aborted':'failed'});
         this.appendEvent(context.runId, cancelled ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: toPublicError(error, cancelled ? 'cancelled' : 'internal_error') });
       });
-      this.notifyLastEvent(context.runId);
       throw error;
     }
   }
 
   private finishRun(context: RunContext, status: 'completed' | 'paused' | 'cancelled', reason?: string): void {
-    this.database.updateRun(context.runId, { status, finishedAt: status === 'completed' || status === 'cancelled' ? new Date().toISOString() : null, lastError: reason ?? null });
-    this.appendAndNotify(context.runId, 'run_state_changed', { status, reason });
+    this.setRunState(context.runId, { status, finishedAt: status === 'completed' || status === 'cancelled' ? new Date().toISOString() : null, lastError: reason ?? null }, { status, reason });
     if (status !== 'paused') this.activeRooms.delete(context.roomId);
+  }
+
+  private setRunState(runId: string,patch: Parameters<Database['updateRun']>[1],payload: unknown): void {
+    this.database.transaction(()=>{this.database.updateRun(runId,patch);this.appendEvent(runId,'run_state_changed',payload);});
   }
 
   private appendAndNotify(runId: string, type: RunEvent['type'], payload: unknown): void {
     this.database.transaction(() => this.appendEvent(runId, type, payload));
-    this.notifyLastEvent(runId);
   }
 
   private appendEvent(runId: string, type: RunEvent['type'], payload: unknown): void {
-    const event = this.toRunEvent({ runId, type, payload, sequence: 1, timestamp: new Date().toISOString() });
+    const turnId = payload && typeof payload==='object' && 'turnId' in payload && typeof payload.turnId==='string'?payload.turnId:undefined;
+    const requestId = turnId?this.database.getLatestAttemptRequestId(turnId):undefined;
+    const event = this.toRunEvent({ runId, type, payload,turnId,requestId,protocolVersion:1, sequence: 1, timestamp: new Date().toISOString() });
     if (!event) throw new ContractError('invalid_response');
-    this.database.appendRunEvent({ runId, type, turnId: event.turnId, payload: event.payload, timestamp: event.timestamp });
+    const saved = this.database.appendRunEvent({ runId, type, turnId: event.turnId,requestId:event.requestId,protocolVersion:1, payload: event.payload, timestamp: event.timestamp });
+    this.database.afterCommit(()=>{
+      const notification = this.toRunEvent(saved);
+      if (notification) for (const listener of this.listeners) {
+        try { listener(notification); } catch { console.error('AI Roundtable event delivery failed'); }
+      }
+    });
   }
 
   private toRunEvent(record: RunEventRecord & { sequence: number }): RunEvent | undefined {
+    if (record.protocolVersion!==undefined && record.protocolVersion!==0 && record.protocolVersion!==1) return;
     const payload = record.payload;
     if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined;
     let requestId: string | undefined;
@@ -348,28 +375,25 @@ export class RunService {
       turnId ??= payload.turnId;
       const turn = this.database.getTurn(turnId);
       if (!turn || turn.runId !== record.runId || turn.id !== payload.turnId) return undefined;
-      requestId = turn.requestId;
+      requestId = record.requestId ?? ('requestId' in payload && typeof payload.requestId==='string'?payload.requestId:turn.requestId);
+      const attempt = this.database.getAttempt(requestId);
+      if (record.protocolVersion===1 && (!record.requestId || !attempt)) return;
+      if (attempt ? attempt.runId!==record.runId || attempt.turnId!==turnId : requestId!==turn.requestId) return;
       if ('requestId' in payload && payload.requestId !== requestId || 'agentId' in payload && payload.agentId !== turn.agentId) return undefined;
       if ('messageId' in payload) {
         if (typeof payload.messageId !== 'string') return undefined;
         const message = this.database.getMessage(payload.messageId);
         if (!message || message.runId !== record.runId || message.turnId !== turnId
+          || attempt && message.id!==attempt.messageId
           || 'senderName' in payload && payload.senderName !== message.senderName) return undefined;
       }
       // v0 stored raw failure strings; replace only at the output boundary, preserving history.
-      if ((record.type === 'turn_failed' || record.type === 'turn_aborted') && 'error' in payload && typeof payload.error === 'string') {
+      if (record.protocolVersion!==1 && (record.type === 'turn_failed' || record.type === 'turn_aborted') && 'error' in payload && typeof payload.error === 'string') {
         safePayload = { ...payload, error: publicError(record.type === 'turn_aborted' ? 'cancelled' : 'internal_error') };
       }
     }
-    const parsed = runEventSchema.safeParse({ ...record, version: PROTOCOL_VERSION, turnId, requestId, payload: safePayload });
+    const parsed = runEventSchema.safeParse({runId:record.runId,type:record.type,sequence:record.sequence,timestamp:record.timestamp, version: PROTOCOL_VERSION, turnId, requestId, payload: safePayload });
     return parsed.success ? parsed.data : undefined;
-  }
-
-  private notifyLastEvent(runId: string): void {
-    const record = this.database.listRunEvents(runId, 0).at(-1);
-    if (!record) return;
-    const event = this.toRunEvent(record) ?? resyncEvent(record, 'invalid_event');
-    if (event) for (const listener of this.listeners) listener(event);
   }
 
   private requireContext(runId: string): RunContext {

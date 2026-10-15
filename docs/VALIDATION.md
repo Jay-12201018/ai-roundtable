@@ -1,5 +1,7 @@
 # 真实验证与数据隔离
 
+R03 本次集成证据见 [报告](verification/2026-10-15-r03-integration.md)及[逐命令台账](verification/2026-10-15-r03-commands.md)。这是集成候选验证，不是尚未授权的 main 合并后 PASS；下列历史阶段规则/结果保留。
+
 ## 证据要求
 
 每次记录执行日期、基线/受检文件、平台、架构、实际 Node/pnpm/Electron 版本、精确命令、退出码、关键输出、失败原因和未运行项。PASS 仅来自本轮对应命令；历史报告不得替代。预期失败测试只有确认预期原因时才算守卫通过。
@@ -13,6 +15,10 @@
 - 桌面 E2E 必须先实现独立 userData 配置并证明隔离；当前 tests/e2e 不存在，R00 不启动 app/dev/preview/包内主入口。
 - 自动网络测试用 fixture/Mock；真实模型验收由用户明确触发并记录模型和限制，不打印 Key。
 - 如检查会运行真实应用入口、访问用户 DB/Key 或不明路径，停止该项，记录原因和触发路径。
+
+R03 新增专项为 `tests/unit/database.test.ts tests/unit/persistence tests/integration/persistence`。先使用 [ENVIRONMENT](ENVIRONMENT.md) 的严格 Node24.18.1 运行 `pnpm run test --reporter=dot`，独立记录 `pnpm run typecheck` 和 `pnpm run build`；切到 Electron 源码重编译后，以 `ELECTRON_RUN_AS_NODE=1 <Electron> node_modules/vitest/vitest.mjs run <上述专项> --reporter=dot` 验证实际 ABI139。两类原生构建不得并行操作同一 node_modules。
+
+有限桌面探针 `tests/probes/r01-electron.cjs --r03-recovery` 会在 ready 前隔离全部应用路径、用原 v1 fixture 执行真实迁移/恢复并阻断外部网络；仅在确认这些防护仍存在后运行。退出后 `ELECTRON_RUN_AS_NODE=1 <Electron> tests/probes/r01-sqlite.cjs <本次新生成的 probe-result.json>` 只读验证自己的临时数据库/备份。不可沿用历史 metadata 路径当新证据，不将有限探针称为正式 E2E 或打包验收。
 
 ## R00 检查顺序
 

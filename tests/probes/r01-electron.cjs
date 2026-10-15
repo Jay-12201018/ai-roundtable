@@ -5,10 +5,12 @@ const { tmpdir } = require('node:os');
 const { dirname, join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { app, session } = require('electron');
+const { execFileSync } = require('node:child_process');
 
 const args = process.argv.slice(2);
 const development = args[0] === '--development';
-assert.ok(args.length === 0 || (development && args.length === 2), 'Usage: Electron r01-electron.cjs [--development http://127.0.0.1:5173/]');
+const recoveryMode = args[0] === '--r03-recovery';
+assert.ok(args.length === 0 || (development && args.length === 2) || (recoveryMode && args.length === 1), 'Usage: Electron r01-electron.cjs [--r03-recovery | --development http://127.0.0.1:5173/]');
 const devUrl = development ? new URL(args[1]) : undefined;
 if (devUrl) {
   assert.equal(devUrl.href, 'http://127.0.0.1:5173/');
@@ -38,10 +40,34 @@ app.setPath('logs', logs);
 assert.equal(app.getPath('userData'), userData);
 assert.equal(app.getPath('sessionData'), sessionData);
 assert.equal(existsSync(join(userData, 'ai-roundtable.db')), false);
+const recoveryStates = ['running','pausing','paused','cancelling','idle','completed','cancelled','error','interrupted'];
+if (recoveryMode) {
+  const Sqlite = require('better-sqlite3');
+  const source = execFileSync('git',['show','135bf82c6462ade6dd5300717d6f0102ce4a660c:src/main/database/Database.ts'],{cwd:root,encoding:'utf8'});
+  const migration = source.match(/const migrations = \[\s*`([\s\S]*?)`/);
+  assert.ok(migration?.[1]);
+  const seed = new Sqlite(join(userData,'ai-roundtable.db'));
+  try {
+    seed.exec(migration[1]);
+    const time='2026-10-13T00:00:00.000Z';
+    seed.exec('CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL)');
+    seed.prepare('INSERT INTO schema_migrations VALUES(1,?)').run(time);
+    seed.prepare('INSERT INTO rooms VALUES(?,?,?,?,?)').run('r03-room','R03 fixture','not the task',time,time);
+    seed.prepare('INSERT INTO agents(id,room_id,display_name,role_template_id,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('r03-agent','r03-room','A','draft',time,time);
+    for(const status of recoveryStates) {
+      const id='r03-'+status;
+      seed.prepare('INSERT INTO workflow_runs(id,room_id,status,workflow_snapshot,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(id,'r03-room',status,'{}',time,time);
+      seed.prepare('INSERT INTO turns(id,run_id,agent_id,status,request_id,turn_index,partial_content,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id+'-turn',id,'r03-agent','running',id+'-request',0,'R03 preexisting partial',time,time);
+      seed.prepare('INSERT INTO messages(id,room_id,run_id,turn_id,sender_type,sender_name,content,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id+'-message','r03-room',id,id+'-turn','agent','A','R03 preexisting partial','streaming',time,time);
+      seed.prepare('UPDATE workflow_runs SET current_turn_id=?,current_agent_id=? WHERE id=?').run(id+'-turn','r03-agent',id);
+    }
+  } finally {seed.close();}
+  assert.equal(app.isReady(),false,'Legacy fixture must precede readiness/Main import');
+}
 
 const metadataPath = join(temporaryDirectory, 'probe-result.json');
 const result = {
-  status: 'RUNNING', development, temporaryDirectory, userData, sessionData,
+  status: 'RUNNING', development, recoveryMode, temporaryDirectory, userData, sessionData,
   metadataPath, entry, preload, renderer, preloadPathEvidence: { source: 'built Main relative reference', relativePath: preloadReference, onlyOutput: 'index.cjs' }, isolationBeforeReady: !app.isReady(),
   blockedRequests: [], permittedRequests: [], consoleErrors: [], cspConsoleErrors: [], preloadErrors: [],
 };
@@ -141,6 +167,21 @@ async function probe() {
       check([...document.scripts].every((script) => script.nonce === nonce), 'Vite scripts lack matching CSP nonce');
     } else check(policy.includes("connect-src 'none';") && !/localhost|127\\.0\\.0\\.1|nonce-/u.test(policy), 'Production CSP retains development sources');
     check(Array.isArray(window.__r01ProbeViolations), 'CSP monitor missing');
+    const recoveryChecks = [];
+    if (${recoveryMode}) {
+      for(const status of ${JSON.stringify(recoveryStates)}) {
+        const recovered=['running','pausing','paused','cancelling'].includes(status);
+        const old=await api.run.getSnapshot('r03-'+status);
+        check(old.status===(recovered?'interrupted':status),'Incorrect startup Run classification');
+        check(old.turns[0].status===(recovered?'interrupted':'running'),'Terminal/idle child changed');
+        check(old.messages[0].content==='R03 preexisting partial' && old.messages[0].status===(recovered?'aborted':'streaming'),'Partial evidence changed');
+        check(old.sequence===(recovered?1:0),'Recovery event is missing or duplicated');
+        check(old.execution.task===null && old.execution.membersSnapshot===null && old.execution.elapsedExecutionMs===null,'Legacy inputs/time invented');
+        check(old.attempts.length===1 && !('inputSnapshot' in old.attempts[0]),'Attempt projection unsafe');
+        if(recovered) check(old.currentTurnId===undefined && old.activeAgentId===undefined,'Active pointers retained');
+        recoveryChecks.push({runId:old.runId,status:old.status,sequence:old.sequence});
+      }
+    }
     const events = [];
     const unsubscribe = api.run.onEvent((event) => events.push(event));
     const { roomId } = await api.room.createDemo('R01 isolated lifecycle probe');
@@ -167,7 +208,7 @@ async function probe() {
     snapshot = await api.run.getSnapshot(started.runId);
     check(snapshot.status === 'paused' && snapshot.turns.length === 2 && snapshot.messages.length === 2, 'Second step did not remain paused');
     check(events.length === eventCount, 'Cancelled listener still receives events');
-    return { runId: started.runId, roomId, snapshot, policy, eventCount, listenerCancelled: true, rootRendered: true, nodeGlobalsAbsent: true, bridgeKeys: Object.keys(api).sort(), cspViolations: window.__r01ProbeViolations };
+    return { runId: started.runId, roomId, snapshot, policy, eventCount,recoveryChecks, listenerCancelled: true, rootRendered: true, nodeGlobalsAbsent: true, bridgeKeys: Object.keys(api).sort(), cspViolations: window.__r01ProbeViolations };
   })()`);
   if (development) {
     const deadline = Date.now() + 5000;

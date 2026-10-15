@@ -130,3 +130,27 @@ DTO 红测已实际出现19失败，修复后48项通过；随后严格配对Nod
 上述独立实施、集成审核段落保留各自交付时的历史状态。环境阻塞随后解决，用户批准候选 `5b8f771bfa0fd1823b7efe6488179e15aea436a5`，以 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 合入 main。合并树与候选完全一致；main 本次 94 项契约、228 项全回归、类型/生产构建、Node/Electron SQLite 及隔离生产 Preload/IPC/退出验证通过，R02 verified，证据见[主线验收](verification/2026-10-14-r02-main.md)。
 
 本次合并/验收没有继续改变 wire shape、数据库 Schema/migration、依赖版本或业务逻辑。后续模块应消费已合入 Shared v1 和同构建 Main/Preload/Renderer，不混用原 v0 Bridge。R03 为 ready，尚未获实施授权；任何持久化契约或 migration 扩展仍由总控审批、分配版本及登记唯一写入人，不能因 ready 自行修改公共文件。
+
+## R03-SHARED-01 总控集成候选（2026-10-15，未合 main）
+
+上段是 R02 验收时的历史状态。用户现已授权 R03 总控接线；本节对应 `codex/integrate-r03`，依赖 main `be37fad9d05050a9bad1847e5008bc67752523f6`。共享写入人为本聊天总控，子项目原提交及 Worktree 保留。完整证据见 [R03 集成报告](verification/2026-10-15-r03-integration.md)。本候选未标 verified，后续模块不得提前实施或消费尚未合入的接口。
+
+| 唯一来源/接口 | 规则与调用方 |
+| --- | --- |
+| Shared `schemas/persistence.ts` | Run 执行元数据、成员快照、Main 私有 StoredRun/RequestAttempt、安全 Attempt 投影和分页输入；DTO 由 Zod 派生，请求输入复用 R02 provider Schema |
+| migration 2 | 总控分配；v1 SQL 不变。旧缺失 task/members/progress/elapsed/input/time 为 NULL；仅唯一可证明的旧请求关联回填 Attempt，不伪造历史 |
+| `Database.initialize()` | 返回 void 或 Promise<void>；所有调用方都可 await，Main 必须等待已开始的磁盘升级。失败关闭资源但保留原库及验证备份，禁止边迁移边创建服务 |
+| `insertRun/getRun/updateRunProgress` | Main 完整持久记录；实际生产者写完整任务/冻结成员/限制。低层旧调用兼容未知元数据，已知进度单调，未知历史不能伪造起点 |
+| `createAttempt/getAttempt/listAttempts/updateAttempt` | Main-only 输入证据；requestId 全局唯一、(turnId,attemptIndex) 唯一、messageId 唯一，首请求等于 Turn 原 requestId；身份/输入不可变，终态不重开；新重试须新请求/消息 |
+| `appendRunEvent` | 返回确切 PersistedRunEvent 对象，包含 sequence/timestamp/protocolVersion/requestId；事务分配序号并验证 v1 Attempt 身份，调用方不可再当 number 使用 |
+| `transaction/afterCommit` | 状态、消息、Attempt、事件共同提交；最外事务成功后才通知；回滚丢弃相应通知，禁止异步事务回调 |
+| `listRunMessages(runId,{after,limit})` | after={runId,sequence}，全局稳定消息键，limit1..500；返回 messages/nextCursor/hasMore；同一页在同一读事务，拒绝跨 Run 游标 |
+| `listRunEvents(runId,{cursor,throughSequence,limit})` | cursor 排除/固定上界包含，limit1..500；返回 events/nextCursor/throughSequence/hasMore。数字游标旧入口仍兼容；不存在的 Run/非法上界拒绝 |
+| `readRunSnapshot/readRunSubscription` | 一次读事务返回完整 Run/Turn/消息/Attempt/sequence；增量超过500或有缺序/坏 JSON 时使用权威快照重同步，不截断后伪称同步完成 |
+| `RunSnapshot.execution/attempts` | Shared 可选字段兼容现有 fixture，当前生产者始终返回；legacy 未知为 NULL。普通投影排除私有 inputSnapshot/providerRequestId/lastError，workflow 仍走 R02 敏感字段守卫 |
+| 事件 | 新写 protocolVersion1，与 wire version1 一致，requestId 绑定该次 Attempt；v0 仅输出时安全适配，未知协议/未知事件触发重同步，不改写原文 |
+| `prepareRegisteredRestore(id)` | 可信 Main-only；仅已验证 catalog 且路径/文件类型/哈希/恢复数据有效才返回独立候选。旧目录行或任意发现文件不可自动信任，不替换现用数据库 |
+
+恢复只作用于 running/pausing/paused/cancelling 父 Run 及其未终结证据；清指针并追加一次 interrupted，保留文本和请求。idle 保持 idle，终态不变，不产生 Provider 调用。Main 启动/退出等待与 R01 幂等屏障一致。
+
+R04 负责后续显式调度/重试与累计限制；R05 在 Main 形成真实上下文并保存 Attempt 输入；R06 消费安全快照/重同步信号。新增消息分页 Bridge、真实模型配置或恢复命令仍需独立总控申请。本次未修改 IPC 注册、Preload API、Renderer App 或 ProviderAdapter，也没有第二套 repository。

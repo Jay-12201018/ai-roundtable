@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync, realpathSync } = require('node:fs');
 const { basename, dirname, join } = require('node:path');
 const { tmpdir } = require('node:os');
+const { createHash } = require('node:crypto');
 const Database = require('better-sqlite3');
 
 assert.ok(process.versions.electron, 'Run with ELECTRON_RUN_AS_NODE=1 and the installed Electron');
@@ -32,6 +33,27 @@ try {
   const event = database.prepare('SELECT payload_json FROM run_events WHERE run_id = ? ORDER BY sequence DESC LIMIT 1').get(result.runId);
   assert.equal(JSON.parse(event.payload_json).status, 'cancelled');
   console.log('R01 shutdown SQLite PASS: cancelled, messages/turns/requests preserved, keys/providers empty');
+  if(result.recoveryMode) {
+    assert.equal(result.recoveryChecks.length,9);
+    for(const status of ['running','pausing','paused','cancelling','idle','completed','cancelled','error','interrupted']) {
+      const id='r03-'+status;const recovered=['running','pausing','paused','cancelling'].includes(status);
+      assert.equal(database.prepare('SELECT status FROM workflow_runs WHERE id=?').pluck().get(id),recovered?'interrupted':status);
+      assert.equal(database.prepare('SELECT status FROM turns WHERE run_id=?').pluck().get(id),recovered?'interrupted':'running');
+      assert.equal(database.prepare('SELECT COUNT(*) FROM run_events WHERE run_id=?').pluck().get(id),recovered?1:0);
+      assert.equal(database.prepare('SELECT input_snapshot FROM request_attempts WHERE run_id=?').pluck().get(id),null);
+    }
+    const receipt=database.prepare('SELECT * FROM schema_backups').all();assert.equal(receipt.length,1);
+    assert.equal(dirname(realpathSync(receipt[0].path)),join(temporary,'userData','backups'));
+    assert.equal(createHash('sha256').update(readFileSync(receipt[0].path)).digest('hex'),receipt[0].sha256);
+    const backup=new Database(receipt[0].path,{readonly:true,fileMustExist:true});
+    try {
+      assert.deepEqual(backup.prepare('SELECT version FROM schema_migrations').pluck().all(),[1]);
+      assert.equal(backup.prepare('SELECT COUNT(*) FROM workflow_runs').pluck().get(),9);
+      assert.equal(backup.prepare("SELECT status FROM workflow_runs WHERE id='r03-paused'").pluck().get(),'paused');
+      assert.equal(backup.prepare("SELECT content FROM messages WHERE run_id='r03-paused'").pluck().get(),'R03 preexisting partial');
+    } finally {backup.close();}
+    console.log('R03 startup recovery/verified v1 backup/legacy unknown inputs PASS: 9 Runs, 4 interrupted, terminal/idle evidence preserved');
+  }
 } finally {
   database.close();
 }
