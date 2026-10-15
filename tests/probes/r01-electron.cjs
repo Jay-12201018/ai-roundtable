@@ -10,7 +10,8 @@ const { execFileSync } = require('node:child_process');
 const args = process.argv.slice(2);
 const development = args[0] === '--development';
 const recoveryMode = args[0] === '--r03-recovery';
-assert.ok(args.length === 0 || (development && args.length === 2) || (recoveryMode && args.length === 1), 'Usage: Electron r01-electron.cjs [--r03-recovery | --development http://127.0.0.1:5173/]');
+const jointMode = args[0] === '--joint-ui';
+assert.ok(args.length === 0 || (development && args.length === 2) || ((recoveryMode || jointMode) && args.length === 1), 'Usage: Electron r01-electron.cjs [--joint-ui | --r03-recovery | --development http://127.0.0.1:5173/]');
 const devUrl = development ? new URL(args[1]) : undefined;
 if (devUrl) {
   assert.equal(devUrl.href, 'http://127.0.0.1:5173/');
@@ -67,7 +68,7 @@ if (recoveryMode) {
 
 const metadataPath = join(temporaryDirectory, 'probe-result.json');
 const result = {
-  status: 'RUNNING', development, recoveryMode, temporaryDirectory, userData, sessionData,
+  status: 'RUNNING', development, recoveryMode, jointMode, temporaryDirectory, userData, sessionData,
   metadataPath, entry, preload, renderer, preloadPathEvidence: { source: 'built Main relative reference', relativePath: preloadReference, onlyOutput: 'index.cjs' }, isolationBeforeReady: !app.isReady(),
   blockedRequests: [], permittedRequests: [], consoleErrors: [], cspConsoleErrors: [], preloadErrors: [],
 };
@@ -104,7 +105,7 @@ const loaded = new Promise((resolveWindow, reject) => {
     contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
       if (isMainFrame) reject(new Error(`Page load failed ${code}: ${description} (${url})`));
     });
-    contents.once('dom-ready', () => {
+    contents.on('dom-ready', () => {
       void contents.executeJavaScript(`
         window.__r01ProbeViolations = [];
         addEventListener('securitypolicyviolation', (event) => {
@@ -142,6 +143,7 @@ async function probe() {
   assert.equal(preferences.webSecurity, true);
   assert.equal(contents.getURL(), development ? devUrl.href : pathToFileURL(renderer).href);
   result.preferences = { sandbox: preferences.sandbox, contextIsolation: preferences.contextIsolation, nodeIntegration: preferences.nodeIntegration, webSecurity: preferences.webSecurity };
+  if (jointMode) result.jointRuns = await require('./joint-ui.cjs')(contents);
   const page = await contents.executeJavaScript(`(async () => {
     const check = (condition, message) => { if (!condition) throw new Error(message); };
     const deadline = Date.now() + 10000;

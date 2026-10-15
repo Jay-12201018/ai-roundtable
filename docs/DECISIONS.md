@@ -101,3 +101,15 @@ R01 验收不表示 V1 发布完成。正式 E2E、跨平台、签名/公证、�
 | D037 | 按用户最终授权只将候选439e3c6以non-ff merge e642b96合main；本轮必要复验后R03 verified，R04/R05/R06 ready | 保留原R03分支及两个Worktree、原始历史和完整候选；不重复合子项目、不改业务代码，不因ready自动启动 | main 本次313全回归、Node/Electron各85专项、类型/构建、严格Node原生/压力5次、Electron ABI139/隔离恢复/IPC/退出数据通过；正式E2E/发布/跨平台仍未验证 |
 
 D031–D036 的候选停止边界是前一阶段历史，本次用户授权取代“未授权合 main”，其数据、安全与环境规则继续生效。完整本轮命令、真实 merge SHA、源树一致性及剩余覆盖限制见[主线验证报告](verification/2026-10-15-r03-main.md)。状态更新独立提交，仅文档变更。
+
+
+## R04/R05/R06 联合集成候选（2026-10-15）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D038 | 最新 main 37766666 独立联合 Worktree，总控独占全部共享接线；各原模块只引入一次 | 原分支/Worktree保留，main不变；当前只提交 review 候选，不把联合 PASS 当主线验收 | 见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)和命令台账 |
+| D039 | 候选 UUID 与一致快照在请求记录之前交给同步builder；读/构建/校验/写在同一事务 | 拒绝不产生假执行记录，afterCommit通知后才调用Provider；Repeat同样必经门禁 | 实际三Agent输入捕获、Attempt逐字DTO比较、拒绝/超时/重入Stop零请求记录 |
+| D040 | Repeat 保留原冻结输入语义，直接校验最终完整输入；不伪造未来Turn让R05接受旧Turn | Retry重放、Continue仅新后缀；预算缺失/超窗不发送，旧证据保留 | 同Turn多Attempt、精确预算边界、Renderer Stop和迟到事件隔离 |
+| D041 | Mock拥有明确测试词法及上下文窗；未知模型没有可靠计数能力就拒绝 | 字符/字节/delta不被称为真实模型Token，Mock词法由生成/计数/usage共用 | Unicode/换行/消息封装计数、实际usage、未知默认resolver拒绝 |
+| D042 | 沿用invalid_response处理非完整finish；安全事件给中文提示，缺历史安全原因则通用失败 | 不引入新公开枚举/DTO，部分输出与失败事实保留；不泄漏私有lastError | length/filter/timeout、乱序和冲突失败重同步；重开后详细失败原因未持久投影 |
+| D043 | 来源审计持久化/新migration或公开协议为C类；可信指令生产来源和无Run发现延期 | 不改已发布migration1/2；普通文本/workflow不能伪造主持人指令，无R07扩张 | 最终输入已存Attempt；来源报告仅瞬时返回，未持久化/展示；正式E2E/发布范围另行授权 |

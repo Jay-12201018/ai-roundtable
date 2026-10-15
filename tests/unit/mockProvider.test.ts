@@ -50,7 +50,7 @@ describe('MockProvider', () => {
   it.each([0, 2])('can finish normally after %i deltas', async (stopAfterDeltas) => {
     const chunks = await collect(new MockProvider({ stopAfterDeltas }));
     expect(chunks.filter((chunk) => chunk.type === 'text_delta')).toHaveLength(stopAfterDeltas);
-    expect(chunks.at(-2)).toEqual({ type: 'usage', requestId: 'main-request', inputTokens: 9, outputTokens: stopAfterDeltas });
+    expect(chunks.at(-2)).toEqual({ type: 'usage', requestId: 'main-request', inputTokens: 13, outputTokens: stopAfterDeltas });
     expect(chunks.at(-1)).toEqual({ type: 'finish', requestId: 'main-request', reason: 'stop' });
     expect(chunks.every((chunk) => chunk.requestId === 'main-request')).toBe(true);
   });
@@ -132,12 +132,12 @@ describe('MockProvider', () => {
     expect(chunks.some((chunk) => chunk.type === 'finish')).toBe(false);
   });
 
-  it('applies the output limit in mock estimate units and preserves the actual input', async () => {
+  it('applies the output limit in the mock vocabulary and preserves the actual input', async () => {
     const parameters: StreamChatInput = { ...input, outputTokenLimit: 1 };
     const before = structuredClone(parameters);
     const chunks = await collect(new MockProvider(), parameters);
     expect(chunks.filter((chunk) => chunk.type === 'text_delta')).toHaveLength(1);
-    expect(chunks.at(-2)).toEqual({ type: 'usage', requestId: 'main-request', inputTokens: 9, outputTokens: 1 });
+    expect(chunks.at(-2)).toEqual({ type: 'usage', requestId: 'main-request', inputTokens: 13, outputTokens: 1 });
     expect(chunks.at(-1)).toEqual({ type: 'finish', requestId: 'main-request', reason: 'length' });
     expect(chunks.every((chunk) => chunk.requestId === parameters.requestId)).toBe(true);
     expect(parameters).toEqual(before);

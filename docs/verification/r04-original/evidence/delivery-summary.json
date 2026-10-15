@@ -1,0 +1,285 @@
+{
+  "sourceTestConfigHashesEqual": true,
+  "sourceTestConfigFiles": 77,
+  "finalAbi": 139,
+  "nativeUnchangedAfterElectronTests": true,
+  "installedLockMatches": true,
+  "results": [
+    {
+      "label": "delivery-native-node",
+      "argv": [
+        "pnpm",
+        "run",
+        "native:node"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "node",
+        "pnpm",
+        "run",
+        "native:node"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "node",
+      "timeoutSeconds": 150.0,
+      "startedAt": "2026-10-15T06:51:44.641898+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 10.917,
+      "warningLines": [
+        ".../node_modules/better-sqlite3 install: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__configuration/availability.h:204:4: warning: \"The selected platform is no longer supported by libc++.\" [-W#warnings]",
+        ".../node_modules/better-sqlite3 install:   204 | #  warning \"The selected platform is no longer supported by libc++.\"",
+        ".../node_modules/better-sqlite3 install: ../src/better_sqlite3.cpp:48:1: warning: cast from 'void (*)(v8::Local<v8::Object>, v8::Local<v8::Value>, v8::Local<v8::Context>)' to 'node::addon_context_register_func' (aka 'void (*)(v8::Local<v8::Object>, v8::Local<v8::Value>, v8::Local<v8::Context>, void *)') converts to incompatible function type [-Wcast-function-type-mismatch]",
+        ".../node_modules/better-sqlite3 install: 2 warnings generated."
+      ]
+    },
+    {
+      "label": "delivery-node-memory",
+      "argv": [
+        "node",
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/sqlite-probe.cjs"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "node",
+        "node",
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/sqlite-probe.cjs"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "node",
+      "timeoutSeconds": 30.0,
+      "startedAt": "2026-10-15T06:52:37.141640+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 0.561,
+      "warningLines": []
+    },
+    {
+      "label": "delivery-node-r04",
+      "argv": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/unit/stateMachine.test.ts",
+        "tests/unit/mockProvider.test.ts",
+        "tests/integration/runControls.test.ts",
+        "tests/integration/mockRun.test.ts",
+        "tests/integration/run",
+        "--reporter=dot"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "node",
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "tests/unit/stateMachine.test.ts",
+        "tests/unit/mockProvider.test.ts",
+        "tests/integration/runControls.test.ts",
+        "tests/integration/mockRun.test.ts",
+        "tests/integration/run",
+        "--reporter=dot"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "node",
+      "timeoutSeconds": 90.0,
+      "startedAt": "2026-10-15T06:52:37.782121+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 1.154,
+      "testFiles": 7,
+      "tests": 88,
+      "warningLines": []
+    },
+    {
+      "label": "delivery-node-full",
+      "argv": [
+        "pnpm",
+        "run",
+        "test",
+        "--reporter=dot"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "node",
+        "pnpm",
+        "run",
+        "test",
+        "--reporter=dot"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "node",
+      "timeoutSeconds": 150.0,
+      "startedAt": "2026-10-15T06:52:38.988655+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 13.775,
+      "testFiles": 29,
+      "tests": 365,
+      "warningLines": [
+        ".../node_modules/better-sqlite3 install: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/__configuration/availability.h:204:4: warning: \"The selected platform is no longer supported by libc++.\" [-W#warnings]",
+        ".../node_modules/better-sqlite3 install:   204 | #  warning \"The selected platform is no longer supported by libc++.\"",
+        ".../node_modules/better-sqlite3 install: ../src/better_sqlite3.cpp:48:1: warning: cast from 'void (*)(v8::Local<v8::Object>, v8::Local<v8::Value>, v8::Local<v8::Context>)' to 'node::addon_context_register_func' (aka 'void (*)(v8::Local<v8::Object>, v8::Local<v8::Value>, v8::Local<v8::Context>, void *)') converts to incompatible function type [-Wcast-function-type-mismatch]",
+        ".../node_modules/better-sqlite3 install: 2 warnings generated."
+      ]
+    },
+    {
+      "label": "delivery-typecheck",
+      "argv": [
+        "pnpm",
+        "run",
+        "typecheck"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "tool",
+        "pnpm",
+        "run",
+        "typecheck"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "tool",
+      "timeoutSeconds": 60.0,
+      "startedAt": "2026-10-15T06:52:52.825610+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 1.172,
+      "warningLines": []
+    },
+    {
+      "label": "delivery-build",
+      "argv": [
+        "pnpm",
+        "run",
+        "build"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "tool",
+        "pnpm",
+        "run",
+        "build"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "tool",
+      "timeoutSeconds": 90.0,
+      "startedAt": "2026-10-15T06:52:54.046584+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 1.931,
+      "warningLines": [
+        " * esbuild will not drop a `@__PURE__` call whose own argument interpolates a variable, but it",
+        "\"// Wrapped in a `@__PURE__` IIFE: esbuild never tree-shakes a top-level initializer that contains a member access on `Number`, so the bare object literal survived into every bundle.\""
+      ]
+    },
+    {
+      "label": "delivery-native-electron",
+      "argv": [
+        "pnpm",
+        "run",
+        "native:electron",
+        "--build-from-source"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "electron",
+        "pnpm",
+        "run",
+        "native:electron",
+        "--build-from-source"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "electron",
+      "timeoutSeconds": 150.0,
+      "startedAt": "2026-10-15T06:52:56.024894+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 11.001,
+      "warningLines": []
+    },
+    {
+      "label": "delivery-electron-memory",
+      "argv": [
+        "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/sqlite-probe.cjs"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "electron-node",
+        "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/sqlite-probe.cjs"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "electron-node",
+      "timeoutSeconds": 30.0,
+      "startedAt": "2026-10-15T06:53:07.076292+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 0.513,
+      "warningLines": []
+    },
+    {
+      "label": "delivery-electron-r04-r03",
+      "argv": [
+        "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "tests/unit/stateMachine.test.ts",
+        "tests/unit/mockProvider.test.ts",
+        "tests/integration/runControls.test.ts",
+        "tests/integration/mockRun.test.ts",
+        "tests/integration/run",
+        "tests/unit/database.test.ts",
+        "tests/unit/persistence",
+        "tests/integration/persistence",
+        "--reporter=dot"
+      ],
+      "wrapperArgv": [
+        "/private/tmp/roundtable-r04-validation-voe8o8pd/env.sh",
+        "electron-node",
+        "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "tests/unit/stateMachine.test.ts",
+        "tests/unit/mockProvider.test.ts",
+        "tests/integration/runControls.test.ts",
+        "tests/integration/mockRun.test.ts",
+        "tests/integration/run",
+        "tests/unit/database.test.ts",
+        "tests/unit/persistence",
+        "tests/integration/persistence",
+        "--reporter=dot"
+      ],
+      "cwd": "/Users/zhangwenjie/.codex/worktrees/5419/AI交互",
+      "mode": "electron-node",
+      "timeoutSeconds": 120.0,
+      "startedAt": "2026-10-15T06:53:07.653800+00:00",
+      "head": "37766666ff10981c302e54636cd0f0378d1c722e",
+      "tree": "cf4b9bc6f15fb2b3a59e035ab298e65812c62d01",
+      "status": "M src/main/orchestrator/stateMachine.ts\n M src/main/providers/mock/MockProvider.ts\n M src/main/services/RunService.ts\n M tests/unit/mockProvider.test.ts\n M tests/unit/stateMachine.test.ts\n?? tests/integration/run/",
+      "exit": 0,
+      "elapsedSeconds": 1.789,
+      "testFiles": 16,
+      "tests": 173,
+      "warningLines": []
+    }
+  ]
+}

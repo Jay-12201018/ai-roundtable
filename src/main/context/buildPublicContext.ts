@@ -60,12 +60,7 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   if (!counter || counter.modelId !== member.modelId || typeof counter.method !== 'string' || !counter.method.trim()
     || typeof counter.countMessages !== 'function' || !['exact', 'upper_bound'].includes(counter.kind)) return reject('token_count_unavailable');
 
-  const count = (values: readonly ProviderMessage[]): number | undefined => {
-    try {
-      const tokens = counter.countMessages(Object.freeze(values.map(value => Object.freeze({ ...value }))));
-      return typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens > 0 ? tokens : undefined;
-    } catch { return undefined; }
-  };
+  const count = (values: readonly ProviderMessage[]) => countModelTokens(values,member.modelId,counter);
   let inputTokens = count(messages);
   if (inputTokens === undefined) return reject('invalid_token_count');
   report.budget.measurement = { unit: 'tokens', kind: counter.kind, method: counter.method, modelId: counter.modelId };
@@ -94,4 +89,12 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   messages.push(...selected.map(candidate => candidate.message));
   report.budget.estimatedInputBytes = byteEstimate(messages);
   return { ok: true, messages, outputTokenLimit: run.outputTokenLimit, selectedHistory, report };
+}
+
+export function countModelTokens(values:readonly ProviderMessage[],modelId:string|null,counter?:ModelTokenCounter):number|undefined{
+  if(!counter||counter.modelId!==modelId||!['exact','upper_bound'].includes(counter.kind)||typeof counter.method!=='string'||!counter.method.trim()||typeof counter.countMessages!=='function')return;
+  try{
+    const tokens=counter.countMessages(Object.freeze(values.map(value=>Object.freeze({...value}))));
+    return typeof tokens==='number'&&Number.isSafeInteger(tokens)&&tokens>0?tokens:undefined;
+  }catch{return;}
 }

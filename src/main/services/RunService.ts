@@ -33,8 +33,13 @@ type RunContext = {
   failureReason?: string;
 };
 
-export type RunMessagesBuilder = (run: RunRecord, member: MemberSnapshot, turnIndex: number) => StreamChatInput['messages'];
-type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string };
+export type RequestPreparation = {
+  snapshot: ReturnType<Database['readRunSnapshot']>;
+  current: { turnId: string; requestId: string; messageId: string; agentId: string; turnIndex: number };
+  repeat?: { messages: StreamChatInput['messages']; sourceRequestId: string; kind: 'retry' | 'continue' };
+};
+export type RunMessagesBuilder = (run: RunRecord, member: MemberSnapshot, turnIndex: number, preparation: RequestPreparation) => StreamChatInput['messages'];
+type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string; sourceRequestId: string; kind: 'retry' | 'continue' };
 
 type EventListener = (event: RunEvent) => void;
 
@@ -52,7 +57,7 @@ export class RunService {
   private shuttingDown = false;
 
   constructor(private readonly database: Database, private readonly provider: ProviderAdapter,
-    private readonly buildMessages: RunMessagesBuilder = run => [{ role: 'user', content: run.task! }]) {}
+    private readonly buildMessages: RunMessagesBuilder = (run,_member,_index,preparation) => preparation.repeat?.messages ?? [{ role: 'user', content: run.task! }]) {}
 
   createDemoRoom(objective: string): string {
     const roomId = randomUUID();
@@ -232,7 +237,7 @@ export class RunService {
       { role: 'user' as const, content: 'Continue the previous response from where it stopped.' },
     ];
     this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }),
-      { turn, messages, modelId: attempt.inputSnapshot.modelId });
+      { turn, messages, modelId: attempt.inputSnapshot.modelId,sourceRequestId:attempt.requestId,kind:suffixOf===undefined?'retry':'continue' });
     await context.promise;
   }
 
@@ -390,20 +395,25 @@ export class RunService {
     const turnId = repeat?.turn.id ?? randomUUID();
     const messageId = randomUUID();
     const requestId = randomUUID();
-    const input: StreamChatInput = { ...streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
-      outputTokenLimit: context.outputTokenLimit, agentRole: member.roleTemplateId, turnIndex,
-      messages: repeat?.messages ?? this.buildMessages(this.requireRun(context.runId), member, turnIndex) }), signal: context.abortController.signal };
-    if (this.deadlineReached(context)) throw new ContractError('timeout');
-    const { signal, ...inputSnapshot } = input;
-    this.database.transaction(() => {
+    const input:StreamChatInput = this.database.transaction(() => {
+      const snapshot=this.database.readRunSnapshot(context.runId);
+      const preparation:RequestPreparation={snapshot,current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
+        repeat:repeat?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}:undefined};
+      const inputSnapshot=streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
+        outputTokenLimit:context.outputTokenLimit,agentRole:member.roleTemplateId,turnIndex,
+        messages:this.buildMessages(snapshot.run,member,turnIndex,preparation) });
+      if (this.deadlineReached(context)) throw new ContractError('timeout');
+      if(context.abortController.signal.aborted)throw new ContractError('cancelled');
       if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
       else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex });
       this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: '', status: 'streaming' });
-      const attemptIndex = this.database.listAttempts(context.runId).filter(a => a.turnId === turnId).length;
+      const attemptIndex = snapshot.attempts.filter(a => a.turnId === turnId).length;
       this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
       this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: member.agentId });
       this.appendEvent(context.runId, 'turn_started', { turnId, messageId, agentId: member.agentId, requestId });
+      return {...inputSnapshot,signal:context.abortController.signal};
     });
+    const {signal}=input;
     let content = '';
     let iterator: AsyncIterator<unknown> | undefined;
     let drained = false;

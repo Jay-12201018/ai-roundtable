@@ -1,10 +1,10 @@
 import type { RoundtableApiContract } from '../../shared/contracts/app';
 import { idSchema } from '../../shared/schemas/common';
 import { runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../shared/schemas/run';
-import type { RunEvent } from '../../shared/types/run';
-import { createRendererStore, type RendererCommand } from '../store/rendererStore';
+import type { RunEvent,InterruptedRunDecision } from '../../shared/types/run';
+import { createRendererStore,canRecover, type RendererCommand } from '../store/rendererStore';
 
-type RunControl = Exclude<RendererCommand, 'create' | 'start'>;
+type RunControl = 'pause' | 'stop' | 'step' | 'resumeRun';
 type IdentityStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const savedRunKey = 'roundtable.runId';
 
@@ -16,6 +16,18 @@ export function createRendererSession(api: RoundtableApiContract, storage?: Iden
   let flight: { generation: number; promise: Promise<void> } | undefined;
   const buffered = new Map<number, RunEvent>();
   let resyncRequested = false;
+  let publicFailure:{sequence:number;message:string}|undefined;
+  let lastRunningSequence=0;
+  function rememberFailure(event:RunEvent){
+    if(event.type==='run_state_changed'&&event.payload.status==='running'){
+      lastRunningSequence=Math.max(lastRunningSequence,event.sequence);
+      if(publicFailure&&publicFailure.sequence<=lastRunningSequence)publicFailure=undefined;
+    }
+    if((event.type==='turn_failed'||event.type==='turn_aborted')&&event.sequence>lastRunningSequence&&(!publicFailure||event.sequence>publicFailure.sequence)){
+      const code=event.payload.error.code;
+      publicFailure={sequence:event.sequence,message:code==='invalid_response'?'模型未完整完成响应，部分输出已保留。':code==='timeout'?'请求已超时，部分输出已保留。':code==='cancelled'?'请求已停止，部分输出已保留。':'模型请求失败，部分输出已保留。'};
+    }
+  }
 
   const current = (generation: number) => mounted && store.getState().generation === generation;
   function clearBuffer() {
@@ -24,6 +36,8 @@ export function createRendererSession(api: RoundtableApiContract, storage?: Iden
     buffered.clear();
     resyncRequested = false;
     flight = undefined;
+    publicFailure=undefined;
+    lastRunningSequence=0;
   }
   function saveIdentity(id?: string) {
     try {
@@ -58,8 +72,9 @@ export function createRendererSession(api: RoundtableApiContract, storage?: Iden
     const parsed = runEventSchema.safeParse(value);
     if (!parsed.success || parsed.data.type === 'snapshot_required') resyncRequested = true;
     else if (parsed.data.sequence > (state.snapshot?.sequence ?? 0)) {
+      rememberFailure(parsed.data);
       const previous = buffered.get(parsed.data.sequence);
-      if (previous && JSON.stringify(previous) !== JSON.stringify(parsed.data)) resyncRequested = true;
+      if (previous && JSON.stringify(previous) !== JSON.stringify(parsed.data)) { resyncRequested = true; publicFailure = undefined; }
       else buffered.set(parsed.data.sequence, parsed.data);
       if (buffered.size > 500) { buffered.clear(); resyncRequested = true; }
     } else return;
@@ -101,6 +116,12 @@ export function createRendererSession(api: RoundtableApiContract, storage?: Iden
           if (!current(generation)) return;
           const parsed = runSubscriptionSchema.safeParse(result);
           if (!parsed.success || parsed.data.snapshot.runId !== runId || !store.getState().applySnapshot(parsed.data.snapshot, generation)) throw new Error('Invalid snapshot');
+          for(const event of parsed.data.events)rememberFailure(event);
+          if(parsed.data.snapshot.status==='running'){
+            lastRunningSequence=Math.max(lastRunningSequence,parsed.data.snapshot.sequence);
+            if(publicFailure&&publicFailure.sequence<=lastRunningSequence)publicFailure=undefined;
+          }
+          if(parsed.data.snapshot.status==='error')store.getState().setError(publicFailure&&publicFailure.sequence<=parsed.data.snapshot.sequence?publicFailure.message:'运行失败，请检查输入预算、模型配置或响应限制。历史输出已保留。',generation);
           // The subscription snapshot already includes its replay events.
           if (applyBuffered()) {
             store.getState().setSyncStatus('ready', generation);
@@ -159,18 +180,27 @@ export function createRendererSession(api: RoundtableApiContract, storage?: Iden
       if (ownsCommand(token, generation)) store.getState().setError('启动协作失败，请检查当前任务状态。', generation);
     } finally { store.getState().endCommand(token); }
   }
-  async function control(command: RunControl) {
+  async function perform(command:RendererCommand,invoke:(runId:string)=>Promise<void>){
     if (!mounted) return;
     const token = store.getState().beginCommand(command);
     if (token === undefined) return;
     const { generation, runId } = store.getState();
     try {
-      await api.run[command](runId!);
+      await invoke(runId!);
       // A newer Main state may have acknowledged this long-running command already.
       if (current(generation) && (!store.getState().pending || ownsCommand(token, generation))) await synchronize();
     } catch {
       if (ownsCommand(token, generation)) store.getState().setError('操作失败，请检查当前运行状态后再试。', generation);
     } finally { store.getState().endCommand(token); }
+  }
+  function control(command:RunControl){return perform(command,id=>api.run[command](id));}
+  function repeat(command:'retryTurn'|'continueMessage'){
+    const snapshot=store.getState().snapshot;const turn=snapshot?.turns.at(-1);const attempt=snapshot?.attempts?.filter(a=>a.turnId===turn?.turnId).at(-1);
+    return perform(command,id=>command==='retryTurn'?api.run.retryTurn(id,turn!.turnId):api.run.continueMessage(id,attempt!.messageId));
+  }
+  function recover(decision:InterruptedRunDecision){
+    if(!canRecover(store.getState(),decision))return Promise.resolve();
+    return perform('recoverInterruptedRun',id=>api.run.recoverInterruptedRun(id,decision));
   }
   function mount() {
     if (disposeMount) return disposeMount;
@@ -198,5 +228,5 @@ export function createRendererSession(api: RoundtableApiContract, storage?: Iden
     };
     return disposeMount;
   }
-  return { store, mount, selectRun, selectRoom, synchronize, createRoom, startRun, control };
+  return { store, mount, selectRun, selectRoom, synchronize, createRoom, startRun, control,repeat,recover };
 }

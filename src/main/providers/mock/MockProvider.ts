@@ -2,6 +2,7 @@ import { ContractError } from '../../../shared/contracts/errors';
 import { listModelsInputSchema, testConnectionInputSchema, streamChatInputSchema } from '../../../shared/schemas/provider';
 import { publicError } from '../../../shared/schemas/error';
 import type { NormalizedChunk, ProviderAdapter, StreamChatInput, ListModelsInput, TestConnectionInput, ConnectionTestResult } from '../types';
+import { mockTextTokens,countMockInputTokens } from './tokenBudget';
 
 export class MockProvider implements ProviderAdapter {
   constructor(private readonly options: {
@@ -33,7 +34,7 @@ export class MockProvider implements ProviderAdapter {
     if (parsed.modelId !== 'mock') { yield { type: 'error', requestId, error: publicError('not_found') }; return; }
     yield { type: 'start', requestId };
     const text = responseFor(parsed.agentRole ?? 'Drafter', parsed.turnIndex ?? 0);
-    const deltas = splitMockText(text);
+    const deltas = mockTextTokens(text);
     let emittedDeltas = 0;
     let limited = false;
     while (true) {
@@ -48,8 +49,8 @@ export class MockProvider implements ProviderAdapter {
       yield { type: 'text_delta', requestId, text: deltas[emittedDeltas] };
       emittedDeltas += 1;
     }
-    // Mock usage estimates UTF-16 input length and output delta units, not real model tokens.
-    yield { type: 'usage', requestId, inputTokens: parsed.messages.reduce((total, message) => total + message.content.length, 0), outputTokens: emittedDeltas };
+    // These are the explicit toy model's vocabulary units, never real Provider usage or billing.
+    yield { type: 'usage', requestId, inputTokens: countMockInputTokens(parsed.messages), outputTokens: emittedDeltas };
     if (signal?.aborted) { yield { type: 'error', requestId, error: publicError('cancelled') }; return; }
     yield { type: 'finish', requestId, reason: limited ? 'length' : 'stop' };
   }
@@ -59,10 +60,6 @@ function responseFor(role: string, turnIndex: number): string {
   if (/critic|审查/i.test(role)) return `Mock 审查：第 ${turnIndex + 1} 轮发现需要补充证据，并建议由起草者修订。`;
   if (/synth|定稿|综合/i.test(role)) return `Mock 定稿：已整合起草和审查意见，形成可执行的最终方案。`;
   return `Mock 起草：这是第 ${turnIndex + 1} 轮的初步方案，包含目标、步骤和验证标准。`;
-}
-
-function splitMockText(text: string): string[] {
-  return text.match(/.{1,4}/gu) ?? [text];
 }
 
 function delay(milliseconds: number | undefined, signal?: AbortSignal): Promise<void> {

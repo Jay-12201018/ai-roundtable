@@ -56,3 +56,10 @@ Create/Start/Pause/Stop/Step/Resume 共用 pending。Main 确认状态变化后�
 ## 文件归属
 
 本轮 R06 独占 App 的首次状态拆分，此后 App 页面组装交还总控。R07/R08/R11–R16 只修改自身 Feature，消费已登记 selector/action；公共 Store 的字段或行为扩展须由总控协调 R06 单一负责人。共享 DTO/事件/命令及可选字段均须先申请 Shared 契约，不能通过私有 IPC、复制 Schema 或另一套 Store 绕过。具体共享申请、验证证据与集成条件见 [R06_HANDOFF](R06_HANDOFF.md)。
+
+
+## 联合候选接线
+
+`session.repeat('retryTurn' | 'continueMessage')` 使用权威快照中最新逻辑 Turn/Attempt，调用既有 typed Bridge；同 Turn 的新请求以不同 messageId 投影，旧输出仍在 messages。`session.recover('inspect' | 'discard' | 'retry' | 'resume')` 使用 `canRecover`：中断部分请求不能直接 resume，legacy/时长耗尽只允许 inspect/discard。长命令收到 Main running 快照后释放 pending，使 Stop 可用；其迟到 Promise 不得清理新命令或其他房间。
+
+App 保留现有布局，只增加这些必要控制。公开失败事件映射中文原因；无安全历史原因时降级通用提示。来源报告、无Run房间发现和新的失败DTO未实现，见 CONTRACTS 的 A/B/C 登记。

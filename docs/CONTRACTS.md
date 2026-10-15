@@ -162,3 +162,23 @@ R04 负责后续显式调度/重试与累计限制；R05 在 Main 形成真实�
 用户批准候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 后，实际以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main；本次主线313全回归、Node/Electron各85专项、类型/构建/原生/隔离Bridge与退出数据均通过，见[主线证据](verification/2026-10-15-r03-main.md)。以上 R03-SHARED-01 和 migration2 现在生效，原 migration1 不变；本轮没有继续修改任何 wire shape/SQL/业务实现。
 
 R04/R05/R06 可在各自另获实施授权后消费这些接口，同构建 Main/Preload/Renderer 一起交付，不能提前开启模块或增加 IPC。后续公共变更仍由总控独占、先登记兼容性及测试再接线，不共享可变依赖/数据库/userData。
+
+
+## R04/R05/R06 联合集成候选（2026-10-15，尚未合 main）
+
+本次用户已授权联合适配，总控为唯一共享文件写入人。三个原模块完整引入一次；状态为 review，后续模块不得将候选视为主线已验收。完整验证见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)。Shared Schema、IPC 注册、Preload、Database 和 migration1/2 均未改变。
+
+| Main 私有接线 | 规则与调用方 |
+| --- | --- |
+| `RunMessagesBuilder(..., preparation)` | 保留原三参数 callback 兼容；第四参数给出真实候选 turn/request/message/agent/index 及 R03 一致快照。Retry/Continue 附原请求身份和最终重放/追加 messages。禁止生成假 Turn 适配 R05 |
+| `RunService.executeTurn` | 同一同步数据库事务内读快照→构建/校验最终输入→时限和 Abort 校验→写 Turn/Message/Attempt/事件；afterCommit 才通知，事务成功后才调用 Provider。Attempt.inputSnapshot 与实际请求同一已解析 DTO，signal 不持久化 |
+| `createPublicMessagesBuilder` | Main 生产装配唯一预算门禁；新 Turn 投影 R03 安全字段进入 R05，Repeat 验证真实最新来源并保留原冻结输入，最终完整消息用同一 `countModelTokens` 校验。拒绝不产生候选记录/turn_started |
+| Mock 模型计数 | 仅 `modelId=mock` 的玩具词法：文本每最多4个 Unicode 标量一单元；请求2封装单元，每条消息4封装/角色单元加文本单元。Mock生成/usage同一定义；32768上下文窗为该测试模型能力，不能用于真实模型或计费。未知能力/模型/不可信计数器拒绝发送 |
+| 可信指令与历史 | application/host 持续指令数组生产暂为空；边界规则、冻结 Agent 角色/提示、任务、已完成公开历史依 R05 顺序。workflow JSON/普通模型文本不取得指令权限；不传私有错误、非公开推理或 Attempt 输入给其他 Agent |
+| Retry/Continue | 同一逻辑 Turn、新 requestId/messageId/Attempt；Retry 重放原输入，Continue 追加来源最新部分正文和固定续写提示，新消息只存后缀。下个 Agent 只使用最新 completed Attempt 的新正文；旧 partial 保留检查，不自动拼成完整回复 |
+| Renderer | session `repeat`/`recover` 仅调用既有 typed API；pending 隔离世代/命令身份，Main running 快照可确认长命令以允许 Stop。结构变化取权威快照，旧请求流、重复事件、缺口与切换仍走 R06 守卫 |
+| 失败语义 | length/content_filter 采用既有 invalid_response，Run error、消息/Attempt failed，保留部分输出；timeout 为 Run error、请求/消息 aborted。公开失败事件映射中文，running 单调屏障和冲突重同步丢弃不可信旧原因；缺安全历史原因时只显示通用提示，不返回 lastError |
+
+共享申请分类：A 已接候选身份/事务顺序/最终预算/Main组装/既有恢复命令/同Turn多Attempt；B 延期可信持续指令生产来源、无Run房间发现、裁剪报告/usage展示；C 来源报告持久化、migration3、公开专用完成原因/持久失败投影必须另获用户批准。R05来源/裁剪报告当前只在构建器返回值中瞬时存在，适配器不保存、不暴露；只能审计最终 Attempt 输入，不能宣称完整来源审计已持久化。
+
+RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实际 Main 必须显式注入本门禁。未来真实 Provider 接入前须登记模型可靠计数能力，不得复用 Mock 词法或移除门禁。本轮不新增 Provider 网络调用。

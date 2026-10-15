@@ -1,6 +1,6 @@
 # R04 Run/Turn 状态机与 Mock 执行实施任务计划
 
-> 当前状态见 [STATUS](../docs/STATUS.md)。未来范围定义；本轮未获实施授权，不得自动启动。
+> 当前状态见 [STATUS](../docs/STATUS.md)。原模块已由用户授权交付；当前是联合集成 review 候选，未合 main，不得自动启动后续任务。
 > 执行时按工程规范选择已授权的执行方式；各项以复选框记录进度，不能因任务文件存在而标完成。
 
 **Goal:** 把 Mock 调度、Run/Turn 命令、请求尝试和真实停止限制统一到可持久重建的状态机。
@@ -88,3 +88,8 @@ pnpm run test -- tests/unit/stateMachine.test.ts tests/unit/mockProvider.test.ts
 ## 交付格式
 
 交付包含：任务 ID 与基线/分支；逐项文件清单；行为和操作说明；精确测试命令、日期、退出码、关键输出与未运行项；契约申请和数据库影响；遗留问题；本模块 Commit SHA；总控接线与集成建议。只提交本任务获准文件，不向 main 自行合并。总控集成后复验才更新 merged/verified。
+
+
+## 2026-10-15 联合候选交付
+
+原模块提交和排他 Worktree 均保留。本次共享文件/Main/跨模块适配由总控唯一写入，任务原 Worktree 不修改；不是并发回写子项目。旧步骤/基线证据保留历史含义，当前实现与验收范围以[联合报告](../docs/verification/2026-10-15-r04-r05-r06-integration.md)、[共享登记](../docs/CONTRACTS.md)和 STATUS 的 review 行为准。三模块真实输入、状态/恢复/订阅/持久化须联合运行，不相加原模块历史测试。C类数据库/公开协议扩展及R07以后不在本轮授权。

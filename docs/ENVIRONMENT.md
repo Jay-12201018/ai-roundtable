@@ -104,3 +104,12 @@ main 合并 `e642b96a8dded195be44749dd6f267798de95198` 后，在 main 自己已�
 本次另建私有cache/gyp/TMPDIR/userData，随后按严格对应的38.8.6 headers源码重编译，实际Electron ABI139加载/85专项/隔离恢复与Bridge/退出数据通过。Node/Electron构建config分别记录正确目标；main、原R03、集成R03原生文件inode不同。最终main原生文件留在Electron ABI139。32个直接依赖版本和安装锁文件只读盘点，锁文件与仓库逐字节相同；未执行可能写全局store的辅助pnpm list，不重写其R02历史失败。
 
 没有再次使用raw数字fetch参数，ENV-R02-INSTALL-01保持已解决；默认Node24.21.0上游异常仍不在支持结论内。本轮诊断警告及正式E2E/发布/跨平台等未验证事项见[主线报告](verification/2026-10-15-r03-main.md)。
+
+
+## R04/R05/R06 联合候选环境（2026-10-15）
+
+本次独立联合WT从无node_modules开始，以独立inode内容缓存及只读索引备份准备自己的store/cache，冻结离线安装exit0（646 reused/0 downloaded）；没有复制其他WT node_modules，也没有冷缓存联网复验。官方Node24.18.1/同版完整headers和pnpm11.25.0来源重新核验，锁字节一致、32直接依赖盘点通过；未引入raw数字fetch参数。
+
+Node源码重编译、534全回归/265模块专项、类型/生产构建、内存SQL/5进程各30万次压力通过后，单独以Electron38.8.6 headers源码重编译，实际ABI139/arm64读写及112项数据库+联合测试通过。两个新userData的生产页面探针、真实UI/刷新/IPC/退出和旧v1恢复/备份只读核验exit0。main、三个原模块及联合WT的原生文件inode各不同，最终联合WT原生文件留在ElectronABI139。
+
+详细路径/命令/退出码/警告及未验证边界见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)和[台账](verification/2026-10-15-r04-r05-r06-commands.md)。Node24.21.0风险保留，未测正式E2E/跨平台/发布/真实模型，main保持原样。

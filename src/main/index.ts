@@ -7,6 +7,7 @@ import { MockProvider } from './providers/mock/MockProvider';
 import { RunService } from './services/RunService';
 import { createMainWindow } from './windows/createMainWindow';
 import { registerIpc } from './ipc/registerIpc';
+import { createPublicMessagesBuilder } from './context/wirePublicContext';
 
 let database: Database | undefined;
 let window: BrowserWindow | undefined;
@@ -43,7 +44,7 @@ if (!hasLock) {
       database.markInFlightRunsInterrupted();
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
-      runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }));
+      runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }),createPublicMessagesBuilder());
       createAppWindow();
       app.on('activate', () => {
         if (!shutdownRequested && BrowserWindow.getAllWindows().length === 0) createAppWindow();

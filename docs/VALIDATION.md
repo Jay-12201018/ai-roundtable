@@ -87,3 +87,10 @@ STATUS 的 review 表示交付待用户检查，verified 表示总控已确认�
 获批集成候选已以 `6aff174e6cf397eb49b9b4ceadb3387f207b84a6` 合入 main；[本次主线验收](verification/2026-10-14-r02-main.md)单独记录重新执行的命令/退出码，不能复用上节环境专项 PASS。R02 verified；R03 ready 仅表示依赖满足，不是实施授权。
 
 pnpm11.25.0 的辅助 list 会按已安装 `.modules.yaml` 的 storeDir 写打开索引，即使 CLI 覆盖 store 也不改变该路径。受限环境下失败须保留，不为盘点清单擅自写全局 store；可只读比较已安装锁文件与仓库锁文件及全部直接依赖的实际版本，明确该核对不等于新干净安装。主线有限 Electron probe仍须在ready前隔离，并在实际退出后只读核对本次临时数据库。
+
+
+## R04/R05/R06 联合候选验证入口
+
+联合专项为`tests/integration/joint`，贯穿真实RunService、R05 builder、R06 session/App及临时SQLite，捕获实际Provider输入而不是相加各模块历史测试。`tests/probes/r01-electron.cjs --joint-ui`在既有ready前数据/网络隔离上增加真实DOM控件及刷新验证；退出后用同轮metadata执行r01-sqlite，只读核对自己的新profile。`--r03-recovery`仍独立运行旧迁移/恢复/安全回归。不得以Bridge暴露私有Attempt输入来取证，实际入口捕获在联合测试中断言。
+
+本次534完整/265专项/27新联合、类型/构建、压力/双ABI/有限桌面真实结果及所有中间失败见[联合报告](verification/2026-10-15-r04-r05-r06-integration.md)。这是review候选证据，不是主线verified；仍无正式tests/e2e，不把DOM脚本探针当跨平台或发布验收。

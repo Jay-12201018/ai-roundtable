@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from 'zustand';
 import { statusLabels } from './locales/zhCN';
-import { canCommand, selectTaskTitle } from './store/rendererStore';
+import { canCommand,canRecover, selectTaskTitle } from './store/rendererStore';
 import { createRendererSession } from './subscriptions/rendererSession';
 
 export function App() {
@@ -19,6 +19,10 @@ export function App() {
   const stopEnabled = useStore(session.store, state => canCommand(state, 'stop'));
   const stepEnabled = useStore(session.store, state => canCommand(state, 'step'));
   const resumeEnabled = useStore(session.store, state => canCommand(state, 'resumeRun'));
+  const retryEnabled = useStore(session.store,state=>canCommand(state,'retryTurn'));
+  const continueEnabled = useStore(session.store,state=>canCommand(state,'continueMessage'));
+  const recoverEnabled = useStore(session.store,state=>canRecover(state,'resume'));
+  const inspectEnabled = useStore(session.store,state=>canRecover(state,'inspect'));
   useEffect(() => session.mount(), [session]);
   const activeTurn = snapshot?.turns.find(turn => turn.status === 'running');
   const messages = snapshot?.messages ?? [];
@@ -52,6 +56,15 @@ export function App() {
         <button onClick={() => void session.control('step')} disabled={!stepEnabled}>下一步</button>
         <button onClick={() => void session.control('resumeRun')} disabled={!resumeEnabled}>继续</button>
         <button onClick={() => void session.control('stop')} disabled={!stopEnabled}>停止</button>
+        {(snapshot?.status==='error'||snapshot?.status==='cancelled'||snapshot?.status==='interrupted')&&<>
+          <button onClick={()=>void session.repeat('retryTurn')} disabled={!retryEnabled}>重试当前回合</button>
+          <button onClick={()=>void session.repeat('continueMessage')} disabled={!continueEnabled}>续写部分回复</button>
+        </>}
+        {snapshot?.status==='interrupted'&&<>
+          <button onClick={()=>void session.recover('inspect')} disabled={!inspectEnabled}>检查中断记录</button>
+          <button onClick={()=>void session.recover('resume')} disabled={!recoverEnabled}>恢复后续回合</button>
+          <button onClick={()=>void session.recover('discard')} disabled={!inspectEnabled}>放弃中断执行</button>
+        </>}
         <dl><dt>事件序列</dt><dd>{snapshot?.sequence ?? 0}</dd><dt>回合</dt><dd>{snapshot?.turns.length ?? 0}</dd></dl>
       </aside>
     </main>

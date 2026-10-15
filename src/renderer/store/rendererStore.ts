@@ -1,8 +1,8 @@
 import { createStore } from 'zustand/vanilla';
 import { runEventSchema, runSnapshotSchema } from '../../shared/schemas/run';
-import type { RunEvent, RunSnapshot } from '../../shared/types/run';
+import type { RunEvent, RunSnapshot,InterruptedRunDecision } from '../../shared/types/run';
 
-export type RendererCommand = 'create' | 'start' | 'pause' | 'stop' | 'step' | 'resumeRun';
+export type RendererCommand = 'create' | 'start' | 'pause' | 'stop' | 'step' | 'resumeRun' | 'retryTurn' | 'continueMessage' | 'recoverInterruptedRun';
 export type SyncStatus = 'idle' | 'syncing' | 'ready' | 'error';
 
 export interface RendererState {
@@ -34,9 +34,28 @@ export function canCommand(state: RendererState, command: RendererCommand): bool
       && !['running', 'pausing', 'paused', 'cancelling'].includes(status ?? '');
   }
   if (!state.runId || !state.snapshot) return false;
+  if(command==='recoverInterruptedRun')return status==='interrupted';
+  if(command==='retryTurn'||command==='continueMessage'){
+    const turn=state.snapshot.turns.at(-1);
+    const attempt=state.snapshot.attempts?.filter(a=>a.turnId===turn?.turnId).at(-1);
+    return hasExecution(state.snapshot)&&['error','cancelled','interrupted'].includes(status!)
+      &&!!turn&&['failed','aborted','interrupted'].includes(turn.status)&&!!attempt&&['failed','aborted','interrupted'].includes(attempt.status)
+      &&(command!=='continueMessage'||!!state.snapshot.messages.find(m=>m.id===attempt.messageId)?.content);
+  }
   if (command === 'pause') return status === 'running';
   if (command === 'stop') return status === 'running' || status === 'pausing' || status === 'paused';
   return status === 'paused';
+}
+
+function hasExecution(snapshot:RunSnapshot):boolean{
+  const e=snapshot.execution;
+  return !!e&&e.task!==null&&e.membersSnapshot!==null&&e.membersSnapshot.length>0&&e.nextTurnIndex!==null&&e.elapsedExecutionMs!==null&&e.elapsedExecutionMs<e.maxDurationMs;
+}
+export function canRecover(state:RendererState,decision:InterruptedRunDecision):boolean{
+  if(!canCommand(state,'recoverInterruptedRun'))return false;
+  if(decision==='inspect'||decision==='discard')return true;
+  if(decision==='retry')return canCommand(state,'retryTurn');
+  return hasExecution(state.snapshot!)&&state.snapshot!.turns.every(t=>t.status==='completed'&&state.snapshot!.attempts?.filter(a=>a.turnId===t.turnId).at(-1)?.status==='completed');
 }
 
 export function selectTaskTitle(state: RendererState): string {
@@ -71,6 +90,7 @@ export function createRendererStore() {
         pending.command === 'pause' && snapshot.status !== 'running'
         || (pending.command === 'step' || pending.command === 'resumeRun') && snapshot.status !== 'paused'
         || pending.command === 'stop' && ['cancelling', 'cancelled', 'completed', 'error', 'interrupted'].includes(snapshot.status)
+        || ['retryTurn','continueMessage','recoverInterruptedRun'].includes(pending.command)&&snapshot.status==='running'
       );
       set({ snapshot, roomId: snapshot.roomId, runId: snapshot.runId, pending: acknowledged ? undefined : pending });
       return true;

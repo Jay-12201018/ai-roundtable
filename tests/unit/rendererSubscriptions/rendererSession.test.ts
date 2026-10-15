@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRendererSession } from '../../../src/renderer/subscriptions/rendererSession';
 import type { RunEvent, RunSubscription } from '../../../src/shared/types/run';
 import { bridge, deferred, delta, marker, snapshot, subscription, time } from './fixtures';
+import { publicError } from '../../../src/shared/schemas/error';
 
 describe('Renderer subscription coordination', () => {
   beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); });
@@ -13,6 +14,40 @@ describe('Renderer subscription coordination', () => {
     return { ...fake, session, dispose, state: () => session.store.getState() };
   }
   const flush = () => vi.advanceTimersByTimeAsync(32);
+
+  it('drops a conflicting same-sequence failure hint when authority has no safe reason', async () => {
+    const { api, session, emit, state, dispose } = setup();
+    try {
+      await session.selectRun('run');
+      const saved = snapshot('run', 3, '保留文本'); saved.status = 'error';
+      vi.mocked(api.run.subscribe).mockResolvedValue({ ...subscription(saved), resyncRequired: true });
+      for (const code of ['timeout','internal_error'] as const) emit({version:1,runId:'run',sequence:3,type:'turn_failed',turnId:'run-turn',requestId:'run-request',timestamp:time,payload:{turnId:'run-turn',messageId:'run-message',error:publicError(code)}});
+      await flush();
+      expect(state().error).toContain('请检查输入预算');
+      expect(state().snapshot?.messages[0].content).toBe('保留文本');
+    } finally { dispose(); }
+  });
+
+  it('does not restore an older failure after a newer running event', async () => {
+    const { api, session, emit, state, dispose } = setup();
+    const response = deferred<RunSubscription>();
+    vi.mocked(api.run.subscribe).mockReturnValueOnce(response.promise);
+    try {
+      const loading = session.selectRun('run');
+      emit({ version: 1, runId: 'run', sequence: 10, type: 'run_state_changed', timestamp: time, payload: { status: 'running' } });
+      emit({ version: 1, runId: 'run', sequence: 8, turnId: 'run-turn', requestId: 'run-request', type: 'turn_failed', timestamp: time,
+        payload: { turnId: 'run-turn', messageId: 'run-message', error: publicError('timeout') } });
+      const saved = snapshot('run', 11, '旧尝试部分输出');
+      saved.status = 'error'; saved.currentTurnId = undefined; saved.activeAgentId = undefined;
+      saved.turns[0].status = 'failed'; saved.messages[0].status = 'failed'; saved.attempts![0].status = 'failed';
+      response.resolve({ ...subscription(saved), resyncRequired: true });
+      await loading;
+      expect(state().syncStatus).toBe('ready');
+      expect(state().error).toContain('请检查输入预算');
+      expect(state().error).not.toContain('请求已超时');
+      expect(api.run.subscribe).toHaveBeenCalledTimes(1);
+    } finally { dispose(); }
+  });
 
   it('attaches before subscribe and buffers only deltas newer than the snapshot', async () => {
     const { api, session, emit, state, dispose } = setup();

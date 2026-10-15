@@ -33,6 +33,30 @@ try {
   const event = database.prepare('SELECT payload_json FROM run_events WHERE run_id = ? ORDER BY sequence DESC LIMIT 1').get(result.runId);
   assert.equal(JSON.parse(event.payload_json).status, 'cancelled');
   console.log('R01 shutdown SQLite PASS: cancelled, messages/turns/requests preserved, keys/providers empty');
+  if(result.jointMode) {
+    const joint=result.jointRuns;
+    const attempts=id=>database.prepare('SELECT request_id,message_id,input_snapshot,status FROM request_attempts WHERE run_id=? ORDER BY attempt_index,rowid').all(id);
+    const complete=attempts(joint.completed.runId);
+    assert.equal(complete.length,3);
+    const b=JSON.parse(complete[1].input_snapshot).messages;
+    const c=JSON.parse(complete[2].input_snapshot).messages;
+    assert.ok(b.some(m=>m.role==='assistant'&&m.content.includes(joint.completed.messages[0].content)));
+    const first=c.findIndex(m=>m.role==='assistant'&&m.content.includes(joint.completed.messages[0].content));
+    const second=c.findIndex(m=>m.role==='assistant'&&m.content.includes(joint.completed.messages[1].content));
+    assert.ok(first>=0 && second>=0 && first<second);
+    const repeated=attempts(joint.stopped.runId);
+    assert.equal(repeated.length,3);
+    const original=JSON.parse(repeated[0].input_snapshot).messages;
+    assert.deepEqual(JSON.parse(repeated[1].input_snapshot).messages,original);
+    assert.deepEqual(JSON.parse(repeated[2].input_snapshot).messages,[...original,{role:'assistant',content:joint.repeats[0].messages[1].content},{role:'user',content:'Continue the previous response from where it stopped.'}]);
+    assert.deepEqual(repeated.map(a=>a.status),['aborted','aborted','aborted']);
+    for(const snapshot of [joint.completed,joint.repeats[1]]){
+      assert.equal(database.prepare('SELECT status FROM workflow_runs WHERE id=?').pluck().get(snapshot.runId),snapshot.status);
+      const messages=database.prepare('SELECT id,sender_name AS senderName,content,status FROM messages WHERE run_id=? ORDER BY rowid').all(snapshot.runId);
+      assert.deepEqual(messages,snapshot.messages);
+    }
+    console.log('Joint desktop UI/refresh/Pause/Step/Resume/Stop/Retry/Continue and durable inputs PASS; actual Provider-input capture is independently asserted in joint Vitest tests');
+  }
   if(result.recoveryMode) {
     assert.equal(result.recoveryChecks.length,9);
     for(const status of ['running','pausing','paused','cancelling','idle','completed','cancelled','error','interrupted']) {
