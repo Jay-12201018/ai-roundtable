@@ -1,17 +1,18 @@
 import type { RunCommand, RunStatus, TurnStatus } from '../../shared/types/run';
+import { ContractError } from '../../shared/contracts/errors';
 
 export type { RunCommand, RunStatus, TurnStatus };
 
 const runTransitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   idle: ['running'],
-  running: ['pausing', 'cancelling', 'completed', 'error', 'interrupted'],
-  pausing: ['paused', 'cancelling', 'interrupted'],
+  running: ['pausing', 'paused', 'cancelling', 'completed', 'error', 'interrupted'],
+  pausing: ['paused', 'completed', 'error', 'cancelling', 'interrupted'],
   paused: ['running', 'cancelling', 'interrupted'],
   cancelling: ['cancelled', 'interrupted'],
   cancelled: ['running'],
   completed: [],
   error: ['running'],
-  interrupted: ['running'],
+  interrupted: ['running', 'cancelled'],
 };
 
 const turnTransitions: Readonly<Record<TurnStatus, readonly TurnStatus[]>> = {
@@ -19,9 +20,9 @@ const turnTransitions: Readonly<Record<TurnStatus, readonly TurnStatus[]>> = {
   pending: ['running', 'cancelled'],
   running: ['completed', 'failed', 'aborted', 'interrupted', 'cancelled'],
   completed: [],
-  failed: [],
-  aborted: [],
-  interrupted: [],
+  failed: ['running'],
+  aborted: ['running'],
+  interrupted: ['running'],
   cancelled: [],
 };
 
@@ -54,15 +55,15 @@ export function transitionTurn(from: TurnStatus, to: TurnStatus): TurnStatus {
   return to;
 }
 
-/** Command guards are kept beside transitions so UI and services share one policy. */
+/** Reopening an incomplete Turn requires an explicit retry/continue command; old Attempts stay terminal. */
 export function canRunCommand(command: RunCommand, status: RunStatus): boolean {
   switch (command) {
     case 'start':
       return status === 'idle';
     case 'pause':
-      return status === 'running';
+      return status === 'running' || status === 'pausing';
     case 'stop':
-      return status === 'running' || status === 'pausing' || status === 'paused';
+      return status === 'running' || status === 'pausing' || status === 'paused' || status === 'cancelling' || status === 'cancelled';
     case 'step':
     case 'resumeRun':
       return status === 'paused';
@@ -70,22 +71,22 @@ export function canRunCommand(command: RunCommand, status: RunStatus): boolean {
       return status === 'interrupted';
     case 'retryTurn':
     case 'continueMessage':
-      return status === 'error' || status === 'cancelled';
+      return status === 'error' || status === 'cancelled' || status === 'interrupted';
   }
 }
 
 export function assertRunCommand(command: RunCommand, status: RunStatus): void {
   if (!canRunCommand(command, status)) {
-    throw new Error(`Command ${command} is not allowed while run is ${status}`);
+    throw new ContractError('invalid_state');
   }
 }
 
 export function canRetryTurn(status: TurnStatus): boolean {
-  return status === 'failed' || status === 'aborted';
+  return status === 'failed' || status === 'aborted' || status === 'interrupted';
 }
 
 export function canContinueMessage(status: TurnStatus): boolean {
-  return status === 'aborted' || status === 'failed';
+  return canRetryTurn(status);
 }
 
 export function canRecoverInterruptedRun(status: RunStatus): boolean {

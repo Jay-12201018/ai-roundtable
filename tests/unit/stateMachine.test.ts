@@ -50,6 +50,23 @@ describe('run state machine', () => {
     expect(canTransitionRun('unknown' as RunStatus, 'running')).toBe(false);
   });
 
+  it.each([
+    ['running', 'paused'], ['pausing', 'completed'], ['pausing', 'error'],
+    ['interrupted', 'cancelled'],
+  ] as Array<[RunStatus, RunStatus]>)('allows the scheduler boundary %s -> %s', (from, to) => {
+    expect(transitionRun(from, to)).toBe(to);
+  });
+
+  it('permits idempotent pending pause/stop while refusing terminal automatic controls', () => {
+    expect(canRunCommand('pause', 'pausing')).toBe(true);
+    expect(canRunCommand('stop', 'cancelling')).toBe(true);
+    expect(canRunCommand('stop', 'cancelled')).toBe(true);
+    for (const status of ['completed', 'error', 'cancelled', 'interrupted'] as const) {
+      expect(canRunCommand('step', status)).toBe(false);
+      expect(canRunCommand('resumeRun', status)).toBe(false);
+    }
+  });
+
   it('only permits a single turn for step and pause does not continue', () => {
     expect(canTransitionRun('paused', 'running')).toBe(true);
     expect(canTransitionRun('pausing', 'running')).toBe(false);
@@ -71,6 +88,13 @@ describe('run state machine', () => {
 });
 
 describe('turn state machine', () => {
+  it('allows an explicit new attempt to reopen incomplete aggregate Turns only', () => {
+    for (const status of ['failed', 'aborted', 'interrupted'] as const) {
+      expect(canRetryTurn(status)).toBe(true);
+      expect(transitionTurn(status, 'running')).toBe('running');
+    }
+    expect(canTransitionTurn('completed', 'running')).toBe(false);
+  });
   it('allows a pending turn to complete or fail exactly once', () => {
     expect(canTransitionTurn('pending', 'running')).toBe(true);
     expect(transitionTurn('running', 'completed')).toBe('completed');

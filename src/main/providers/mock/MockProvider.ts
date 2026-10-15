@@ -4,7 +4,12 @@ import { publicError } from '../../../shared/schemas/error';
 import type { NormalizedChunk, ProviderAdapter, StreamChatInput, ListModelsInput, TestConnectionInput, ConnectionTestResult } from '../types';
 
 export class MockProvider implements ProviderAdapter {
-  constructor(private readonly options: { tokenDelayMs?: number } = {}) {}
+  constructor(private readonly options: {
+    tokenDelayMs?: number;
+    stopAfterDeltas?: number;
+    errorAfterDeltas?: number;
+    stallAfterDeltas?: number;
+  } = {}) {}
 
   async listModels(input: ListModelsInput) {
     const { signal, ...parameters } = input;
@@ -28,19 +33,24 @@ export class MockProvider implements ProviderAdapter {
     if (parsed.modelId !== 'mock') { yield { type: 'error', requestId, error: publicError('not_found') }; return; }
     yield { type: 'start', requestId };
     const text = responseFor(parsed.agentRole ?? 'Drafter', parsed.turnIndex ?? 0);
-    let outputTokens = 0;
-    for (const token of tokenize(text)) {
+    const deltas = splitMockText(text);
+    let emittedDeltas = 0;
+    let limited = false;
+    while (true) {
       if (signal?.aborted) { yield { type: 'error', requestId, error: publicError('cancelled') }; return; }
-      await delay(this.options.tokenDelayMs ?? 0);
+      if (emittedDeltas === this.options.errorAfterDeltas) { yield { type: 'error', requestId, error: publicError('internal_error') }; return; }
+      if (emittedDeltas === this.options.stallAfterDeltas) await delay(undefined, signal);
       if (signal?.aborted) { yield { type: 'error', requestId, error: publicError('cancelled') }; return; }
-      outputTokens += 1;
-      if (outputTokens > (parsed.outputTokenLimit ?? Infinity)) break;
-      yield { type: 'text_delta', requestId, text: token };
+      if (emittedDeltas >= deltas.length || emittedDeltas >= (this.options.stopAfterDeltas ?? Infinity)) break;
+      if (emittedDeltas >= (parsed.outputTokenLimit ?? Infinity)) { limited = true; break; }
+      await delay(this.options.tokenDelayMs ?? 0, signal);
+      if (signal?.aborted) { yield { type: 'error', requestId, error: publicError('cancelled') }; return; }
+      yield { type: 'text_delta', requestId, text: deltas[emittedDeltas] };
+      emittedDeltas += 1;
     }
+    // Mock usage estimates UTF-16 input length and output delta units, not real model tokens.
+    yield { type: 'usage', requestId, inputTokens: parsed.messages.reduce((total, message) => total + message.content.length, 0), outputTokens: emittedDeltas };
     if (signal?.aborted) { yield { type: 'error', requestId, error: publicError('cancelled') }; return; }
-    const limited = outputTokens > (parsed.outputTokenLimit ?? Infinity);
-    outputTokens = Math.min(outputTokens, parsed.outputTokenLimit ?? Infinity);
-    yield { type: 'usage', requestId, inputTokens: parsed.messages.reduce((total, message) => total + message.content.length, 0), outputTokens };
     yield { type: 'finish', requestId, reason: limited ? 'length' : 'stop' };
   }
 }
@@ -51,10 +61,19 @@ function responseFor(role: string, turnIndex: number): string {
   return `Mock 起草：这是第 ${turnIndex + 1} 轮的初步方案，包含目标、步骤和验证标准。`;
 }
 
-function tokenize(text: string): string[] {
+function splitMockText(text: string): string[] {
   return text.match(/.{1,4}/gu) ?? [text];
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return milliseconds > 0 ? new Promise((resolve) => setTimeout(resolve, milliseconds)) : Promise.resolve();
+function delay(milliseconds: number | undefined, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || (milliseconds !== undefined && milliseconds <= 0)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = milliseconds === undefined ? undefined : setTimeout(done, milliseconds);
+    function done() {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+  });
 }

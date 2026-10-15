@@ -1,34 +1,40 @@
 import { randomUUID } from 'node:crypto';
-import type { RunEvent, RunSnapshot, RunSubscription, RunStatus } from '../../shared/types/run';
-import { assertRunCommand } from '../orchestrator/stateMachine';
+import { setImmediate as drainReadyCallbacks } from 'node:timers/promises';
+import type { RunEvent, RunSnapshot, RunSubscription, RunStatus, TurnStatus } from '../../shared/types/run';
+import { assertRunCommand, canRetryTurn, transitionRun, transitionTurn } from '../orchestrator/stateMachine';
 import type { StartRunInput } from '../../shared/contracts/run';
 import type { InterruptedRunDecision } from '../../shared/types/run';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
 import { publicError } from '../../shared/schemas/error';
-import { runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
+import { interruptedRunDecisionSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
 import { roomMessagesSchema } from '../../shared/schemas/app';
 import { PROTOCOL_VERSION } from '../../shared/schemas/common';
-import { normalizedChunkSchema } from '../../shared/schemas/provider';
-import type { Database, RunEventRecord } from '../database/Database';
+import { normalizedChunkSchema, streamChatInputSchema } from '../../shared/schemas/provider';
+import type { MemberSnapshot } from '../../shared/schemas/persistence';
+import type { Database, RunEventRecord, RunRecord, TurnRecord } from '../database/Database';
 import type { ProviderAdapter, StreamChatInput } from '../providers/types';
 
 type RunContext = {
   runId: string;
   roomId: string;
-  task: string;
   mode: 'automatic' | 'step';
   maxTurns: number;
   maxDurationMs: number;
   outputTokenLimit: number;
   abortController: AbortController;
-  pauseRequested: boolean;
   stopRequested: boolean;
-  nextAgentIndex: number;
+  timedOut: boolean;
   promise: Promise<void>;
-  members: ReturnType<Database['listAgents']>;
+  members: MemberSnapshot[];
   elapsedBefore: number;
-  segmentStartedAt: number;
+  segmentStartedAt?: number;
+  deadline?: ReturnType<typeof setTimeout>;
+  executing: boolean;
+  failureReason?: string;
 };
+
+export type RunMessagesBuilder = (run: RunRecord, member: MemberSnapshot, turnIndex: number) => StreamChatInput['messages'];
+type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string };
 
 type EventListener = (event: RunEvent) => void;
 
@@ -42,8 +48,11 @@ export class RunService {
   private readonly contexts = new Map<string, RunContext>();
   private readonly listeners = new Set<EventListener>();
   private readonly activeRooms = new Set<string>();
+  private shutdownPromise?: Promise<void>;
+  private shuttingDown = false;
 
-  constructor(private readonly database: Database, private readonly provider: ProviderAdapter) {}
+  constructor(private readonly database: Database, private readonly provider: ProviderAdapter,
+    private readonly buildMessages: RunMessagesBuilder = run => [{ role: 'user', content: run.task! }]) {}
 
   createDemoRoom(objective: string): string {
     const roomId = randomUUID();
@@ -58,34 +67,20 @@ export class RunService {
     const parsed = startRunInputSchema.safeParse(input);
     if (!parsed.success) throw new ContractError('invalid_input');
     input = parsed.data;
-    if (this.activeRooms.has(input.roomId)) throw new Error('Room already has an active run');
-    if (this.activeRooms.size > 0) throw new Error('Another room already has an active run');
-    if (!this.database.getRoom(input.roomId)) throw new Error('Room not found');
+    this.assertAvailable();
+    if (!this.database.getRoom(input.roomId)) throw new ContractError('not_found');
+    const members = this.database.listAgents(input.roomId).map(({ id, roomId: _roomId, ...member }) => ({ ...member, agentId: id, modelId: member.modelId ?? 'mock' }));
+    if (!members.length) throw new ContractError('invalid_state');
     const runId = randomUUID();
-    const context: RunContext = {
-      runId,
-      roomId: input.roomId,
-      task: input.task,
-      mode: input.mode ?? 'automatic',
-      maxTurns: input.maxTurns ?? 3,
-      maxDurationMs: input.maxDurationMs ?? 300000,
-      outputTokenLimit: input.outputTokenLimit ?? 1024,
-      abortController: new AbortController(),
-      pauseRequested: false,
-      stopRequested: false,
-      nextAgentIndex: 0,
-      promise: Promise.resolve(),
-      members: this.database.listAgents(input.roomId), elapsedBefore: 0, segmentStartedAt: 0,
-    };
-    this.database.transaction(() => {
+    const context: RunContext = { runId, roomId: input.roomId, members,
+      mode: input.mode ?? 'automatic', maxTurns: input.maxTurns ?? 3, maxDurationMs: input.maxDurationMs ?? 300000,
+      outputTokenLimit: input.outputTokenLimit ?? 1024, abortController: new AbortController(),
+      stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
+    this.schedule(context, () => {
       this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: input.workflowSnapshot, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
-        task: input.task, membersSnapshot:context.members.map(a=>({agentId:a.id,displayName:a.displayName,roleTemplateId:a.roleTemplateId,displayOrder:a.displayOrder,systemPrompt:'',providerId:null,modelId:'mock'})),nextTurnIndex:0,elapsedExecutionMs:0 });
-      this.database.updateRun(runId, { status: 'running', startedAt: new Date().toISOString() });
-      this.appendEvent(runId, 'run_state_changed', { status: 'running' });
+        task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 });
+      this.setRunState(runId, { status: 'running', startedAt: new Date().toISOString() }, { status: 'running' });
     });
-    this.contexts.set(runId, context);
-    this.activeRooms.add(input.roomId);
-    context.promise = this.runLoop(context);
     return this.getSnapshot(runId);
   }
 
@@ -146,203 +141,379 @@ export class RunService {
     return this.activeRooms.size > 0;
   }
 
-  async shutdown(): Promise<void> {
-    const contexts = [...this.contexts.values()];
-    for (const context of contexts) {
-      context.stopRequested = true;
-      context.abortController.abort();
-    }
-    await Promise.all(contexts.map((context) => context.promise));
-    for (const context of contexts) {
-      if (this.database.getRun(context.runId)?.status === 'paused') this.finishRun(context, 'cancelled');
-    }
-    this.contexts.clear();
-    this.activeRooms.clear();
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shuttingDown = true;
+    // Drain already queued output once; never wait for a Provider's pending I/O.
+    const drained = [...this.contexts.values()].some(context => context.executing) ? drainReadyCallbacks() : Promise.resolve();
+    this.shutdownPromise = drained.then(() => Promise.all([...this.contexts.keys()].map(id => this.stop(id)))).then(() => {}).finally(() => {
+      this.shuttingDown = false;
+      this.shutdownPromise = undefined;
+    });
+    return this.shutdownPromise;
   }
 
   pause(runId: string): void {
-    const context = this.requireContext(runId);
-    const status = this.database.getRun(runId)?.status;
-    if (!status) throw new Error('Run not found');
-    assertRunCommand('pause', status as RunStatus);
-    context.pauseRequested = true;
+    const run = this.requireRun(runId);
+    assertRunCommand('pause', run.status);
+    this.requireContext(runId);
+    if (run.status === 'pausing') return;
     this.setRunState(runId, { status: 'pausing' }, { status: 'pausing' });
   }
 
   async stop(runId: string): Promise<void> {
-    const context = this.requireContext(runId);
-    const status = this.database.getRun(runId)?.status;
-    if (!status) throw new Error('Run not found');
-    assertRunCommand('stop', status as RunStatus);
-    context.stopRequested = true;
-    context.abortController.abort();
-    if (status === 'paused') {
-      this.finishRun(context, 'cancelled');
+    const run = this.requireRun(runId);
+    assertRunCommand('stop', run.status);
+    if (run.status === 'cancelled') return;
+    const context = this.contexts.get(runId);
+    if (run.status === 'cancelling' && context?.executing) { await context.promise; return; }
+    if (!context) {
+      if (run.status !== 'paused') throw new ContractError('invalid_state');
+      this.database.transaction(() => {
+        this.setRunState(runId, { status: 'cancelling' }, { status: 'cancelling' });
+        this.setRunState(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentTurnId: null, currentAgentId: null }, { status: 'cancelled' });
+      });
       return;
     }
-    this.setRunState(runId, { status: 'cancelling' }, { status: 'cancelling' });
-    await context.promise;
+    if (run.status !== 'cancelling') this.setRunState(runId, { status: 'cancelling' }, { status: 'cancelling' });
+    context.stopRequested = true;
+    context.abortController.abort(new ContractError('cancelled'));
+    if (!context.executing) this.finishRun(context, 'cancelled');
+    else await context.promise;
   }
 
   async step(runId: string): Promise<void> {
-    const context = this.requireContext(runId);
-    const status = this.database.getRun(runId)?.status;
-    if (status !== 'paused') throw new Error('Step requires a paused run');
-    context.mode = 'step';
-    context.pauseRequested = false;
-    this.setRunState(runId, { status: 'running',mode:'step' }, { status: 'running' });
-    context.promise = this.runLoop(context);
-    await context.promise;
+    await this.resumePaused(runId, 'step');
   }
 
   async resumeRun(runId: string): Promise<void> {
-    const context = this.requireContext(runId);
-    const status = this.database.getRun(runId)?.status;
-    if (status !== 'paused') throw new Error('resumeRun requires a paused run');
-    context.mode = 'automatic';
-    context.pauseRequested = false;
-    this.setRunState(runId, { status: 'running',mode:'automatic' }, { status: 'running' });
-    context.promise = this.runLoop(context);
+    await this.resumePaused(runId, 'automatic');
+  }
+
+  private async resumePaused(runId: string, mode: RunContext['mode']): Promise<void> {
+    const run = this.requireRun(runId);
+    assertRunCommand(mode === 'step' ? 'step' : 'resumeRun', run.status);
+    const context = this.contexts.get(runId) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
+    this.assertSettled(runId);
+    this.assertBudget(run);
+    context.mode = mode;
+    this.schedule(context, () => this.setRunState(runId, { status: 'running', mode }, { status: 'running' }));
     await context.promise;
   }
 
-  async retryTurn(_runId: string, _turnId: string): Promise<void> {
-    throw new ContractError('unsupported');
+  async retryTurn(runId: string, turnId: string): Promise<void> {
+    await this.repeatAttempt(runId, turnId);
   }
 
-  async continueMessage(_runId: string, _messageId: string): Promise<void> {
-    throw new ContractError('unsupported');
+  async continueMessage(runId: string, messageId: string): Promise<void> {
+    const run = this.requireRun(runId);
+    this.contextFrom(run); // Legacy inputs are unknown, never reconstructed from room text.
+    const message = this.database.getMessage(messageId);
+    if (!message || message.runId !== runId || !message.turnId || !message.content) throw new ContractError('invalid_state');
+    const latest = this.database.getLatestAttemptRequestId(message.turnId);
+    if (!latest || this.database.getAttempt(latest)?.messageId !== messageId) throw new ContractError('invalid_state');
+    await this.repeatAttempt(runId, message.turnId, message.content);
+  }
+
+  private async repeatAttempt(runId: string, turnId: string, suffixOf?: string): Promise<void> {
+    const run = this.requireRun(runId);
+    const context = this.contextFrom(run);
+    assertRunCommand(suffixOf === undefined ? 'retryTurn' : 'continueMessage', run.status);
+    const turn = this.database.listTurns(runId).at(-1);
+    const requestId = this.database.getLatestAttemptRequestId(turnId);
+    const attempt = requestId ? this.database.getAttempt(requestId) : undefined;
+    if (!turn || turn.id !== turnId || !canRetryTurn(turn.status as TurnStatus) || !attempt
+      || !canRetryTurn(attempt.status) || !attempt.inputSnapshot) throw new ContractError('invalid_state');
+    this.assertBudget(run);
+    const messages = suffixOf === undefined ? attempt.inputSnapshot.messages : [
+      ...attempt.inputSnapshot.messages,
+      { role: 'assistant' as const, content: suffixOf },
+      { role: 'user' as const, content: 'Continue the previous response from where it stopped.' },
+    ];
+    this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }),
+      { turn, messages, modelId: attempt.inputSnapshot.modelId });
+    await context.promise;
   }
 
   async recoverInterruptedRun(runId: string, decision: InterruptedRunDecision): Promise<void> {
-    const run = this.database.getRun(runId);
-    if (!run) throw new ContractError('not_found');
-    if (run.status !== 'interrupted') throw new ContractError('invalid_state');
+    const parsed = interruptedRunDecisionSchema.safeParse(decision);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    const run = this.requireRun(runId);
+    assertRunCommand('recoverInterruptedRun', run.status);
     if (decision === 'inspect') return;
     if (decision === 'discard') {
-      this.setRunState(runId, { status: 'cancelled', finishedAt: new Date().toISOString() }, { status: 'cancelled', reason: 'discarded after interruption' });
+      this.setRunState(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentTurnId: null, currentAgentId: null }, { status: 'cancelled', reason: 'discarded after interruption' });
       return;
     }
-    throw new ContractError('unsupported');
+    const context = this.contextFrom(run);
+    if (decision === 'retry') {
+      const turn = this.database.listTurns(runId).at(-1);
+      if (!turn) throw new ContractError('invalid_state');
+      await this.repeatAttempt(runId, turn.id);
+      return;
+    }
+    this.assertSettled(runId);
+    this.assertBudget(run);
+    this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }));
+    await context.promise;
   }
 
-  private async runLoop(context: RunContext): Promise<void> {
-    const startedAt = Date.now();
-    context.elapsedBefore = this.database.getRun(context.runId)?.elapsedExecutionMs??0;
+  private requireRun(runId: string): RunRecord {
+    const run = this.database.getRun(runId);
+    if (!run) throw new ContractError('not_found');
+    return run;
+  }
+
+  private contextFrom(run: RunRecord): RunContext {
+    if (run.task === null || run.membersSnapshot === null || !run.membersSnapshot.length || run.nextTurnIndex === null || run.elapsedExecutionMs === null) throw new ContractError('unsupported');
+    return { runId: run.id, roomId: run.roomId, members: run.membersSnapshot,
+      mode: run.mode, maxTurns: run.maxTurns, maxDurationMs: run.maxDurationMs, outputTokenLimit: run.outputTokenLimit,
+      abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: run.elapsedExecutionMs, executing: false };
+  }
+
+  private assertSettled(runId: string): void {
+    if (this.database.listTurns(runId).some(turn => {
+      const requestId = this.database.getLatestAttemptRequestId(turn.id);
+      return turn.status !== 'completed' || !requestId || this.database.getAttempt(requestId)?.status !== 'completed';
+    })) throw new ContractError('invalid_state');
+  }
+
+  private assertBudget(run: RunRecord): void {
+    if (run.elapsedExecutionMs !== null && run.elapsedExecutionMs >= run.maxDurationMs) throw new ContractError('timeout');
+  }
+
+  private assertAvailable(context?: RunContext): void {
+    if (this.shuttingDown) throw new ContractError('invalid_state');
+    if (this.activeRooms.size && (!context || this.contexts.get(context.runId) !== context)) throw new Error('Another room already has an active run');
+  }
+
+  private schedule(context: RunContext, change: () => void, repeat?: RepeatAttempt): void {
+    this.assertAvailable(context);
+    const previous = this.contexts.get(context.runId);
+    const oldPromise = context.promise;
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    context.promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    void context.promise.catch(() => {});
+    context.abortController = new AbortController();
+    context.stopRequested = false;
+    context.timedOut = false;
+    context.failureReason = undefined;
     context.segmentStartedAt = performance.now();
-    try {
-      const agents = context.members;
-      while (context.nextAgentIndex < agents.length && context.nextAgentIndex < context.maxTurns) {
-        if (Date.now() - startedAt > context.maxDurationMs) {
-          this.finishRun(context, 'paused', 'Maximum run duration reached');
-          return;
-        }
-        if (context.stopRequested) {
-          this.finishRun(context, 'cancelled');
-          return;
-        }
-        if (context.pauseRequested) {
-          this.finishRun(context, 'paused');
-          return;
-        }
-        await this.executeTurn(context, agents[context.nextAgentIndex], context.nextAgentIndex);
-        context.nextAgentIndex += 1;
-        if (context.mode === 'step') {
-          this.finishRun(context, context.nextAgentIndex >= agents.length ? 'completed' : 'paused');
-          return;
-        }
-      }
-      this.finishRun(context, 'completed');
-    } catch (error) {
-      if (context.stopRequested || /cancel/i.test(String(error))) {
-        this.finishRun(context, 'cancelled');
-      } else {
-        this.setRunState(context.runId, { status: 'error', lastError: toPublicError(error).message, finishedAt: new Date().toISOString() }, { status: 'error' });
-      }
-      this.activeRooms.delete(context.roomId);
-    } finally {
-      this.persistElapsed(context);
+    context.executing = true;
+    this.contexts.set(context.runId, context);
+    this.activeRooms.add(context.roomId);
+    try { this.database.transaction(change); }
+    catch (error) {
+      context.executing = false;
+      context.segmentStartedAt = undefined;
+      context.promise = oldPromise;
+      if (!previous) { this.contexts.delete(context.runId); this.activeRooms.delete(context.roomId); }
+      resolve();
+      throw error;
     }
+    this.armDeadline(context);
+    void this.runLoop(context, repeat).then(resolve, error => {
+      clearTimeout(context.deadline);
+      context.elapsedBefore = this.elapsed(context);
+      context.segmentStartedAt = undefined;
+      context.executing = false;
+      context.abortController.abort();
+      reject(error);
+    });
+  }
+
+  private armDeadline(context: RunContext): void {
+    if (this.deadlineReached(context)) return;
+    const remaining = context.maxDurationMs - this.elapsed(context);
+    context.deadline = setTimeout(() => this.armDeadline(context), Math.min(remaining, 2147483647));
+  }
+
+  private deadlineReached(context: RunContext): boolean {
+    if (context.timedOut || this.elapsed(context) >= context.maxDurationMs) {
+      context.timedOut = true;
+      context.abortController.abort(new ContractError('timeout'));
+      return true;
+    }
+    return false;
+  }
+
+  private async runLoop(context: RunContext, repeat?: RepeatAttempt): Promise<void> {
+    try {
+      while (true) {
+        if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
+        if (this.deadlineReached(context)) throw new ContractError('timeout');
+        const run = this.requireRun(context.runId);
+        if (!repeat && run.nextTurnIndex! >= context.maxTurns) { this.finishRun(context, 'completed'); return; }
+        if (run.status === 'pausing') { this.finishRun(context, 'paused'); return; }
+        const turnIndex = repeat?.turn.turnIndex ?? run.nextTurnIndex!;
+        const repeatedAgentId = repeat?.turn.agentId;
+        const member = repeat ? context.members.find(a => a.agentId === repeatedAgentId) : context.members[turnIndex % context.members.length];
+        if (!member) throw new ContractError('invalid_state');
+        await this.executeTurn(context, member, turnIndex, repeat);
+        repeat = undefined;
+        if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
+        if (this.deadlineReached(context)) throw new ContractError('timeout');
+        if (this.requireRun(context.runId).nextTurnIndex! >= context.maxTurns) { this.finishRun(context, 'completed'); return; }
+        if (context.mode === 'step' || this.requireRun(context.runId).status === 'pausing') { this.finishRun(context, 'paused'); return; }
+      }
+    } catch (error) {
+      const code = toPublicError(error).code;
+      this.finishRun(context, context.stopRequested || code === 'cancelled' ? 'cancelled' : 'error',
+        context.timedOut || code === 'timeout' ? 'Maximum run duration reached' : undefined,
+        context.failureReason ?? toPublicError(error).message);
+    }
+  }
+
+  private elapsed(context: RunContext): number {
+    return context.elapsedBefore + (context.segmentStartedAt === undefined ? 0 : Math.max(0, Math.floor(performance.now() - context.segmentStartedAt)));
   }
 
   private persistElapsed(context: RunContext): void {
-    this.database.updateRunProgress(context.runId,{elapsedExecutionMs:context.elapsedBefore+Math.max(0,Math.floor(performance.now()-context.segmentStartedAt))});
+    this.database.updateRunProgress(context.runId, { elapsedExecutionMs: this.elapsed(context) });
   }
 
-  private async executeTurn(context: RunContext, agent: { id: string; displayName: string; roleTemplateId: string }, turnIndex: number): Promise<void> {
-    const turnId = randomUUID();
+  private withAbort<T>(context: RunContext, work: () => Promise<T>): Promise<T> {
+    const signal = context.abortController.signal;
+    if (signal.aborted) return Promise.reject(new ContractError(context.timedOut ? 'timeout' : 'cancelled'));
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => { signal.removeEventListener('abort', abort); reject(new ContractError(context.timedOut ? 'timeout' : 'cancelled')); };
+      signal.addEventListener('abort', abort, { once: true });
+      try {
+        work().then(value => { signal.removeEventListener('abort', abort); resolve(value); }, error => { signal.removeEventListener('abort', abort); reject(error); });
+      } catch (error) { signal.removeEventListener('abort', abort); reject(error); }
+    });
+  }
+
+  private async executeTurn(context: RunContext, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt): Promise<void> {
+    const turnId = repeat?.turn.id ?? randomUUID();
     const messageId = randomUUID();
     const requestId = randomUUID();
-    const input: StreamChatInput = { requestId, modelId: 'mock', outputTokenLimit: context.outputTokenLimit, agentRole: agent.roleTemplateId, turnIndex, messages: [{ role: 'user', content: context.task }], signal: context.abortController.signal };
-    const {signal,...inputSnapshot} = input;
+    const input: StreamChatInput = { ...streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
+      outputTokenLimit: context.outputTokenLimit, agentRole: member.roleTemplateId, turnIndex,
+      messages: repeat?.messages ?? this.buildMessages(this.requireRun(context.runId), member, turnIndex) }), signal: context.abortController.signal };
+    if (this.deadlineReached(context)) throw new ContractError('timeout');
+    const { signal, ...inputSnapshot } = input;
     this.database.transaction(() => {
-      this.database.insertTurn({ id: turnId, runId: context.runId, agentId: agent.id, status: 'running', requestId, turnIndex });
-      this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: agent.displayName, content: '', status: 'streaming' });
-      this.database.createAttempt({requestId,runId:context.runId,turnId,messageId,attemptIndex:0,status:'pending',inputSnapshot});
-      this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: agent.id });
-      this.appendEvent(context.runId, 'turn_started', { turnId, messageId, agentId: agent.id, requestId });
+      if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
+      else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex });
+      this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: '', status: 'streaming' });
+      const attemptIndex = this.database.listAttempts(context.runId).filter(a => a.turnId === turnId).length;
+      this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
+      this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: member.agentId });
+      this.appendEvent(context.runId, 'turn_started', { turnId, messageId, agentId: member.agentId, requestId });
     });
     let content = '';
+    let iterator: AsyncIterator<unknown> | undefined;
+    let drained = false;
     try {
-      let outputTokens = 0;
       let started = false;
-      let finished = false;
-      let locallyLimited = false;
-      for await (const value of this.provider.streamChat(input)) {
-        const parsed = normalizedChunkSchema.safeParse(value);
-        if (!parsed.success || parsed.data.requestId !== requestId || finished) throw new ContractError('invalid_response');
-        const chunk = parsed.data;
-        if (chunk.type === 'error') throw new ContractError(chunk.error.code);
-        if (chunk.type === 'start') {
-          if (started) throw new ContractError('invalid_response');
-          started = true;
-          this.database.updateAttempt(requestId,{status:'running',providerRequestId:chunk.providerRequestId});
-          continue;
+      let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
+      if (this.deadlineReached(context) || signal?.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
+      iterator = this.provider.streamChat(input)[Symbol.asyncIterator]();
+      await this.withAbort(context, async () => {
+        while (true) {
+          const next = await iterator!.next();
+          this.deadlineReached(context);
+          if (signal?.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
+          if (next.done) { drained = true; break; }
+          const parsed = normalizedChunkSchema.safeParse(next.value);
+          if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
+          const chunk = parsed.data;
+          if (chunk.type === 'error') throw new ContractError(chunk.error.code);
+          if (chunk.type === 'start') {
+            if (started) throw new ContractError('invalid_response');
+            started = true;
+            this.database.updateAttempt(requestId, { status: 'running', providerRequestId: chunk.providerRequestId });
+            continue;
+          }
+          if (!started) throw new ContractError('invalid_response');
+          if (chunk.type === 'finish') { finishReason = chunk.reason; continue; }
+          if (chunk.type === 'text_delta') {
+            content += chunk.text;
+            this.database.transaction(() => {
+              this.database.updateMessage(messageId, content, 'streaming');
+              this.database.updateTurn(turnId, { partialContent: content });
+              this.persistElapsed(context);
+              this.appendEvent(context.runId, 'text_delta', { turnId, messageId, senderName: member.displayName, text: chunk.text });
+            });
+          } else if (chunk.type === 'reasoning_summary_delta') {
+            this.appendAndNotify(context.runId, 'reasoning_summary_delta', { turnId, messageId, senderName: member.displayName, text: chunk.text });
+          } else if (chunk.type === 'usage') {
+            this.appendAndNotify(context.runId, 'usage_updated', { turnId, inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens });
+          }
         }
-        if (!started) throw new ContractError('invalid_response');
-        if (chunk.type === 'finish') { finished = true; continue; }
-        if (chunk.type === 'text_delta') {
-          if (outputTokens >= context.outputTokenLimit) { locallyLimited = true; break; }
-          outputTokens += 1;
-          content += chunk.text;
-          this.database.transaction(() => {
-            this.database.updateMessage(messageId, content, 'streaming');
-            this.database.updateTurn(turnId, { partialContent: content });
-            this.persistElapsed(context);
-            this.appendEvent(context.runId, 'text_delta', { turnId, messageId, senderName: agent.displayName, text: chunk.text });
-          });
-        } else if (chunk.type === 'reasoning_summary_delta') {
-          this.appendAndNotify(context.runId, 'reasoning_summary_delta', { turnId, messageId, senderName: agent.displayName, text: chunk.text });
-        } else if (chunk.type === 'usage') {
-          this.appendAndNotify(context.runId, 'usage_updated', { turnId, inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens });
-        }
+      });
+      if (!finishReason) throw new ContractError('invalid_response');
+      if (finishReason !== 'stop') {
+        // shortcut: v1 has no incomplete-finish error code, request a shared reason before real Providers.
+        context.failureReason = `Provider finish: ${finishReason}`;
+        throw new ContractError('invalid_response');
       }
-      if (!finished && !locallyLimited) throw new ContractError('invalid_response');
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, 'completed');
-        this.database.updateTurn(turnId, { status: 'completed', partialContent: content });
-        this.database.updateAttempt(requestId,{status:'completed'});
+        this.database.updateTurn(turnId, { status: transitionTurn('running', 'completed'), partialContent: content });
+        this.database.updateAttempt(requestId, { status: 'completed' });
+        this.persistElapsed(context);
         this.appendEvent(context.runId, 'turn_completed', { turnId, messageId });
       });
     } catch (error) {
-      const cancelled = context.stopRequested || /cancel/i.test(String(error));
+      const code = toPublicError(error).code;
+      const aborted = context.stopRequested || context.timedOut || code === 'cancelled' || code === 'timeout';
       this.database.transaction(() => {
-        this.database.updateMessage(messageId, content, cancelled ? 'aborted' : 'failed');
-        this.database.updateTurn(turnId, { status: cancelled ? 'aborted' : 'failed', partialContent: content });
-        this.database.updateAttempt(requestId,{status:cancelled?'aborted':'failed'});
-        this.appendEvent(context.runId, cancelled ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: toPublicError(error, cancelled ? 'cancelled' : 'internal_error') });
+        this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
+        this.database.updateTurn(turnId, { status: transitionTurn('running', aborted ? 'aborted' : 'failed'), partialContent: content });
+        this.database.updateAttempt(requestId, { status: aborted ? 'aborted' : 'failed' });
+        this.persistElapsed(context);
+        this.appendEvent(context.runId, aborted ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: toPublicError(error, aborted ? 'cancelled' : 'internal_error') });
       });
       throw error;
+    } finally {
+      // A non-cooperating Provider must not block Stop/shutdown or write late chunks.
+      if (!drained && iterator?.return) void Promise.resolve().then(() => iterator!.return!()).catch(() => {});
     }
   }
 
-  private finishRun(context: RunContext, status: 'completed' | 'paused' | 'cancelled', reason?: string): void {
-    this.setRunState(context.runId, { status, finishedAt: status === 'completed' || status === 'cancelled' ? new Date().toISOString() : null, lastError: reason ?? null }, { status, reason });
-    if (status !== 'paused') this.activeRooms.delete(context.roomId);
+  private finishRun(context: RunContext, status: 'completed' | 'paused' | 'cancelled' | 'error', reason?: 'Maximum run duration reached', lastError?: string): void {
+    if (status === 'cancelled' && this.requireRun(context.runId).status !== 'cancelling') {
+      this.setRunState(context.runId, { status: 'cancelling' }, { status: 'cancelling' });
+    }
+    clearTimeout(context.deadline);
+    const elapsed = this.elapsed(context);
+    this.database.transaction(() => {
+      if (status === 'error' || status === 'cancelled') {
+        const aborted = status === 'cancelled' || context.timedOut;
+        for (const turn of this.database.listTurns(context.runId).filter(t => t.status === 'running')) {
+          const requestId = this.database.getLatestAttemptRequestId(turn.id);
+          const attempt = requestId ? this.database.getAttempt(requestId) : undefined;
+          if (!attempt || !['pending', 'running'].includes(attempt.status)) throw new ContractError('invalid_state');
+          const message = this.database.getMessage(attempt.messageId)!;
+          this.database.updateMessage(message.id, message.content, aborted ? 'aborted' : 'failed');
+          this.database.updateTurn(turn.id, { status: transitionTurn('running', aborted ? 'aborted' : 'failed') });
+          this.database.updateAttempt(attempt.requestId, { status: aborted ? 'aborted' : 'failed' });
+          this.appendEvent(context.runId, aborted ? 'turn_aborted' : 'turn_failed', { turnId: turn.id, messageId: message.id,
+            error: publicError(context.timedOut ? 'timeout' : aborted ? 'cancelled' : 'internal_error') });
+        }
+      }
+      this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
+      this.database.afterCommit(() => {
+        context.elapsedBefore = elapsed;
+        context.segmentStartedAt = undefined;
+        context.executing = false;
+        if (status !== 'paused') { this.contexts.delete(context.runId); this.activeRooms.delete(context.roomId); }
+      });
+      this.setRunState(context.runId, { status, finishedAt: status === 'paused' ? null : new Date().toISOString(),
+        currentTurnId: null, currentAgentId: null, lastError: lastError ?? reason ?? null }, { status, reason });
+    });
   }
 
-  private setRunState(runId: string,patch: Parameters<Database['updateRun']>[1],payload: unknown): void {
-    this.database.transaction(()=>{this.database.updateRun(runId,patch);this.appendEvent(runId,'run_state_changed',payload);});
+  private setRunState(runId: string, patch: Parameters<Database['updateRun']>[1], payload: unknown): void {
+    this.database.transaction(() => {
+      if (patch.status) transitionRun(this.requireRun(runId).status, patch.status as RunStatus);
+      this.database.updateRun(runId, patch);
+      this.appendEvent(runId, 'run_state_changed', payload);
+    });
   }
 
   private appendAndNotify(runId: string, type: RunEvent['type'], payload: unknown): void {
@@ -398,7 +569,7 @@ export class RunService {
 
   private requireContext(runId: string): RunContext {
     const context = this.contexts.get(runId);
-    if (!context) throw new Error('Run is not active in this process');
+    if (!context) throw new ContractError('invalid_state');
     return context;
   }
 }
