@@ -14,17 +14,34 @@ export type KeyStorageBackend = {
 export class KeyService {
   private readonly memory = new Map<string, { providerId: string; plaintext: string; revision: string }>();
   private readonly sessionReferences = new Map<string, KeyReference>();
-  private readonly pending = new Map<string, Promise<void>>();
+  private readonly pending = new Map<string, { tail: Promise<void>; revisions: Set<{ value: string }> }>();
 
   constructor(private readonly database: Database, private readonly backend: KeyStorageBackend) {}
 
-  private serialize<T>(providerId: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.pending.get(providerId) ?? Promise.resolve();
-    const result = previous.then(work);
-    const tail = result.then(() => {}, () => {});
-    this.pending.set(providerId, tail);
-    void tail.then(() => { if (this.pending.get(providerId) === tail) this.pending.delete(providerId); });
-    return result;
+  private async serialize<T>(providerId: string, work: (revision: string) => Promise<T>): Promise<T> {
+    try {
+      const revision = { value: this.database.getProviderKeyRevision(providerId) };
+      const previous = this.pending.get(providerId);
+      const revisions = previous?.revisions ?? new Set<{ value: string }>();
+      revisions.add(revision);
+      const result = (previous?.tail ?? Promise.resolve()).then(() => {
+        if (this.database.getProviderKeyRevision(providerId) !== revision.value) throw new ContractError('invalid_state');
+        return work(revision.value);
+      });
+      const tail = result.then(() => {}, () => {});
+      this.pending.set(providerId, { tail, revisions });
+      void tail.then(() => {
+        if (this.pending.get(providerId)?.tail === tail) this.pending.delete(providerId);
+        revisions.delete(revision);
+      });
+      return await result;
+    } catch (error) { throw error instanceof ContractError ? error : new ContractError('internal_error'); }
+  }
+
+  private advanceQueuedRevision(providerId: string, previous: string): void {
+    const next = this.database.getProviderKeyRevision(providerId);
+    // Only our committed Key mutation may advance requests queued for the same target.
+    for (const revision of this.pending.get(providerId)?.revisions ?? []) if (revision.value === previous) revision.value = next;
   }
 
   private clearSession(providerId: string): void {
@@ -40,16 +57,16 @@ export class KeyService {
 
   async storeKey(providerId: string, plaintext: string): Promise<KeyReference> {
     if (typeof plaintext !== 'string' || !plaintext.trim() || plaintext.length > 16384) throw new ContractError('invalid_input');
-    return this.serialize(providerId, async () => {
+    return this.serialize(providerId, async revision => {
       try {
         if (this.provider(providerId).kind === 'mock') throw new ContractError('invalid_input');
         this.database.assertProviderMutable(providerId);
-        const revision = this.database.getProviderKeyRevision(providerId);
         const reference = { id: randomUUID() };
         const encryptedValue = this.backend.persistent ? await this.backend.encrypt(plaintext) : undefined;
         if (encryptedValue !== undefined && !encryptedValue) throw new ContractError('internal_error');
         // Recheck activity after encryption; cipher, current reference and revocation commit together.
         this.database.replaceProviderKey(providerId, encryptedValue === undefined ? null : { id: reference.id, providerId, encryptedValue, backend: this.backend.backend }, revision);
+        this.advanceQueuedRevision(providerId, revision);
         this.clearSession(providerId);
         if (!this.backend.persistent) {
           this.memory.set(reference.id, { providerId, plaintext, revision: this.database.getProviderKeyRevision(providerId) });
@@ -83,8 +100,8 @@ export class KeyService {
   }
 
   async deleteKey(providerId: string): Promise<void> {
-    return this.serialize(providerId, async () => {
-      try { this.database.replaceProviderKey(providerId, null, this.database.getProviderKeyRevision(providerId)); this.clearSession(providerId); }
+    return this.serialize(providerId, async revision => {
+      try { this.database.replaceProviderKey(providerId, null, revision); this.advanceQueuedRevision(providerId, revision); this.clearSession(providerId); }
       catch (error) { throw error instanceof ContractError ? error : new ContractError('internal_error'); }
     });
   }
@@ -97,17 +114,22 @@ export class KeyService {
   }
 
   async getProviderKeyState(providerId: string): Promise<ProviderKeyState> {
-    const provider = this.provider(providerId);
-    const session = this.sessionReferences.get(providerId);
-    if (session && this.memory.get(session.id)?.revision !== this.database.getProviderKeyRevision(providerId)) this.clearSession(providerId);
-    const keyReference = provider.keyReference ?? this.sessionReferences.get(providerId) ?? null;
-    let state: ProviderKeyState['state'] = 'missing';
-    if (keyReference) {
-      state = 'unavailable';
-      try { if (await this.resolveKey(providerId, keyReference)) state = this.backend.persistent ? 'configured' : 'session'; }
-      catch { /* A failed backend is public unavailability, never a backend error or secret. */ }
+    const storage = await this.getStatus();
+    for (;;) {
+      const provider = this.provider(providerId);
+      const revision = this.database.getProviderKeyRevision(providerId);
+      const session = this.sessionReferences.get(providerId);
+      if (session && this.memory.get(session.id)?.revision !== revision) this.clearSession(providerId);
+      const keyReference = provider.keyReference ?? this.sessionReferences.get(providerId) ?? null;
+      let state: ProviderKeyState['state'] = 'missing';
+      if (keyReference) {
+        state = 'unavailable';
+        try { if (await this.resolveKey(providerId, keyReference)) state = this.backend.persistent ? 'configured' : 'session'; }
+        catch { /* A failed backend is public unavailability, never a backend error or secret. */ }
+      }
+      if (this.database.getProviderKeyRevision(providerId) !== revision) continue;
+      return providerKeyStateSchema.parse({ providerId, keyReference, state, storage });
     }
-    return providerKeyStateSchema.parse({ providerId, keyReference, state, storage: await this.getStatus() });
   }
 
   async getStatus(): Promise<KeyStorageStatus> {
