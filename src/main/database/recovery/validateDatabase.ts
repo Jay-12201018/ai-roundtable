@@ -2,6 +2,8 @@ import type Sqlite from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { messageStatusValues, runStatusValues, turnStatusValues } from '../../../shared/types/run';
 import { requestAttemptSchema,executionMetadataSchema } from '../../../shared/schemas/persistence';
+import { timestampSchema } from '../../../shared/schemas/common';
+import { providerModelSchema } from '../../../shared/schemas/provider';
 import { runEventSchema } from '../../../shared/schemas/run';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
@@ -20,6 +22,27 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
     const versions = tables.includes('schema_migrations') ? db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all() as number[] : [];
     if (versions.some((version, index) => version !== index + 1)) throw new Error('Invalid migration ledger');
     const modern = (versions.at(-1)??0)>=2;
+    if ((versions.at(-1) ?? 0) >= 3) {
+      for (const [table, required] of Object.entries({ rooms: ['archived_at'], agents: ['archived_at','configuration_version'], providers: ['is_default','default_model_id','custom_models_json','key_revision'] })) {
+        const columns = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{name:string}>).map(c => c.name));
+        if (required.some(column => !columns.has(column))) throw new Error('Recovery v3 schema is incomplete');
+      }
+      assertNoRows(db, "SELECT 1 FROM agents WHERE enabled NOT IN (0,1) OR configuration_version NOT IN (0,1) LIMIT 1", 'Invalid Agent configuration');
+      assertNoRows(db, "SELECT 1 FROM providers WHERE enabled NOT IN (0,1) OR is_default NOT IN (0,1) OR (is_default=1 AND enabled<>1) OR typeof(key_revision)<>'text' OR length(key_revision)=0 LIMIT 1", 'Invalid Provider configuration');
+      assertNoRows(db, 'SELECT 1 WHERE (SELECT COUNT(*) FROM providers WHERE is_default=1)>1', 'Invalid default Provider');
+      assertNoRows(db, "SELECT 1 FROM providers p JOIN key_records k ON k.id=p.api_key_reference WHERE k.provider_id<>p.id LIMIT 1", 'Invalid Provider Key ownership');
+      for (const table of ['rooms','agents']) {
+        for (const row of db.prepare(`SELECT archived_at FROM ${table} WHERE archived_at IS NOT NULL`).iterate() as Iterable<{archived_at:unknown}>) {
+          if (!timestampSchema.safeParse(row.archived_at).success) throw new Error('Invalid archive timestamp');
+        }
+      }
+      for (const row of db.prepare('SELECT custom_models_json FROM providers').iterate() as Iterable<{custom_models_json:string}>) {
+        let models: unknown;
+        try { models=JSON.parse(row.custom_models_json); } catch { throw new Error('Invalid Provider model JSON'); }
+        if (!Array.isArray(models) || models.some(model => !providerModelSchema.safeParse(model).success) || new Set(models.map(model => (model as {id:string}).id)).size!==models.length) throw new Error('Invalid Provider models');
+      }
+    }
+
     if (modern && !tables.includes('request_attempts')) throw new Error('Recovery v2 schema is incomplete');
 
     for (const [table, statuses] of [['workflow_runs', runStatusValues], ['turns', turnStatusValues], ['messages', messageStatusValues]] as const) {

@@ -106,7 +106,7 @@ describe('Database legacy disk migration', () => {
 
       raw = new DatabaseDriver(filename, { readonly: true, fileMustExist: true });
       const appliedVersions = raw.prepare('SELECT version, applied_at FROM schema_migrations ORDER BY version').all();
-      expect(appliedVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)}]);
+      expect(appliedVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)},{version:3,applied_at:expect.any(String)}]);
       expect(raw.prepare('SELECT mode, max_turns, max_duration_ms, output_token_limit, current_turn_id, current_agent_id FROM workflow_runs WHERE id = ?').get('legacy-run')).toEqual({ mode: 'step', max_turns: 5, max_duration_ms: 45000, output_token_limit: 96, current_turn_id: 'legacy-turn', current_agent_id: 'legacy-agent' });
       expect(raw.pragma('integrity_check', { simple: true })).toBe('ok');
       expect(raw.pragma('foreign_key_check')).toEqual([]);

@@ -89,3 +89,10 @@ pnpm run test -- tests/unit/rooms tests/integration/rooms tests/unit/rendererRoo
 ## 交付格式
 
 交付包含：任务 ID 与基线/分支；逐项文件清单；行为和操作说明；精确测试命令、日期、退出码、关键输出与未运行项；契约申请和数据库影响；遗留问题；本模块 Commit SHA；总控接线与集成建议。只提交本任务获准文件，不向 main 自行合并。总控集成后复验才更新 merged/verified。
+
+
+## 2026-10-16 共享前置交付与启动边界
+
+用户本轮仅授权总控共享前置候选，未授权本feature或其Worktree。实际接口、调用示例、错误/分页/引用规则及唯一文件归属统一见[共享调用手册](../docs/R07_R08_SHARED.md)；本任务不再自行定义第二套DTO或migration。候选分支 `codex/shared-r07-r08-foundation`，基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，仍待审核/合main。
+
+启动前先确认共享候选已由用户批准合入并完成main新鲜复验，登记真实最终完整main SHA；R07/R08均从该同一SHA开始，并各自获得创建/实施授权。Shared/Database/migration3/公共测试/Main/IPC/Preload/App/store等由总控冻结，模块只消费；所有新增接线请求统一交总控。此追加不勾选既有功能验收复选框，也不推进R09。

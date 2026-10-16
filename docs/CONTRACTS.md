@@ -191,3 +191,21 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 完整联合候选d4a0d2742eb28d2441e4d06e8154b8cdd6955336已按用户批准由37766666 fast-forward合main；没有重复合原模块、新merge commit、协议或migration修改。本次main534全回归/265专项/112 Electron专项、类型/构建/双ABI/隔离页面/退出数据均实际通过，见[主线报告](verification/2026-10-16-r04-r05-r06-main.md)，三模块及联合集成verified。上节私有builder/可靠计数/Repeat/Renderer接线现已主线生效，A类已完成，B/C延期边界不因verified自动取消。
 
 R07/R08的基础依赖满足，现仅ready；Room/Agent/History、Provider设置/Key引用等DTO/Schema/数据库/IPC仍需另获授权后由总控统一提出、审批、分配版本和接线。现有Adapter协议不等于设置CRUD或通用Key IPC已存在，子项目不能自行扩展公共接口或复用Mock词法发真实请求。
+
+
+## SHARED-R07-R08-01 — 配置与历史共享前置候选（2026-10-16）
+
+用户批准共享前置实施；本候选未合 main，不能用于声明 R07/R08 功能完成。唯一源码为 `src/shared/schemas/configuration.ts` 及派生 `src/shared/contracts/configuration.ts`，两个 index 导出。完整参数/结果、Database 与 typed API 的差别、文件归属、错误/安全边界见[共享调用手册](R07_R08_SHARED.md)。这取代任务书中待申请的 Room/Agent/Provider/Key/History wire shape，不另建协议。
+
+| 契约 | 消费方 | 冻结规则 |
+| --- | --- | --- |
+| RoomConfiguration / AgentConfiguration 与 CRUD 输入 | R07 room服务/rooms feature；总控 Database | Main 生成新 ID；新成员 Provider/model 成对，旧半配置可读可修；归档保留历史身份，引用阻止硬删 |
+| ProviderConfiguration / ProviderSummary / ProviderModel | R08 settings、R07 摘要选择、后续 Main resolver | providerId 为配置实例；模型身份为(providerId,modelId)；显式Mock/真实/失效区分，禁止隐式回退 |
+| KeyReference / KeyStorageStatus / ProviderKeyState | R08与Main KeyService | 替换/删除/目标变更撤销旧引用；session不持久化；仅独立setKey请求带明文，不入普通DTO/日志/历史 |
+| RoomMessagePage / RoomRunPage 与 cursor | R07历史服务/feature | 房间作用域、固定首次上界、稳定升序；Run加rowid插入上界，末页null；输入/响应都严格校验 |
+| RoomManagementApiContract / ProviderSettingsApiContract | Main服务与将来的Preload | input/output map可执行但尚未注册IPC；沿用既有envelope/error/source验证，不添加通用invoke |
+| RoomsFeatureProps / SettingsFeatureProps | 两个独立feature与总控App组装 | api及显式actions注入；R07只收安全Provider摘要和加载状态，不直接引用settings/Key |
+
+本次改变 Main-only KeyService.resolveKey 签名为(providerId,reference)，deleteKey改为providerId，并新增受保护deleteProvider；所有现有调用测试同步，生产唯一调用方目前仅getStatus。Database 旧运行投影形状不变；listAgents增加配置启动门禁。既有 RunEvent.version=1、Run/Turn/Attempt DTO和注册IPC集合不变。migration3只追加配置字段/索引，1/2原文不改。
+
+待联合集成：真实 room/settings 服务实现后由总控注册双端handler/Preload、组装Main/App、刷新Provider摘要及R06选择投影，敏感命令独立脱敏。未接线方法不能假报可用。真实网络/factory能力留R09/R10，自动化仅Mock/fixture；真实配置当前明确unsupported且不创建请求。

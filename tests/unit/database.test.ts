@@ -141,7 +141,7 @@ describe('Database', () => {
       database = undefined;
       reader = new DatabaseDriver(filename, { readonly: true, fileMustExist: true });
       const firstVersions = reader.prepare('SELECT version, applied_at FROM schema_migrations ORDER BY version').all();
-      expect(firstVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)}]);
+      expect(firstVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)},{version:3,applied_at:expect.any(String)}]);
       reader.close();
       reader = undefined;
 

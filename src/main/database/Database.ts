@@ -1,8 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import DatabaseDriver from 'better-sqlite3';
 import { chmodSync } from 'node:fs';
 import { mkdir, lstat, realpath, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { migration3 } from './migrations/v3';
+import { ContractError } from '../../shared/contracts/errors';
+import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions } from '../../shared/schemas/configuration';
+import type { RoomInput,RoomConfiguration,AgentInput,AgentConfiguration,ProviderInput,ProviderConfiguration,ProviderSummary,RoomMessagePageInput,RoomMessagePage,RoomRunPageInput,RoomRunPage } from '../../shared/contracts/configuration';
 import { migration2 } from './migrations/v2';
 import { createVerifiedBackup, type VerifiedBackup } from './backup/createVerifiedBackup';
 import { prepareRestore } from './recovery/prepareRestore';
@@ -164,6 +169,7 @@ const migrations = [
     CREATE INDEX IF NOT EXISTS idx_events_run_sequence ON run_events(run_id, sequence);
   `,
   migration2,
+  migration3,
 ];
 
 export class Database {
@@ -285,7 +291,14 @@ export class Database {
 
   listAgents(roomId: string): Array<{ id: string; roomId: string; displayName: string; roleTemplateId: string; displayOrder: number; systemPrompt: string; providerId: string | null; modelId: string | null }> {
     this.assertInitialized();
-    const rows = this.db.prepare('SELECT id, room_id, display_name, role_template_id, display_order,system_prompt,provider_id,model_id FROM agents WHERE room_id = ? ORDER BY display_order,rowid').all(roomId) as Array<{ id: string; room_id: string; display_name: string; role_template_id: string; display_order: number; system_prompt: string; provider_id: string | null; model_id: string | null }>;
+    if (this.getRoomConfiguration(roomId)?.archivedAt) throw new ContractError('invalid_state');
+    const rows = this.db.prepare('SELECT id, room_id, display_name, role_template_id, display_order,system_prompt,provider_id,model_id,configuration_version FROM agents WHERE room_id = ? AND enabled=1 AND archived_at IS NULL ORDER BY display_order,id').all(roomId) as Array<{ id: string; room_id: string; display_name: string; role_template_id: string; display_order: number; system_prompt: string; provider_id: string | null; model_id: string | null; configuration_version: number }>;
+    for (const row of rows) {
+      // Only untouched pre-configuration Demo rows retain the legacy null-to-Mock path.
+      if (row.configuration_version === 0 && row.provider_id === null && row.model_id === null) continue;
+      if (row.provider_id === null || row.model_id === null) throw new ContractError('invalid_state');
+      if (this.validateModelSelection(row.provider_id,row.model_id).kind !== 'mock') throw new ContractError('unsupported');
+    }
     return rows.map((row) => ({ id: row.id, roomId: row.room_id, displayName: row.display_name, roleTemplateId: row.role_template_id, displayOrder: row.display_order, systemPrompt: row.system_prompt, providerId: row.provider_id, modelId: row.model_id }));
   }
 
@@ -569,6 +582,271 @@ export class Database {
     this.db.prepare('DELETE FROM key_records WHERE id = ?').run(id);
   }
 
+  createRoom(input: RoomInput): RoomConfiguration {
+    const room = configurationInput(roomInputSchema, input);
+    return this.transaction(() => { this.insertRoom(room); return this.getRoomConfiguration(room.id)!; });
+  }
+
+  updateRoom(input: RoomInput): RoomConfiguration {
+    const room = configurationInput(roomInputSchema, input);
+    return this.transaction(() => {
+      if (!this.getRoom(room.id)) throw new ContractError('not_found');
+      this.db.prepare('UPDATE rooms SET name=?,objective=?,updated_at=? WHERE id=?').run(room.name, room.objective, now(), room.id);
+      return this.getRoomConfiguration(room.id)!;
+    });
+  }
+
+  getRoomConfiguration(id: string): RoomConfiguration | undefined {
+    this.assertInitialized(); configurationInput(idSchema, id);
+    const row = this.db.prepare('SELECT id,name,objective,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM rooms WHERE id=?').get(id);
+    return row ? configurationOutput(roomConfigurationSchema, row) : undefined;
+  }
+
+  listRooms(input: { includeArchived?: boolean } = {}): RoomConfiguration[] {
+    this.assertInitialized();
+    const { includeArchived } = configurationInput(listRoomsInputSchema, input);
+    const ids = this.db.prepare(`SELECT id FROM rooms ${includeArchived ? '' : 'WHERE archived_at IS NULL'} ORDER BY created_at,id`).pluck().all() as string[];
+    return ids.map(id => this.getRoomConfiguration(id)!);
+  }
+
+  archiveRoom(id: string, archived = true): RoomConfiguration {
+    configurationInput(idSchema, id); configurationInput(z.boolean(), archived);
+    return this.transaction(() => {
+      if (!this.getRoom(id)) throw new ContractError('not_found');
+      if (archived && this.db.prepare("SELECT 1 FROM workflow_runs WHERE room_id=? AND status IN ('running','pausing','paused','cancelling') LIMIT 1").get(id)) throw new ContractError('invalid_state');
+      this.db.prepare('UPDATE rooms SET archived_at=?,updated_at=? WHERE id=?').run(archived ? now() : null, now(), id);
+      return this.getRoomConfiguration(id)!;
+    });
+  }
+
+  deleteRoom(id: string): void {
+    configurationInput(idSchema, id);
+    this.transaction(() => {
+      if (!this.getRoom(id)) throw new ContractError('not_found');
+      if (this.db.prepare('SELECT 1 FROM workflow_runs WHERE room_id=? LIMIT 1').get(id) || this.db.prepare('SELECT 1 FROM messages WHERE room_id=? LIMIT 1').get(id)) throw new ContractError('invalid_state');
+      for (const agent of this.listAgentConfigurations(id, true)) this.assertAgentUnreferenced(agent.id);
+      this.db.prepare('DELETE FROM rooms WHERE id=?').run(id);
+    });
+  }
+
+  createAgent(input: AgentInput): AgentConfiguration {
+    const agent = configurationInput(agentInputSchema, input);
+    return this.transaction(() => {
+      this.assertAgentConfiguration(agent);
+      if (this.db.prepare('SELECT 1 FROM agents WHERE id=?').get(agent.id)) throw new ContractError('invalid_state');
+      const timestamp = now();
+      this.db.prepare('INSERT INTO agents(id,room_id,display_name,role_template_id,provider_id,model_id,system_prompt,enabled,display_order,created_at,updated_at,configuration_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)')
+        .run(agent.id, agent.roomId, agent.displayName, agent.roleTemplateId, agent.providerId, agent.modelId, agent.systemPrompt, Number(agent.enabled), agent.displayOrder, timestamp, timestamp);
+      return this.getAgentConfiguration(agent.id)!;
+    });
+  }
+
+  updateAgent(input: AgentInput): AgentConfiguration {
+    const agent = configurationInput(agentInputSchema, input);
+    return this.transaction(() => {
+      const previous = this.getAgentConfiguration(agent.id);
+      if (!previous) throw new ContractError('not_found');
+      if (previous.roomId !== agent.roomId) throw new ContractError('invalid_input');
+      this.assertAgentConfiguration(agent);
+      this.db.prepare('UPDATE agents SET display_name=?,role_template_id=?,provider_id=?,model_id=?,system_prompt=?,enabled=?,display_order=?,updated_at=?,configuration_version=1 WHERE id=?')
+        .run(agent.displayName, agent.roleTemplateId, agent.providerId, agent.modelId, agent.systemPrompt, Number(agent.enabled), agent.displayOrder, now(), agent.id);
+      return this.getAgentConfiguration(agent.id)!;
+    });
+  }
+
+  private assertAgentConfiguration(agent: z.output<typeof agentInputSchema>): void {
+    const room = this.getRoomConfiguration(agent.roomId);
+    if (!room) throw new ContractError('not_found');
+    if (room.archivedAt) throw new ContractError('invalid_state');
+    if (agent.providerId !== null) {
+      const provider = this.getProviderConfiguration(agent.providerId);
+      if (!provider) throw new ContractError('not_found');
+      if (provider.kind === 'mock' && agent.modelId !== 'mock') throw new ContractError('invalid_input');
+    }
+  }
+
+  getAgentConfiguration(id: string): AgentConfiguration | undefined {
+    this.assertInitialized(); configurationInput(idSchema, id);
+    const row = this.db.prepare('SELECT id,room_id AS roomId,display_name AS displayName,role_template_id AS roleTemplateId,provider_id AS providerId,model_id AS modelId,system_prompt AS systemPrompt,enabled,display_order AS displayOrder,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM agents WHERE id=?').get(id) as Record<string, unknown> | undefined;
+    return row ? configurationOutput(agentConfigurationSchema, { ...row, enabled: row.enabled === 1 }) : undefined;
+  }
+
+  listAgentConfigurations(roomId: string, includeArchived = false): AgentConfiguration[] {
+    this.assertInitialized(); configurationInput(idSchema, roomId); configurationInput(z.boolean(), includeArchived);
+    if (!this.getRoom(roomId)) throw new ContractError('not_found');
+    const ids = this.db.prepare(`SELECT id FROM agents WHERE room_id=? ${includeArchived ? '' : 'AND archived_at IS NULL'} ORDER BY display_order,id`).pluck().all(roomId) as string[];
+    return ids.map(id => this.getAgentConfiguration(id)!);
+  }
+
+  reorderAgents(roomId: string, agentIds: string[]): AgentConfiguration[] {
+    configurationInput(reorderAgentsInputSchema, { roomId, agentIds });
+    return this.transaction(() => {
+      const agents = this.listAgentConfigurations(roomId);
+      if (new Set(agentIds).size !== agentIds.length || agents.length !== agentIds.length || agents.some(a => !agentIds.includes(a.id))) throw new ContractError('invalid_input');
+      const update = this.db.prepare('UPDATE agents SET display_order=?,updated_at=? WHERE id=? AND room_id=?');
+      agentIds.forEach((id, order) => update.run(order, now(), id, roomId));
+      return this.listAgentConfigurations(roomId);
+    });
+  }
+
+  archiveAgent(id: string, archived = true): AgentConfiguration {
+    configurationInput(idSchema, id); configurationInput(z.boolean(), archived);
+    return this.transaction(() => {
+      if (!this.getAgentConfiguration(id)) throw new ContractError('not_found');
+      this.db.prepare('UPDATE agents SET archived_at=?,updated_at=? WHERE id=?').run(archived ? now() : null, now(), id);
+      return this.getAgentConfiguration(id)!;
+    });
+  }
+
+  private assertAgentUnreferenced(id: string): void {
+    if (this.db.prepare('SELECT 1 FROM turns WHERE agent_id=? LIMIT 1').get(id)
+      || this.db.prepare("SELECT 1 FROM workflow_runs r WHERE r.current_agent_id=? OR EXISTS(SELECT 1 FROM json_each(r.members_snapshot) m WHERE json_extract(m.value,'$.agentId')=?) LIMIT 1").get(id, id)) throw new ContractError('invalid_state');
+  }
+
+  deleteAgent(id: string): void {
+    configurationInput(idSchema, id);
+    this.transaction(() => {
+      if (!this.getAgentConfiguration(id)) throw new ContractError('not_found');
+      this.assertAgentUnreferenced(id); this.db.prepare('DELETE FROM agents WHERE id=?').run(id);
+    });
+  }
+
+  createProvider(input: ProviderInput): ProviderConfiguration {
+    return this.writeProvider(input, false);
+  }
+
+  updateProvider(input: ProviderInput): ProviderConfiguration {
+    return this.writeProvider(input, true);
+  }
+
+  private writeProvider(input: ProviderInput, update: boolean): ProviderConfiguration {
+    const provider = configurationInput(providerInputSchema, input);
+    if (provider.kind === 'mock' && (provider.defaultModelId !== null && provider.defaultModelId !== 'mock' || provider.customModels.some(m => m.id !== 'mock'))) throw new ContractError('invalid_input');
+    return this.transaction(() => {
+      const exists = !!this.db.prepare('SELECT 1 FROM providers WHERE id=?').get(provider.id);
+      if (update && !exists) throw new ContractError('not_found');
+      if (!update && exists) throw new ContractError('invalid_state');
+      if (update) this.assertProviderMutable(provider.id);
+      if (provider.isDefault) this.db.prepare('UPDATE providers SET is_default=0 WHERE is_default=1').run();
+      const timestamp = now();
+      const previous = update ? this.db.prepare('SELECT type,base_url FROM providers WHERE id=?').get(provider.id) as {type:string;base_url:string|null} : undefined;
+      const targetChanged = !!previous && (previous.type !== provider.kind || previous.base_url !== provider.baseUrl);
+      if (update) this.db.prepare('UPDATE providers SET name=?,type=?,base_url=?,enabled=?,is_default=?,default_model_id=?,custom_models_json=?,updated_at=? WHERE id=?')
+        .run(provider.name, provider.kind, provider.baseUrl, Number(provider.enabled), Number(provider.isDefault), provider.defaultModelId, JSON.stringify(provider.customModels), timestamp, provider.id);
+      else this.db.prepare('INSERT INTO providers(id,name,type,base_url,enabled,is_default,default_model_id,custom_models_json,created_at,updated_at,key_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+        .run(provider.id, provider.name, provider.kind, provider.baseUrl, Number(provider.enabled), Number(provider.isDefault), provider.defaultModelId, JSON.stringify(provider.customModels), timestamp, timestamp, randomUUID());
+      if (targetChanged) {
+        this.db.prepare('UPDATE providers SET api_key_reference=NULL,key_revision=? WHERE id=?').run(randomUUID(),provider.id);
+        this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(provider.id);
+      }
+      return this.getProviderConfiguration(provider.id)!;
+    });
+  }
+
+  getProviderConfiguration(id: string): ProviderConfiguration | undefined {
+    this.assertInitialized(); configurationInput(idSchema, id);
+    const row = this.db.prepare('SELECT id,name,type AS kind,base_url AS baseUrl,enabled,is_default AS isDefault,default_model_id AS defaultModelId,custom_models_json AS customModels,api_key_reference AS keyReference,created_at AS createdAt,updated_at AS updatedAt FROM providers WHERE id=?').get(id) as Record<string, unknown> | undefined;
+    if (!row) return;
+    let models: unknown;
+    try { models = JSON.parse(row.customModels as string); } catch { throw new ContractError('invalid_state'); }
+    return configurationOutput(providerConfigurationSchema, { ...row, enabled: row.enabled === 1, isDefault: row.isDefault === 1, customModels: models, keyReference: row.keyReference === null ? null : { id: row.keyReference } });
+  }
+
+  listProviderSummaries(): ProviderSummary[] {
+    this.assertInitialized();
+    const rows = this.db.prepare('SELECT id,name,type,enabled,is_default,default_model_id,api_key_reference FROM providers ORDER BY created_at,id').all() as Array<{ id: string; name: string; type: string; enabled: number; is_default: number; default_model_id: string | null; api_key_reference: string | null }>;
+    return rows.map(row => {
+      let configuration: ProviderConfiguration | undefined;
+      try { configuration = this.getProviderConfiguration(row.id); } catch { /* Preserve invalid legacy rows; never echo their URL or raw configuration. */ }
+      const record = row.api_key_reference ? this.rawKeyRecord(row.api_key_reference) : undefined;
+      return configurationOutput(providerSummarySchema, { id: row.id, name: row.name, kind: configuration?.kind ?? null, enabled: row.enabled === 1,
+        isDefault: row.is_default === 1, defaultModelId: configuration?.defaultModelId ?? null, customModels: configuration?.customModels ?? [], configurationValid: !!configuration, hasStoredKey: record?.providerId === row.id });
+    });
+  }
+
+  validateModelSelection(providerId: string, modelId: string): ProviderConfiguration {
+    configurationInput(idSchema, providerId); configurationInput(idSchema, modelId);
+    const provider = this.getProviderConfiguration(providerId);
+    if (!provider) throw new ContractError('not_found');
+    if (!provider.enabled) throw new ContractError('invalid_state');
+    if (provider.kind === 'mock' && modelId !== 'mock') throw new ContractError('invalid_input');
+    return provider;
+  }
+
+  assertProviderMutable(id: string): void {
+    this.assertInitialized(); configurationInput(idSchema, id);
+    if (!this.db.prepare('SELECT 1 FROM providers WHERE id=?').get(id)) throw new ContractError('not_found');
+    const used = this.db.prepare(`SELECT 1 FROM workflow_runs r WHERE r.status IN ('running','pausing','paused','cancelling') AND (
+      EXISTS(SELECT 1 FROM json_each(r.members_snapshot) m WHERE json_extract(m.value,'$.providerId')=?)
+      OR (r.members_snapshot IS NULL AND EXISTS(SELECT 1 FROM agents a WHERE a.room_id=r.room_id AND a.provider_id=?))) LIMIT 1`).get(id, id);
+    if (used) throw new ContractError('invalid_state');
+  }
+
+  deleteProvider(id: string): void {
+    configurationInput(idSchema, id);
+    this.transaction(() => {
+      this.assertProviderMutable(id);
+      if (this.db.prepare('SELECT 1 FROM agents WHERE provider_id=? LIMIT 1').get(id)
+        || this.db.prepare("SELECT 1 FROM workflow_runs r WHERE EXISTS(SELECT 1 FROM json_each(r.members_snapshot) m WHERE json_extract(m.value,'$.providerId')=?) LIMIT 1").get(id)) throw new ContractError('invalid_state');
+      this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(id);
+      this.db.prepare('DELETE FROM providers WHERE id=?').run(id);
+    });
+  }
+
+  getProviderKeyRevision(providerId: string): string {
+    this.assertInitialized(); configurationInput(idSchema, providerId);
+    const revision = this.db.prepare('SELECT key_revision FROM providers WHERE id=?').pluck().get(providerId) as string | undefined;
+    if (!revision) throw new ContractError('not_found');
+    return revision;
+  }
+
+  replaceProviderKey(providerId: string, record: { id: string; providerId: string; encryptedValue: string; backend: string } | null, expectedRevision: string): void {
+    this.transaction(() => {
+      this.assertProviderMutable(providerId);
+      if (this.getProviderKeyRevision(providerId) !== expectedRevision) throw new ContractError('invalid_state');
+      if (record && (record.providerId !== providerId || this.rawKeyRecord(record.id))) throw new ContractError('invalid_state');
+      if (record) this.storeKeyRecord(record);
+      this.db.prepare('UPDATE providers SET api_key_reference=?,updated_at=?,key_revision=? WHERE id=?').run(record?.id ?? null, now(), randomUUID(), providerId);
+      this.db.prepare('DELETE FROM key_records WHERE provider_id=? AND id<>?').run(providerId, record?.id ?? '');
+    });
+  }
+
+  listRoomMessages(input: RoomMessagePageInput): RoomMessagePage {
+    const { roomId, cursor, limit } = configurationInput(roomMessagePageInputSchema, input);
+    return this.transaction(() => {
+      if (!this.getRoom(roomId)) throw new ContractError('not_found');
+      const maximum = this.db.prepare('SELECT COALESCE(MAX(sort_key),0) FROM messages WHERE room_id=?').pluck().get(roomId) as number;
+      const through = cursor?.throughKey ?? maximum; const after = cursor?.afterKey ?? 0;
+      if (cursor && (cursor.roomId !== roomId || after > through || through > maximum
+        || [after, through].some(key => key > 0 && !this.db.prepare('SELECT 1 FROM messages WHERE room_id=? AND sort_key=?').get(roomId, key)))) throw new ContractError('invalid_input');
+      const rows = this.db.prepare('SELECT id,room_id AS roomId,run_id AS runId,turn_id AS turnId,sender_type AS senderType,sender_name AS senderName,content,status,sort_key AS sortKey,created_at AS createdAt,updated_at AS updatedAt FROM messages WHERE room_id=? AND sort_key>? AND sort_key<=? ORDER BY sort_key LIMIT ?').all(roomId, after, through, limit + 1);
+      const selected = rows.slice(0, limit); const hasMore = rows.length > limit;
+      return configurationOutput(roomMessagePageSchema, { items: selected, hasMore, nextCursor: hasMore ? { roomId, afterKey: (selected.at(-1) as { sortKey: number }).sortKey, throughKey: through } : null });
+    });
+  }
+
+  listRoomRuns(input: RoomRunPageInput): RoomRunPage {
+    const { roomId, cursor, limit } = configurationInput(roomRunPageInputSchema, input);
+    return this.transaction(() => {
+      if (!this.getRoom(roomId)) throw new ContractError('not_found');
+      const upper = this.db.prepare('SELECT created_at AS createdAt,id FROM workflow_runs WHERE room_id=? ORDER BY created_at DESC,id DESC LIMIT 1').get(roomId) as { createdAt: string; id: string } | undefined;
+      if (!upper) {
+        if (cursor) throw new ContractError('invalid_input');
+        return { items: [], nextCursor: null, hasMore: false };
+      }
+      const through = cursor?.through ?? upper;
+      const maximumRowId = this.db.prepare('SELECT COALESCE(MAX(rowid),0) FROM workflow_runs WHERE room_id=?').pluck().get(roomId) as number;
+      const throughRowId = cursor?.throughRowId ?? maximumRowId;
+      if (cursor && (cursor.roomId !== roomId || throughRowId > maximumRowId || [cursor.after, through].some(point => !this.db.prepare('SELECT 1 FROM workflow_runs WHERE room_id=? AND created_at=? AND id=?').get(roomId, point.createdAt, point.id))
+        || compareHistoryPoint(cursor.after, through) > 0 || compareHistoryPoint(through, upper) > 0)) throw new ContractError('invalid_input');
+      const afterSql = cursor ? 'AND (created_at,id)>(?,?)' : '';
+      const args = cursor ? [roomId, throughRowId, cursor.after.createdAt, cursor.after.id, through.createdAt, through.id, limit + 1] : [roomId, throughRowId, through.createdAt, through.id, limit + 1];
+      const rows = this.db.prepare(`SELECT id,room_id AS roomId,status,task,created_at AS createdAt,updated_at AS updatedAt FROM workflow_runs WHERE room_id=? AND rowid<=? ${afterSql} AND (created_at,id)<=(?,?) ORDER BY created_at,id LIMIT ?`).all(...args) as Array<{ id: string; createdAt: string }>;
+      const selected = rows.slice(0, limit); const hasMore = rows.length > limit; const last = selected.at(-1)!;
+      return configurationOutput(roomRunPageSchema, { items: selected, hasMore, nextCursor: hasMore ? { roomId, throughRowId, after: { createdAt: last.createdAt, id: last.id }, through } : null });
+    });
+  }
+
   close(): void {
     if (this.db.open) this.db.close();
   }
@@ -581,4 +859,18 @@ export class Database {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function configurationInput<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {
+  const result = schema.safeParse(value);
+  if (!result.success) throw new ContractError('invalid_input');
+  return result.data;
+}
+function configurationOutput<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {
+  const result = schema.safeParse(value);
+  if (!result.success) throw new ContractError('invalid_state');
+  return result.data;
+}
+function compareHistoryPoint(a: { createdAt: string; id: string }, b: { createdAt: string; id: string }): number {
+  return compareRunPositions(a,b);
 }

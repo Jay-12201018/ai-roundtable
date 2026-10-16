@@ -122,3 +122,12 @@ Node源码重编译、534全回归/265模块专项、类型/生产构建、内�
 全部Node检查结束后，按对应Electron38.8.6缓存headers源码重建，实际38.8.6/内嵌Node22.22.0/ABI139/arm64 SQL、112专项、新隔离生产页面/控件/刷新/Bridge/正常退出数据以及旧v1恢复/备份验证均exit0。测试后native SHA不变，11份WT的native inode独立；main与候选WT最终均为ElectronABI139。原32直接依赖版本盘点、安装锁逐字节核对通过；未执行写全局store的pnpm list。
 
 ENV-R02-INSTALL-01保持已解决，不引入raw数字fetch参数；Node24.21.0风险保留。实际命令、警告/辅助诊断失败和未验证边界见[本次主线报告](verification/2026-10-16-r04-r05-r06-main.md)。后续Node测试仍须受控重编译，不能混用Electron native。
+
+
+## R07/R08 共享前置候选环境（2026-10-16）
+
+在唯一共享WT从空node_modules开始，原package/lock/workspace文件不变；独立内容缓存/metadata/store和copy导入，冻结离线安装exit0，646 reused/0 downloaded。未复制node_modules，未进行本轮冷缓存联网复验；不使用raw数值fetch覆盖。
+
+官方24.18.1/darwin-arm64 runtime/同发行包include/config及pnpm11.25.0来源重新核对；Node ABI137完整612回归、类型/生产构建、内存读写/5轮各30万prepare/get及正常退出均通过。全部Node测试结束后使用对应38.8.6 headers独立源码重编译，实际Electron38.8.6/Node22.22.0/ABI139/arm64内存SQL、190专项和两个新隔离userData的UI/恢复/Bridge/退出只读核验均exit0。最终共享WT native留Electron目标，原main不变。
+
+原生目录不共享；中途重编译窗口的inode诊断失败、启动权限失败和编译提示如实保留，不能当产品测试PASS。Node24.21.0上游风险未解决。详细真实命令/退出码与未验证限制见[候选报告](verification/2026-10-16-r07-r08-shared.md)及[台账](verification/2026-10-16-r07-r08-shared-commands.md)。

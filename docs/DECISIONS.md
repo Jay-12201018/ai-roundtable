@@ -129,3 +129,15 @@ D038的review/未合main为历史阶段，用户本次最终授权已取代停�
 | --- | --- | --- | --- |
 | D045 | 用户确认免费、Source Available、非商业授权；未来个人 GitHub 公开源码、Releases 提供桌面安装包，用户 BYOK；优先 PolyForm Noncommercial 1.0.0，正式发布前再次核对并由用户确认 | 不默认 MIT/Apache-2.0，不称 OSI 标准开源，不增加收费/订阅/激活/支付/反盗版；保留全部技术功能、依赖与 Worktree 路线 | 仅规划；当前不设置正式 LICENSE、不修改 package、不创建或公开仓库、不启动 R17；细则见[发布政策](RELEASE_POLICY.md) |
 | D046 | R17 最终验收补充许可证全文、版权/第三方及贡献权利、README 双语说明、拟公开完整历史敏感信息、GitHub 准备与跨平台 Releases；公共文件和发布归总控统一负责 | 外部贡献不自动转移版权，入站授权须与最终出站许可衔接；DCO/CLA 适用性及署名由用户确认，第三方许可独立保留 | 各项仍未执行；检查失败停止公开，不擅自重写历史，公开/上传仍须明确授权，不因文档调整推进任务状态 |
+
+
+## R07/R08 共享前置候选（2026-10-16，待用户审核）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D047 | 从最新已验收main510f58a独立共享分支，总控独占Shared/Database/migration/公共测试，候选review后停止 | 不与未来R07/R08争文件，不合main、不创建功能WT；模块需同一新main基线后再授权 | [本次报告](verification/2026-10-16-r07-r08-shared.md)和[接口手册](R07_R08_SHARED.md)；main不变 |
+| D048 | Provider实例ID稳定，模型身份成对；真实/显式Mock/失效配置分开，新配置不得落旧Demo兜底 | 目前真实resolver未实现，启动前unsupported优于生成虚假Mock成功；仅未编辑旧Demo保留兼容 | 配置三Mock实际公共输入/Attempt、真实及禁用零Mock/零Run、旧快照保留；真实网络未验证 |
+| D049 | 追加migration3配置/归档/Key revision与索引，沿用单Database和已验收在线备份恢复，1/2不改 | 不伪造历史配置/时间；新ledger与实际列同时验证；历史引用禁止硬删 | 新建/1→3/2→3/幂等/实际DDL失败字节回滚/旧版可恢复备份/WAL busy与v3恢复 |
+| D050 | Provider拥有Key，每实例串行+revision CAS；更换目标撤销密文，会话仅内存；异步解密返回前再校验 | 解决迟到加解密、ID重用和跨Provider取Key；活动冻结引用禁止改Key/配置 | fake secure/memory、失败保留、延迟竞态与泄漏断言；真实系统后端未验证 |
+| D051 | 消息sortKey、Run(createdAt,id)+首次rowid上界分页；Shared比较遵从SQLite BINARY | 避免updatedAt漂移与同时间戳后插入较小ID混页；cursor绑定房间且校验实际边界 | 固定上界/并发插入/Unicode/跨房/错误cursor；跨页可变流式文本不冻结 |
+| D052 | 冻结纯typed API和input/output表及feature props，生产handler/Preload/App等真实组装延至联合集成 | 不建空handler、不把接口存在当功能完成；两个feature可用注入API独立测试 | 原Bridge/CSP/sandbox和旧Run联合回归通过；R07/R08UI及真实模型未实现 |

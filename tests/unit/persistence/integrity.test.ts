@@ -8,7 +8,7 @@ describe('recovery database validation', () => {
     const f = diskFixture();
     try {
       const report = validateDatabase(f.db);
-      expect(report.schemaVersion).toBe(2);
+      expect(report.schemaVersion).toBe(3);
       expect(report.counts).toEqual({ runs: 1, turns: 1, messages: 1, events: 1 });
       expect(report.evidenceSha256).toMatch(/^[a-f0-9]{64}$/);
       f.db.prepare('UPDATE turns SET request_id = ?').run('other-request');
@@ -27,7 +27,7 @@ describe('recovery database validation', () => {
     ["UPDATE workflow_runs SET status = 'unknown'", /status/i],
     ["UPDATE turns SET status = 'unknown'", /status/i],
     ["UPDATE messages SET status = 'unknown'", /status/i],
-    ["UPDATE schema_migrations SET version = 3 WHERE version = 2", /migration/i],
+    ["UPDATE schema_migrations SET version = 4 WHERE version = 3", /migration/i],
   ])('rejects damaged evidence: %s', (sql, error) => {
     const f = diskFixture();
     try {

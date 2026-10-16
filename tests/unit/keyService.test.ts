@@ -14,19 +14,21 @@ describe('KeyService', () => {
   it('stores only encrypted data and resolves the key inside the main process', async () => {
     const database = new Database(':memory:');
     database.initialize();
+    database.createProvider({ id: 'provider-1', name: 'Fixture', kind: 'openai' });
     const service = new KeyService(database, secureBackend);
 
     const reference = await service.storeKey('provider-1', 'sk-secret');
 
     expect(reference.id).toBeTruthy();
     expect(database.rawKeyRecord(reference.id)?.encryptedValue).not.toContain('sk-secret');
-    expect(await service.resolveKey(reference)).toBe('sk-secret');
+    expect(await service.resolveKey('provider-1', reference)).toBe('sk-secret');
     database.close();
   });
 
   it('uses session memory when the backend is not persistent', async () => {
     const database = new Database(':memory:');
     database.initialize();
+    database.createProvider({ id: 'provider-1', name: 'Fixture', kind: 'openai' });
     const memoryBackend: KeyStorageBackend = {
       mode: 'memory',
       backend: 'basic_text',
@@ -38,7 +40,7 @@ describe('KeyService', () => {
     const reference = await service.storeKey('provider-1', 'sk-session');
 
     expect(database.rawKeyRecord(reference.id)).toBeUndefined();
-    expect(await service.resolveKey(reference)).toBe('sk-session');
+    expect(await service.resolveKey('provider-1', reference)).toBe('sk-session');
     database.close();
   });
 });
