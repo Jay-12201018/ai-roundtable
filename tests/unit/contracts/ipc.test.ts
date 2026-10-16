@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
-import type { RunService } from '../../../src/main/services/RunService';
 import { registerIpc } from '../../../src/main/ipc/registerIpc';
 import { ContractError } from '../../../src/shared/contracts/errors';
 
@@ -20,10 +19,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   start.mockResolvedValue(snapshot); getSnapshot.mockReturnValue(snapshot);
   registerIpc({ webContents: { send } } as unknown as BrowserWindow, {
-    start, getSnapshot, recoverInterruptedRun: recover,
-    createDemoRoom: () => 'room', getMessages: () => [],
-    onEvent: (listener: (event: unknown) => void) => { fixture.listener = listener; return () => {}; },
-  } as unknown as RunService);
+    run: {
+      start, getSnapshot, recoverInterruptedRun: recover,
+      createDemoRoom: () => 'room', getMessages: () => [],
+      onEvent: (listener: (event: unknown) => void) => { fixture.listener = listener; return () => {}; },
+    }, rooms: {}, settings: {},
+  } as unknown as Parameters<typeof registerIpc>[1]);
 });
 const invoke = (channel: string, ...args: unknown[]) => fixture.handlers.get(channel)!({}, ...args);
 describe('IPC runtime contract', () => {

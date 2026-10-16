@@ -6,7 +6,7 @@ import { RunService } from '../../../src/main/services/RunService';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { createRendererSession } from '../../../src/renderer/subscriptions/rendererSession';
 import { canRecover } from '../../../src/renderer/store/rendererStore';
-import { PublicProvider,apiFor } from './fixtures';
+import { PublicProvider,apiFor,appApiFor } from './fixtures';
 
 afterEach(()=>{cleanup();localStorage.clear();});
 function recovered(options:{completed?:boolean;legacy?:boolean;exhausted?:boolean}={}){
@@ -24,7 +24,7 @@ function recovered(options:{completed?:boolean;legacy?:boolean;exhausted?:boolea
   if(options.completed)db.updateAttempt('original-request',{status:'completed'});
   if(options.completed)db.updateRunProgress('run',{nextTurnIndex:1});
   expect(db.markInFlightRunsInterrupted()).toBe(1);expect(db.markInFlightRunsInterrupted()).toBe(0);
-  const provider=new PublicProvider({gated:true});const service=new RunService(db,provider,createPublicMessagesBuilder());const api=apiFor(service);
+  const provider=new PublicProvider({gated:true});const service=new RunService(db,provider,createPublicMessagesBuilder());const api=appApiFor(service,db);
   return {db,provider,service,api,async close(){provider.releaseAll();await service.shutdown();db.close();}};
 }
 describe('joint interrupted recovery and reload',()=>{

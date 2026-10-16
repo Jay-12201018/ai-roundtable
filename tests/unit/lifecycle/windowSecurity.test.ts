@@ -55,6 +55,13 @@ function navigate(window: any, url: string, eventName = 'will-navigate', isMainF
 }
 
 describe('window navigation security', () => {
+  it('permits the 800 by 600 desktop layout without changing the security preferences', () => {
+    createMainWindow();
+    expect(fixture.windows[0].options.minWidth).toBe(800);
+    expect(fixture.windows[0].options.minHeight).toBe(600);
+    expect(fixture.windows[0].options.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true });
+  });
+
   it.each([
     'http://localhost.attacker.example:5173/',
     'http://localhost:5174/',

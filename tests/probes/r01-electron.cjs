@@ -4,8 +4,21 @@ const { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFile
 const { tmpdir } = require('node:os');
 const { dirname, join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, session } = require('electron');
+const { app, session, safeStorage } = require('electron');
+// A fresh profile does not isolate the OS keychain; never call its backend in probes.
+const fakeStorage = { isEncryptionAvailable: () => false, getSelectedStorageBackend: () => 'basic_text',
+  encryptString: () => { throw new Error('Fixture encryption unavailable'); },
+  decryptString: () => { throw new Error('Fixture decryption unavailable'); },
+  setUsePlainTextEncryption: () => { throw new Error('Fixture plaintext backend forbidden'); } };
+for (const name of Object.getOwnPropertyNames(safeStorage)) {
+  assert.equal(typeof fakeStorage[name], 'function', 'Unisolated safeStorage method: ' + name);
+  safeStorage[name] = fakeStorage[name];
+  assert.equal(safeStorage[name], fakeStorage[name]);
+}
 const { execFileSync } = require('node:child_process');
+
+app.commandLine.appendSwitch('use-mock-keychain');
+assert.equal(app.commandLine.hasSwitch('use-mock-keychain'), true);
 
 const args = process.argv.slice(2);
 const development = args[0] === '--development';
@@ -153,10 +166,19 @@ async function probe() {
     }
     check(typeof window.require === 'undefined' && typeof window.process === 'undefined', 'Node globals exposed');
     const api = window.roundtable;
-    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['room', 'run']), 'Unexpected Bridge top-level API');
+    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['room', 'rooms', 'run', 'settings']), 'Unexpected Bridge top-level API');
     check(JSON.stringify(Object.keys(api.room).sort()) === JSON.stringify(['createDemo', 'getMessages']), 'Unexpected room API');
     const expected = ['continueMessage', 'getSnapshot', 'onEvent', 'pause', 'recoverInterruptedRun', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
     check(JSON.stringify(Object.keys(api.run).sort()) === JSON.stringify(expected), 'Unexpected run API');
+    const configurationKeys = {
+      rooms: ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'],
+      settings: ['createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModels','listProviderSummaries','setKey','testConnection','updateProvider'],
+    };
+    for (const [group, methods] of Object.entries(configurationKeys)) {
+      check(JSON.stringify(Object.keys(api[group]).sort()) === JSON.stringify(methods), 'Unexpected ' + group + ' API');
+      check(Object.values(api[group]).every(value => typeof value === 'function'), 'Configuration Bridge method missing');
+      check(!('resolveKey' in api[group]) && !('invoke' in api[group]), 'Private capability exposed');
+    }
     check(Object.values(api.room).every((value) => typeof value === 'function') && Object.values(api.run).every((value) => typeof value === 'function'), 'Bridge method missing');
     const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     check(policy.includes("frame-src 'none';") && policy.includes("object-src 'none';") && policy.includes("base-uri 'none';"), 'CSP missing isolation directives');

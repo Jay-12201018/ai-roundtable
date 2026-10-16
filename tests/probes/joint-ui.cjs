@@ -20,11 +20,22 @@ async function page(stage) {
   const text = () => [...document.querySelectorAll('.message p')].map(p => p.textContent);
   await wait(() => document.querySelector('.app-shell'), Boolean, 'App not rendered');
   const api = window.roundtable;
+  const selectDemo = async () => {
+    const { roomId } = await api.room.createDemo('R04-R06 regression fixture');
+    await click('房间与成员'); await click('刷新房间');
+    const rooms = await api.rooms.listRooms();
+    const index = rooms.findIndex(room => room.id === roomId);
+    check(index >= 0, 'Fresh demo room absent');
+    await wait(() => document.querySelectorAll('.rooms-navigation .rooms-list button'), buttons => buttons.length === rooms.length, 'Rooms projection stale');
+    document.querySelectorAll('.rooms-navigation .rooms-list button')[index].click();
+    await click('讨论');
+  };
   let id;
   const read = () => api.run.getSnapshot(id);
   const settled = (status, turns) => wait(read, s => s.status === status && s.turns.length === turns
     && JSON.stringify(text()) === JSON.stringify(s.messages.map(m => m.content)), 'DOM/snapshot did not settle: ' + status);
   if (stage === 'pause') {
+    await selectDemo();
     await click('开始 Mock 协作');
     id = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run identity not saved');
     await wait(() => text(), t => t[0]?.length > 0, 'First partial text absent');
@@ -38,7 +49,7 @@ async function page(stage) {
   const stepped = await settled('paused', 2);
   await click('继续');
   const completed = await settled('completed', 3);
-  await click('新建任务');
+  await selectDemo();
   await wait(() => localStorage.getItem('roundtable.runId'), value => value === null, 'New room selection not committed');
   await click('开始 Mock 协作');
   id = await wait(() => localStorage.getItem('roundtable.runId'), value => value && value !== completed.runId, 'New Run not saved');

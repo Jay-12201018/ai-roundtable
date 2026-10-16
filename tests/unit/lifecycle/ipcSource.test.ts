@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
-import type { RunService } from '../../../src/main/services/RunService';
 import { registerIpc } from '../../../src/main/ipc/registerIpc';
 import { createMainWindow } from '../../../src/main/windows/createMainWindow';
 
@@ -51,7 +50,7 @@ function bind(url = 'http://localhost:5173/') {
   const frame = webContents.mainFrame;
   Object.assign(frame, { url });
   fixture.onEvent.mockReturnValue(() => {});
-  const service = { createDemoRoom: fixture.createRoom, onEvent: fixture.onEvent } as unknown as RunService;
+  const service = { run: { createDemoRoom: fixture.createRoom, onEvent: fixture.onEvent }, rooms: {}, settings: {} } as unknown as Parameters<typeof registerIpc>[1];
   const dispose = registerIpc(window, service);
   const event = { sender: webContents, senderFrame: frame } as unknown as IpcMainInvokeEvent;
   return { window, service, frame, event, dispose, invoke: () => fixture.handlers.get('room.createDemo')!(event, 'test objective') };
@@ -166,7 +165,22 @@ describe('registered IPC source boundary', () => {
     expect(fixture.send).not.toHaveBeenCalled();
   });
 
-  it.each(['room.createDemo', 'room.getMessages', 'run.getSnapshot', 'run.subscribe', 'run.start', 'run.pause', 'run.stop', 'run.step', 'run.resumeRun', 'run.retryTurn', 'run.continueMessage', 'run.recoverInterruptedRun'])('guards the source before handling %s', async (channel) => {
+  it('does not block the configuration drain on a pending run control request', async () => {
+    const bound = bind();
+    let release!: () => void;
+    bound.service.run.pause = () => new Promise<void>(resolve => { release = resolve; });
+    const pending = fixture.handlers.get('run.pause')!(bound.event, 'r');
+    bound.dispose();
+    await bound.dispose.drain();
+    release();
+    await expect(pending).rejects.toThrow('Unauthorized IPC sender');
+  });
+
+  it.each(['room.createDemo', 'room.getMessages', 'run.getSnapshot', 'run.subscribe', 'run.start', 'run.pause', 'run.stop', 'run.step', 'run.resumeRun', 'run.retryTurn', 'run.continueMessage', 'run.recoverInterruptedRun',
+    'rooms.createRoom', 'rooms.updateRoom', 'rooms.getRoomConfiguration', 'rooms.listRooms', 'rooms.archiveRoom', 'rooms.deleteRoom',
+    'rooms.createAgent', 'rooms.updateAgent', 'rooms.getAgentConfiguration', 'rooms.listAgentConfigurations', 'rooms.reorderAgents', 'rooms.archiveAgent', 'rooms.deleteAgent', 'rooms.listRoomMessages', 'rooms.listRoomRuns',
+    'settings.createProvider', 'settings.updateProvider', 'settings.getProviderConfiguration', 'settings.listProviderSummaries', 'settings.deleteProvider', 'settings.setKey', 'settings.deleteKey', 'settings.getProviderKeyState', 'settings.getKeyStorageStatus', 'settings.listModels', 'settings.testConnection',
+  ])('guards the source before handling %s', async (channel) => {
     const bound = bind();
     Object.assign(bound.event, { senderFrame: null });
     await expect(Promise.resolve().then(() => fixture.handlers.get(channel)!(bound.event, undefined))).rejects.toThrow('Unauthorized IPC sender');

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
+import { props as roomProps, room } from './rendererRooms/fixtures';
 import type { RunEvent, RunSnapshot, RunSubscription } from '../../src/shared/types/run';
 
 function snapshot(runId: string, sequence = 0, content = ''): RunSnapshot {
@@ -16,6 +17,16 @@ function delta(runId: string, sequence: number, text: string): RunEvent {
   return { version: 1, runId, turnId: `${runId}-turn`, requestId: `${runId}-request`, sequence, type: 'text_delta', timestamp: new Date().toISOString(), payload: { turnId: `${runId}-turn`, messageId: `${runId}-message`, senderName: '起草者', text } };
 }
 
+function configurationApis() {
+  const rooms = roomProps().api;
+  vi.mocked(rooms.listRooms).mockResolvedValue([room('room', '现有房间')]);
+  return { rooms, settings: {
+    createProvider: vi.fn(), updateProvider: vi.fn(), getProviderConfiguration: vi.fn(),
+    listProviderSummaries: vi.fn().mockResolvedValue([]), deleteProvider: vi.fn(), setKey: vi.fn(), deleteKey: vi.fn(),
+    getProviderKeyState: vi.fn(), getKeyStorageStatus: vi.fn(), listModels: vi.fn(), testConnection: vi.fn(),
+  } };
+}
+
 describe('Renderer run synchronization', () => {
   let listener: (event: RunEvent) => void;
   const unsubscribe = vi.fn();
@@ -28,6 +39,7 @@ describe('Renderer run synchronization', () => {
     subscribe.mockImplementation(async (id: string): Promise<RunSubscription> => ({ snapshot: snapshot(id), events: [], nextCursor: 0, resyncRequired: false }));
     start.mockResolvedValue(snapshot('new', 2));
     window.roundtable = {
+      ...configurationApis(),
       room: { createDemo: vi.fn().mockResolvedValue({ roomId: 'room' }), getMessages: vi.fn().mockResolvedValue([]) },
       run: { subscribe, start, getSnapshot: vi.fn().mockImplementation(async (id) => snapshot(id)),
         onEvent: vi.fn((handler) => { listener = handler; return unsubscribe; }),
@@ -96,6 +108,7 @@ describe('Renderer run synchronization', () => {
   it('starts only once while the start command is pending and releases its listener', async () => {
     start.mockReturnValue(new Promise(() => {}));
     const view = render(<App />);
+    await waitFor(() => expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByText('开始 Mock 协作'));
     fireEvent.click(screen.getByText('开始 Mock 协作'));
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
@@ -103,14 +116,15 @@ describe('Renderer run synchronization', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks Play and new rooms until the restored run snapshot arrives', () => {
+  it('blocks Play and new rooms until the restored run snapshot arrives', async () => {
     localStorage.setItem('roundtable.runId', 'restoring');
     subscribe.mockReturnValue(new Promise(() => {}));
     render(<App />);
     expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByText('新建任务') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('房间与成员') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('开始 Mock 协作'));
     expect(start).not.toHaveBeenCalled();
+    await act(async () => {});
   });
 
   it('displays workflow and message status in Simplified Chinese', async () => {
@@ -133,6 +147,7 @@ describe('Renderer task identity and command feedback', () => {
     const events = new Set<(event: RunEvent) => void>();
     const subscribe = vi.fn(async () => ({ snapshot: saved!, events: [], nextCursor: saved!.sequence, resyncRequired: false }));
     window.roundtable = {
+      ...configurationApis(),
       room: { createDemo: vi.fn(), getMessages: vi.fn() },
       run: { subscribe, getSnapshot: vi.fn(), start: vi.fn(), onEvent: vi.fn(handler => { events.add(handler); return () => { events.delete(handler); }; }), pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn() },
     };
@@ -146,6 +161,7 @@ describe('Renderer task identity and command feedback', () => {
     setup(saved);
     render(<App />);
     await screen.findByText('历史消息');
+    await act(async () => {});
     fireEvent.change(screen.getByLabelText('任务目标'), { target: { value: '这是另一份草稿' } });
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('数据库中的真实目标');
     expect(screen.getAllByText('数据库中的真实目标')).toHaveLength(2);
@@ -153,16 +169,20 @@ describe('Renderer task identity and command feedback', () => {
 
   it('locks repeated room creation and presents its captured title after success', async () => {
     setup();
-    let finish!: (room: { roomId: string }) => void;
-    vi.mocked(window.roundtable.room.createDemo).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    vi.mocked(window.roundtable.rooms.listRooms).mockResolvedValue([]);
+    let finish!: (value: ReturnType<typeof room>) => void;
+    vi.mocked(window.roundtable.rooms.createRoom).mockReturnValue(new Promise(resolve => { finish = resolve; }));
     render(<App />);
-    fireEvent.change(screen.getByLabelText('任务目标'), { target: { value: '创建目标' } });
-    fireEvent.click(screen.getByText('新建任务'));
-    fireEvent.click(screen.getByText('新建任务'));
-    expect(window.roundtable.room.createDemo).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('房间与成员'));
+    fireEvent.click(await screen.findByRole('button', { name: '新建房间' }));
+    fireEvent.change(screen.getByLabelText('房间名称'), { target: { value: '创建目标' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存房间' }));
+    fireEvent.click(screen.getByRole('button', { name: '正在保存…' }));
+    expect(window.roundtable.rooms.createRoom).toHaveBeenCalledTimes(1);
+    expect(window.roundtable.rooms.createRoom).toHaveBeenCalledWith({ name: '创建目标', objective: '' });
     expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(true);
-    await act(async () => finish({ roomId: 'created' }));
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('创建目标');
+    await act(async () => finish(room('created', '创建目标')));
+    expect(screen.getByRole('heading', { name: '创建目标' })).toBeTruthy();
   });
 
   it.each(['interrupted', 'error'] as const)('preserves partial messages and disables unavailable controls for %s', async (status) => {

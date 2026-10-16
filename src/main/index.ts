@@ -6,12 +6,17 @@ import { KeyService } from './security/KeyService';
 import { MockProvider } from './providers/mock/MockProvider';
 import { RunService } from './services/RunService';
 import { createMainWindow } from './windows/createMainWindow';
-import { registerIpc } from './ipc/registerIpc';
+import { RoomService } from './room/RoomService';
+import { ProviderSettingsService } from './settings/ProviderSettingsService';
+import { registerIpc, type IpcDisposer } from './ipc/registerIpc';
 import { createPublicMessagesBuilder } from './context/wirePublicContext';
 
 let database: Database | undefined;
 let window: BrowserWindow | undefined;
-let unregisterIpc: (() => void) | undefined;
+let unregisterIpc: IpcDisposer | undefined;
+let ipcCleanup = Promise.resolve();
+let roomService: RoomService | undefined;
+let settingsService: ProviderSettingsService | undefined;
 let runService: RunService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
@@ -44,6 +49,8 @@ if (!hasLock) {
       database.markInFlightRunsInterrupted();
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
+      roomService = new RoomService(database);
+      settingsService = new ProviderSettingsService(database, keyService);
       runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }),createPublicMessagesBuilder());
       createAppWindow();
       app.on('activate', () => {
@@ -63,11 +70,11 @@ if (!hasLock) {
 function createAppWindow(): void {
   if (shutdownRequested) return;
   try {
-    if (!runService) throw new Error('Run service is not initialized');
+    if (!runService || !roomService || !settingsService) throw new Error('Run service is not initialized');
     disposeCurrentIpc();
     const createdWindow = createMainWindow();
     window = createdWindow;
-    const dispose = registerIpc(createdWindow, runService);
+    const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
       if (shutdownRequested || !runService || !runService.hasActiveRuns()) return;
@@ -87,7 +94,13 @@ function createAppWindow(): void {
 function disposeCurrentIpc(): void {
   const dispose = unregisterIpc;
   unregisterIpc = undefined;
-  dispose?.();
+  if (dispose) {
+    try { dispose(); }
+    finally {
+      // Revoked pages cannot receive results, but their accepted writes must finish before close.
+      ipcCleanup = Promise.all([ipcCleanup, dispose.drain()]).then(() => undefined);
+    }
+  }
 }
 
 function requestShutdown(exitCode = 0): void {
@@ -98,7 +111,8 @@ function requestShutdown(exitCode = 0): void {
   shutdownPromise = Promise.resolve().then(async () => {
     try {
       if (initializationPromise) await initializationPromise;
-      await runService?.shutdown();
+      try { await runService?.shutdown(); }
+      finally { await ipcCleanup; }
     } catch (error) {
       shutdownExitCode = 1;
       console.error('AI Roundtable shutdown failed', error);

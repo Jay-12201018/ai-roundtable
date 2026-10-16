@@ -78,6 +78,8 @@ export interface RoomsFeatureProps {
   providerLoadState: 'loading' | 'ready' | 'error';
   onReloadProviders: () => void;
   onSelectRoom: (roomId: string) => void;
+  onClearRoom?: () => void;
+  initialRoomId?: string;
   onSelectRun: (runId: string) => void;
   onOpenSettings: () => void;
 }
@@ -87,7 +89,7 @@ export interface SettingsFeatureProps {
   onClose: () => void;
 }
 
-// Candidate protocols only. Production IPC/Preload registration waits for real services.
+// Canonical configuration schemas are shared by services, IPC and Preload.
 export const roomManagementContracts = {
   createRoom: { input: schemas.createRoomInputSchema, output: schemas.roomConfigurationSchema },
   updateRoom: { input: schemas.roomInputSchema, output: schemas.roomConfigurationSchema },

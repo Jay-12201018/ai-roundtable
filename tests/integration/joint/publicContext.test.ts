@@ -60,8 +60,9 @@ describe('R04 + R05 actual public requests',()=>{
     const db=new Database(':memory:');db.initialize();const provider=new PublicProvider();const service=new RunService(db,provider,createPublicMessagesBuilder());
     const agents=db.listAgents.bind(db);vi.spyOn(db,'listAgents').mockImplementation(id=>agents(id).map(a=>({...a,modelId:'unknown-paid-model'})));
     try{
-      const run=await service.start({roomId:service.createDemoRoom('room'),task:'task',workflowSnapshot:{}});await service.waitForIdle(run.runId);
-      expect(service.getSnapshot(run.runId).status).toBe('error');expect(provider.inputs).toEqual([]);expect(db.listAttempts(run.runId)).toEqual([]);expect(db.listTurns(run.runId)).toEqual([]);
+      const roomId=service.createDemoRoom('room');
+      await expect(service.start({roomId,task:'task',workflowSnapshot:{}})).rejects.toMatchObject({ code:'invalid_state' });
+      expect(provider.inputs).toEqual([]);expect(db.listRoomRuns({roomId}).items).toEqual([]);expect(db.listMessages(roomId)).toEqual([]);expect(service.hasActiveRuns()).toBe(false);
     }finally{await service.shutdown();db.close();}
   });
   it('keeps ordinary model text in assistant history and excludes private reasoning and errors',async()=>{

@@ -5,17 +5,21 @@ import { resyncEvent } from '../../shared/contracts/events';
 import { PROTOCOL_VERSION } from '../../shared/schemas/common';
 import { inputError, publicError } from '../../shared/schemas/error';
 import { runEventSchema } from '../../shared/schemas/run';
-import { RunService } from '../services/RunService';
+import type { RoomManagementApiContract, ProviderSettingsApiContract } from '../../shared/contracts/configuration';
+import type { RunService } from '../services/RunService';
 import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
 
-let currentDisposer: (() => void) | undefined;
+export type IpcDisposer = (() => void) & { drain(): Promise<void> };
+let currentDisposer: IpcDisposer | undefined;
 
-export function registerIpc(window: BrowserWindow, service: RunService): () => void {
+export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract }): IpcDisposer {
+  const { run: service, rooms, settings } = services;
   currentDisposer?.();
   let disposed = false;
   let unsubscribe: (() => void) | undefined;
   const registered: string[] = [];
-  const dispose = () => {
+  const pendingConfiguration = new Set<Promise<unknown>>();
+  const dispose: IpcDisposer = Object.assign(() => {
     if (disposed) return;
     disposed = true;
     try { unsubscribe?.(); }
@@ -23,7 +27,7 @@ export function registerIpc(window: BrowserWindow, service: RunService): () => v
       for (const channel of registered) ipcMain.removeHandler(channel);
       if (currentDisposer === dispose) currentDisposer = undefined;
     }
-  };
+  }, { drain: async () => { await Promise.allSettled([...pendingConfiguration]); } });
   currentDisposer = dispose;
   const ensureSender = (event: IpcMainInvokeEvent) => {
     if (disposed || !isTrustedIpcSender(window, event)) throw new Error('Unauthorized IPC sender');
@@ -41,6 +45,32 @@ export function registerIpc(window: BrowserWindow, service: RunService): () => v
     'run.retryTurn': ({ runId, turnId }) => service.retryTurn(runId, turnId),
     'run.continueMessage': ({ runId, messageId }) => service.continueMessage(runId, messageId),
     'run.recoverInterruptedRun': ({ runId, decision }) => service.recoverInterruptedRun(runId, decision),
+    'rooms.createRoom': (input) => rooms.createRoom(input),
+    'rooms.updateRoom': (input) => rooms.updateRoom(input),
+    'rooms.getRoomConfiguration': (input) => rooms.getRoomConfiguration(input),
+    'rooms.listRooms': (input) => rooms.listRooms(input),
+    'rooms.archiveRoom': (input) => rooms.archiveRoom(input),
+    'rooms.deleteRoom': (input) => rooms.deleteRoom(input),
+    'rooms.createAgent': (input) => rooms.createAgent(input),
+    'rooms.updateAgent': (input) => rooms.updateAgent(input),
+    'rooms.getAgentConfiguration': (input) => rooms.getAgentConfiguration(input),
+    'rooms.listAgentConfigurations': (input) => rooms.listAgentConfigurations(input),
+    'rooms.reorderAgents': (input) => rooms.reorderAgents(input),
+    'rooms.archiveAgent': (input) => rooms.archiveAgent(input),
+    'rooms.deleteAgent': (input) => rooms.deleteAgent(input),
+    'rooms.listRoomMessages': (input) => rooms.listRoomMessages(input),
+    'rooms.listRoomRuns': (input) => rooms.listRoomRuns(input),
+    'settings.createProvider': (input) => settings.createProvider(input),
+    'settings.updateProvider': (input) => settings.updateProvider(input),
+    'settings.getProviderConfiguration': (input) => settings.getProviderConfiguration(input),
+    'settings.listProviderSummaries': () => settings.listProviderSummaries(),
+    'settings.deleteProvider': (input) => settings.deleteProvider(input),
+    'settings.setKey': (input) => settings.setKey(input),
+    'settings.deleteKey': (input) => settings.deleteKey(input),
+    'settings.getProviderKeyState': (input) => settings.getProviderKeyState(input),
+    'settings.getKeyStorageStatus': () => settings.getKeyStorageStatus(),
+    'settings.listModels': (input) => settings.listModels(input),
+    'settings.testConnection': (input) => settings.testConnection(input),
   };
   const register = <C extends IpcChannel>(channel: C) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
@@ -49,14 +79,22 @@ export function registerIpc(window: BrowserWindow, service: RunService): () => v
       if (args.length !== 1) return { version: PROTOCOL_VERSION, ok: false, error: publicError('invalid_input', 'arguments') };
       if (!input.success) return { version: PROTOCOL_VERSION, ok: false, error: inputError(input.error) };
       const parameters = input.data as IpcInput<C>;
-      return (async () => {
+      const operation = (async () => {
+        let response;
         try {
           const result = await handlers[channel](parameters);
-          return { version: PROTOCOL_VERSION, ok: true, data: parseIpcOutput(channel, parameters, result) };
+          response = { version: PROTOCOL_VERSION, ok: true, data: parseIpcOutput(channel, parameters, result) };
         } catch (error) {
-          return { version: PROTOCOL_VERSION, ok: false, error: toPublicError(error) };
+          response = { version: PROTOCOL_VERSION, ok: false, error: toPublicError(error) };
         }
+        ensureSender(event);
+        return response;
       })();
+      if (channel.startsWith('rooms.') || channel.startsWith('settings.')) {
+        pendingConfiguration.add(operation);
+        void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
+      }
+      return operation;
     });
     registered.push(channel);
   };

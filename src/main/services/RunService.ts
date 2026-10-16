@@ -295,6 +295,12 @@ export class RunService {
 
   private schedule(context: RunContext, change: () => void, repeat?: RepeatAttempt): void {
     this.assertAvailable(context);
+    // Revalidate frozen references before retries/recovery, without replacing historical members.
+    for (const member of context.members) {
+      if (member.providerId === null && member.modelId === 'mock') continue;
+      if (member.providerId === null || member.modelId === null) throw new ContractError('invalid_state');
+      if (this.database.validateModelSelection(member.providerId, member.modelId).kind !== 'mock') throw new ContractError('unsupported');
+    }
     const previous = this.contexts.get(context.runId);
     const oldPromise = context.promise;
     let resolve!: () => void;

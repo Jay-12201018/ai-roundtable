@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RoundtableApiContract } from '../../../src/shared/contracts/app';
+import { apiErrorSchema } from '../../../src/shared/schemas/error';
 
 const fixture = vi.hoisted(() => ({ invoke: vi.fn(), handlers: new Set<(...args: unknown[]) => void>(), api: undefined as RoundtableApiContract | undefined }));
 vi.mock('electron', () => ({
@@ -16,6 +17,17 @@ const snapshot = { runId: 'r', roomId: 'room', status: 'running', sequence: 4, w
 const emit = (value: unknown) => { for (const handler of fixture.handlers) handler({}, value); };
 beforeEach(() => { fixture.invoke.mockReset(); fixture.handlers.clear(); });
 describe('restricted Preload contract', () => {
+  it('exposes only typed feature methods and sends one explicit undefined argument for no-input requests', async () => {
+    expect(Object.keys(fixture.api!).sort()).toEqual(['room', 'rooms', 'run', 'settings']);
+    expect(fixture.api!.settings).not.toHaveProperty('resolveKey');
+    fixture.invoke.mockResolvedValue({ version: 1, ok: true, data: [] });
+    await fixture.api!.settings.listProviderSummaries();
+    expect(fixture.invoke).toHaveBeenLastCalledWith('settings.listProviderSummaries', undefined);
+    fixture.invoke.mockResolvedValue({ version: 1, ok: true, data: { mode: 'memory', backend: 'memory', persistent: false, message: '当前系统没有可靠的安全存储，密钥仅在本次会话有效。' } });
+    await fixture.api!.settings.getKeyStorageStatus();
+    expect(fixture.invoke).toHaveBeenLastCalledWith('settings.getKeyStorageStatus', undefined);
+  });
+
   it('unwraps validated responses without exposing the IPC envelope', async () => {
     fixture.invoke.mockResolvedValue({ version: 1, ok: true, data: snapshot });
     expect(await fixture.api!.run.getSnapshot('r')).toEqual(snapshot);
@@ -35,11 +47,29 @@ describe('restricted Preload contract', () => {
     fixture.invoke.mockRejectedValue(new Error('fixture-secret'));
     await expect(fixture.api!.run.getSnapshot('r')).rejects.toMatchObject({ code: 'transport_error', message: 'IPC connection failed' });
   });
-  it('does not expose internal paths or stacks when the bridge rejects a request', async () => {
-    fixture.invoke.mockRejectedValue(new Error('fixture-secret'));
-    const error = await fixture.api!.run.getSnapshot('r').catch((error: Error) => error);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).stack).not.toMatch(/\bat\s|\.ts|\.cjs|\//);
+  it('rejects transport failures with a strict public DTO that crosses contextBridge without losing fields', async () => {
+    fixture.invoke.mockRejectedValue(new Error('fixture-secret /private/internal/preload.cjs'));
+    const error = await fixture.api!.run.getSnapshot('r').catch((error: unknown) => error);
+    expect(apiErrorSchema.safeParse(error).success).toBe(true);
+    expect(error).toStrictEqual({ code: 'transport_error', message: 'IPC connection failed', retryable: true });
+    expect(error).not.toBeInstanceOf(Error);
+    expect(error).not.toHaveProperty('stack');
+    expect(JSON.stringify(error)).not.toMatch(/fixture-secret|\bat\s|\.ts|\.cjs|\//);
+  });
+  it.each([
+    ['invalid input', () => fixture.api!.run.getSnapshot(' '), undefined, { code: 'invalid_input', message: 'Invalid request parameters', retryable: false, field: 'arguments' }],
+    ['malformed response', () => fixture.api!.run.getSnapshot('r'), { version: 2, ok: true, data: snapshot }, { code: 'invalid_response', message: 'Invalid response; refresh the run snapshot', retryable: false }],
+    ['cross-run response', () => fixture.api!.run.getSnapshot('r'), { version: 1, ok: true, data: { ...snapshot, runId: 'other' } }, { code: 'invalid_response', message: 'Invalid response; refresh the run snapshot', retryable: false }],
+    ['public error', () => fixture.api!.run.getSnapshot('r'), { version: 1, ok: false, error: { code: 'unsupported', message: 'This operation is not supported yet', retryable: false } }, { code: 'unsupported', message: 'This operation is not supported yet', retryable: false }],
+    ['Key failure', () => fixture.api!.settings.setKey({ providerId: 'p', apiKey: 'fixture-secret' }), { version: 1, ok: false, error: { code: 'internal_error', message: 'Operation failed', retryable: false } }, { code: 'internal_error', message: 'Operation failed', retryable: false }],
+  ] as const)('returns only a strict public DTO for %s', async (_case, request, response, expected) => {
+    fixture.invoke.mockResolvedValue(response);
+    const error = await request().catch((error: unknown) => error);
+    expect(apiErrorSchema.safeParse(error).success).toBe(true);
+    expect(error).toStrictEqual(expected);
+    expect(error).not.toBeInstanceOf(Error);
+    expect(error).not.toHaveProperty('stack');
+    expect(JSON.stringify(error)).not.toMatch(/fixture-secret|\bat\s|\.ts|\.cjs|\//);
   });
   it('turns unknown-version events into a safe snapshot request and releases listeners', async () => {
     fixture.invoke.mockResolvedValue({ version: 1, ok: true, data: snapshot });

@@ -6,12 +6,12 @@ import { Database } from '../../../src/main/database/Database';
 import { RunService } from '../../../src/main/services/RunService';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { createRendererSession } from '../../../src/renderer/subscriptions/rendererSession';
-import { PublicProvider,apiFor } from './fixtures';
+import { PublicProvider,apiFor,appApiFor } from './fixtures';
 
 afterEach(()=>{cleanup();localStorage.clear();});
 function fixture(options:ConstructorParameters<typeof PublicProvider>[0]={gated:true}){
   const db=new Database(':memory:');db.initialize();const provider=new PublicProvider(options);
-  const service=new RunService(db,provider,createPublicMessagesBuilder());const api=apiFor(service);
+  const service=new RunService(db,provider,createPublicMessagesBuilder());const api=appApiFor(service,db);
   return {db,provider,service,api,async close(){provider.releaseAll();await service.shutdown();db.close();}};
 }
 describe('R04 + R05 + R06 live integration',()=>{
@@ -33,9 +33,9 @@ describe('R04 + R05 + R06 live integration',()=>{
     }finally{dispose();await f.close();}
   });
   it('projects real alpha/beta/gamma to the DOM with Pause, one Step and Resume',async()=>{
-    const f=fixture();window.roundtable=f.api;
+    const f=fixture();f.service.createDemoRoom('联合 Mock');window.roundtable=f.api;
     try{
-      render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始 Mock 协作'}));
+      render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始 Mock 协作'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始 Mock 协作'}));
       await screen.findByText('alpha');expect(f.provider.inputs).toHaveLength(1);
       await waitFor(()=>expect((screen.getByRole('button',{name:'暂停'}) as HTMLButtonElement).disabled).toBe(false));
       fireEvent.click(screen.getByRole('button',{name:'暂停'}));await screen.findByText(/正在暂停/);

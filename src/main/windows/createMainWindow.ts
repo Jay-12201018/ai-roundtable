@@ -40,8 +40,8 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     width: 1440,
     height: 900,
-    minWidth: 1080,
-    minHeight: 680,
+    minWidth: 800,
+    minHeight: 600,
     backgroundColor: '#0f172a',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),

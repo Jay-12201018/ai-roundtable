@@ -7,9 +7,10 @@ import { Dialog, errorText } from './ui';
 import './rooms.css';
 
 export function RoomsFeature(props: RoomsFeatureProps) {
-  const { api, onSelectRoom } = props;
+  const { api, onSelectRoom, onClearRoom } = props;
   const [rooms, setRooms] = useState<RoomConfiguration[]>([]);
-  const [selectedId, setSelectedId] = useState<string>(); const selection = useRef<string | undefined>(undefined);
+  const [selectedId, setSelectedId] = useState(props.initialRoomId); const selection = useRef(props.initialRoomId);
+  const initialized = useRef(false); const restoreInitial = useRef(Boolean(props.initialRoomId));
   const [includeArchived, setIncludeArchived] = useState(false);
   const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [editor, setEditor] = useState<RoomConfiguration | 'new'>();
@@ -20,17 +21,27 @@ export function RoomsFeature(props: RoomsFeatureProps) {
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; }; }, []);
 
   const select = useCallback((id: string | undefined) => {
-    if (selection.current === id) return;
+    if (initialized.current && selection.current === id) return;
+    initialized.current = true;
     generation.current++; selection.current = id; setSelectedId(id); setEditor(undefined); setConfirmation(undefined); setNotice(''); setError(''); setTab('members');
-    if (id) onSelectRoom(id);
-  }, [onSelectRoom]);
+    if (id) onSelectRoom(id); else onClearRoom?.();
+  }, [onSelectRoom, onClearRoom]);
   const reload = useCallback(async () => {
     const token = ++request.current; setLoading(true); setError('');
     try {
       const next = await api.listRooms({ includeArchived });
       if (!alive.current || token !== request.current) return;
+      if (restoreInitial.current) {
+        restoreInitial.current = false;
+        if (selection.current && !next.some(room => room.id === selection.current)) {
+          const restored = await api.getRoomConfiguration({ id: selection.current });
+          if (!alive.current || token !== request.current) return;
+          if (restored.archivedAt && !includeArchived) { setIncludeArchived(true); return; }
+        }
+      }
       setRooms(next);
       if (!next.some(room => room.id === selection.current)) select(next[0]?.id);
+      else initialized.current = true;
     } catch (error) { if (alive.current && token === request.current) setError(errorText(error)); }
     finally { if (alive.current && token === request.current) setLoading(false); }
   }, [api, includeArchived, select]);

@@ -41,6 +41,7 @@ const fixture = vi.hoisted(() => {
     dialog: { showErrorBox: vi.fn(), showMessageBoxSync: vi.fn() },
     database: { initialize: vi.fn(), markInFlightRunsInterrupted: vi.fn(), close: vi.fn() },
     service: { shutdown: vi.fn(), hasActiveRuns: vi.fn() },
+    rooms: {}, settings: {}, keys: { getStatus: async () => ({}) },
     createWindow: vi.fn(),
     windowLoad: vi.fn(),
     registerIpc: vi.fn(),
@@ -51,7 +52,9 @@ const fixture = vi.hoisted(() => {
 vi.mock('electron', () => ({ app: fixture.app, dialog: fixture.dialog, BrowserWindow: fixture.Window, shell: { openExternal: vi.fn() } }));
 vi.mock('../../src/main/database/Database', () => ({ Database: vi.fn(function () { return fixture.database; }) }));
 vi.mock('../../src/main/security/electronSafeStorage', () => ({ createElectronKeyBackend: vi.fn() }));
-vi.mock('../../src/main/security/KeyService', () => ({ KeyService: vi.fn(function () { return { getStatus: async () => ({}) }; }) }));
+vi.mock('../../src/main/security/KeyService', () => ({ KeyService: vi.fn(function () { return fixture.keys; }) }));
+vi.mock('../../src/main/room/RoomService', () => ({ RoomService: vi.fn(function () { return fixture.rooms; }) }));
+vi.mock('../../src/main/settings/ProviderSettingsService', () => ({ ProviderSettingsService: vi.fn(function () { return fixture.settings; }) }));
 vi.mock('../../src/main/providers/mock/MockProvider', () => ({ MockProvider: vi.fn() }));
 vi.mock('../../src/main/services/RunService', () => ({ RunService: vi.fn(function () { return fixture.service; }) }));
 vi.mock('../../src/main/windows/createMainWindow', () => ({ createMainWindow: fixture.createWindow }));
@@ -97,13 +100,44 @@ beforeEach(() => {
     return window;
   });
   fixture.registerIpc.mockImplementation(() => {
-    const unsubscribe = vi.fn();
+    const unsubscribe = Object.assign(vi.fn(), { drain: vi.fn(async () => {}) });
     fixture.unregister.push(unsubscribe);
     return unsubscribe;
   });
 });
 
 describe('application lifecycle', () => {
+  it('assembles room and settings services with the same database and protected key service', async () => {
+    await startApp();
+    const { RoomService } = await import('../../src/main/room/RoomService');
+    const { ProviderSettingsService } = await import('../../src/main/settings/ProviderSettingsService');
+    expect(RoomService).toHaveBeenCalledExactlyOnceWith(fixture.database);
+    expect(ProviderSettingsService).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.keys);
+    expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings });
+  });
+
+  it('waits for current and already closed window configuration writes before closing SQLite', async () => {
+    const pending: (() => void)[] = [];
+    fixture.registerIpc.mockImplementation(() => {
+      const wait = new Promise<void>(resolve => pending.push(resolve));
+      const dispose = Object.assign(vi.fn(), { drain: vi.fn(() => wait) });
+      fixture.unregister.push(dispose);
+      return dispose;
+    });
+    await startApp();
+    fixture.windows[0]!.close(); emit('activate');
+    emit('before-quit'); emit('before-quit');
+    await vi.waitFor(() => expect(fixture.service.shutdown).toHaveBeenCalledOnce());
+    expect(fixture.database.close).not.toHaveBeenCalled();
+    pending[1]!();
+    await Promise.resolve(); await Promise.resolve();
+    expect(fixture.database.close).not.toHaveBeenCalled();
+    pending[0]!();
+    await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledExactlyOnceWith(0));
+    await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
+    fixture.unregister.forEach(dispose => expect(dispose).toHaveBeenCalledOnce());
+  });
+
   it('waits for disk initialization before closing and never opens a window after quit', async () => {
     let finish!: () => void;
     fixture.database.initialize.mockImplementation(() => new Promise<void>(resolve => {finish=resolve;}));
@@ -114,7 +148,7 @@ describe('application lifecycle', () => {
     expect(fixture.createWindow).not.toHaveBeenCalled();
     finish();
     await vi.waitFor(()=>expect(fixture.app.exit).toHaveBeenCalledWith(0));
-    expect(fixture.database.close).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
     expect(fixture.database.markInFlightRunsInterrupted).not.toHaveBeenCalled();
     expect(fixture.createWindow).not.toHaveBeenCalled();
   });
@@ -128,7 +162,7 @@ describe('application lifecycle', () => {
     try {
       await startApp(); emit('before-quit'); fail(new Error('Backup validation failed'));
       await vi.waitFor(()=>expect(fixture.app.exit).toHaveBeenCalledWith(1));
-      expect(fixture.database.close).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
       expect(fixture.createWindow).not.toHaveBeenCalled();
     } finally {log.mockRestore();}
   });
@@ -140,7 +174,7 @@ describe('application lifecycle', () => {
     await startApp();
 
     expect(fixture.dialog.showErrorBox).toHaveBeenCalledWith('AI 圆桌启动失败', 'Migration failed');
-    expect(fixture.database.close).toHaveBeenCalled();
+    await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalled());
     expect(fixture.app.exit).toHaveBeenCalledWith(1);
     expect(fixture.createWindow).not.toHaveBeenCalled();
     errorLog.mockRestore();
@@ -160,7 +194,7 @@ describe('application lifecycle', () => {
     expect(fixture.dialog.showErrorBox).toHaveBeenCalledWith('AI 圆桌启动失败', expect.stringContaining('加载'));
     expect(fixture.windows[0]?.hide).toHaveBeenCalledOnce();
     expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-    expect(fixture.database.close).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
     expect(fixture.app.exit).toHaveBeenCalledWith(0);
   });
@@ -183,7 +217,7 @@ describe('application lifecycle', () => {
     emit('activate');
 
     expect(fixture.unregister[0]).toHaveBeenCalledTimes(1);
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], fixture.service);
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings });
     expect(fixture.windows[1]?.destroyed).toBe(false);
   });
 
@@ -207,7 +241,7 @@ describe('application lifecycle', () => {
     await Promise.resolve();
 
     expect(fixture.service.shutdown).toHaveBeenCalledTimes(1);
-    expect(fixture.database.close).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledTimes(1));
     expect(fixture.app.exit).toHaveBeenCalledWith(0);
   });
 
@@ -293,7 +327,7 @@ describe('application lifecycle', () => {
       expect(first.preventDefault).toHaveBeenCalledOnce();
       expect(second.preventDefault).toHaveBeenCalledOnce();
       expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-      expect(fixture.database.close).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
       expect(fixture.app.exit).toHaveBeenCalledOnce();
       expect(errorLog).toHaveBeenCalled();
     } finally { errorLog.mockRestore(); }
@@ -307,7 +341,7 @@ describe('application lifecycle', () => {
       emit('before-quit');
       await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledWith(1));
       emit('before-quit');
-      expect(fixture.database.close).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
       expect(fixture.app.exit).toHaveBeenCalledOnce();
       expect(errorLog).toHaveBeenCalled();
     } finally { errorLog.mockRestore(); }
@@ -322,7 +356,7 @@ describe('application lifecycle', () => {
       await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledWith(1));
       expect(fixture.unregister[0]).toHaveBeenCalledOnce();
       expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-      expect(fixture.database.close).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
       expect(errorLog).toHaveBeenCalled();
     } finally { errorLog.mockRestore(); }
   });
@@ -338,7 +372,7 @@ describe('application lifecycle', () => {
     await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledWith(0));
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
     expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-    expect(fixture.database.close).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
     expect(fixture.app.exit).toHaveBeenCalledOnce();
   });
 
@@ -350,7 +384,7 @@ describe('application lifecycle', () => {
       await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledWith(1));
       expect(fixture.dialog.showErrorBox).toHaveBeenCalledWith('AI 圆桌启动失败', 'Window failed');
       expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-      expect(fixture.database.close).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
     } finally { errorLog.mockRestore(); }
   });
 
@@ -373,7 +407,7 @@ describe('application lifecycle', () => {
       await Promise.resolve();
     }
     expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-    expect(fixture.database.close).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
     expect(fixture.app.exit).toHaveBeenCalledOnce();
   });
 
@@ -382,7 +416,7 @@ describe('application lifecycle', () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await startApp();
-      expect(fixture.database.close).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
     } finally { errorLog.mockRestore(); }
   });
 
@@ -425,7 +459,7 @@ describe('application lifecycle', () => {
     fixture.windows[0]!.close();
     emit('second-instance');
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], fixture.service);
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings });
     expect(fixture.windows.filter((window) => !window.destroyed)).toHaveLength(1);
   });
 });

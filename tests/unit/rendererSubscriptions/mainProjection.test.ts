@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { RunService } from '../../../src/main/services/RunService';
-import type { RoundtableApiContract } from '../../../src/shared/contracts/app';
+import type { RunSessionApiContract } from '../../../src/shared/contracts/app';
 import { createRendererSession } from '../../../src/renderer/subscriptions/rendererSession';
 
 // Exercise the frozen Main API with an in-memory DB; no Electron entry, keys or network.
@@ -10,7 +10,7 @@ function setup(tokenDelayMs = 0) {
   const database = new Database(':memory:');
   database.initialize();
   const service = new RunService(database, new MockProvider({ tokenDelayMs }));
-  const api: RoundtableApiContract = {
+  const api: RunSessionApiContract = {
     room: { createDemo: async objective => ({ roomId: service.createDemoRoom(objective) }), getMessages: async id => service.getMessages(id) },
     run: {
       start: input => service.start(input), subscribe: async (id, cursor) => service.subscribe(id, cursor), getSnapshot: async id => service.getSnapshot(id),

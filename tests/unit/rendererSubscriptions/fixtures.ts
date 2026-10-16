@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { RoundtableApiContract } from '../../../src/shared/contracts/app';
+import type { RunSessionApiContract } from '../../../src/shared/contracts/app';
 import type { RunEvent, RunSnapshot, RunSubscription } from '../../../src/shared/types/run';
 
 export const time = '2026-10-15T00:00:00.000Z';
@@ -30,7 +30,7 @@ export function deferred<T>() {
 }
 export function bridge() {
   const listeners = new Set<(event: RunEvent) => void>();
-  const api: RoundtableApiContract = {
+  const api: RunSessionApiContract = {
     room: { createDemo: vi.fn(async () => ({ roomId: 'created-room' })), getMessages: vi.fn(async () => []) },
     run: {
       subscribe: vi.fn(async (id) => subscription(snapshot(id))), getSnapshot: vi.fn(async (id) => snapshot(id)),

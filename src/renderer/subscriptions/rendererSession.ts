@@ -1,4 +1,4 @@
-import type { RoundtableApiContract } from '../../shared/contracts/app';
+import type { RunSessionApiContract } from '../../shared/contracts/app';
 import { idSchema } from '../../shared/schemas/common';
 import { runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../shared/schemas/run';
 import type { RunEvent,InterruptedRunDecision } from '../../shared/types/run';
@@ -8,7 +8,7 @@ type RunControl = 'pause' | 'stop' | 'step' | 'resumeRun';
 type IdentityStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const savedRunKey = 'roundtable.runId';
 
-export function createRendererSession(api: RoundtableApiContract, storage?: IdentityStorage) {
+export function createRendererSession(api: RunSessionApiContract, storage?: IdentityStorage, options: { requireRoom?: boolean } = {}) {
   const store = createRendererStore();
   let mounted = false;
   let disposeMount: (() => void) | undefined;
@@ -159,7 +159,7 @@ export function createRendererSession(api: RoundtableApiContract, storage?: Iden
     } finally { store.getState().endCommand(token); }
   }
   async function startRun() {
-    if (!mounted) return;
+    if (!mounted || options.requireRoom && !store.getState().roomId) return;
     const token = store.getState().beginCommand('start');
     if (token === undefined) return;
     const { generation, draft, roomId } = store.getState();
