@@ -1,0 +1,1 @@
+export { RoomsFeature } from './RoomsFeature';
