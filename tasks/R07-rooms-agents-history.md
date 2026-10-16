@@ -91,8 +91,10 @@ pnpm run test -- tests/unit/rooms tests/integration/rooms tests/unit/rendererRoo
 交付包含：任务 ID 与基线/分支；逐项文件清单；行为和操作说明；精确测试命令、日期、退出码、关键输出与未运行项；契约申请和数据库影响；遗留问题；本模块 Commit SHA；总控接线与集成建议。只提交本任务获准文件，不向 main 自行合并。总控集成后复验才更新 merged/verified。
 
 
-## 2026-10-16 共享前置交付与启动边界
+## 2026-10-16 共享前置主线验收与启动边界
 
-用户本轮仅授权总控共享前置候选，未授权本feature或其Worktree。实际接口、调用示例、错误/分页/引用规则及唯一文件归属统一见[共享调用手册](../docs/R07_R08_SHARED.md)；本任务不再自行定义第二套DTO或migration。候选分支 `codex/shared-r07-r08-foundation`，基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，仍待审核/合main。
+用户已另行批准共享候选1e1f971正式合main，本轮独立主线必要复验通过，SHARED-R07-R08-01为merged/verified；证据见[主线报告](../docs/verification/2026-10-16-r07-r08-shared-main.md)。本feature仍ready、未实施，未授权创建Worktree。
 
-启动前先确认共享候选已由用户批准合入并完成main新鲜复验，登记真实最终完整main SHA；R07/R08均从该同一SHA开始，并各自获得创建/实施授权。Shared/Database/migration3/公共测试/Main/IPC/Preload/App/store等由总控冻结，模块只消费；所有新增接线请求统一交总控。此追加不勾选既有功能验收复选框，也不推进R09。
+实际接口、调用方法、错误/分页/引用规则及唯一文件归属统一见[共享调用手册](../docs/R07_R08_SHARED.md)，本任务不再定义第二套DTO或migration。未来启动必须登记包含本次治理更新的同一最新main完整SHA（由最终交付给出，开始前重新核验）；R07/R08各自仍须获得明确创建/实施授权。
+
+Shared/Database/migration3/公共测试/Main/IPC/Preload/App/store等由总控冻结。模块只消费并提交接线申请；R07独占room/rooms及专属测试，R08独占settings/security及专属测试，R08启动后总控不并发写KeyService。生产handler/Preload/App接线留联合集成。此更新不勾选功能验收，也不推进R09/R17。

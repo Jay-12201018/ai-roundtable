@@ -1,6 +1,6 @@
 # R00–R18 状态与授权看板
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08 功能仍仅 ready、未授权创建/实施；用户另行授权的共享前置现为 review 候选，未合 main，见文末专节。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08 功能仍为 ready、未授权创建/实施；共享前置1e1f971已按本次授权fast-forward合main并完成独立主线验收，登记merged/verified，见文末专节。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
 
 状态定义：not_started 未开始；ready 依赖满足但仍需实施授权；in_progress 正在执行；review 交付待审核；merged 已由总控集成；verified 验收确认；blocked 前置未满足或存在阻塞。状态与授权分列，不能推断。
 
@@ -13,8 +13,8 @@
 | R04 | Run/Turn Mock | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原63ef56e1cd9d4bb9d0793aa4e97e499b45574ecd；引入3c6ed2ff9f79b08a915d152dccd556c0df219090；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
 | R05 | 公共上下文与基本限制 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原1c5a2183f0c5d4f335b39b99aa27cac8fe7baad7；引入7586f023d373f38cbd08df623dcf0149abcebdcf；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
 | R06 | Renderer 状态与订阅 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原ed6d659734cea4169fb54a66bdb257439d6daa39；引入6fe8805bb96c6c41d9f4671260c64ed13c47a275；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
-| R07 | 房间、成员、历史 | R04/R05/R06已合main且verified | 未分派 | ready | 仅依赖满足；未授权创建Worktree或实施 | 未创建 | 无 | 未运行 |
-| R08 | Key 与 Provider 设置 | R04/R05/R06已合main且verified | 未分派 | ready | 仅依赖满足；未授权创建Worktree或实施 | 未创建 | 无 | 未运行 |
+| R07 | 房间、成员、历史 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 未分派 | ready | 仅依赖满足；未授权创建Worktree或实施 | 未创建 | 无 | 未运行 |
+| R08 | Key 与 Provider 设置 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 未分派 | ready | 仅依赖满足；未授权创建Worktree或实施 | 未创建 | 无 | 未运行 |
 | R09 | OpenAI 与兼容端点 | R07/R08；Mock 联合验收 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R10A | Anthropic | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R10B | Gemini | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
@@ -113,9 +113,9 @@ R04/R05/R06 都仅依赖已验收的 R03 数据基础与 R02 契约，因此标 
 R07/R08仅ready，需用户另行实施/Worktree授权及排他负责人登记；总控先统一Room/Agent/History与Provider/Key/endpoint的公共契约和数据/IPC接线，子项目不能自行改Shared/Database/migration/Main/App/store公共文件。本轮不创建新WT、不开发R07/R08，所有原任务/集成分支和WT保留。正式E2E、跨平台/发布、真实模型及已登记C类扩展仍未完成。
 
 
-## R07/R08 共享前置候选（2026-10-16）
+## R07/R08 共享前置候选（2026-10-16，历史阶段）
 
-本节是本轮状态；上文“仅规划/没有创建 Worktree”指先前发布规划轮。用户本次明确授权总控实现共享前置，不授权合 main 或创建两个 feature Worktree。总控从已验收 main `510f58a75c676496f6e4e5960eb89553d04ab8ac` 创建唯一共享 Worktree/分支 `codex/shared-r07-r08-foundation`，main 未改。候选提交由包含本节的 Git 提交定位，完整 SHA 见最终交付。
+本节保留候选阶段历史；最新状态见下一节主线验收。上文“仅规划/没有创建 Worktree”指先前发布规划轮。用户本次明确授权总控实现共享前置，不授权合 main 或创建两个 feature Worktree。总控从已验收 main `510f58a75c676496f6e4e5960eb89553d04ab8ac` 创建唯一共享 Worktree/分支 `codex/shared-r07-r08-foundation`，main 未改。候选提交由包含本节的 Git 提交定位，完整 SHA 见最终交付。
 
 | 项目 | 负责人 | 状态 | 范围及证据 |
 | --- | --- | --- | --- |
@@ -128,3 +128,20 @@ R07/R08仅ready，需用户另行实施/Worktree授权及排他负责人登记�
 候选接口和排他文件详见[共享调用手册](R07_R08_SHARED.md)。Shared、Database、migration3、公共测试与 Main/IPC/Preload/App 接线归总控；以后 R07 独占 room/rooms，R08 独占 settings/security，不能同时写 KeyService。新的输入/输出表未挂生产 Bridge，不存在假成功 handler。
 
 下一门槛：用户审核候选并明确授权合并 → 总控合 main 并重新验证 → 冻结实际最终 main 完整 SHA → 用户单独授权两个功能 Worktree。当前不能从原 main 消费本候选接口。R09 及后续状态/路线不推进；保留全部原分支和 Worktree。真实模型、真实系统 Key 后端、R07/R08 功能UI、正式E2E/发布/跨平台未验证。
+
+
+## R07/R08 共享前置正式合并及main验收（2026-10-16）
+
+用户审核三份共享交付文件后，正式授权仅ff-only合并及main独立复验。开始时main仍510f58a、候选仍1e1f971，12个Worktree均干净、候选唯一提交直接父为main。实际执行 `git merge --ff-only codex/shared-r07-r08-foundation`，main推进 `1e1f971562151fd800324a544ff4da19fa71e5ab`；没有新merge commit、冲突、重复引入或其他分支更新。全部原分支/Worktree保留。
+
+| 项目 | 状态 | 本次证据与授权 |
+| --- | --- | --- |
+| SHARED-R07-R08-01 | merged / verified | main本次44文件612全回归、4文件78共享专项、strict/build、Node原生内存/压力5次、Electron ABI139/18文件190专项、两个新隔离UI/恢复profile及退出只读核验全部exit0；见[主线报告](verification/2026-10-16-r07-r08-shared-main.md)与[命令台账](verification/2026-10-16-r07-r08-shared-main-commands.md) |
+| R07 | ready，未启动 | 已满足共享主线前置；未分派、无功能Worktree、未授权功能实施 |
+| R08 | ready，未启动 | 已满足共享主线前置；未分派、无功能Worktree、未授权功能实施 |
+
+本轮治理提交只更新状态/接口现状/证据与任务启动门槛，完整最终main SHA由包含本节的提交及最终交付定位；两个模块未来必须从该同一最新main完整SHA开始，启动前重新核验，不从旧510f58a或仅候选WT开发。用户仍须另行授权创建/实施。
+
+文件归属以[共享调用手册](R07_R08_SHARED.md)为准：总控独占Shared/Database/migration3/公共测试/Main/IPC/Preload/App/store及公共工厂；R07独占room/rooms及专属测试；R08独占settings/security及专属测试，后续总控冻结KeyService写入。同文件不并发写。新typed API仍未生产注册，真实组装留联合集成；R09/R17及其他任务未启动。
+
+本次不安装/升级依赖，不复制node_modules，main使用自己的既有独立依赖与本轮私有cache/gyp/TMPDIR/userData，Node24.18.1严格同版headers和Electron38.8.6 headers分别重建，最终main原生模块为ABI139。migration1/2逐字核对不变；升级/回滚/备份/WAL/Key归属及撤销均在本轮实际测试通过。Node24.21.0风险、真实Provider/系统Key后端、R07/R08功能UI/新Bridge、正式E2E和跨平台发布仍未验证。

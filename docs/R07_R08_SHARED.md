@@ -1,6 +1,6 @@
 # R07/R08 共享前置调用与文件归属
 
-2026-10-16；申请号 `SHARED-R07-R08-01`；当前为候选 review，未合 main。基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，分支 `codex/shared-r07-r08-foundation`。实际验证见[实施报告](verification/2026-10-16-r07-r08-shared.md)及[命令台账](verification/2026-10-16-r07-r08-shared-commands.md)。本页与 Shared 源码一起交付，不依赖 Downloads 或临时文件作为产品规范。
+2026-10-16；申请号 `SHARED-R07-R08-01`；当前共享前置已合main并verified；R07/R08功能仍ready、未启动。共享开发原始基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，原候选分支 `codex/shared-r07-r08-foundation`。候选历史见[实施报告](verification/2026-10-16-r07-r08-shared.md)；本次独立主线验证见[main验收](verification/2026-10-16-r07-r08-shared-main.md)及[main命令台账](verification/2026-10-16-r07-r08-shared-main-commands.md)。本页与 Shared 源码一起交付，不依赖 Downloads 或临时文件作为产品规范。
 
 ## 唯一事实来源与层级
 
@@ -85,11 +85,11 @@ R07 导出组件 props 使用 `RoomsFeatureProps`：api、providers 安全摘要
 | R07（以后单独授权） | src/main/room/**；src/renderer/features/rooms/**；tests/unit/rooms/**；tests/integration/rooms/**；tests/unit/rendererRooms/** |
 | R08（以后单独授权） | src/main/settings/**；src/renderer/features/settings/**；src/main/security/KeyService.ts；src/main/security/electronSafeStorage.ts；tests/unit/keyService.test.ts；tests/unit/settings/**；tests/integration/settings/**；tests/unit/rendererSettings/** |
 
-本候选期间全部修改归总控；R08 启动后总控冻结 KeyService 写入，公共 Key 回归由 R08 运行但不能自行改公共断言。需要 Shared/DB 变更先提交含调用方、迁移、安全和测试影响的申请，唯一负责人处理。
+共享前置实施及本次主线验收均由总控独占；R08 启动后总控冻结 KeyService 写入，公共 Key 回归由 R08 运行但不能自行改公共断言。需要 Shared/DB 变更先提交含调用方、迁移、安全和测试影响的申请，唯一负责人处理。
 
 migration3 只归总控；migration1/2 原文不变，后续新版本再分配，不得由 R07/R08 各建一份3。3为配置字段、归档、Key revision、单默认索引和历史索引；保留旧未知任务/执行时间，不创建虚假 Provider/模型/Key。初始化前沿用验证过的 SQLite 在线备份与候选恢复，迁移同事务失败回滚。
 
-**当前不能从 main 创建可消费这些接口的功能 Worktree**：main 仍在510f58a，没有本候选。需用户审核并另行授权总控合并、执行 main 新鲜复验，再以真实最终 main 完整 SHA 同时冻结 R07/R08 基线；随后另行授权创建 `codex/r07-rooms-agents-history` 和 `codex/r08-key-provider-settings`。二者可并行，生产接线只在联合集成进行。此处分支名是计划，不是已创建事实。
+**共享主线前置现已满足，但尚未授权创建/实施功能 Worktree**：用户批准1e1f971已从510f58a以ff-only合main，本轮主线独立复验通过。未来R07/R08必须从包含本次状态更新的同一最新main完整SHA开始（最终交付给出，启动前以 `git rev-parse main` 重新核验），分别为 `codex/r07-rooms-agents-history` 和 `codex/r08-key-provider-settings`。二者可并行，生产接线仍由总控在联合集成完成；需用户下一次明确授权，当前未创建这两个Worktree。
 
 ## 测试方法
 

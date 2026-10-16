@@ -141,3 +141,12 @@ D038的review/未合main为历史阶段，用户本次最终授权已取代停�
 | D050 | Provider拥有Key，每实例串行+revision CAS；更换目标撤销密文，会话仅内存；异步解密返回前再校验 | 解决迟到加解密、ID重用和跨Provider取Key；活动冻结引用禁止改Key/配置 | fake secure/memory、失败保留、延迟竞态与泄漏断言；真实系统后端未验证 |
 | D051 | 消息sortKey、Run(createdAt,id)+首次rowid上界分页；Shared比较遵从SQLite BINARY | 避免updatedAt漂移与同时间戳后插入较小ID混页；cursor绑定房间且校验实际边界 | 固定上界/并发插入/Unicode/跨房/错误cursor；跨页可变流式文本不冻结 |
 | D052 | 冻结纯typed API和input/output表及feature props，生产handler/Preload/App等真实组装延至联合集成 | 不建空handler、不把接口存在当功能完成；两个feature可用注入API独立测试 | 原Bridge/CSP/sandbox和旧Run联合回归通过；R07/R08UI及真实模型未实现 |
+
+
+## R07/R08 共享前置最终合并与主线验收（2026-10-16）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D053 | 按用户正式授权将共享候选1e1f971从510f58a以ff-only合main，本轮必要主线复验后SHARED-R07-R08-01 merged/verified；R07/R08仍ready未启动 | 12个WT合并前干净；候选单提交、原migration1/2及历史保留；没有新merge commit，不创建功能WT或启动R09/R17 | main本次612全回归/78共享/190 Electron、strict/build、双ABI/Node压力5次、隔离UI/恢复/退出数据全部exit0；[本轮报告](verification/2026-10-16-r07-r08-shared-main.md) |
+
+D047的候选停止边界已由本次正式合并授权取代；D048–D052的引用/Key/分页/分工与延期接线规则不变。新typed API尚未生产注册，旧Bridge探针通过不代表R07/R08功能或真实模型可用。后续两个模块需从同一最终main完整SHA并另获创建/实施授权。

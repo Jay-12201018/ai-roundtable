@@ -190,12 +190,12 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 
 完整联合候选d4a0d2742eb28d2441e4d06e8154b8cdd6955336已按用户批准由37766666 fast-forward合main；没有重复合原模块、新merge commit、协议或migration修改。本次main534全回归/265专项/112 Electron专项、类型/构建/双ABI/隔离页面/退出数据均实际通过，见[主线报告](verification/2026-10-16-r04-r05-r06-main.md)，三模块及联合集成verified。上节私有builder/可靠计数/Repeat/Renderer接线现已主线生效，A类已完成，B/C延期边界不因verified自动取消。
 
-R07/R08的基础依赖满足，现仅ready；Room/Agent/History、Provider设置/Key引用等DTO/Schema/数据库/IPC仍需另获授权后由总控统一提出、审批、分配版本和接线。现有Adapter协议不等于设置CRUD或通用Key IPC已存在，子项目不能自行扩展公共接口或复用Mock词法发真实请求。
+上一阶段R04/R05/R06合并时，R07/R08仅ready；当时Room/Agent/History、Provider设置/Key引用等DTO/Schema/数据库/IPC仍待授权总控统一处理。共享前置的最新主线状态见下一节；生产IPC接线仍待联合集成。现有Adapter协议不等于设置CRUD或通用Key IPC已存在，子项目不能自行扩展公共接口或复用Mock词法发真实请求。
 
 
-## SHARED-R07-R08-01 — 配置与历史共享前置候选（2026-10-16）
+## SHARED-R07-R08-01 — 配置与历史共享前置（2026-10-16，已合main验收）
 
-用户批准共享前置实施；本候选未合 main，不能用于声明 R07/R08 功能完成。唯一源码为 `src/shared/schemas/configuration.ts` 及派生 `src/shared/contracts/configuration.ts`，两个 index 导出。完整参数/结果、Database 与 typed API 的差别、文件归属、错误/安全边界见[共享调用手册](R07_R08_SHARED.md)。这取代任务书中待申请的 Room/Agent/Provider/Key/History wire shape，不另建协议。
+用户已批准共享前置正式合并；1e1f971已fast-forward合main并通过[本轮主线验收](verification/2026-10-16-r07-r08-shared-main.md)。共享前置merged/verified不能用于声明R07/R08功能完成。唯一源码为 `src/shared/schemas/configuration.ts` 及派生 `src/shared/contracts/configuration.ts`，两个 index 导出。完整参数/结果、Database 与 typed API 的差别、文件归属、错误/安全边界见[共享调用手册](R07_R08_SHARED.md)。这取代任务书中待申请的 Room/Agent/Provider/Key/History wire shape，不另建协议。
 
 | 契约 | 消费方 | 冻结规则 |
 | --- | --- | --- |

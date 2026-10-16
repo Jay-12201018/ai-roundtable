@@ -1,5 +1,7 @@
 # 真实验证与数据隔离
 
+最新共享前置主线验收：用户批准1e1f971后已ff-only合main，本次612完整/78共享/190 Electron与双ABI、类型/构建、隔离UI/恢复/退出核验见[2026-10-16主线报告](verification/2026-10-16-r07-r08-shared-main.md)。以下阶段记录按历史保留；任何历史PASS不替代新任务实际运行。
+
 R04/R05/R06已按用户批准fast-forward合main，最新实际主线验证见[本次主线报告](verification/2026-10-16-r04-r05-r06-main.md)；R03等历史结果仍保留。原[集成报告](verification/2026-10-15-r03-integration.md)和[集成命令台账](verification/2026-10-15-r03-commands.md)保持历史身份，不代替主线新鲜结果；下列历史阶段规则/结果保留。
 
 ## 证据要求

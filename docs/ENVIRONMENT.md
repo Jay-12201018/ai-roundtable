@@ -131,3 +131,12 @@ ENV-R02-INSTALL-01保持已解决，不引入raw数字fetch参数；Node24.21.0�
 官方24.18.1/darwin-arm64 runtime/同发行包include/config及pnpm11.25.0来源重新核对；Node ABI137完整612回归、类型/生产构建、内存读写/5轮各30万prepare/get及正常退出均通过。全部Node测试结束后使用对应38.8.6 headers独立源码重编译，实际Electron38.8.6/Node22.22.0/ABI139/arm64内存SQL、190专项和两个新隔离userData的UI/恢复/Bridge/退出只读核验均exit0。最终共享WT native留Electron目标，原main不变。
 
 原生目录不共享；中途重编译窗口的inode诊断失败、启动权限失败和编译提示如实保留，不能当产品测试PASS。Node24.21.0上游风险未解决。详细真实命令/退出码与未验证限制见[候选报告](verification/2026-10-16-r07-r08-shared.md)及[台账](verification/2026-10-16-r07-r08-shared-commands.md)。
+
+
+## R07/R08 共享前置合并后main环境确认（2026-10-16）
+
+从510f58a fast-forward至已批准1e1f971后，main使用自己的既有独立node_modules及本轮新cache/gyp/TMPDIR/userData重新验证，没有新install、复制依赖或改全局Node。官方24.18.1 darwin-arm64 runtime/同发行包include/config、官方缓存archive SHA和pnpm11.25.0入口/bundle/worker字节重新核对；锁字节一致、32直接依赖实际版本盘点通过。
+
+受控pretest实际源码编译SQLite12.11.1至Node ABI137/arm64；612完整/78共享专项、strict/生产构建、内存SQL和5独立进程各30万次压力均exit0。Node检查全部结束后才以对应38.8.6 headers源码重建，Electron38.8.6/Node22.22.0实际ABI139内存SQL/190专项及两个新profile的UI/恢复/Bridge/退出数据均exit0。main最终native留ABI139，12个WT的native inode各独立；两个旧WT无config文件，ABI标未知，不将其他历史环境算本轮运行通过。
+
+本次不重复冷缓存安装/发布打包，不再使用raw数值fetch覆盖。Node24.21.0上游风险及旧ENV证据保留，不能把旧安装或候选PASS当本次结果。全部实际命令、警告和未验证项见[本次主线报告](verification/2026-10-16-r07-r08-shared-main.md)及[台账](verification/2026-10-16-r07-r08-shared-main-commands.md)。
