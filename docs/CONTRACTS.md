@@ -209,3 +209,19 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 本次改变 Main-only KeyService.resolveKey 签名为(providerId,reference)，deleteKey改为providerId，并新增受保护deleteProvider；所有现有调用测试同步，生产唯一调用方目前仅getStatus。Database 旧运行投影形状不变；listAgents增加配置启动门禁。既有 RunEvent.version=1、Run/Turn/Attempt DTO和注册IPC集合不变。migration3只追加配置字段/索引，1/2原文不改。
 
 待联合集成：真实 room/settings 服务实现后由总控注册双端handler/Preload、组装Main/App、刷新Provider摘要及R06选择投影，敏感命令独立脱敏。未接线方法不能假报可用。真实网络/factory能力留R09/R10，自动化仅Mock/fixture；真实配置当前明确unsupported且不创建请求。
+
+
+## R07/R08 联合候选接线（2026-10-17，待最终合 main 审核）
+
+本节更新先前“待联合集成”的接线状态；main 仍为 c1b5bea。两个模块已按用户授权各引入一次，证据见 [联合报告](verification/2026-10-17-r07-r08-integration.md)。Database、配置 Schema、migration1/2/3、package/lock 未改。
+
+- 完整 RoundtableApiContract 保留 room/run，增加 rooms/settings；RunSessionApiContract 仅投影所需 room/run。38 条受限 invoke 直接引用同一 input/output 契约，无通用 invoke/send、Key resolve 或文件能力。
+- 同一 Database 注入 RunService、RoomService、KeyService 和 ProviderSettingsService。Main 为唯一数据写入者；真实网络未接入时明确 unsupported，没有空成功 handler。
+- Main/Preload 都验证输入/输出及实体、Provider、房间和分页固定上界。异步成功和失败返回前重新校验 sender、senderFrame 与可信顶层页面；失信来源不能收到迟到响应或敏感事件。
+- **Bridge Promise 拒绝值为严格 ApiError 普通 DTO**（code、固定 message、retryable、可选白名单 field），不再依赖 Error/ContractError 实例、detail 或 stack。Main 内部 ContractError 保留，成功值和 IPC envelope 不变。真实 contextBridge 会剥离自定义 Error 字段；plain DTO 经实际 Electron 实验证明能保留安全字段且不带内部路径/堆栈。
+- IpcDisposer 立即撤注册/订阅，drain 等待已接受的 rooms/settings 操作结算。Main 关库前等待当前与已关闭窗口的配置操作；来源撤销不回滚、不重试已接受写入。Run 控制不加入此集合；后端永不结算时仍会等待，不能提前关库造成迟到写入。
+- RoomsFeatureProps 增加可选 onClearRoom()、initialRoomId。App 先恢复 Run 再挂 Rooms，找回归档房间，恢复失败保留重同步；末房删除/归档/过滤清除旧 Run、订阅投影和恢复位置。
+- Provider 创建/修改/删除、存 Key/删 Key 在结算后统一刷新安全摘要，离开设置仍有效。历史身份通过 Attempt→Turn→Run 冻结成员读取，未知显示未记录，不查当前配置覆盖。
+- RunService 统一 schedule 在任何状态修改前重新校验冻结 Provider/model，真实、禁用或失效配置禁止用当前 MockAdapter 执行。旧 Demo 只兼容 null Provider + mock model。R09 必须统一实现真实 resolver，不能仅删除门禁。
+
+本轮共享文件归总控独占；R07/R08 及联合候选为 review，未合 main、未 verified，不启动 R09/R17。

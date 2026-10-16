@@ -1,6 +1,6 @@
 # R07 房间、成员与公共历史实施任务计划
 
-> 当前状态见 [STATUS](../docs/STATUS.md)。未来范围定义；本轮未获实施授权，不得自动启动。
+> 当前状态见 [STATUS](../docs/STATUS.md)。原任务范围定义保留；当前已授权联合集成，候选 review，尚未授权最终合 main。
 > 执行时按工程规范选择已授权的执行方式；各项以复选框记录进度，不能因任务文件存在而标完成。
 
 **Goal:** 用可持久配置的房间、成员和历史替换固定 Demo，并保持旧 Run 的身份和执行快照。
@@ -98,3 +98,8 @@ pnpm run test -- tests/unit/rooms tests/integration/rooms tests/unit/rendererRoo
 实际接口、调用方法、错误/分页/引用规则及唯一文件归属统一见[共享调用手册](../docs/R07_R08_SHARED.md)，本任务不再定义第二套DTO或migration。未来启动必须登记包含本次治理更新的同一最新main完整SHA（由最终交付给出，开始前重新核验）；R07/R08各自仍须获得明确创建/实施授权。
 
 Shared/Database/migration3/公共测试/Main/IPC/Preload/App/store等由总控冻结。模块只消费并提交接线申请；R07独占room/rooms及专属测试，R08独占settings/security及专属测试，R08启动后总控不并发写KeyService。生产handler/Preload/App接线留联合集成。此更新不勾选功能验收，也不推进R09/R17。
+
+
+## 2026-10-17 联合候选交付
+
+本模块原提交已独立完成并获本轮总控联合授权；在 codex/integrate-r07-r08 完成真实公共接线。当前为 review，不能将下方/此前历史 ready 说明当作当前状态，也不自行宣布 main 验收。代码提交 `64ac8ce5038813cc60374573dc8871da30d1eeb0`，详细逐项结果、原模块与总控改动清单见[联合报告](../docs/verification/2026-10-17-r07-r08-integration.md)及[台账](../docs/verification/2026-10-17-r07-r08-commands.md)。任务原始范围与技术路线不变；公共文件唯一归总控，原 Worktree 不回写，R09/R17 未实施。

@@ -140,3 +140,12 @@ ENV-R02-INSTALL-01保持已解决，不引入raw数字fetch参数；Node24.21.0�
 受控pretest实际源码编译SQLite12.11.1至Node ABI137/arm64；612完整/78共享专项、strict/生产构建、内存SQL和5独立进程各30万次压力均exit0。Node检查全部结束后才以对应38.8.6 headers源码重建，Electron38.8.6/Node22.22.0实际ABI139内存SQL/190专项及两个新profile的UI/恢复/Bridge/退出数据均exit0。main最终native留ABI139，12个WT的native inode各独立；两个旧WT无config文件，ABI标未知，不将其他历史环境算本轮运行通过。
 
 本次不重复冷缓存安装/发布打包，不再使用raw数值fetch覆盖。Node24.21.0上游风险及旧ENV证据保留，不能把旧安装或候选PASS当本次结果。全部实际命令、警告和未验证项见[本次主线报告](verification/2026-10-16-r07-r08-shared-main.md)及[台账](verification/2026-10-16-r07-r08-shared-main-commands.md)。
+
+
+## R07/R08 联合候选环境（2026-10-17）
+
+本次独立集成 WT 从无 node_modules 开始，以原 package/lock/workspace、独立内容缓存/store、copy 导入完成冻结离线安装（646 reused/0 downloaded，exit0），没有复制 node_modules、升级依赖或进行冷缓存联网安装。官方24.18.1 darwin-arm64/同发行包2726 include文件、pnpm11.25.0核心执行文件及缓存包来源重新核验；pnpm整个安装树并非逐文件完全一致，4个.bin shim缺失及2个reflink helper差异的辅助诊断失败保留，实际强制copy，不把该诊断写成全树PASS。
+
+Node ABI137完整846/专项292、类型/生产构建、内存/5进程各30万SQL压力通过后，串行使用对应38.8.6 headers重建。最终实际Electron38.8.6/Node22.22.0/ABI139/arm64读写、393专项及隔离生产UI/刷新/重启/退出审计通过。本WT原生inode11210266、SHA256 be8e575eb62c1a56c57192e0e183c17f687f122d1e8e1af084eb043c661f0fba，最终保留Electron目标；23,051个物理inode与自身store、源store、main及R07/R08依赖没有共享，其他14WT原生inode也均独立。锁字节一致、32直接依赖实际版本盘点通过。
+
+未引入raw数字fetch参数；ENV-R02-INSTALL-01保持已解决，Node24.21.0上游风险仍未解决，不混用跨补丁headers/Node与Electron native。首次环境脚本/测试RED/桌面selector及跨桥错误等失败均在[本轮报告](verification/2026-10-17-r07-r08-integration.md)和[台账](verification/2026-10-17-r07-r08-commands.md)保留。macOS stderr的sandbox_extension提示与Zod/Rollup注释提示单列；实际退出码及断言通过，不外推正式E2E、OS密钥链、跨平台或发布。

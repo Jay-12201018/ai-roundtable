@@ -150,3 +150,15 @@ D038的review/未合main为历史阶段，用户本次最终授权已取代停�
 | D053 | 按用户正式授权将共享候选1e1f971从510f58a以ff-only合main，本轮必要主线复验后SHARED-R07-R08-01 merged/verified；R07/R08仍ready未启动 | 12个WT合并前干净；候选单提交、原migration1/2及历史保留；没有新merge commit，不创建功能WT或启动R09/R17 | main本次612全回归/78共享/190 Electron、strict/build、双ABI/Node压力5次、隔离UI/恢复/退出数据全部exit0；[本轮报告](verification/2026-10-16-r07-r08-shared-main.md) |
 
 D047的候选停止边界已由本次正式合并授权取代；D048–D052的引用/Key/分页/分工与延期接线规则不变。新typed API尚未生产注册，旧Bridge探针通过不代表R07/R08功能或真实模型可用。后续两个模块需从同一最终main完整SHA并另获创建/实施授权。
+
+
+## R07/R08 联合候选（2026-10-17）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D054 | c1b5bea 上建立唯一联合 Worktree，两模块各 cherry-pick -x 一次，总控完成公共接线后交 review | main、原分支/Worktree 保留，不重复引入、不启动 R09/R17 | 精确 SHA、patch-id、本轮结果见联合报告/台账 |
+| D055 | 受限 rooms/settings Bridge 直接消费统一契约，拒绝值为 ApiError 普通 DTO | contextBridge 剥离 Error 自定义字段；DTO 保留 code/retryable 且无 stack，不靠错误字符串推断权限 | 真桥实验、严格单元及生产错误反馈；Main 内部 ContractError 不变 |
+| D056 | 撤来源后等待已接受配置操作结算再关 DB | 避免 Key/配置迟到写关闭数据库；不回滚或重试已接受写入，旧 disposer 不影响新注册 | 延迟 fake 加密、来源失信、配置 drain 与退出屏障回归；不等待 Run 长控制 |
+| D057 | 所有新执行/重试/续写/恢复统一检查冻结 Provider 引用仍有效且显式 Mock | 旧 Run 终态后配置可变更，不能绕过新建门禁继续把真实/失效配置当 Mock | RED 复现后证明拒绝且历史/Attempt/锁不变；真实 Adapter 留 R09 |
+| D058 | 先恢复后挂 Rooms、空选择清投影、设置结算刷新摘要、历史读取冻结身份 | 防首房吞恢复、离开设置丢刷新、末房遗留旧 Run、当前配置污染历史 | Renderer 联合及生产操作分别验证；亮暗/窄窗以实际功能布局，最小800×600 |
+| D059 | 有限桌面探针 ready 前隔离数据、全部 safeStorage 方法 fake、Chromium mock-keychain、Node/Chromium 网络阻断 | userData 隔离本身不能隔离 Keychain；只用假 Key，不触发付费 Provider | fake 密文持久化不证明真实 OS 加密；不等于正式 E2E、跨平台或发布验收 |

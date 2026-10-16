@@ -103,3 +103,14 @@ pnpm11.25.0 的辅助 list 会按已安装 `.modules.yaml` 的 storeDir 写打�
 本次main实际重新执行534全回归、265三模块/联合专项、112 Electron数据库/联合专项、类型/生产构建、Node严格配对压力及ElectronABI139，两个新的ready前隔离profile完成真实页面/刷新/Preload/IPC/退出与恢复/备份核对后才更新verified。具体精确argv/exit与指纹见[本次台账](verification/2026-10-16-r04-r05-r06-main-commands.md)，不能以10月15日候选PASS代替。
 
 新部署后复验仍按Node检查→Electron重建→实际ABI/隔离页面→退出后只读本轮profile顺序，禁止同时重建同一依赖树的两个ABI。本次有限DOM控件探针不是正式E2E；没有更新测试、删除失败或放宽安全断言。R07/R08 ready仍须分别获实施/Worktree授权。
+
+
+## R07/R08 联合生产入口验证（2026-10-17）
+
+本轮候选证据见[报告](verification/2026-10-17-r07-r08-integration.md)和[台账](verification/2026-10-17-r07-r08-commands.md)。新有限探针 `tests/probes/r07r08-electron.cjs` 启动真实 built Main/CJS Preload/App，以实际 DOM 表单/按钮验证两模块；`--restart <本轮私有manifest>` 仅接受本探针拥有、无 symlink、UID 匹配的临时目录。退出后另用 `r07r08-sqlite.cjs <本轮result>` 只读核对对应 SQLite。它们不是 R17 的正式 E2E 或发布打包。
+
+GUI 前先串行完成 Node24.18.1 原生与测试→Electron38.8.6/ABI139重建/实际加载。ready 前隔离 userData/sessionData/logs，启用并断言 Chromium use-mock-keychain，替换并核对 safeStorage 全部方法为 fake；阻断 Node 和 Chromium 网络。fake 加解密只验证应用归属/持久化链路，不证明 OS 加密或真实 Keychain。旧 r01-electron 探针也使用 fake 后端与 mock-keychain。
+
+真实 contextBridge 会剥离 Error 自定义字段。Preload Promise 拒绝须为严格 ApiError DTO，并以实际 Electron 验证 code/message/retryable、拒绝未知字段/堆栈/原异常；仅 mock contextBridge 的测试不够。测试失败先定位，禁止退回通用成功或根据任意错误字符串赋予权限。
+
+记录窗口 requested/actual/workArea。受 macOS 显示区域限制时，只报告实际高度；不能将被钳制的1600×870/868声明为1600×1000通过。实际800×600、1024×768、1280×800及三页亮暗/窄窗控件可达证据与未验证边界分列。

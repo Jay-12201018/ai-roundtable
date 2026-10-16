@@ -106,3 +106,12 @@ pnpm native:electron
 ```
 
 Database fixture 优先 `:memory:`；磁盘迁移/备份使用测试自己 mkdtemp 的私有目录，Key 用 fake backend 和唯一假值。现有公共测试可直接消费，无须启动生产应用或使用真实 Key。完整实际命令、压力与安全隔离探针见本次台账；上述方法不是未执行功能测试的 PASS 声明。
+
+
+## 联合候选接线更新（2026-10-17）
+
+上述共享前置与功能启动门槛为历史。本轮已另获 R07/R08 联合授权，总控在 codex/integrate-r07-r08 完成真实 Main 服务、受限 rooms/settings Bridge、App feature 与 R06 协调；尚未获最终合 main 授权。见 [接口登记](CONTRACTS.md)及[本轮报告](verification/2026-10-17-r07-r08-integration.md)。
+
+新增 props 仅 onClearRoom?: () => void（空选择）和 initialRoomId?: string（首次恢复）；既有 onSelectRoom(string) 不变。会话依赖 RunSessionApiContract，App 依赖完整 RoundtableApiContract。Bridge Promise 拒绝为安全 ApiError DTO，无 Error 实例/stack；成功值、持久化 Schema 不变。
+
+原模块目录归属保留；本次公共接线、窄窗与最小兼容修正均由总控独占。真实网络/factory 与正式 E2E/发布仍须 R09/R10/R17 后续授权，没有新增 migration。
