@@ -35,7 +35,7 @@ describe('R04 + R05 + R06 live integration',()=>{
   it('projects real alpha/beta/gamma to the DOM with Pause, one Step and Resume',async()=>{
     const f=fixture();f.service.createDemoRoom('联合 Mock');window.roundtable=f.api;
     try{
-      render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始 Mock 协作'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始 Mock 协作'}));
+      render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始协作'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始协作'}));
       await screen.findByText('alpha');expect(f.provider.inputs).toHaveLength(1);
       await waitFor(()=>expect((screen.getByRole('button',{name:'暂停'}) as HTMLButtonElement).disabled).toBe(false));
       fireEvent.click(screen.getByRole('button',{name:'暂停'}));await screen.findByText(/正在暂停/);

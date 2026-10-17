@@ -289,7 +289,7 @@ export class Database {
     this.db.prepare('INSERT INTO agents(id, room_id, display_name, role_template_id, display_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(agent.id, agent.roomId, agent.displayName, agent.roleTemplateId, agent.displayOrder, timestamp, timestamp);
   }
 
-  listAgents(roomId: string): Array<{ id: string; roomId: string; displayName: string; roleTemplateId: string; displayOrder: number; systemPrompt: string; providerId: string | null; modelId: string | null }> {
+  listAgents(roomId: string, validateRealSelection?: (providerId: string, modelId: string) => void): Array<{ id: string; roomId: string; displayName: string; roleTemplateId: string; displayOrder: number; systemPrompt: string; providerId: string | null; modelId: string | null }> {
     this.assertInitialized();
     if (this.getRoomConfiguration(roomId)?.archivedAt) throw new ContractError('invalid_state');
     const rows = this.db.prepare('SELECT id, room_id, display_name, role_template_id, display_order,system_prompt,provider_id,model_id,configuration_version FROM agents WHERE room_id = ? AND enabled=1 AND archived_at IS NULL ORDER BY display_order,id').all(roomId) as Array<{ id: string; room_id: string; display_name: string; role_template_id: string; display_order: number; system_prompt: string; provider_id: string | null; model_id: string | null; configuration_version: number }>;
@@ -297,7 +297,10 @@ export class Database {
       // Only untouched pre-configuration Demo rows retain the legacy null-to-Mock path.
       if (row.configuration_version === 0 && row.provider_id === null && row.model_id === null) continue;
       if (row.provider_id === null || row.model_id === null) throw new ContractError('invalid_state');
-      if (this.validateModelSelection(row.provider_id,row.model_id).kind !== 'mock') throw new ContractError('unsupported');
+      if (this.validateModelSelection(row.provider_id,row.model_id).kind !== 'mock') {
+        if (!validateRealSelection) throw new ContractError('unsupported');
+        validateRealSelection(row.provider_id, row.model_id);
+      }
     }
     return rows.map((row) => ({ id: row.id, roomId: row.room_id, displayName: row.display_name, roleTemplateId: row.role_template_id, displayOrder: row.display_order, systemPrompt: row.system_prompt, providerId: row.provider_id, modelId: row.model_id }));
   }

@@ -112,7 +112,12 @@ describe('application lifecycle', () => {
     const { RoomService } = await import('../../src/main/room/RoomService');
     const { ProviderSettingsService } = await import('../../src/main/settings/ProviderSettingsService');
     expect(RoomService).toHaveBeenCalledExactlyOnceWith(fixture.database);
-    expect(ProviderSettingsService).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.keys);
+    const { ProviderRegistry } = await import('../../src/main/providers/ProviderRegistry');
+    const { RunService } = await import('../../src/main/services/RunService');
+    const registry = vi.mocked(ProviderSettingsService).mock.calls[0][2];
+    expect(registry).toBeInstanceOf(ProviderRegistry);
+    expect(ProviderSettingsService).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.keys, registry);
+    expect(vi.mocked(RunService).mock.calls[0][3]).toBe(registry);
     expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings });
   });
 

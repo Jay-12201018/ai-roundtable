@@ -20,7 +20,7 @@ function delta(runId: string, sequence: number, text: string): RunEvent {
 function configurationApis() {
   const rooms = roomProps().api;
   vi.mocked(rooms.listRooms).mockResolvedValue([room('room', '现有房间')]);
-  return { rooms, settings: {
+  return { rooms, settings: { confirmTarget: vi.fn(),
     createProvider: vi.fn(), updateProvider: vi.fn(), getProviderConfiguration: vi.fn(),
     listProviderSummaries: vi.fn().mockResolvedValue([]), deleteProvider: vi.fn(), setKey: vi.fn(), deleteKey: vi.fn(),
     getProviderKeyState: vi.fn(), getKeyStorageStatus: vi.fn(), listModels: vi.fn(), testConnection: vi.fn(),
@@ -65,7 +65,7 @@ describe('Renderer run synchronization', () => {
     subscribe.mockImplementation(async (id: string) => ({ snapshot: { ...snapshot(id, id === 'old' ? 36 : 2), status: id === 'old' ? 'completed' : 'running' }, events: [], nextCursor: id === 'old' ? 36 : 2, resyncRequired: false }));
     render(<App />);
     await waitFor(() => expect(screen.getByText('36')).toBeTruthy());
-    fireEvent.click(screen.getByText('开始 Mock 协作'));
+    fireEvent.click(screen.getByText('开始协作'));
     await waitFor(() => expect(subscribe).toHaveBeenCalledWith('new', expect.any(Number)));
     act(() => { listener(delta('old', 37, '旧请求内容')); listener(delta('new', 3, '新请求内容')); });
     await waitFor(() => expect(screen.getByText('新请求内容')).toBeTruthy());
@@ -108,9 +108,9 @@ describe('Renderer run synchronization', () => {
   it('starts only once while the start command is pending and releases its listener', async () => {
     start.mockReturnValue(new Promise(() => {}));
     const view = render(<App />);
-    await waitFor(() => expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByText('开始 Mock 协作'));
-    fireEvent.click(screen.getByText('开始 Mock 协作'));
+    await waitFor(() => expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByText('开始协作'));
+    fireEvent.click(screen.getByText('开始协作'));
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     view.unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
@@ -120,9 +120,9 @@ describe('Renderer run synchronization', () => {
     localStorage.setItem('roundtable.runId', 'restoring');
     subscribe.mockReturnValue(new Promise(() => {}));
     render(<App />);
-    expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByText('房间与成员') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByText('开始 Mock 协作'));
+    fireEvent.click(screen.getByText('开始协作'));
     expect(start).not.toHaveBeenCalled();
     await act(async () => {});
   });
@@ -180,7 +180,7 @@ describe('Renderer task identity and command feedback', () => {
     fireEvent.click(screen.getByRole('button', { name: '正在保存…' }));
     expect(window.roundtable.rooms.createRoom).toHaveBeenCalledTimes(1);
     expect(window.roundtable.rooms.createRoom).toHaveBeenCalledWith({ name: '创建目标', objective: '' });
-    expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(true);
     await act(async () => finish(room('created', '创建目标')));
     expect(screen.getByRole('heading', { name: '创建目标' })).toBeTruthy();
   });
@@ -215,7 +215,7 @@ describe('Renderer task identity and command feedback', () => {
     render(<App />);
     await screen.findByRole('alert');
     expect(screen.getByRole('alert').textContent).not.toContain('/private');
-    expect((screen.getByText('开始 Mock 协作') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('重试同步'));
     await screen.findByText('恢复文本');
     expect(window.roundtable.run.start).not.toHaveBeenCalled();

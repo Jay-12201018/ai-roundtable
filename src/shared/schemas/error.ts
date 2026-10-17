@@ -4,7 +4,7 @@ import './common';
 export const errorMessages = {
   invalid_input: 'Invalid request parameters',
   invalid_response: 'Invalid response; refresh the run snapshot',
-  forbidden: 'Unauthorized IPC sender',
+  forbidden: 'Permission denied',
   unsupported: 'This operation is not supported yet',
   not_found: 'Requested resource was not found',
   invalid_state: 'Operation is not allowed in the current state',

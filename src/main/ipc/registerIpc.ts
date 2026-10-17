@@ -65,6 +65,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'settings.getProviderConfiguration': (input) => settings.getProviderConfiguration(input),
     'settings.listProviderSummaries': () => settings.listProviderSummaries(),
     'settings.deleteProvider': (input) => settings.deleteProvider(input),
+    'settings.confirmTarget': (input) => settings.confirmTarget(input),
     'settings.setKey': (input) => settings.setKey(input),
     'settings.deleteKey': (input) => settings.deleteKey(input),
     'settings.getProviderKeyState': (input) => settings.getProviderKeyState(input),

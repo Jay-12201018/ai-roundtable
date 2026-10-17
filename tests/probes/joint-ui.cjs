@@ -36,7 +36,7 @@ async function page(stage) {
     && JSON.stringify(text()) === JSON.stringify(s.messages.map(m => m.content)), 'DOM/snapshot did not settle: ' + status);
   if (stage === 'pause') {
     await selectDemo();
-    await click('开始 Mock 协作');
+    await click('开始协作');
     id = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run identity not saved');
     await wait(() => text(), t => t[0]?.length > 0, 'First partial text absent');
     await click('暂停');
@@ -51,7 +51,7 @@ async function page(stage) {
   const completed = await settled('completed', 3);
   await selectDemo();
   await wait(() => localStorage.getItem('roundtable.runId'), value => value === null, 'New room selection not committed');
-  await click('开始 Mock 协作');
+  await click('开始协作');
   id = await wait(() => localStorage.getItem('roundtable.runId'), value => value && value !== completed.runId, 'New Run not saved');
   await wait(() => text(), t => t[0]?.length > 0, 'Stop partial absent');
   await click('停止');

@@ -1,0 +1,152 @@
+import type { Database } from '../database/Database';
+import type { KeyService } from '../security/KeyService';
+import type { ConfirmProviderTargetInput, ProviderConfiguration } from '../../shared/contracts/configuration';
+import { confirmProviderTargetInputSchema } from '../../shared/schemas/configuration';
+import { ContractError, toPublicError } from '../../shared/contracts/errors';
+import { streamChatInputSchema } from '../../shared/schemas/provider';
+import type { ProviderAdapter, StreamChatInput } from './types';
+import type { ModelTokenCounter } from '../context/types';
+import { countModelTokens } from '../context/buildPublicContext';
+import { MockProvider } from './mock/MockProvider';
+import { mockModelBudget } from './mock/tokenBudget';
+import { OpenAIProvider } from './openai/OpenAIProvider';
+import { OpenAICompatibleProvider } from './openai-compatible/OpenAICompatibleProvider';
+import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider';
+import { createSafeFetch } from './network';
+
+export interface ApprovedModelPolicy {
+  evidence: string;
+  outputTokenParameter: 'max_tokens' | 'max_completion_tokens';
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+  counter: ModelTokenCounter;
+  price: { inputUsdPerMillion: number; outputUsdPerMillion: number; maxRequestUsd: number; evidence: string };
+}
+type Options = {
+  policyResolver?: (configuration: ProviderConfiguration, modelId: string) => ApprovedModelPolicy | undefined;
+  capabilitiesResolver?: (configuration: ProviderConfiguration) => ChatCompletionCapabilities;
+  transportFactory?: (guard: () => void) => typeof fetch;
+};
+type Approval = { kind: string; baseUrl: string; revision: string };
+const officialCapabilities: ChatCompletionCapabilities = { outputTokenParameter: 'max_completion_tokens', streamUsage: true, listModels: true, authentication: 'models' };
+const unknownCapabilities: ChatCompletionCapabilities = { outputTokenParameter: null, streamUsage: false, listModels: false, authentication: 'unsupported' };
+
+// Main owns approvals and reviewed model evidence. Renderer/model names cannot supply either.
+export class ProviderRegistry {
+  private readonly approvals = new Map<string, Approval>();
+  constructor(private readonly database: Database, private readonly keys: KeyService, private readonly options: Options = {}) {}
+
+  private configuration(id: string): ProviderConfiguration {
+    const configuration = this.database.getProviderConfiguration(id);
+    if (!configuration) throw new ContractError('not_found');
+    if (!configuration.enabled) throw new ContractError('invalid_state');
+    if (!['mock', 'openai', 'openai-compatible'].includes(configuration.kind)) throw new ContractError('unsupported');
+    return configuration;
+  }
+  private target(configuration: ProviderConfiguration): string {
+    const base = configuration.baseUrl ?? (configuration.kind === 'openai' ? 'https://api.openai.com/v1' : '');
+    if (!base) throw new ContractError('invalid_input');
+    const target = new URL(base).toString().replace(/\/+$/u, '');
+    if (configuration.kind === 'openai' && target !== 'https://api.openai.com/v1') throw new ContractError('invalid_input');
+    return target;
+  }
+  confirmTarget(input: ConfirmProviderTargetInput): { providerId: string } {
+    const parsed = confirmProviderTargetInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    const configuration = this.configuration(parsed.data.providerId);
+    if (configuration.kind === 'mock') throw new ContractError('invalid_input');
+    const baseUrl = this.target(configuration);
+    if (new URL(parsed.data.baseUrl).toString().replace(/\/+$/u, '') !== baseUrl) throw new ContractError('forbidden');
+    this.approvals.set(configuration.id, { kind: configuration.kind, baseUrl, revision: this.database.getProviderKeyRevision(configuration.id) });
+    return { providerId: configuration.id };
+  }
+  private trusted(id: string): Approval {
+    const configuration = this.configuration(id);
+    const approved = this.approvals.get(id);
+    if (!approved || approved.kind !== configuration.kind || approved.baseUrl !== this.target(configuration)
+      || approved.revision !== this.database.getProviderKeyRevision(id)) throw new ContractError('forbidden');
+    return approved;
+  }
+  resolveModelPolicy(configuration: ProviderConfiguration, modelId: string): ApprovedModelPolicy | undefined {
+    // shortcut: no real-model tokenizer/price profiles are approved yet; add sourced profiles under separate review.
+    return this.options.policyResolver?.(configuration, modelId);
+  }
+  resolveCapabilities(configuration: ProviderConfiguration): ChatCompletionCapabilities {
+    return configuration.kind === 'openai' ? officialCapabilities : this.options.capabilitiesResolver?.(configuration) ?? unknownCapabilities;
+  }
+  createTransport(guard: () => void): typeof fetch { return this.options.transportFactory?.(guard) ?? createSafeFetch(guard); }
+
+  assertSelection(providerId: string, modelId: string): void {
+    const configuration = this.database.validateModelSelection(providerId, modelId);
+    if (configuration.kind === 'mock') return;
+    this.trusted(providerId);
+    const policy = this.resolveModelPolicy(configuration, modelId);
+    if (!policy || !policy.evidence.trim() || policy.counter.modelId !== modelId || !policy.counter.method.trim()
+      || !['exact','upper_bound'].includes(policy.counter.kind)
+      || !Number.isSafeInteger(policy.contextWindowTokens) || policy.contextWindowTokens <= 0
+      || !Number.isSafeInteger(policy.maxOutputTokens) || policy.maxOutputTokens <= 0
+      || policy.maxOutputTokens > policy.contextWindowTokens || !policy.price.evidence.trim()
+      || [policy.price.inputUsdPerMillion, policy.price.outputUsdPerMillion, policy.price.maxRequestUsd].some(n => !Number.isFinite(n) || n < 0)
+      || !policy.outputTokenParameter || this.resolveCapabilities(configuration).outputTokenParameter !== policy.outputTokenParameter) throw new ContractError('unsupported');
+  }
+  budget(providerId: string, modelId: string) {
+    this.assertSelection(providerId, modelId);
+    const configuration = this.configuration(providerId);
+    return configuration.kind === 'mock' ? mockModelBudget : this.resolveModelPolicy(configuration, modelId);
+  }
+  checkGeneration(providerId: string, input: StreamChatInput): void {
+    // StreamChatInput includes AbortSignal only inside Main; validate its serializable request separately.
+    const { signal: _signal, ...request } = input;
+    if (!streamChatInputSchema.safeParse(request).success) throw new ContractError('invalid_input');
+    this.assertSelection(providerId, input.modelId);
+    const configuration = this.configuration(providerId);
+    if (configuration.kind === 'mock') return;
+    const policy = this.resolveModelPolicy(configuration, input.modelId)!;
+    const count = countModelTokens(input.messages, input.modelId, policy.counter);
+    if (count === undefined || input.outputTokenLimit === undefined || input.outputTokenLimit > policy.maxOutputTokens
+      || count + input.outputTokenLimit > policy.contextWindowTokens) throw new ContractError('invalid_input');
+    const maximumUsd = (count * policy.price.inputUsdPerMillion + input.outputTokenLimit * policy.price.outputUsdPerMillion) / 1_000_000;
+    if (!Number.isFinite(maximumUsd) || maximumUsd > policy.price.maxRequestUsd) throw new ContractError('invalid_input');
+  }
+
+  getAdapter(providerId: string, modelId?: string): ProviderAdapter {
+    const configuration = this.configuration(providerId);
+    if (configuration.kind === 'mock') {
+      if (modelId !== undefined) this.database.validateModelSelection(providerId, modelId);
+      return new MockProvider({ tokenDelayMs: 60 });
+    }
+    const approval = this.trusted(providerId);
+    if (modelId !== undefined) this.assertSelection(providerId, modelId);
+    const guard = () => {
+      const current = this.trusted(providerId);
+      if (current.kind !== approval.kind || current.baseUrl !== approval.baseUrl || current.revision !== approval.revision) throw new ContractError('forbidden');
+      if (modelId !== undefined) this.assertSelection(providerId, modelId);
+    };
+    const transport = this.createTransport(guard);
+    const options = { configuration, confirmedBaseUrl: approval.baseUrl,
+      resolveKey: async (id: string) => {
+        guard();
+        if (id !== providerId) throw new ContractError('forbidden');
+        const state = await this.keys.getProviderKeyState(id); guard();
+        const key = state.keyReference ? await this.keys.resolveKey(id, state.keyReference) : undefined;
+        guard(); return key;
+      },
+      fetch: (async (url, init) => { guard(); return transport(url, init); }) as typeof fetch,
+    };
+    const adapter = configuration.kind === 'openai' ? new OpenAIProvider(options) : new OpenAICompatibleProvider({ ...options, capabilities: this.resolveCapabilities(configuration) });
+    const stream = adapter.streamChat.bind(adapter);
+    const registry = this;
+    adapter.streamChat = async function* (input) {
+      try {
+        if (modelId !== undefined && input.modelId !== modelId) throw new ContractError('invalid_input');
+        guard(); registry.checkGeneration(providerId, input);
+        for await (const chunk of stream(input)) { guard(); yield chunk; }
+      } catch (error) { yield { type: 'error', requestId: input.requestId, error: toPublicError(error) }; }
+    };
+    const list = adapter.listModels.bind(adapter);
+    adapter.listModels = async input => { guard(); const models = await list(input); guard(); return models; };
+    const test = adapter.testConnection.bind(adapter);
+    adapter.testConnection = async input => { guard(); const result = await test(input); guard(); return result; };
+    return adapter;
+  }
+}

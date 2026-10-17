@@ -59,6 +59,7 @@ const api: RoundtableApiContract = {
     getProviderConfiguration: (input) => invoke('settings.getProviderConfiguration', input),
     listProviderSummaries: () => invoke('settings.listProviderSummaries', undefined),
     deleteProvider: (input) => invoke('settings.deleteProvider', input),
+    confirmTarget: (input) => invoke('settings.confirmTarget', input),
     setKey: (input) => invoke('settings.setKey', input),
     deleteKey: (input) => invoke('settings.deleteKey', input),
     getProviderKeyState: (input) => invoke('settings.getProviderKeyState', input),

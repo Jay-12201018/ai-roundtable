@@ -46,7 +46,7 @@ async function page(stage, saved) {
     return value;
   };
   if (stage === 'first') {
-    check(!findButton('开始 Mock 协作') || findButton('开始 Mock 协作').disabled, 'Empty room must not start a legacy demo');
+    check(!findButton('开始协作') || findButton('开始协作').disabled, 'Empty room must not start a legacy demo');
     await click('模型设置');
     await click('新增 Provider'); await fill('Provider 名称', 'Smoke Mock'); await fill('Provider 类型', 'mock');
     await click('保存配置');
@@ -69,7 +69,7 @@ async function page(stage, saved) {
       check(field('API Key').value === '', 'Secret form not cleared after save'); return noKey(state);
     }
     const firstKey = await saveKey('r78-fake-key-one');
-    await fill('API Key', 'r78-fake-key-two'); await click('保存或替换 Key');
+    await toggle('我已核对请求目标', true); await fill('API Key', 'r78-fake-key-two'); await click('保存或替换 Key');
     const replacement = await wait(keyState, state => state.state === 'configured' && state.keyReference.id !== firstKey.keyReference.id, 'Replacement did not revoke old reference');
     await click('删除 Key'); await click('确认删除 Key'); await wait(keyState, state => state.state === 'missing', 'Key deletion not saved');
     await saveKey('r78-fake-key-three');
@@ -86,7 +86,7 @@ async function page(stage, saved) {
     check(rejected, 'Cross-provider Key reference injection rejection shape: ' + JSON.stringify(rejectionEvidence));
     check((await api.settings.getProviderKeyState({ providerId: saved.otherProviderId })).state === 'missing', 'Other Provider acquired Key');
     await toggle('我已核对请求目标', true); await click('测试鉴权');
-    await wait(() => document.body.innerText, value => value.includes('鉴权测试：真实连接能力尚未接入。'), 'Real Provider reported false network success');
+    await wait(() => document.body.innerText, value => value.includes('鉴权测试：当前目标或模型缺少已确认的能力、计数或预算信息。'), 'Real Provider reported false network success');
     noKey(await api.settings.listProviderSummaries()); noKey(await api.settings.getProviderConfiguration({ id: saved.realProviderId }));
     noKey(await keyState()); noKey(replacement);
     await click('返回讨论'); await click('房间与成员');
@@ -111,7 +111,7 @@ async function page(stage, saved) {
     check(saved.agents.every(agent => agent.providerId === saved.mockProviderId && agent.modelId === 'mock'), 'Members are not all explicit Mock');
     saved.otherRoomId = await createRoom('Smoke Disposable');
     await click('Smoke Roundtable'); await click('讨论'); await fill('任务目标', 'R78 public three Agent collaboration');
-    await click('开始 Mock 协作'); saved.runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run not selected');
+    await click('开始协作'); saved.runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run not selected');
     await wait(text, values => values[0]?.length > 0, 'Partial message not projected');
     await click('暂停'); snapshots.paused = await settle(saved.runId, 'paused', 1);
     check(snapshots.paused.execution.membersSnapshot.length === 3, 'Frozen members missing');
@@ -126,7 +126,7 @@ async function page(stage, saved) {
     await click('下一步'); snapshots.stepped = await settle(saved.runId, 'paused', 2);
     await click('继续'); snapshots.completed = await settle(saved.runId, 'completed', 3);
     check(snapshots.completed.attempts.length === 3 && new Set(snapshots.completed.attempts.map(attempt => attempt.requestId)).size === 3, 'Three request identities missing');
-    await fill('任务目标', 'R78 cancellation and explicit repeat'); await click('开始 Mock 协作');
+    await fill('任务目标', 'R78 cancellation and explicit repeat'); await click('开始协作');
     const repeatRunId = await wait(() => localStorage.getItem('roundtable.runId'), id => id && id !== saved.runId, 'Repeat scenario Run absent');
     await wait(text, values => values[0]?.length > 0, 'Stop partial output absent'); await click('停止');
     snapshots.stopped = await settle(repeatRunId, 'cancelled', 1); snapshots.repeats = [];
@@ -158,7 +158,7 @@ async function page(stage, saved) {
     await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Disposable', 'Archive did not switch to remaining room');
     await click('删除房间'); await click('确认删除');
     await wait(() => document.querySelector('.rooms-empty h2')?.textContent, value => value === '你的下一场圆桌', 'Last visible room deletion did not clear');
-    await click('讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && findButton('开始 Mock 协作').disabled, 'Last-room clear kept old projection/start');
+    await click('讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && findButton('开始协作').disabled, 'Last-room clear kept old projection/start');
     await click('房间与成员'); await toggle('显示归档房间', true);
     await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Roundtable', 'Archived room unavailable');
     await click('历史记录'); await click('R78 public three Agent collaboration'); await settle(saved.runId, 'completed', 3);

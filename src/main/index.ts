@@ -3,6 +3,9 @@ import { app, dialog, BrowserWindow } from 'electron';
 import { Database } from './database/Database';
 import { createElectronKeyBackend } from './security/electronSafeStorage';
 import { KeyService } from './security/KeyService';
+import { ProviderRegistry } from './providers/ProviderRegistry';
+export { ProviderRegistry };
+import { mockModelBudget } from './providers/mock/tokenBudget';
 import { MockProvider } from './providers/mock/MockProvider';
 import { RunService } from './services/RunService';
 import { createMainWindow } from './windows/createMainWindow';
@@ -50,8 +53,10 @@ if (!hasLock) {
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
-      settingsService = new ProviderSettingsService(database, keyService);
-      runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }),createPublicMessagesBuilder());
+      const providers = new ProviderRegistry(database, keyService);
+      settingsService = new ProviderSettingsService(database, keyService, providers);
+      runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }), createPublicMessagesBuilder((modelId, member) =>
+        member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined), providers);
       createAppWindow();
       app.on('activate', () => {
         if (!shutdownRequested && BrowserWindow.getAllWindows().length === 0) createAppWindow();

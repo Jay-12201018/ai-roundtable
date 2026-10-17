@@ -2,13 +2,14 @@ import { ContractError } from '../../shared/contracts/errors';
 import { streamChatInputSchema } from '../../shared/schemas/provider';
 import { buildPublicContext,countModelTokens } from './buildPublicContext';
 import type { ModelTokenCounter } from './types';
+import type { MemberSnapshot } from '../../shared/schemas/persistence';
 import type { RunMessagesBuilder } from '../services/RunService';
 import { mockModelBudget } from '../providers/mock/tokenBudget';
 
 type ModelBudget={contextWindowTokens:number;counter:ModelTokenCounter};
-export function createPublicMessagesBuilder(resolve:(modelId:string|null)=>ModelBudget|undefined=id=>id==='mock'?mockModelBudget:undefined):RunMessagesBuilder{
+export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:MemberSnapshot)=>ModelBudget|undefined=id=>id==='mock'?mockModelBudget:undefined):RunMessagesBuilder{
   return (run,member,turnIndex,{snapshot,current,repeat})=>{
-    const budget=resolve(member.modelId);
+    const budget=resolve(member.modelId,member);
     if(!budget||!Number.isSafeInteger(budget.contextWindowTokens)||budget.contextWindowTokens<=0)throw new ContractError('unsupported');
     if(snapshot.run.id!==run.id||snapshot.run.roomId!==run.roomId||current.agentId!==member.agentId||current.turnIndex!==turnIndex
       ||snapshot.messages.some(m=>m.id===current.messageId)||snapshot.attempts.some(a=>a.requestId===current.requestId))throw new ContractError('invalid_state');

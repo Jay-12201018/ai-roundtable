@@ -52,6 +52,7 @@ export function App() {
       try { return await work(); } finally { void reloadProviders(); }
     }
     return {
+      confirmTarget: input => api.settings.confirmTarget(input),
       createProvider: input => refreshAfter(() => api.settings.createProvider(input)),
       updateProvider: input => refreshAfter(() => api.settings.updateProvider(input)),
       deleteProvider: input => refreshAfter(() => api.settings.deleteProvider(input)),
@@ -114,7 +115,7 @@ export function App() {
             return <article className="message" key={message.id}><strong>{member?.displayName ?? message.senderName}</strong><div className="message-identity">{member?.roleTemplateId ?? '角色未记录'} · Provider：{member?.providerId ?? '未记录'} · Model：{member?.modelId ?? '未记录'}</div><p>{message.content}</p><small>{statusLabels[message.status] ?? '未知状态'}</small></article>;
           })}
         </div>
-        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={() => void session.startRun()} disabled={!startEnabled}>开始 Mock 协作</button></div>
+        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={() => void session.startRun()} disabled={!startEnabled}>开始协作</button></div>
         {syncStatus === 'syncing' && <div role="status" className="sync-feedback">正在同步运行状态</div>}
         {pending && <div role="status" className="sync-feedback">操作已发送，等待确认</div>}
         {snapshot?.status === 'interrupted' && <div className="sync-feedback">执行已中断，部分输出已保留。请先检查历史记录。</div>}

@@ -12,6 +12,7 @@ import { PROTOCOL_VERSION } from '../../shared/schemas/common';
 import { normalizedChunkSchema, streamChatInputSchema } from '../../shared/schemas/provider';
 import type { MemberSnapshot } from '../../shared/schemas/persistence';
 import type { Database, RunEventRecord, RunRecord, TurnRecord } from '../database/Database';
+import type { ProviderRegistry } from '../providers/ProviderRegistry';
 import type { ProviderAdapter, StreamChatInput } from '../providers/types';
 
 type RunContext = {
@@ -57,7 +58,8 @@ export class RunService {
   private shuttingDown = false;
 
   constructor(private readonly database: Database, private readonly provider: ProviderAdapter,
-    private readonly buildMessages: RunMessagesBuilder = (run,_member,_index,preparation) => preparation.repeat?.messages ?? [{ role: 'user', content: run.task! }]) {}
+    private readonly buildMessages: RunMessagesBuilder = (run,_member,_index,preparation) => preparation.repeat?.messages ?? [{ role: 'user', content: run.task! }],
+    private readonly registry?: ProviderRegistry) {}
 
   createDemoRoom(objective: string): string {
     const roomId = randomUUID();
@@ -74,7 +76,7 @@ export class RunService {
     input = parsed.data;
     this.assertAvailable();
     if (!this.database.getRoom(input.roomId)) throw new ContractError('not_found');
-    const members = this.database.listAgents(input.roomId).map(({ id, roomId: _roomId, ...member }) => ({ ...member, agentId: id, modelId: member.modelId ?? 'mock' }));
+    const members = this.database.listAgents(input.roomId, this.registry ? (providerId, modelId) => this.registry!.assertSelection(providerId, modelId) : undefined).map(({ id, roomId: _roomId, ...member }) => ({ ...member, agentId: id, modelId: member.modelId ?? 'mock' }));
     if (!members.length) throw new ContractError('invalid_state');
     const runId = randomUUID();
     const context: RunContext = { runId, roomId: input.roomId, members,
@@ -299,7 +301,8 @@ export class RunService {
     for (const member of context.members) {
       if (member.providerId === null && member.modelId === 'mock') continue;
       if (member.providerId === null || member.modelId === null) throw new ContractError('invalid_state');
-      if (this.database.validateModelSelection(member.providerId, member.modelId).kind !== 'mock') throw new ContractError('unsupported');
+      if (this.registry) this.registry.assertSelection(member.providerId, member.modelId);
+      else if (this.database.validateModelSelection(member.providerId, member.modelId).kind !== 'mock') throw new ContractError('unsupported');
     }
     const previous = this.contexts.get(context.runId);
     const oldPromise = context.promise;
@@ -408,6 +411,7 @@ export class RunService {
       const inputSnapshot=streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
         outputTokenLimit:context.outputTokenLimit,agentRole:member.roleTemplateId,turnIndex,
         messages:this.buildMessages(snapshot.run,member,turnIndex,preparation) });
+      if (member.providerId && this.registry) this.registry.checkGeneration(member.providerId, inputSnapshot);
       if (this.deadlineReached(context)) throw new ContractError('timeout');
       if(context.abortController.signal.aborted)throw new ContractError('cancelled');
       if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
@@ -427,7 +431,8 @@ export class RunService {
       let started = false;
       let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
       if (this.deadlineReached(context) || signal?.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
-      iterator = this.provider.streamChat(input)[Symbol.asyncIterator]();
+      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId) : this.provider;
+      iterator = provider.streamChat(input)[Symbol.asyncIterator]();
       await this.withAbort(context, async () => {
         while (true) {
           const next = await iterator!.next();
@@ -463,7 +468,7 @@ export class RunService {
       });
       if (!finishReason) throw new ContractError('invalid_response');
       if (finishReason !== 'stop') {
-        // shortcut: v1 has no incomplete-finish error code, request a shared reason before real Providers.
+        // Incomplete output is retained as failed evidence; only an explicit user action may retry.
         context.failureReason = `Provider finish: ${finishReason}`;
         throw new ContractError('invalid_response');
       }

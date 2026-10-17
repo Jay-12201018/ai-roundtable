@@ -81,10 +81,11 @@ export const providerKeyStateSchema = z.object({
   && (input.state !== 'configured' || input.storage.mode === 'secure')
   && (input.state !== 'session' || input.storage.mode === 'memory'), 'Inconsistent key state');
 export const providerIdInputSchema = z.object({ providerId: idSchema }).strict();
+export const confirmProviderTargetInputSchema = providerIdInputSchema.extend({ baseUrl: providerBaseUrlSchema, confirmed: z.literal(true) });
 export const setProviderKeyInputSchema = providerIdInputSchema.extend({ apiKey: z.string().min(1) });
 export const providerModelsInputSchema = providerIdInputSchema;
 export const providerModelsResultSchema = providerIdInputSchema.extend({ models: z.array(providerModelSchema) });
-export const providerConnectionTestInputSchema = providerIdInputSchema.extend({ level: connectionLevelSchema, modelId: idSchema.optional() })
+export const providerConnectionTestInputSchema = providerIdInputSchema.extend({ level: connectionLevelSchema, modelId: idSchema.optional(), allowGeneration: z.literal(true).optional() })
   .refine((input) => input.level !== 'generation' || input.modelId !== undefined, 'Generation test requires a model');
 export const providerConnectionTestResultSchema = providerIdInputSchema.extend({ result: connectionTestResultSchema });
 

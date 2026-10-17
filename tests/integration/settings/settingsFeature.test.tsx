@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
 import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/KeyService';
+import { ProviderRegistry } from '../../../src/main/providers/ProviderRegistry';
 import { ProviderSettingsService } from '../../../src/main/settings';
 import { SettingsFeature } from '../../../src/renderer/features/settings';
 
@@ -10,13 +11,14 @@ afterEach(() => { cleanup(); databases.splice(0).forEach(db => db.close()); });
 function fixture() {
   const database = new Database(':memory:'); database.initialize(); databases.push(database);
   const keys = new KeyService(database, createMemoryKeyBackend());
-  const api = new ProviderSettingsService(database, keys);
-  return { database, keys, api };
+  const network = vi.fn(async () => { throw new Error('Network disabled in standalone settings test'); });
+  const api = new ProviderSettingsService(database, keys, new ProviderRegistry(database, keys, { transportFactory: () => network }));
+  return { database, keys, api, network };
 }
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 it('connects the standalone feature to the actual settings service, Database and memory-only Key lifecycle', async () => {
-  const { database, api, keys } = fixture();
+  const { database, api, keys, network } = fixture();
   render(<SettingsFeature api={api} onClose={() => {}} />);
   await screen.findByText('还没有 Provider，添加一个配置开始。');
   fireEvent.click(screen.getByRole('button', { name: '新增 Provider' }));
@@ -38,8 +40,11 @@ it('connects the standalone feature to the actual settings service, Database and
   expect(database.rawKeyRecord(prior.keyReference!.id)).toBeUndefined();
   fireEvent.click(screen.getByRole('button', { name: '检查配置' }));
   await screen.findByText('配置检查：通过（仅本地配置）');
+  expect((screen.getByLabelText('我已核对请求目标') as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByLabelText('我已核对请求目标'));
   fireEvent.click(screen.getByRole('button', { name: '测试鉴权' }));
-  await screen.findByText('鉴权测试：真实连接能力尚未接入。');
+  await screen.findByText('鉴权测试：当前目标或模型缺少已确认的能力、计数或预算信息。');
+  expect(network).not.toHaveBeenCalled();
   fill('Base URL', 'https://other.example.test/v1');
   fireEvent.click(screen.getByLabelText('我已核对请求目标'));
   fireEvent.click(screen.getByRole('button', { name: '保存配置' }));

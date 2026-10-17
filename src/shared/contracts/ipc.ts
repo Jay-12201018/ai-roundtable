@@ -46,6 +46,7 @@ export const ipcContracts = {
   'settings.getProviderConfiguration': providerSettingsContracts.getProviderConfiguration,
   'settings.listProviderSummaries': providerSettingsContracts.listProviderSummaries,
   'settings.deleteProvider': providerSettingsContracts.deleteProvider,
+  'settings.confirmTarget': providerSettingsContracts.confirmTarget,
   'settings.setKey': providerSettingsContracts.setKey,
   'settings.deleteKey': providerSettingsContracts.deleteKey,
   'settings.getProviderKeyState': providerSettingsContracts.getProviderKeyState,
@@ -89,7 +90,7 @@ function configurationMatches(channel: IpcChannel, input: unknown, data: unknown
     return agents.every(agent => agent.roomId === request.roomId)
       && (channel !== 'rooms.reorderAgents' || agents.length === request.agentIds!.length && agents.every((agent,index) => agent.id === request.agentIds![index]));
   }
-  if (['settings.setKey','settings.getProviderKeyState','settings.listModels','settings.testConnection'].includes(channel)
+  if (['settings.confirmTarget','settings.setKey','settings.getProviderKeyState','settings.listModels','settings.testConnection'].includes(channel)
     && entity.providerId !== request.providerId) return false;
   if (channel === 'settings.testConnection' && entity.result?.level !== request.level) return false;
   if (channel === 'rooms.listRoomMessages') {

@@ -15,7 +15,7 @@ const toDraft = (value: ProviderConfiguration): Draft => ({ name: value.name, ki
 const kinds: Record<ProviderKind, string> = { mock: 'Mock（离线演示）', openai: 'OpenAI', 'openai-compatible': 'OpenAI-Compatible', anthropic: 'Anthropic', gemini: 'Gemini' };
 const messages: Record<ErrorCode, string> = {
   invalid_input: '配置无效，请检查名称、模型与请求地址。', invalid_response: '返回结果无效，请重新加载。',
-  forbidden: '此操作没有权限。', unsupported: '真实连接能力尚未接入。', not_found: '配置已不存在，请重新加载。',
+  forbidden: '此操作没有权限。', unsupported: '当前目标或模型缺少已确认的能力、计数或预算信息。', not_found: '配置已不存在，请重新加载。',
   invalid_state: '当前状态不允许此操作；请先结束相关运行或检查引用。', internal_error: '操作失败，请重试。',
   transport_error: '连接中断，请重新加载后重试。', authentication_failed: '鉴权失败，请检查 Key。', rate_limited: '请求过于频繁，请稍后重试。',
   timeout: '请求超时，请稍后重试。', cancelled: '请求已取消。', network_error: '无法连接 Provider，请检查请求地址。',
@@ -156,7 +156,8 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   const endpoint = draft.kind === 'mock' || draft.baseUrl.trim() === '' ? null : providerBaseUrlSchema.safeParse(draft.baseUrl);
   const endpointInvalid = endpoint !== null && !endpoint.success;
   const normalizedEndpoint = endpoint?.success ? endpoint.data : null;
-  const target = draft.kind === 'mock' ? 'Mock 离线演示，不发送网络请求。' : normalizedEndpoint ?? '厂商默认地址，真实连接尚未接入';
+  const effectiveTarget = normalizedEndpoint ?? (draft.kind === 'openai' ? 'https://api.openai.com/v1' : null);
+  const target = draft.kind === 'mock' ? 'Mock 离线演示，不发送网络请求。' : effectiveTarget ?? '请填写并核对实际请求地址；此类型的默认目标尚未配置。';
   const targetChanged = !saved || saved.kind !== draft.kind || saved.baseUrl !== normalizedEndpoint;
   const dirty = saved === null || JSON.stringify(toDraft(saved)) !== JSON.stringify(draft);
   const canUseSaved = saved !== null && !dirty && !busy;
@@ -194,7 +195,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     if (apiKey.trim() === '') { setError('请输入 API Key；离开输入框会清除输入。'); return; }
     void perform(async () => {
       const state = await api.setKey({ providerId: saved.id, apiKey });
-      if (alive.current) { setKeyState(state); setNotice('Key 已保存。'); setResults({}); }
+      if (alive.current) { setKeyState(state); setNotice('Key 已保存。'); setResults({}); setTargetConfirmed(false); setGenerationConfirmed(false); }
     });
   }
 
@@ -208,16 +209,36 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
       } else if (operation === 'key') {
         await api.deleteKey({ providerId });
         const state = await api.getProviderKeyState({ providerId });
-        if (alive.current) { setKeyState(state); setDeleting(null); setNotice('Key 已删除。'); setResults({}); }
+        if (alive.current) { setKeyState(state); setDeleting(null); setNotice('Key 已删除。'); setResults({}); setTargetConfirmed(false); setGenerationConfirmed(false); }
       }
+    });
+  }
+
+  async function confirmSavedTarget(): Promise<boolean> {
+    if (!saved || dirty || !targetReady) throw new ContractError('invalid_state');
+    if (saved.kind === 'mock') return true;
+    const baseUrl = saved.baseUrl ?? (saved.kind === 'openai' ? 'https://api.openai.com/v1' : null);
+    if (!baseUrl) throw new ContractError('invalid_input');
+    const response = await api.confirmTarget({ providerId: saved.id, baseUrl, confirmed: true });
+    if (!alive.current) return false;
+    if (response.providerId !== saved.id) throw new ContractError('invalid_response');
+    return true;
+  }
+
+  function confirmSessionTarget() {
+    clearSecret();
+    if (!canUseSaved || !targetReady) return;
+    void perform(async () => {
+      if (await confirmSavedTarget()) setNotice('本次会话请求目标已确认；更换 Key 或目标后需重新确认。');
     });
   }
 
   function test(level: TestLevel) {
     clearSecret();
-    if (!canUseSaved || !saved || !targetReady || level === 'generation' && (!generationConfirmed || generationModel.trim() === '')) return;
+    if (!canUseSaved || !saved || level !== 'configuration' && !targetReady || level === 'generation' && (!generationConfirmed || generationModel.trim() === '')) return;
     void perform(async () => {
-      const response = await api.testConnection({ providerId: saved.id, level, ...(level === 'generation' ? { modelId: generationModel.trim() } : {}) });
+      if (level !== 'configuration' && !await confirmSavedTarget()) return;
+      const response = await api.testConnection({ providerId: saved.id, level, ...(level === 'generation' ? { modelId: generationModel.trim(), ...(saved.kind === 'mock' ? {} : { allowGeneration: true }) } : {}) });
       if (!alive.current) return;
       if (response.providerId !== saved.id || response.result.level !== level) throw new ContractError('invalid_response');
       const result = response.result;
@@ -229,6 +250,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     clearSecret(); if (!canUseSaved || !saved || !targetReady) return;
     void perform(async () => {
       try {
+        if (!await confirmSavedTarget()) return;
         const response = await api.listModels({ providerId: saved.id });
         if (!alive.current) return;
         if (response.providerId !== saved.id) throw new ContractError('invalid_response');
@@ -242,7 +264,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   if (loadFailed) return <div aria-busy={busy}>{error && <p role="alert">{error}</p>}<p>无法读取此配置。可重试加载；需要移除此实例时，删除仍受成员与运行引用保护。</p><div className="settings-actions"><button type="button" disabled={busy} onClick={() => void load()}>重新加载</button><button type="button" disabled={busy} onClick={() => setDeleting('provider')}>删除 Provider</button></div>{deletionConfirmation}</div>;
   return <div className="settings-editor" aria-busy={busy}>
     <h2>{saved ? '编辑 Provider' : '新增 Provider'}</h2>
-    <p>Mock 是离线演示。真实 Provider 的网络 Adapter 尚未接入；保存配置与 Key 不代表鉴权或生成成功。</p>
+    <p>Mock 是离线演示。保存配置与 Key 不代表鉴权或生成成功；真实请求需要确认目标，生成还需已审核的模型能力与预算。</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status" className="settings-success">{notice}</p>}
     {busy && <p role="status">正在处理，请等待结果…</p>}
     <form onSubmit={save} noValidate>
@@ -257,6 +279,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
         <p id="settings-endpoint-help">仅允许 HTTPS 或明确的 localhost、127.0.0.1、[::1] HTTP；不得含凭据、查询参数或片段。留空使用厂商默认地址；兼容端点需填写才能通过配置检查。</p>
         <div className="settings-target"><strong>请求目标</strong><p>{endpointInvalid ? '地址无效，无法确认请求目标。' : target}</p>
           {draft.kind !== 'mock' && !endpointInvalid && <label className="settings-check"><input type="checkbox" checked={targetConfirmed} onChange={event => setTargetConfirmed(event.target.checked)} />我已核对请求目标</label>}
+          {saved && draft.kind !== 'mock' && <button type="button" disabled={!canUseSaved || !targetReady || !effectiveTarget} onClick={confirmSessionTarget}>确认本次会话目标</button>}
           {saved && targetChanged && <p className="settings-warning">更换类型或请求目标会撤销旧 Key；保存后必须重新输入 Key。</p>}
         </div>
         <label className="settings-check"><input type="checkbox" checked={draft.enabled} onChange={event => { change('enabled', event.target.checked); if (!event.target.checked) setDraft(previous => ({ ...previous, isDefault: false })); }} />启用此 Provider</label>
@@ -291,11 +314,11 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
       </>}
     </section>}
     {saved && <section className="settings-section" aria-labelledby="settings-tests-title"><h3 id="settings-tests-title">分级检查与测试</h3>
-      <p>配置检查仅校验本地设置。获取模型列表、鉴权与真实生成相互独立；当前真实网络能力尚未接入，操作会明确报告不支持。</p>
+      <p>配置检查仅校验本地设置。获取模型列表、鉴权与真实生成相互独立；未知目标能力、模型计数或预算会拒绝生成。</p>
       {dirty && <p className="settings-warning">先保存或取消配置更改，再操作 Key 或运行检查。</p>}
       {!targetReady && <p className="settings-warning">请先勾选“我已核对请求目标”。</p>}
       {!saved.enabled && <p className="settings-warning">当前 Provider 已禁用；配置检查会报告不可用。</p>}
-      <div className="settings-actions"><button type="button" disabled={!canUseSaved || !targetReady} onClick={() => test('configuration')}>检查配置</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={listModels}>获取模型列表</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={() => test('authentication')}>测试鉴权</button></div>
+      <div className="settings-actions"><button type="button" disabled={!canUseSaved} onClick={() => test('configuration')}>检查配置</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={listModels}>获取模型列表</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={() => test('authentication')}>测试鉴权</button></div>
       <label>生成测试模型 ID<input value={generationModel} onChange={event => { setGenerationModel(event.target.value); setGenerationConfirmed(false); }} disabled={!canUseSaved} /></label>
       <label className="settings-check"><input type="checkbox" checked={generationConfirmed} onChange={event => setGenerationConfirmed(event.target.checked)} disabled={!canUseSaved} />我确认本次生成测试可能产生费用</label>
       <button type="button" disabled={!canUseSaved || !targetReady || !generationConfirmed || !generationModel.trim()} onClick={() => test('generation')}>发起生成测试</button>

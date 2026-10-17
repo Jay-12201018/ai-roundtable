@@ -29,8 +29,8 @@ function openRooms() { fireEvent.click(screen.getByRole('button', { name: '房�
 
 it('keeps start disabled with no room and never creates an implicit Demo', async () => {
   const f = fixture(); render(<App />);
-  await waitFor(() => expect((screen.getByRole('button', { name: '开始 Mock 协作' }) as HTMLButtonElement).disabled).toBe(true));
-  fireEvent.click(screen.getByRole('button', { name: '开始 Mock 协作' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(true));
+  fireEvent.click(screen.getByRole('button', { name: '开始协作' }));
   expect(f.api.room.createDemo).not.toHaveBeenCalled(); expect(f.api.run.start).not.toHaveBeenCalled();
   const session = createRendererSession(f.api, undefined, { requireRoom: true }); const dispose = session.mount();
   await session.startRun();
@@ -126,7 +126,7 @@ it.each(['archive', 'delete', 'filter'] as const)('clears restored messages and 
   fireEvent.click(screen.getByRole('button', { name: '讨论' }));
   expect(screen.queryByText('持久历史正文')).toBeNull(); expect(screen.queryByText('旧选择的迟到内容')).toBeNull();
   expect(localStorage.getItem('roundtable.runId')).toBeNull();
-  expect((screen.getByRole('button', { name: '开始 Mock 协作' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('shows unrecorded metadata for old Runs without using live member configuration', async () => {

@@ -18,6 +18,7 @@ function fixture(configurations: ProviderConfiguration[] = [base]) {
   const keyStates = new Map<string, ProviderKeyState>();
   const keyState = (providerId: string): ProviderKeyState => keyStates.get(providerId) ?? { providerId, state: 'missing', keyReference: null, storage: memory };
   const api: ProviderSettingsApiContract = {
+    confirmTarget: vi.fn(async ({providerId})=>({providerId})),
     listProviderSummaries: vi.fn(async () => [...records.values()].map(({ id, name, kind, enabled, isDefault, defaultModelId, customModels }) => ({ id, name, kind, enabled, isDefault, defaultModelId, customModels, configurationValid: true, hasStoredKey: false }))),
     getProviderConfiguration: vi.fn(async ({ id }) => structuredClone(records.get(id)!)),
     getProviderKeyState: vi.fn(async ({ providerId }) => keyState(providerId)),
@@ -199,13 +200,13 @@ describe('R08 standalone settings interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: '检查配置' }));
     expect(await screen.findByText('配置检查：通过（仅本地配置）')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '测试鉴权' }));
-    expect(await screen.findByText('鉴权测试：真实连接能力尚未接入。')).toBeTruthy();
+    expect(await screen.findByText('鉴权测试：当前目标或模型缺少已确认的能力、计数或预算信息。')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '发起生成测试' }));
     expect(api.testConnection).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByLabelText('我确认本次生成测试可能产生费用'));
     fireEvent.click(screen.getByRole('button', { name: '发起生成测试' }));
-    expect(await screen.findByText('生成测试：真实连接能力尚未接入。')).toBeTruthy();
-    expect(api.testConnection).toHaveBeenLastCalledWith({ providerId: 'one', level: 'generation', modelId: 'model-one' });
+    expect(await screen.findByText('生成测试：当前目标或模型缺少已确认的能力、计数或预算信息。')).toBeTruthy();
+    expect(api.testConnection).toHaveBeenLastCalledWith({ providerId: 'one', level: 'generation', modelId: 'model-one', allowGeneration: true });
     expect(screen.getByText('配置检查：通过（仅本地配置）')).toBeTruthy();
   });
 
