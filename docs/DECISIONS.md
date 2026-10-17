@@ -199,3 +199,10 @@ D060的停止记录与原失败日志保留；仅本次授权及真实补充证�
 | D069 | 旧恢复探针仅补已批准的confirmTarget精确白名单，保留原失败；业务/构建、既有回归及R09/R78探针输入不变，不机械重跑无关检查 | 实际失败发生于Bridge集合检查、恢复断言前；补一项后新profile实际恢复及只读审计通过，未放宽安全要求 | 首次Node sandbox EPERM及旧探针exit1完整保留[台账](verification/2026-10-17-r09-main-commands.md)；无产品修改 |
 
 D062的候选未合main边界已由用户本次授权取代，D063–D067的数据/网络/可靠计数及未验收限制继续有效。生产真实生成仍因缺获审model policy而unsupported；R10A/B仅ready、R11有限计划/Mock准备仍需冻结共享协议和另获实施授权，真实API/Keychain/E2E/发布未验证。
+
+## DeepSeek 首次真实调用前的安全准备候选（2026-10-17）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D070 | 从dc387146建立独立codex/deepseek-safety-prep，仅补Main受限参数能力、同币种CNY整数预算及候选有效期 | 不把人民币写进USD字段，不按厂商/模型名猜计数；保留Mock、既有R09网络/Key/取消及历史语义 | 本轮32专项、Node/Electron各1105、strict/build、双ABI、真实隔离入口/退出通过，见[报告](verification/2026-10-17-deepseek-preparation.md)/[台账](verification/2026-10-17-deepseek-preparation-commands.md) |
+| D071 | DEEPSEEK-TOKEN-01未解决前不注册真实DeepSeek model policy，准备候选review，真实生成blocked | 官方离线V4.1工具存在，但未证明1017生产API完整计费封装对应；不造字符/字节上界或用fixture计数解锁 | 默认生产Key前unsupported；真实API/Keychain/实际账单未验证，无合main或付费授权，不启动其他任务 |

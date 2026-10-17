@@ -13,14 +13,19 @@ import { OpenAIProvider } from './openai/OpenAIProvider';
 import { OpenAICompatibleProvider } from './openai-compatible/OpenAICompatibleProvider';
 import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider';
 import { createSafeFetch } from './network';
+import { deepSeekFlashCapabilities } from './modelPolicies/deepseekFlash';
 
 export interface ApprovedModelPolicy {
   evidence: string;
   outputTokenParameter: 'max_tokens' | 'max_completion_tokens';
   contextWindowTokens: number;
   maxOutputTokens: number;
+  maxInputTokens?: number;
   counter: ModelTokenCounter;
-  price: { inputUsdPerMillion: number; outputUsdPerMillion: number; maxRequestUsd: number; evidence: string };
+  price: { inputUsdPerMillion: number; outputUsdPerMillion: number; maxRequestUsd: number; evidence: string } | {
+    currency: 'CNY'; inputMicroCnyPerToken: number; outputMicroCnyPerToken: number; maxRequestMicroCny: number;
+    reviewedAt: string; expiresAt: string; evidence: string;
+  };
 }
 type Options = {
   policyResolver?: (configuration: ProviderConfiguration, modelId: string) => ApprovedModelPolicy | undefined;
@@ -72,7 +77,7 @@ export class ProviderRegistry {
     return this.options.policyResolver?.(configuration, modelId);
   }
   resolveCapabilities(configuration: ProviderConfiguration): ChatCompletionCapabilities {
-    return configuration.kind === 'openai' ? officialCapabilities : this.options.capabilitiesResolver?.(configuration) ?? unknownCapabilities;
+    return configuration.kind === 'openai' ? officialCapabilities : this.options.capabilitiesResolver?.(configuration) ?? deepSeekFlashCapabilities(configuration) ?? unknownCapabilities;
   }
   createTransport(guard: () => void): typeof fetch { return this.options.transportFactory?.(guard) ?? createSafeFetch(guard); }
 
@@ -85,8 +90,9 @@ export class ProviderRegistry {
       || !['exact','upper_bound'].includes(policy.counter.kind)
       || !Number.isSafeInteger(policy.contextWindowTokens) || policy.contextWindowTokens <= 0
       || !Number.isSafeInteger(policy.maxOutputTokens) || policy.maxOutputTokens <= 0
-      || policy.maxOutputTokens > policy.contextWindowTokens || !policy.price.evidence.trim()
-      || [policy.price.inputUsdPerMillion, policy.price.outputUsdPerMillion, policy.price.maxRequestUsd].some(n => !Number.isFinite(n) || n < 0)
+      || policy.maxOutputTokens > policy.contextWindowTokens
+      || policy.maxInputTokens !== undefined && (!Number.isSafeInteger(policy.maxInputTokens) || policy.maxInputTokens <= 0 || policy.maxInputTokens > policy.contextWindowTokens)
+      || !validPrice(policy.price)
       || !policy.outputTokenParameter || this.resolveCapabilities(configuration).outputTokenParameter !== policy.outputTokenParameter) throw new ContractError('unsupported');
   }
   budget(providerId: string, modelId: string) {
@@ -104,9 +110,16 @@ export class ProviderRegistry {
     const policy = this.resolveModelPolicy(configuration, input.modelId)!;
     const count = countModelTokens(input.messages, input.modelId, policy.counter);
     if (count === undefined || input.outputTokenLimit === undefined || input.outputTokenLimit > policy.maxOutputTokens
+      || policy.maxInputTokens !== undefined && count > policy.maxInputTokens
       || count + input.outputTokenLimit > policy.contextWindowTokens) throw new ContractError('invalid_input');
-    const maximumUsd = (count * policy.price.inputUsdPerMillion + input.outputTokenLimit * policy.price.outputUsdPerMillion) / 1_000_000;
-    if (!Number.isFinite(maximumUsd) || maximumUsd > policy.price.maxRequestUsd) throw new ContractError('invalid_input');
+    const price = policy.price;
+    if ('currency' in price) {
+      const maximumMicroCny = count * price.inputMicroCnyPerToken + input.outputTokenLimit * price.outputMicroCnyPerToken;
+      if (!Number.isSafeInteger(maximumMicroCny) || maximumMicroCny > price.maxRequestMicroCny) throw new ContractError('invalid_input');
+    } else {
+      const maximumUsd = (count * price.inputUsdPerMillion + input.outputTokenLimit * price.outputUsdPerMillion) / 1_000_000;
+      if (!Number.isFinite(maximumUsd) || maximumUsd > price.maxRequestUsd) throw new ContractError('invalid_input');
+    }
   }
 
   getAdapter(providerId: string, modelId?: string): ProviderAdapter {
@@ -149,4 +162,15 @@ export class ProviderRegistry {
     adapter.testConnection = async input => { guard(); const result = await test(input); guard(); return result; };
     return adapter;
   }
+}
+
+function validPrice(price: ApprovedModelPolicy['price']): boolean {
+  if (!price.evidence.trim()) return false;
+  if ('currency' in price) {
+    const reviewed = Date.parse(price.reviewedAt); const expires = Date.parse(price.expiresAt); const now = Date.now();
+    return price.currency === 'CNY' && Number.isFinite(reviewed) && Number.isFinite(expires)
+      && reviewed <= now && now < expires && expires > reviewed
+      && [price.inputMicroCnyPerToken, price.outputMicroCnyPerToken, price.maxRequestMicroCny].every(n => Number.isSafeInteger(n) && n >= 0);
+  }
+  return [price.inputUsdPerMillion, price.outputUsdPerMillion, price.maxRequestUsd].every(n => Number.isFinite(n) && n >= 0);
 }

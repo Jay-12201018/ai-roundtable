@@ -139,6 +139,8 @@ async function main(){
   assert.equal(stopped.length,3,'One explicit start, retry and continue; no automatic retry');assert.ok(stopped.every(r=>r.aborted),'Stop did not abort actual sockets');
   assert.deepEqual(result.ui.snapshots.repeated.messages[0],result.ui.snapshots.stopped.messages[0]);
  }
+ result.deepSeekPreparation=await require('./deepseek-preparation.cjs')(contents,()=>result.fakeSafeStorage.decrypt);
+ assert.equal(result.deepSeekPreparation.checks.length,9,'DeepSeek preparation assertions did not all execute');
  assert.deepEqual(result.nodeNetworkAttempts,[]);assert.deepEqual(result.chromiumNetworkAttempts,[]);assert.deepEqual(result.preloadErrors,[]);assert.deepEqual(result.consoleErrors,[]);
  for(const name of safeStorageMethods)assert.equal(safeStorage[name],fake[name],'Unisolated Key backend');
  assert.ok(result.fakeSafeStorage.decrypt>0,'No actual fake encrypted Key read');

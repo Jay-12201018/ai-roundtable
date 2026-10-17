@@ -180,3 +180,12 @@ R07/R08仅ready，需用户另行实施/Worktree授权及排他负责人登记�
 本轮main实际Node75文件1073/1073、R09专项14文件227/227、Electron75文件1073/1073、strict/build、双ABI内存/压力、真实生产fixture12请求、重启HTTP0及两次退出只读审计均exit0；原房间/设置/三Mock生产回归首轮/重启各18/18真桥断言及审计、旧v1异常恢复/备份也通过。首次loopback沙箱EPERM和旧恢复探针遗漏confirmTarget的exit1保留，后者仅一行验证白名单修复，没有业务/构建改动。全部必要主线检查完成后才将R09 fixture登记merged/verified；详见[报告](verification/2026-10-17-r09-main.md)和[台账](verification/2026-10-17-r09-main-commands.md)。最终main完整SHA为本次独立状态提交，由交付消息及Git定位。
 
 R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/next-step/阶段进度及必要持久化契约仍须总控先冻结，不能自行跨Shared/DB/RunService/App写入。真实生成默认无获审model policy仍unsupported；公网模型/能力计数/费用、真实Keychain、正式E2E及跨平台发布未验收，不启动后续模块/Worktree或GitHub发布。
+
+## DeepSeek 首次真实测试安全准备（2026-10-17，独立候选）
+
+| ID | 范围 | 负责人 | 状态 | 分支/基线 | 验收/授权边界 |
+| --- | --- | --- | --- | --- | --- |
+| DEEPSEEK-PREP-01 | DeepSeek参数、人民币预算及安全fixture准备 | 总控，本轮唯一写入者；协作代理只读 | review（准备候选） | codex/deepseek-safety-prep；dc387146e1535a596508a5b58ea8bfe3903fc658 | 32专项、Node/Electron各1105、strict/build、双ABI及隔离生产/重启/退出通过；[报告](verification/2026-10-17-deepseek-preparation.md)/[命令](verification/2026-10-17-deepseek-preparation-commands.md)；未合main，未授权真实API |
+| DEEPSEEK-TOKEN-01 | 1017 API完整输入Token/隐式封装安全上界证明 | 待总控进一步审查 | blocked | 无获审真实counter，未注册ModelPolicy | 生成在Key/请求前拒绝，真实API数量0；不能用fixture计数/字符比例/预算授权绕过 |
+
+main保持dc387146且干净，R09已有fixture verified不外推为DeepSeek真实可用。仅记录候选，R00–R18路线、其他任务状态及分工不变。价格候选使用高峰未命中输入¥2/M、输出¥8/M，单次¥0.05，有效至2026-10-18T00:00Z，过期须复核。真实计数/Keychain/公网账单、E2E/发布未验收；本轮停止，不自动合main或启动后续任务。
