@@ -1,13 +1,13 @@
 # R07/R08 共享前置调用与文件归属
 
-2026-10-16；申请号 `SHARED-R07-R08-01`；当前共享前置已合main并verified；R07/R08功能仍ready、未启动。共享开发原始基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，原候选分支 `codex/shared-r07-r08-foundation`。候选历史见[实施报告](verification/2026-10-16-r07-r08-shared.md)；本次独立主线验证见[main验收](verification/2026-10-16-r07-r08-shared-main.md)及[main命令台账](verification/2026-10-16-r07-r08-shared-main-commands.md)。本页与 Shared 源码一起交付，不依赖 Downloads 或临时文件作为产品规范。
+2026-10-16；申请号 `SHARED-R07-R08-01`；共享前置已合main并verified；R07/R08及接线已ff-only合main，但本次验收因补充桥脚本错误停止、未verified，见[实际主线记录](verification/2026-10-17-r07-r08-main.md)。共享开发原始基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，原候选分支 `codex/shared-r07-r08-foundation`。候选历史见[实施报告](verification/2026-10-16-r07-r08-shared.md)；共享阶段独立主线历史见[main验收](verification/2026-10-16-r07-r08-shared-main.md)及[main命令台账](verification/2026-10-16-r07-r08-shared-main-commands.md)。本页与 Shared 源码一起交付，不依赖 Downloads 或临时文件作为产品规范。
 
 ## 唯一事实来源与层级
 
 - `src/shared/schemas/configuration.ts` 定义运行时输入、输出、游标、Key 状态；`src/shared/contracts/configuration.ts` 从 Schema 派生 DTO、typed API、feature props 和输入/输出表。Shared 不依赖 Electron、数据库或 SDK。
-- `RoomManagementApiContract` / `ProviderSettingsApiContract` 是未来可信服务和 Renderer 的调用边界，方法集合由 `roomManagementContracts` / `providerSettingsContracts` 覆盖。它们现在是可执行校验表，尚未注册到 IPC。
+- `RoomManagementApiContract` / `ProviderSettingsApiContract` 是未来可信服务和 Renderer 的调用边界，方法集合由 `roomManagementContracts` / `providerSettingsContracts` 覆盖。它们已注册受限rooms/settings IPC，Main/Preload双端校验。
 - `Database` 是唯一持久层，沿用已有事务、备份、恢复和 Run 快照；`KeyService` 是唯一 Key 生命周期入口。不得另建 repository、协议或 Provider 引用格式。
-- 当前生产 `window.roundtable` 仍只有原 room/run API。不得把本页的新方法声称为已可通过页面调用，也不得添加返回假成功的 handler。
+- 当前生产 `window.roundtable` 已含room/run/rooms/settings，Main服务及feature真实接线；无通用invoke/resolveKey或空成功handler。真实网络仍明确unsupported，本次最终主线验收尚未完成。
 
 ## Provider、Model 与失效配置
 
@@ -19,7 +19,7 @@
 
 新建/更新 Agent 的 providerId/modelId 必须同时为空或同时有值；同时为空表示尚未配置。未知 Provider 拒绝；已禁用配置仍可显示/保存用于修复，但启动时拒绝。真实模型 ID 允许自定义，不把当前模型列表当厂商永久白名单；真实可用性留真实 Adapter 验证。旧库半配置保留可读输出，编辑保存须修复为完整对或空对。
 
-目前 RunService 尚使用既有 Mock resolver。Database.listAgents 在新 Run 启动前只允许显式 Mock；真实 Provider 返回 unsupported，禁用/未配置/失效配置明确拒绝，不会静默落到 Mock。仅未编辑的旧 Demo NULL/NULL 成员保留原兼容行为；新配置一律走严格规则。后续 R09 的真实 resolver 需总控替换这一临时准入门禁并补测试，不能只删除检查。
+目前仍使用Mock resolver；Database.listAgents在新Run前校验，RunService所有schedule路径改变状态前复验冻结Provider/model；真实返回unsupported，禁用/失效明确拒绝，不落Mock。旧Demo只兼容null Provider+mock model。R09真实resolver仍须总控统一接入并补测试，不能只删门禁。
 
 端点仅允许 HTTPS，或原始 authority 明确为 localhost/127.0.0.1/[::1] 的 HTTP；拒绝 userinfo、query、fragment、反斜线、控制字符及 URL 数值别名绕过。Schema 返回规范化 URL。DNS 解析、重定向、真实网络目标和用户确认留 R08/R09；Schema 通过不代表已经完成网络安全验证。
 
@@ -76,7 +76,7 @@ R07 导出组件 props 使用 `RoomsFeatureProps`：api、providers 安全摘要
 
 总控在联合集成负责：实例化 room/settings 服务、注入 Database/KeyService/真实可用 Adapter、双端 IPC 注册和来源验证、敏感命令专用脱敏、Preload typed API、App/provider 摘要加载/刷新及 R06 选择投影。模块提供真实服务和独立 feature；总控不得为这些待完成服务预置空 handler。Provider factory 的真实网络能力属于 R09/R10，R08 自动化仅 fake/fixture。
 
-## 排他文件归属和启动门槛
+## 排他文件归属和启动门槛（原模块阶段登记，现态见文末）
 
 | 唯一写入者 | 目录/文件 |
 | --- | --- |
@@ -89,7 +89,7 @@ R07 导出组件 props 使用 `RoomsFeatureProps`：api、providers 安全摘要
 
 migration3 只归总控；migration1/2 原文不变，后续新版本再分配，不得由 R07/R08 各建一份3。3为配置字段、归档、Key revision、单默认索引和历史索引；保留旧未知任务/执行时间，不创建虚假 Provider/模型/Key。初始化前沿用验证过的 SQLite 在线备份与候选恢复，迁移同事务失败回滚。
 
-**共享主线前置现已满足，但尚未授权创建/实施功能 Worktree**：用户批准1e1f971已从510f58a以ff-only合main，本轮主线独立复验通过。未来R07/R08必须从包含本次状态更新的同一最新main完整SHA开始（最终交付给出，启动前以 `git rev-parse main` 重新核验），分别为 `codex/r07-rooms-agents-history` 和 `codex/r08-key-provider-settings`。二者可并行，生产接线仍由总控在联合集成完成；需用户下一次明确授权，当前未创建这两个Worktree。
+**以下为共享前置阶段历史启动门槛，非当前授权状态**：用户批准1e1f971已从510f58a以ff-only合main，本轮主线独立复验通过。未来R07/R08必须从包含本次状态更新的同一最新main完整SHA开始（最终交付给出，启动前以 `git rev-parse main` 重新核验），分别为 `codex/r07-rooms-agents-history` 和 `codex/r08-key-provider-settings`。二者可并行，生产接线仍由总控在联合集成完成；需用户下一次明确授权，当前未创建这两个Worktree。
 
 ## 测试方法
 
@@ -108,10 +108,12 @@ pnpm native:electron
 Database fixture 优先 `:memory:`；磁盘迁移/备份使用测试自己 mkdtemp 的私有目录，Key 用 fake backend 和唯一假值。现有公共测试可直接消费，无须启动生产应用或使用真实 Key。完整实际命令、压力与安全隔离探针见本次台账；上述方法不是未执行功能测试的 PASS 声明。
 
 
-## 联合候选接线更新（2026-10-17）
+## 联合接线及最终合并现态（2026-10-17）
 
-上述共享前置与功能启动门槛为历史。本轮已另获 R07/R08 联合授权，总控在 codex/integrate-r07-r08 完成真实 Main 服务、受限 rooms/settings Bridge、App feature 与 R06 协调；尚未获最终合 main 授权。见 [接口登记](CONTRACTS.md)及[本轮报告](verification/2026-10-17-r07-r08-integration.md)。
+上述共享前置与功能启动门槛为历史。本轮已另获 R07/R08 联合授权，总控在 codex/integrate-r07-r08 完成真实 Main 服务、受限 rooms/settings Bridge、App feature 与 R06 协调；获批d3205b2已正式ff-only合main，但本次主线验收因补充桥包装器错误停止，未verified。见 [接口登记](CONTRACTS.md)及[本轮报告](verification/2026-10-17-r07-r08-integration.md)。
 
 新增 props 仅 onClearRoom?: () => void（空选择）和 initialRoomId?: string（首次恢复）；既有 onSelectRoom(string) 不变。会话依赖 RunSessionApiContract，App 依赖完整 RoundtableApiContract。Bridge Promise 拒绝为安全 ApiError DTO，无 Error 实例/stack；成功值、持久化 Schema 不变。
 
 原模块目录归属保留；本次公共接线、窄窗与最小兼容修正均由总控独占。真实网络/factory 与正式 E2E/发布仍须 R09/R10/R17 后续授权，没有新增 migration。
+
+实际Main/Preload/App接线已合入，不再需要创建R07/R08 Worktree。原目录归属保留，后续Shared/Database/migration/Main/App/公共投影和工厂由总控统一修改。补充桥字段检查未完成，R09仍blocked/未授权；本轮不继续实施或创建Worktree。

@@ -114,3 +114,9 @@ GUI 前先串行完成 Node24.18.1 原生与测试→Electron38.8.6/ABI139重建
 真实 contextBridge 会剥离 Error 自定义字段。Preload Promise 拒绝须为严格 ApiError DTO，并以实际 Electron 验证 code/message/retryable、拒绝未知字段/堆栈/原异常；仅 mock contextBridge 的测试不够。测试失败先定位，禁止退回通用成功或根据任意错误字符串赋予权限。
 
 记录窗口 requested/actual/workArea。受 macOS 显示区域限制时，只报告实际高度；不能将被钳制的1600×870/868声明为1600×1000通过。实际800×600、1024×768、1280×800及三页亮暗/窄窗控件可达证据与未验证边界分列。
+
+## R07/R08 合并后 main 实际验证与停止（2026-10-17）
+
+本轮main已真实通过61文件846完整、23文件292联合、5文件111IPC、29文件393Electron、strict/build、双ABI/压力、生产UI/刷新/新进程重启/退出审计及旧恢复。各组重叠不累加。补充真实contextBridge字段检查因临时包装器Electron导入错误在生产Main之前失败；未执行的断言不能写PASS。子进程由本任务核验后SIGTERM（-15/外层241），不是自然退出成功或超时PASS。
+
+用户要求失败即停止验收推进，因此本轮停在merged/未verified，不修复重跑。成功项、脚本失败、精确argv/退出码及后续门槛分别见[主线报告](verification/2026-10-17-r07-r08-main.md)和[台账](verification/2026-10-17-r07-r08-main-commands.md)。后续授权继续时，先在任何可能失败的代码之前隔离数据和mock-keychain、使用Electron内置模块，再执行补充验证；本轮没有把修改建议写成已修复。

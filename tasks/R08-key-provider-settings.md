@@ -1,6 +1,6 @@
 # R08 Key 与 Provider 设置实施任务计划
 
-> 当前状态见 [STATUS](../docs/STATUS.md)。原任务范围定义保留；当前已授权联合集成，候选 review，尚未授权最终合 main。
+> 当前已按用户授权ff-only合main；本次主线验收因临时补充桥探针错误停止，状态merged、未verified。原任务定义及候选阶段文字保留历史，现态见[STATUS](../docs/STATUS.md)。
 > 执行时按工程规范选择已授权的执行方式；各项以复选框记录进度，不能因任务文件存在而标完成。
 
 **Goal:** 建立受保护 Key、Provider 配置和分级连接测试的设置链路，给真实适配器只传可信引用。
@@ -99,6 +99,12 @@ pnpm run test -- tests/unit/keyService.test.ts tests/unit/settings tests/integra
 Shared/Database/migration3/公共测试/Main/IPC/Preload/App/store等由总控冻结。模块只消费并提交接线申请；R07独占room/rooms及专属测试，R08独占settings/security及专属测试，R08启动后总控不并发写KeyService。生产handler/Preload/App接线留联合集成。此更新不勾选功能验收，也不推进R09/R17。
 
 
-## 2026-10-17 联合候选交付
+## 2026-10-17 联合候选交付（历史review阶段）
 
 本模块原提交已独立完成并获本轮总控联合授权；在 codex/integrate-r07-r08 完成真实公共接线。当前为 review，不能将下方/此前历史 ready 说明当作当前状态，也不自行宣布 main 验收。代码提交 `64ac8ce5038813cc60374573dc8871da30d1eeb0`，详细逐项结果、原模块与总控改动清单见[联合报告](../docs/verification/2026-10-17-r07-r08-integration.md)及[台账](../docs/verification/2026-10-17-r07-r08-commands.md)。任务原始范围与技术路线不变；公共文件唯一归总控，原 Worktree 不回写，R09/R17 未实施。
+
+## 2026-10-17 最终合并与验收停止
+
+获批候选d3205b2c3fba2061437150e87a87508d44fbb660已从c1b5bea严格ff-only合main，原分支/Worktree保留。main本次846完整/292联合/111IPC/393Electron、strict/build、双ABI及生产UI/新进程重启/退出审计均通过；补充真桥字段探针在生产Main加载前因临时包装器错误失败，已停止验收，未修复重跑。本模块仅merged、未verified；R09仍blocked/未授权。
+
+[主线报告](../docs/verification/2026-10-17-r07-r08-main.md)和[台账](../docs/verification/2026-10-17-r07-r08-main-commands.md)保留通过与失败的分别证据。本轮不改业务/测试/Schema/migration/依赖、不破坏性回滚、不启动后续模块。
