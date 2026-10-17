@@ -126,3 +126,11 @@ GUI 前先串行完成 Node24.18.1 原生与测试→Electron38.8.6/ABI139重建
 本次另获用户授权后，仅修改tests/probes/r07r08-electron.cjs：复用既有隔离和内置Electron入口，在main()真实Main/页面加载后直接await两种错误路径，每条9项，精确18条具名断言/2个错误结果才可继续UI/PASS/退出。断言失败沿既有fail写FAIL、exit1，不允许空集或异步旁路。
 
 本次修复后的真实生产探针自然exit0、18/18及原UI操作/24布局通过，退出后只读SQLite审计exit0。业务、原fixtures/操作输入、构建与native不变，用户已明确允许复用同版本既有验收，故未机械重跑全回归/类型/构建/重启；这些结果明确列为原主线有效证据。原失败不删除。精确前后命令/退出码/断言列表见[现有主线报告与补充节](verification/2026-10-17-r07-r08-main.md)及[台账](verification/2026-10-17-r07-r08-main-commands.md)，未验证边界不变。
+
+## R09 合并后 main fixture 验收（2026-10-17）
+
+本轮在获批f3a8fee合main后重新执行Node/Electron各75文件1073、R09专项14文件227、strict/build、严格双ABI原生与SQLite、真实生产入口fixture12请求/重启HTTP0/退出只读审计、原Mock生产回归与旧v1异常恢复。不是候选历史PASS复用，完整命令和首次失败见[主线台账](verification/2026-10-17-r09-main-commands.md)。
+
+原r01-electron恢复探针的精确settings白名单漏新confirmTarget，实际exit1；本轮只补该方法后新profile重跑及退出审计exit0。业务、构建、既有测试/fixture输入未变，保留同业务版本本轮有效全回归证据，不将空集/提前退出视为成功。所有GUI仍先隔离真实数据及系统Keychain，仅fake后端和自有loopback HTTP，不扩大真实API授权。
+
+R09的verified只限fixture；默认无获审真实model policy时生成拒绝。真实模型能力/计数/费用、公网调用、OS Keychain、正式E2E与跨平台发布均未验证。后续Provider/工作流仍需独立授权与共享契约冻结，不因ready自动实施。

@@ -224,12 +224,12 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 - Provider 创建/修改/删除、存 Key/删 Key 在结算后统一刷新安全摘要，离开设置仍有效。历史身份通过 Attempt→Turn→Run 冻结成员读取，未知显示未记录，不查当前配置覆盖。
 - RunService 统一 schedule 在任何状态修改前重新校验冻结 Provider/model，真实、禁用或失效配置禁止用当前 MockAdapter 执行。旧 Demo 只兼容 null Provider + mock model。R09 必须统一实现真实 resolver，不能仅删除门禁。
 
-共享文件仍归总控独占。R07/R08及联合集成现merged/verified；R09仅ready、未授权。补充真桥实际验证普通对象/原型、精确code/固定message/retryable、严格自有字段与白名单field、无Error内部字段/堆栈/秘密回显。invalid_input是Preload拒绝到Renderer，not_found是Main→IPC→Preload→Renderer；未新增或修改产品契约，真实网络与系统Keychain仍未验证。
+共享文件仍归总控独占。上一阶段补充验收时R07/R08及联合集成merged/verified，R09仅ready、未授权；R09当前状态以下节主线登记为准。补充真桥实际验证普通对象/原型、精确code/固定message/retryable、严格自有字段与白名单field、无Error内部字段/堆栈/秘密回显。invalid_input是Preload拒绝到Renderer，not_found是Main→IPC→Preload→Renderer；未新增或修改产品契约，真实网络与系统Keychain仍未验证。
 
 
-## R09 联合候选：Provider 实例、会话目标与生成门禁（2026-10-17）
+## R09 主线：Provider 实例、会话目标与生成门禁（2026-10-17）
 
-本节仅适用于 `codex/integrate-r09` 候选，尚未合 main；不覆盖 R07/R08 的稳定引用、Key 修订/CAS 及冻结成员规则。
+本节协议已随获批f3a8fee以ff-only合main，本轮[主线fixture验收](verification/2026-10-17-r09-main.md)通过；不覆盖 R07/R08 的稳定引用、Key 修订/CAS 及冻结成员规则。真实公网模型/计数/费用与系统Keychain未验收。
 
 - 唯一新增 IPC 为 `settings.confirmTarget({providerId, baseUrl, confirmed:true}) -> {providerId}`；Shared Schema strict，Main/Preload 双向校验并核对返回 providerId。普通 Bridge 不含 resolveKey、通用 invoke/send 或策略注入能力。现有 `settings.testConnection` 仅增加可选 `allowGeneration:true`；真实生成测试必须显式提供，缺失即拒绝。configuration 为本地校验，获取列表/鉴权均不证明生成可用。
 - Main `ProviderRegistry` 以稳定 providerId 读取当前配置及 KeyService 引用。会话确认绑定规范化目标、kind、key_revision；重启、目标/类型变更、Key 更换/撤销/删除重建后不能沿用旧确认。Key 异步读取后、DNS 后、TCP/TLS 连接完成发送前复核；stream 每个结果、列表与鉴权结果完成后再复核，防迟到成功。已发出的请求不能被解释为未发生或未收费。

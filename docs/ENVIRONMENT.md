@@ -165,3 +165,11 @@ Node ABI137源码编译、846完整/292专项/111安全、strict/build及五进�
 修复前后业务源与原回归输入不变；生产out内5个运行文件和既有Finder .DS_Store均完整记录，本轮前后SHA及mtime不变，native SHA不变。5运行文件mtime落在原main-build-04实际时间窗；原build记录没有完整out SHA快照，不冒称与不存在的旧哈希逐项比较。当前前后哈希及Git来源核对支持用户批准的同业务版本证据复用，不算新build或全量重跑。最初辅助清单假定out共5文件，因原有.DS_Store而exit1，后完整记录6文件、仅校验5运行文件时间窗，未删除或忽略运行产物。
 
 原错误wrapper/失败日志SHA不变，后端与系统Keychain未改；默认Node24.21.0风险及真实模型/系统Keychain/正式E2E/跨平台/发布未验证限制保留。
+
+## R09 合并后 main 受控环境（2026-10-17）
+
+main严格ff-only至获批f3a8fee后，新建 `/private/tmp/roundtable-r09-main-fgltw4x0` 独立cache/gyp/TMPDIR/XDG/GUI profiles，复用main自己的独立node_modules，没有新install或复制其他WT依赖。官方24.18.1 darwin-arm64 runtime与同发行headers（含node二进制2727文件）、pnpm11.25.0官方包455文件来源重新核验；32直接依赖/安装锁一致。main23555物理依赖inode与其他WT共享0，16个既有native文件inode独立，其他WT native inode/SHA与本轮编译前快照一致。
+
+Node24.18.1/同版headers源码编译SQLite12.11.1，ABI137/arm64完整1073、R09专项227、strict/build、5独立进程各100内存DB/10000行自然退出通过。Node检查结束后，以严格对应Electron38.8.6的125 headers源码编译，实际内嵌Node22.22.0/ABI139/arm64 SQL与完整1073、真实生产fixture/Mock/恢复/Preload/IPC/新进程/退出审计全部exit0。main最终native留ABI139，后续Node SQLite验证须先按受控环境重建ABI137，不并发覆盖。
+
+首次loopback测试EPERM和旧恢复探针白名单漏confirmTarget的失败均保留，后者仅验证脚本一行补齐后实际重跑；不是产品ABI/业务崩溃。ENV-R02-INSTALL-01保持已解决，不引入raw数值fetch参数、不改全局Node/依赖；Node24.21.0上游风险保留。本次未重新执行冷缓存下载或正式包/ASAR检查。具体命令、证据及未验证边界见[本轮main报告](verification/2026-10-17-r09-main.md)和[台账](verification/2026-10-17-r09-main-commands.md)。

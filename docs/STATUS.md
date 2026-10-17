@@ -1,6 +1,6 @@
 # R00–R18 状态与授权看板
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08获批候选d3205b2已严格ff-only合main；此前补充桥包装器失败记录保留，本次另获授权修复验证入口，18/18真实桥安全断言及退出审计通过，两模块及联合集成现为merged/verified；见[主线与补充记录](verification/2026-10-17-r07-r08-main.md)。R09已获用户联合接线授权；当前在独立 codex/integrate-r09 完成 fixture 候选验收，状态 review，未合 main，不外推真实 API 验收。共享前置1e1f971先前已按相应授权合main并完成当时的独立主线验收，保持merged/verified，见文末历史专节。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08获批候选d3205b2已严格ff-only合main；此前补充桥包装器失败记录保留，本次另获授权修复验证入口，18/18真实桥安全断言及退出审计通过，两模块及联合集成现为merged/verified；见[主线与补充记录](verification/2026-10-17-r07-r08-main.md)。R09获批候选f3a8fee已按用户最终授权ff-only合main，本轮[独立主线验收](verification/2026-10-17-r09-main.md)完成后仅登记fixture merged/verified；真实模型/费用策略、系统Keychain与发布未验收。共享前置1e1f971先前已按相应授权合main并完成当时的独立主线验收，保持merged/verified，见文末历史专节。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
 
 状态定义：not_started 未开始；ready 依赖满足但仍需实施授权；in_progress 正在执行；review 交付待审核；merged 已由总控集成；verified 验收确认；blocked 前置未满足或存在阻塞。状态与授权分列，不能推断。
 
@@ -15,10 +15,10 @@
 | R06 | Renderer 状态与订阅 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原ed6d659734cea4169fb54a66bdb257439d6daa39；引入6fe8805bb96c6c41d9f4671260c64ed13c47a275；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
 | R07 | 房间、成员、历史 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d991178；引入f718f829；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
 | R08 | Key 与 Provider 设置 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d2aed6c；引入5f01e978；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
-| R09 | OpenAI 与兼容端点 | R07/R08已合main verified；Mock联合验收 | 原模块交付；总控独占联合接线 | review | 用户仅授权 fixture 联合集成，未授权合 main/真实付费测试 | codex/integrate-r09；独立集成 WT，原模块 WT 保留 | 原2d97af571debf106aadad708a2c0418f299c6eef；引入f5baaf07e1603a7c356fb0c9cedeb131977307ba；接线da512e7a64a6ec4a596b0f7fda820b3d62b04e42；最终候选含治理提交 | [R09联合候选](verification/2026-10-17-r09-integration.md)及[命令台账](verification/2026-10-17-r09-commands.md)；Node/Electron各1073回归、227 R09专项、strict/build及生产入口fixture，未标main verified |
-| R10A | Anthropic | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
-| R10B | Gemini | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
-| R11 | 声明式工作流 | R07；真实验收另需 R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
+| R09 | OpenAI 与兼容端点 | R07/R08已合main verified；Mock联合验收 | 原模块交付；总控独占联合接线 | verified（fixture） | 用户批准最终合main及主线独立验收；真实付费测试未授权 | 已合main；codex/integrate-r09与原分支/WT保留 | 原2d97af571debf106aadad708a2c0418f299c6eef；唯一引入f5baaf07e1603a7c356fb0c9cedeb131977307ba；接线da512e7a64a6ec4a596b0f7fda820b3d62b04e42；ff入站f3a8fee38f5b7d75b5144c2997d72373fda6ddd6 | [本轮main报告](verification/2026-10-17-r09-main.md)/[台账](verification/2026-10-17-r09-main-commands.md)：Node/Electron各1073、R09专项227、strict/build、双ABI/SQLite、真实生产fixture12请求/重启HTTP0及退出审计；旧探针白名单一行修复，原失败保留 |
+| R10A | Anthropic | R09 fixture已合main verified | 未分派 | ready | 未授权实施/创建Worktree或真实调用 | 未创建 | 无 | 前置链路满足；公共factory/Shared接线由总控负责，模块未运行 |
+| R10B | Gemini | R09 fixture已合main verified | 未分派 | ready | 未授权实施/创建Worktree或真实调用 | 未创建 | 无 | 前置链路满足；公共factory/Shared接线由总控负责，模块未运行 |
+| R11 | 声明式工作流 | R07/R04–R06具备；生产接线仍需总控冻结计划/进度契约；真实验收另需获审模型规则 | 未分派 | ready（仅独立计划/Mock范围） | 未授权实施/创建Worktree；真实调用未授权 | 未创建 | 无 | 不把generic workflowSnapshot当完整协议；模块未运行 |
 | R12 | 主持人与消息版本 | R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R13 | 摘要、usage、费用预算 | R05/R09/R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R14 | 结构化产物 | R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
@@ -172,3 +172,11 @@ R07/R08仅ready，需用户另行实施/Worktree授权及排他负责人登记�
 本次真实Electron38.8.6/ABI139/arm64探针自然exit0，原生产操作及24组布局也通过；随后只读退出SQLite审计exit0。业务src、构建配置/依赖、原回归fixtures及UI输入不变；5个生产构建文件本轮前后SHA/mtime不变、native不变，按用户明确授权复用同业务版本的846完整/292联合/111安全/393Electron、strict/build和重启等既有主线证据，不称本轮重跑。全部必要验收闭环后登记R07/R08及联合集成**merged/verified**，关闭VALID-R78-BRIDGE-01。
 
 本次提交仅一个验证探针与治理文档，原失败提交28cb2f7、分支/15WT及历史保留。R09依赖满足而ready，未授权实施/创建Worktree，未启动；不实施R17、不发布。最终完整main SHA由本节所在提交及交付消息定位。真实Provider、系统Keychain、正式E2E/跨平台/发布等原限制不变。
+
+## R09 正式合并与 fixture 主线验收（2026-10-17）
+
+本节取代候选review/未合main的历史停止边界。用户批准完整f3a8fee38f5b7d75b5144c2997d72373fda6ddd6后，重新核对main仍e9cf24e99d09a460f4d8cd0a3a8b7ec4aacf285a且干净、祖先关系与原模块唯一引入记录后，实际git merge --ff-only codex/integrate-r09 exit0；没有重复合原分支，没有新merge commit。紧邻合并前17个WT与收尾清单一致，原分支/WT/历史保留；较早18清单的差异及边界见主线报告。
+
+本轮main实际Node75文件1073/1073、R09专项14文件227/227、Electron75文件1073/1073、strict/build、双ABI内存/压力、真实生产fixture12请求、重启HTTP0及两次退出只读审计均exit0；原房间/设置/三Mock生产回归首轮/重启各18/18真桥断言及审计、旧v1异常恢复/备份也通过。首次loopback沙箱EPERM和旧恢复探针遗漏confirmTarget的exit1保留，后者仅一行验证白名单修复，没有业务/构建改动。全部必要主线检查完成后才将R09 fixture登记merged/verified；详见[报告](verification/2026-10-17-r09-main.md)和[台账](verification/2026-10-17-r09-main-commands.md)。最终main完整SHA为本次独立状态提交，由交付消息及Git定位。
+
+R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/next-step/阶段进度及必要持久化契约仍须总控先冻结，不能自行跨Shared/DB/RunService/App写入。真实生成默认无获审model policy仍unsupported；公网模型/能力计数/费用、真实Keychain、正式E2E及跨平台发布未验收，不启动后续模块/Worktree或GitHub发布。

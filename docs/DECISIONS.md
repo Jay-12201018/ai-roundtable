@@ -190,3 +190,12 @@ D060的停止记录与原失败日志保留；仅本次授权及真实补充证�
 | D065 | 标准库 transport：全部 DNS 校验、固定地址、连接后再 guard 发凭据、无重定向/自动重试 | 关闭 DNS 重绑定及连接等待期间的失效引用窗口，保留 TLS 校验 | identity 编码；压缩、真实 TLS/公网能力不外推 |
 | D066 | RunService 使用冻结 Provider/Model 实例和 R05 实例预算，保留原 Attempt/partial/usage 事件语义 | 真实 Provider 不静默回退；只有显式重试/续写/中断决策允许再调用 | 不改 migration 1/2/3，不伪造上游请求 ID |
 | D067 | 真实生产入口 fixture 烟测与 live API/OS Keychain/发布验收分列 | fixture 使用真实 App/Preload/IPC/Main 与 HTTP，但可信策略及官方目标 transport 受控替换 | 必须自然 exit0 加同轮退出 SQLite 审计；仅完成本轮授权，不标 main verified |
+
+## R09 正式合并与主线 fixture 验收（2026-10-17）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D068 | 用户最终授权后，从e9cf24e严格ff-only合入完整f3a8fee，本次main独立必要验证完成后仅R09 fixture merged/verified | 原模块只引入一次，原分支/17个当时登记WT及历史保留；不重复merge、不自动启动后续模块 | Node/Electron各1073、R09专项227、strict/build、严格双ABI/SQL、真实生产fixture12请求/重启HTTP0、原Mock/恢复/退出审计通过；[主线报告](verification/2026-10-17-r09-main.md) |
+| D069 | 旧恢复探针仅补已批准的confirmTarget精确白名单，保留原失败；业务/构建、既有回归及R09/R78探针输入不变，不机械重跑无关检查 | 实际失败发生于Bridge集合检查、恢复断言前；补一项后新profile实际恢复及只读审计通过，未放宽安全要求 | 首次Node sandbox EPERM及旧探针exit1完整保留[台账](verification/2026-10-17-r09-main-commands.md)；无产品修改 |
+
+D062的候选未合main边界已由用户本次授权取代，D063–D067的数据/网络/可靠计数及未验收限制继续有效。生产真实生成仍因缺获审model policy而unsupported；R10A/B仅ready、R11有限计划/Mock准备仍需冻结共享协议和另获实施授权，真实API/Keychain/E2E/发布未验证。
