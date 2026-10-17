@@ -206,3 +206,11 @@ D062的候选未合main边界已由用户本次授权取代，D063–D067的数�
 | --- | --- | --- | --- |
 | D070 | 从dc387146建立独立codex/deepseek-safety-prep，仅补Main受限参数能力、同币种CNY整数预算及候选有效期 | 不把人民币写进USD字段，不按厂商/模型名猜计数；保留Mock、既有R09网络/Key/取消及历史语义 | 本轮32专项、Node/Electron各1105、strict/build、双ABI、真实隔离入口/退出通过，见[报告](verification/2026-10-17-deepseek-preparation.md)/[台账](verification/2026-10-17-deepseek-preparation-commands.md) |
 | D071 | DEEPSEEK-TOKEN-01未解决前不注册真实DeepSeek model policy，准备候选review，真实生成blocked | 官方离线V4.1工具存在，但未证明1017生产API完整计费封装对应；不造字符/字节上界或用fixture计数解锁 | 默认生产Key前unsupported；真实API/Keychain/实际账单未验证，无合main或付费授权，不启动其他任务 |
+
+## DeepSeek 安全准备正式合并（2026-10-18）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D072 | 按用户授权从dc387146严格ff-only合入获批30d5783，主线独立复验后仅DEEPSEEK-PREP-01 merged/verified；TOKEN-01仍blocked | 不注册未经证明counter、不续期价格、不读取真实Key/用户DB、不调用公网模型；原18WT/分支/历史保留 | 本轮Node/Electron各1105、32专项、strict/build、双ABI、生产拒绝/重启HTTP0/退出审计均exit0，见[主线报告](verification/2026-10-18-deepseek-main.md)及台账 |
+
+D070/D071的候选未合main边界由本次合并授权取代，其计数阻塞、真实调用禁令及未验收限制保持。本轮不实施Tokenizer或其他任务。

@@ -239,9 +239,9 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 - Node 原生 transport 对全部 DNS 结果检查，HTTPS 仅公共地址、HTTP 仅显式 loopback；固定地址/家族、禁代理复用和重定向，保持 TLS 主机名/证书验证。凭据直到连接完成并复核后才发送；支持取消和流关闭。只请求 identity 编码并拒绝压缩响应，不宣称支持 gzip/br。
 - 共享错误 `forbidden` 的固定 message 改为 `Permission denied`，code/retryable 不变；IPC 来源拒绝自身的内部异常保留，不将 Provider 403 错报成 IPC 来源错误。没有新增事件版本、usage 字段或 migration；usage 继续按已有带身份事件持久化，providerRequestId 缺失保持 null，不用 SSE completion id 伪造。
 
-## DeepSeek 安全准备候选（2026-10-17，未合main）
+## DeepSeek 安全准备主线（2026-10-18）
 
-总控在`codex/deepseek-safety-prep`独占Main策略/Adapter/专项接线；本节不改变公开Shared DTO、IPC/Preload、事件版本或数据库。main仍dc387146。实际范围和未解除阻塞见[准备报告](verification/2026-10-17-deepseek-preparation.md)。
+总控在`codex/deepseek-safety-prep`独占Main策略/Adapter/专项接线；本节不改变公开Shared DTO、IPC/Preload、事件版本或数据库。用户批准的30d5783已从dc387146以ff-only合main，本轮[独立主线复验](verification/2026-10-18-deepseek-main.md)通过；只验收安全准备。实际范围和未解除阻塞仍见[原准备报告](verification/2026-10-17-deepseek-preparation.md)，本轮不注册counter或续期价格。
 
 - Main-only ApprovedModelPolicy.price保留既有USD字段，新增明确`currency:'CNY'`分支：inputMicroCnyPerToken/outputMicroCnyPerToken/maxRequestMicroCny均非负安全整数；reviewedAt/expiresAt/evidence必须有效且当前在审查窗口内。同币种整数比较，无汇率/缓存折扣猜测；已有guard会重新校验。新增可选maxInputTokens与真实模型contextWindowTokens分开，未知计数仍拒绝。
 - ChatCompletionCapabilities新增唯一受限字面字段thinkingDisabledForModel:'deepseek-flash'，只能由可信Main提供；SDK只对该modelId加入thinking.disabled，无通用extra_body或Renderer扩展能力。默认cap仅匹配openai-compatible+规范化后精确https://api.deepseek.com，列表/鉴权仍unsupported。
