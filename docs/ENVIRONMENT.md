@@ -150,10 +150,18 @@ Node ABI137完整846/专项292、类型/生产构建、内存/5进程各30万SQL
 
 未引入raw数字fetch参数；ENV-R02-INSTALL-01保持已解决，Node24.21.0上游风险仍未解决，不混用跨补丁headers/Node与Electron native。首次环境脚本/测试RED/桌面selector及跨桥错误等失败均在[本轮报告](verification/2026-10-17-r07-r08-integration.md)和[台账](verification/2026-10-17-r07-r08-commands.md)保留。macOS stderr的sandbox_extension提示与Zod/Rollup注释提示单列；实际退出码及断言通过，不外推正式E2E、OS密钥链、跨平台或发布。
 
-## R07/R08 合并后 main 实际环境（2026-10-17，验收停止）
+## R07/R08 合并后 main 实际环境（2026-10-17，前次停止历史）
 
 main已按授权ff-only从c1b5bea到d3205b2。main自身既有独立node_modules、本轮新 `/private/tmp/roundtable-r78-main-7o0obscb` cache/gyp/TMPDIR/profile，未新install/复制依赖/改全局Node。官方24.18.1/同发行包2726 include文件和pnpm11.25.0核心4文件重新核验，锁与32直接依赖一致，无raw数字fetch参数或pnpm list写全局store。
 
 Node ABI137源码编译、846完整/292专项/111安全、strict/build及五进程各30万SQL通过后，串行使用对应Electron38.8.6的125 headers重建；实际ABI139/arm64读写/压力、393专项及生产UI/重启/退出审计通过。main最终native inode11267295，SHA256 be8e575eb62c1a56c57192e0e183c17f687f122d1e8e1af084eb043c661f0fba；15WT native inode独立，main23555物理inode与candidate/R07/R08各23051共享0。无15份合并前native SHA快照，不宣称全部哈希未变；两个旧R01WT缺config，ABI未知。
 
 新增补充桥包装器错误使用绝对electron包路径，拿到二进制路径字符串而非内置API，在生产探针导入及其ready前隔离之前失败；不能声称该失败进程完成了隔离断言。未加载生产Main/Database/KeyService，不是SQLite ABI或R07/R08业务崩溃证据；进程已定向终止、未修复重跑，验收停止。前述成功生产探针均有独立隔离证据，不被该失败替代。ENV-R02-INSTALL-01保持已解决，24.21.0风险仍在；详见[主线报告](verification/2026-10-17-r07-r08-main.md)。
+
+## R07/R08 补充修复环境（2026-10-17）
+
+本次继续沿用受控runner/已有独立main依赖与ABI139，不新安装、不重建或改全局环境。实际Electron38.8.6/内嵌Node22.22.0/ABI139/arm64重新启动新临时profile；ready前隔离、全fake safeStorage、mock-keychain及双网络阻断均实测，18/18真桥断言/原生产操作/退出只读SQLite审计exit0。
+
+修复前后业务源与原回归输入不变；生产out内5个运行文件和既有Finder .DS_Store均完整记录，本轮前后SHA及mtime不变，native SHA不变。5运行文件mtime落在原main-build-04实际时间窗；原build记录没有完整out SHA快照，不冒称与不存在的旧哈希逐项比较。当前前后哈希及Git来源核对支持用户批准的同业务版本证据复用，不算新build或全量重跑。最初辅助清单假定out共5文件，因原有.DS_Store而exit1，后完整记录6文件、仅校验5运行文件时间窗，未删除或忽略运行产物。
+
+原错误wrapper/失败日志SHA不变，后端与系统Keychain未改；默认Node24.21.0风险及真实模型/系统Keychain/正式E2E/跨平台/发布未验证限制保留。

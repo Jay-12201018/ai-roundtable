@@ -1,6 +1,6 @@
 # R07/R08 共享前置调用与文件归属
 
-2026-10-16；申请号 `SHARED-R07-R08-01`；共享前置已合main并verified；R07/R08及接线已ff-only合main，但本次验收因补充桥脚本错误停止、未verified，见[实际主线记录](verification/2026-10-17-r07-r08-main.md)。共享开发原始基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，原候选分支 `codex/shared-r07-r08-foundation`。候选历史见[实施报告](verification/2026-10-16-r07-r08-shared.md)；共享阶段独立主线历史见[main验收](verification/2026-10-16-r07-r08-shared-main.md)及[main命令台账](verification/2026-10-16-r07-r08-shared-main-commands.md)。本页与 Shared 源码一起交付，不依赖 Downloads 或临时文件作为产品规范。
+2026-10-16；申请号 `SHARED-R07-R08-01`；共享前置已合main并verified；R07/R08及接线已ff-only合main，补充桥验证入口现已按新授权修复并实测18/18，最终merged/verified，见[实际主线记录](verification/2026-10-17-r07-r08-main.md)。共享开发原始基线 `510f58a75c676496f6e4e5960eb89553d04ab8ac`，原候选分支 `codex/shared-r07-r08-foundation`。候选历史见[实施报告](verification/2026-10-16-r07-r08-shared.md)；共享阶段独立主线历史见[main验收](verification/2026-10-16-r07-r08-shared-main.md)及[main命令台账](verification/2026-10-16-r07-r08-shared-main-commands.md)。本页与 Shared 源码一起交付，不依赖 Downloads 或临时文件作为产品规范。
 
 ## 唯一事实来源与层级
 
@@ -110,10 +110,10 @@ Database fixture 优先 `:memory:`；磁盘迁移/备份使用测试自己 mkdte
 
 ## 联合接线及最终合并现态（2026-10-17）
 
-上述共享前置与功能启动门槛为历史。本轮已另获 R07/R08 联合授权，总控在 codex/integrate-r07-r08 完成真实 Main 服务、受限 rooms/settings Bridge、App feature 与 R06 协调；获批d3205b2已正式ff-only合main，但本次主线验收因补充桥包装器错误停止，未verified。见 [接口登记](CONTRACTS.md)及[本轮报告](verification/2026-10-17-r07-r08-integration.md)。
+上述共享前置与功能启动门槛为历史。本轮已另获 R07/R08 联合授权，总控在 codex/integrate-r07-r08 完成真实 Main 服务、受限 rooms/settings Bridge、App feature 与 R06 协调；获批d3205b2已正式ff-only合main；原停止记录保留，本次另获授权修复探针，18/18及退出审计通过后最终verified。见 [接口登记](CONTRACTS.md)及[本轮报告](verification/2026-10-17-r07-r08-integration.md)。
 
 新增 props 仅 onClearRoom?: () => void（空选择）和 initialRoomId?: string（首次恢复）；既有 onSelectRoom(string) 不变。会话依赖 RunSessionApiContract，App 依赖完整 RoundtableApiContract。Bridge Promise 拒绝为安全 ApiError DTO，无 Error 实例/stack；成功值、持久化 Schema 不变。
 
 原模块目录归属保留；本次公共接线、窄窗与最小兼容修正均由总控独占。真实网络/factory 与正式 E2E/发布仍须 R09/R10/R17 后续授权，没有新增 migration。
 
-实际Main/Preload/App接线已合入，不再需要创建R07/R08 Worktree。原目录归属保留，后续Shared/Database/migration/Main/App/公共投影和工厂由总控统一修改。补充桥字段检查未完成，R09仍blocked/未授权；本轮不继续实施或创建Worktree。
+实际Main/Preload/App接线已合入，不再需要创建R07/R08 Worktree。原目录归属保留，后续Shared/Database/migration/Main/App/公共投影和工厂由总控统一修改。补充桥字段检查现已完成，R09仅ready、未授权实施/创建Worktree；本轮不启动后续模块。

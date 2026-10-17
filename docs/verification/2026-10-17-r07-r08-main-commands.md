@@ -1,6 +1,6 @@
 # R07/R08 main 独立验收逐命令台账
 
-2026-10-17；cwd=`/Users/zhangwenjie/Documents/ChatGPT/AI交互`；本轮检查gitHead=`d3205b2c3fba2061437150e87a87508d44fbb660`。原始收据/日志根=`/private/tmp/roundtable-r78-main-7o0obscb`；本页永久登记实际命令及摘要，临时目录不保证永久存在。历史候选台账不回写。
+前次主线与停止阶段（2026-10-17；本次补充授权见文末）：cwd=`/Users/zhangwenjie/Documents/ChatGPT/AI交互`；本轮检查gitHead=`d3205b2c3fba2061437150e87a87508d44fbb660`。原始收据/日志根=`/private/tmp/roundtable-r78-main-7o0obscb`；本页永久登记实际命令及摘要，临时目录不保证永久存在。历史候选台账不回写。
 
 ## 隔离与运行器
 
@@ -14,7 +14,7 @@ Node dist=`/private/tmp/roundtable-r02-integration-b0c3ktgt/runtime-24.18.1/node
 
 - 合并前：git status --porcelain=v1 --untracked-files=all（全部15WT空）；git rev-parse main/集成/原模块；git merge-base --is-ancestor；git rev-list --reverse；git show --format=fuller；原/引入 git patch-id --stable；git diff --name-status/--stat；逐文件范围/敏感项/不变文件SHA核对。断言通过。
 - `git merge --ff-only codex/integrate-r07-r08`：exit0，c1b5bea→d3205b2c3fba2061437150e87a87508d44fbb660，Fast-forward；merge.json与preflight.json存原始记录。无新merge commit。
-- 所有运行前后业务/测试/配置指纹均 `31d853b241a0bff1fcc631b27090ca69c284a4020ef7cc435c35948e6acac88e`；package/lock/workspace SHA分别 `2e1cde38189630518c7ba60eb66495e0c4c6a4871a31f1590c5b475c27fd0335` / `3752425b23f83898811def6f289a3154733e71a981a47d08840e841b7c6b7ba3` / `77832f09aa15f28c96d01acf7e613a6ed5052335213af2a15793ee17cbdf8276`。
+- 前次阶段所有运行前后业务/测试/配置指纹均 `31d853b241a0bff1fcc631b27090ca69c284a4020ef7cc435c35948e6acac88e`；package/lock/workspace SHA分别 `2e1cde38189630518c7ba60eb66495e0c4c6a4871a31f1590c5b475c27fd0335` / `3752425b23f83898811def6f289a3154733e71a981a47d08840e841b7c6b7ba3` / `77832f09aa15f28c96d01acf7e613a6ed5052335213af2a15793ee17cbdf8276`。
 
 ## 每次实际执行
 
@@ -223,3 +223,47 @@ Xcode fs-event/cache、GUI stderr sandbox_extension_issue_file_to_process Operat
 
 - `python3 /private/tmp/roundtable-r78-main-7o0obscb/run-check.py main-stop-docs-check-18 60 tool python3 /private/tmp/roundtable-r78-main-7o0obscb/check-main-stop-docs.py`：exit=0，0.097s；11个治理文件范围/链接/敏感模式/源码不变与merged、R09blocked状态校验通过。
 - 日志SHA256=`3f8276835645ee3f56643e1a03de9c12d5066c74c30dd71f15ad54f4da0b792e`；不将文档检查当作补充真桥运行成功。
+
+## 补充修复授权后的真实命令与结果（2026-10-17）
+
+本节为用户另行批准后的补充执行，起始main28cb2f7，业务版本仍d3205b2；前文失败记录保留。修复方式为把新增断言顺序接入原生产探针，不再执行错误wrapper。实际命令均由原受控runner执行，Electron模式移除继承ELECTRON_RUN_AS_NODE，审计模式仅设置ELECTRON_RUN_AS_NODE=1；不重建native或构建。
+
+### bridge-repair-baseline-19
+
+- 实际命令：`python3 /private/tmp/roundtable-r78-main-7o0obscb/run-check.py bridge-repair-baseline-19 60 tool python3 /private/tmp/roundtable-r78-main-7o0obscb/freeze-bridge-repair.py`。
+- UTC=2026-10-17T03:10:56.201293+00:00；exit=0；0.090s；日志SHA256=`6214051678c91e483298b0dffea7a760a06f30542522966d94661bd36b4ac835`。
+
+### bridge-repair-syntax-20
+
+- 实际命令：`python3 /private/tmp/roundtable-r78-main-7o0obscb/run-check.py bridge-repair-syntax-20 30 tool node --check tests/probes/r07r08-electron.cjs`。
+- UTC=2026-10-17T03:11:14.216234+00:00；exit=0；0.211s；日志SHA256=`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`。
+
+### bridge-repair-production-21
+
+- 实际命令：`python3 /private/tmp/roundtable-r78-main-7o0obscb/run-check.py bridge-repair-production-21 270 electron node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tests/probes/r07r08-electron.cjs`。
+- UTC=2026-10-17T03:11:24.454798+00:00；exit=0；12.609s；日志SHA256=`7ba8d24dcd3d5f58759558deb182726a3ff174947ba680673d5aae0725ee76e2`。
+
+### bridge-repair-exit-audit-22
+
+- 实际命令：`python3 /private/tmp/roundtable-r78-main-7o0obscb/run-check.py bridge-repair-exit-audit-22 60 electron-node node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tests/probes/r07r08-sqlite.cjs /private/tmp/roundtable-r78-main-7o0obscb/test-tmp/roundtable-r78-production-8Le12w/r78-first.json`。
+- UTC=2026-10-17T03:12:17.276573+00:00；exit=0；0.080s；日志SHA256=`2e000438a05bbc317656760b6a5cc51ee4bf931c9771d2d975cfdd632dd6da56`。
+
+### bridge-repair-scope-23
+
+- 实际命令：`python3 /private/tmp/roundtable-r78-main-7o0obscb/run-check.py bridge-repair-scope-23 60 tool python3 /private/tmp/roundtable-r78-main-7o0obscb/audit-bridge-repair.py`。
+- UTC=2026-10-17T03:12:31.484082+00:00；exit=0；0.049s；日志SHA256=`87a07eba7123b7430caf83748cc425b20692fa520039407b8364743a749bba92`。
+
+修复前：原Electron+check-real-bridge.cjs启动错误，0条新增断言，定向终止子进程-15/外层241；原记录未修改。修复后：Electron+tests/probes/r07r08-electron.cjs，18/18实际具名断言、2错误结果，正常自然exit0；实际生产Main/Preload/Renderer和原UI操作完成，退出后只读SQLite审计exit0。不是空测试或提前退出。
+
+本次额外辅助清单初次将out共5文件当假设而exit1，实际多一份旧Finder .DS_Store；随后完整冻结6文件，运行时5文件时间窗分别校验，未删文件/降安全断言。该清单错误不是生产探针失败，独立保留说明；本次生产探针与退出审计均首跑exit0。
+
+探针SHA从45cb65c60a81d1be3797d7e1f7463119dbe52937889ccde6dedc14311a528223变为1360a0798bae38405c83df3cf88eb70b911cac2a3e4b67c07851eabbb2034514；全源码/测试/配置指纹从31d853b...变为7213ac04de0ba52397b9c95cfd22f81d8f512a0193d8bd47cee4d8e87a6608c4，唯一可执行输入差异为新增验证断言，不是业务代码变化。
+
+原846/292/111/393、strict/build及重启证据依据用户授权复用，未再次执行，不写成本轮新PASS。修复前后构建/native/原回归输入的SHA核对见bridge-repair-baseline.json及bridge-repair-scope.json；没有旧全量out哈希快照，不杜撰旧哈希对比。18条断言完整具名列表与两错误DTO记录在本次新profile/r78-first.json的bridgeErrors，所有网络/console/preload错误数组空。
+
+补充验收通过后R07/R08及联合集成最终verified，R09仅ready且未授权启动；停止历史保留。未运行真实Provider/Keychain/正式E2E/发布或新Worktree。
+
+### bridge-repair-delivery-24
+
+- `python3 /private/tmp/roundtable-r78-main-7o0obscb/run-check.py bridge-repair-delivery-24 60 tool python3 /private/tmp/roundtable-r78-main-7o0obscb/check-bridge-repair-delivery.py`：exit=0，0.145s；12文件边界、190本地链接、状态/授权、旧失败/业务输入/out/native保留核对通过。
+- 日志SHA256=`4f8e5c408d4662625a0e5fab39232069ab00f51da8ecf378bfa4bd5a2bb100bc`；这是交付一致性检查，不代替18项真桥实际执行。

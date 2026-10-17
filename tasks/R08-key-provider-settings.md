@@ -1,6 +1,6 @@
 # R08 Key 与 Provider 设置实施任务计划
 
-> 当前已按用户授权ff-only合main；本次主线验收因临时补充桥探针错误停止，状态merged、未verified。原任务定义及候选阶段文字保留历史，现态见[STATUS](../docs/STATUS.md)。
+> 当前已合main并最终verified：本次按新授权修复验证入口，18/18真桥安全断言及退出审计通过。原停止/候选阶段记录保留历史，现态见[STATUS](../docs/STATUS.md)。
 > 执行时按工程规范选择已授权的执行方式；各项以复选框记录进度，不能因任务文件存在而标完成。
 
 **Goal:** 建立受保护 Key、Provider 配置和分级连接测试的设置链路，给真实适配器只传可信引用。
@@ -103,8 +103,12 @@ Shared/Database/migration3/公共测试/Main/IPC/Preload/App/store等由总控�
 
 本模块原提交已独立完成并获本轮总控联合授权；在 codex/integrate-r07-r08 完成真实公共接线。当前为 review，不能将下方/此前历史 ready 说明当作当前状态，也不自行宣布 main 验收。代码提交 `64ac8ce5038813cc60374573dc8871da30d1eeb0`，详细逐项结果、原模块与总控改动清单见[联合报告](../docs/verification/2026-10-17-r07-r08-integration.md)及[台账](../docs/verification/2026-10-17-r07-r08-commands.md)。任务原始范围与技术路线不变；公共文件唯一归总控，原 Worktree 不回写，R09/R17 未实施。
 
-## 2026-10-17 最终合并与验收停止
+## 2026-10-17 最终合并与验收停止（前次授权历史）
 
 获批候选d3205b2c3fba2061437150e87a87508d44fbb660已从c1b5bea严格ff-only合main，原分支/Worktree保留。main本次846完整/292联合/111IPC/393Electron、strict/build、双ABI及生产UI/新进程重启/退出审计均通过；补充真桥字段探针在生产Main加载前因临时包装器错误失败，已停止验收，未修复重跑。本模块仅merged、未verified；R09仍blocked/未授权。
 
 [主线报告](../docs/verification/2026-10-17-r07-r08-main.md)和[台账](../docs/verification/2026-10-17-r07-r08-main-commands.md)保留通过与失败的分别证据。本轮不改业务/测试/Schema/migration/依赖、不破坏性回滚、不启动后续模块。
+
+## 2026-10-17 补充验证完成
+
+用户另行授权最小探针修复。本次仅修改验证脚本、业务/原回归输入/构建/native不变，修复后真实Electron18/18安全断言、原生产操作及退出审计exit0；其余同版本有效主线证据依授权复用，不冒称本次重跑。R07/R08及联合集成现merged/verified，原失败与历史保留。详见[主线报告补充节](../docs/verification/2026-10-17-r07-r08-main.md)和[台账](../docs/verification/2026-10-17-r07-r08-main-commands.md)。R09仅依赖ready，未启动/创建Worktree，不实施R17。

@@ -1,6 +1,6 @@
 # R00–R18 状态与授权看板
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08获批候选d3205b2已严格ff-only合main；本次主线复验的补充真桥探针因临时包装器导入错误失败，已按用户条件停止，当前merged、未verified，R09仍blocked；见[主线实际记录](verification/2026-10-17-r07-r08-main.md)。共享前置1e1f971先前已按相应授权合main并完成当时的独立主线验收，保持merged/verified，见文末历史专节。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08获批候选d3205b2已严格ff-only合main；此前补充桥包装器失败记录保留，本次另获授权修复验证入口，18/18真实桥安全断言及退出审计通过，两模块及联合集成现为merged/verified；见[主线与补充记录](verification/2026-10-17-r07-r08-main.md)。R09仅ready、未授权实施或创建Worktree。共享前置1e1f971先前已按相应授权合main并完成当时的独立主线验收，保持merged/verified，见文末历史专节。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
 
 状态定义：not_started 未开始；ready 依赖满足但仍需实施授权；in_progress 正在执行；review 交付待审核；merged 已由总控集成；verified 验收确认；blocked 前置未满足或存在阻塞。状态与授权分列，不能推断。
 
@@ -13,9 +13,9 @@
 | R04 | Run/Turn Mock | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原63ef56e1cd9d4bb9d0793aa4e97e499b45574ecd；引入3c6ed2ff9f79b08a915d152dccd556c0df219090；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
 | R05 | 公共上下文与基本限制 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原1c5a2183f0c5d4f335b39b99aa27cac8fe7baad7；引入7586f023d373f38cbd08df623dcf0149abcebdcf；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
 | R06 | Renderer 状态与订阅 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原ed6d659734cea4169fb54a66bdb257439d6daa39；引入6fe8805bb96c6c41d9f4671260c64ed13c47a275；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
-| R07 | 房间、成员、历史 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | merged | 最终合并已授权；主线验收停止，未verified | 已合main；集成及原分支/WT全部保留 | 原d991178；引入f718f829；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [本次main记录](verification/2026-10-17-r07-r08-main.md)：846完整/292联合/111IPC/393Electron、strict/build及生产UI/重启/退出审计已通过；补充桥脚本失败，验收未完成 |
-| R08 | Key 与 Provider 设置 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | merged | 最终合并已授权；主线验收停止，未verified | 已合main；集成及原分支/WT全部保留 | 原d2aed6c；引入5f01e978；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [本次main记录](verification/2026-10-17-r07-r08-main.md)：846完整/292联合/111IPC/393Electron、strict/build及生产UI/重启/退出审计已通过；补充桥脚本失败，验收未完成 |
-| R09 | OpenAI 与兼容端点 | R07/R08最终主线验收待完成 | 未分派 | blocked | 未授权实施/创建Worktree，未启动 | 未创建 | 无 | 不能因部分检查通过转ready |
+| R07 | 房间、成员、历史 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d991178；引入f718f829；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
+| R08 | Key 与 Provider 设置 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d2aed6c；引入5f01e978；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
+| R09 | OpenAI 与兼容端点 | R07/R08已合main verified；Mock联合验收 | 未分派 | ready | 未授权实施/创建Worktree，未启动 | 未创建 | 无 | 仅依赖就绪；R09未运行 |
 | R10A | Anthropic | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R10B | Gemini | R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R11 | 声明式工作流 | R07；真实验收另需 R09 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
@@ -155,7 +155,7 @@ R07/R08仅ready，需用户另行实施/Worktree授权及排他负责人登记�
 
 联合集成、R07、R08 均 **review**，未合 main、未标 merged/verified；R09/R17 仍 blocked/未授权。无新增 migration、依赖、真实 Provider 调用；系统 Keychain 加密、Windows/Linux、正式 E2E/发布包等未验证。1600×1000请求被本机工作区限制为1600×870/868，实际尺寸分列，不冒称完整1000高度已测。
 
-## R07/R08 正式合并与主线验收停止（2026-10-17）
+## R07/R08 正式合并与主线验收停止（2026-10-17，前次授权历史）
 
 用户审核候选后明确授权最终合并。重新核对main仍c1b5beaddfe254ca978f32874e6376b398d09836、候选仍d3205b2c3fba2061437150e87a87508d44fbb660，15WT干净；两个原模块各引入一次且patch-id匹配，main无额外提交。实际 `git merge --ff-only codex/integrate-r07-r08` exit0，main直接推进获批候选，无额外merge commit/冲突/历史重写，原分支与Worktree保留。
 
@@ -164,3 +164,11 @@ R07/R08仅ready，需用户另行实施/Worktree授权及排他负责人登记�
 按用户“若发现失败，保留证据并停止验收推进”要求，未修复重跑、未继续主线验收。R07/R08和联合集成只登记**merged，验收停止、未verified**；R09仍blocked/未授权，未启动任何新任务或Worktree。记录见[主线报告](verification/2026-10-17-r07-r08-main.md)与[台账](verification/2026-10-17-r07-r08-main-commands.md)。本次独立提交只记录事实/失败/现态，不改业务、测试、依赖或migration，不进行破坏性回滚。
 
 剩余门槛为用户允许继续后，先修复并在ready前落实补充探针隔离，再完成真实桥DTO字段核验及退出确认；通过后才能独立更新verified/R09 ready。既有通过记录有效，但不能将部分PASS或候选历史PASS替代未完成检查。
+
+## R07/R08 补充探针修复与最终验收（2026-10-17）
+
+用户另行授权最小验证修复及完成验收。完整日志、错误wrapper与electron npm入口源码确认绝对包路径只返回二进制路径；原失败(-15/外层241)保留不删。仅在tests/probes/r07r08-electron.cjs中，将新增错误DTO断言放入既有隔离完成/真实Main加载后、UI和PASS之前直接await；沿用内置require('electron')、失败写FAIL/exit1。两条真实错误路径各9项，精确18/18，不能空集成功。
+
+本次真实Electron38.8.6/ABI139/arm64探针自然exit0，原生产操作及24组布局也通过；随后只读退出SQLite审计exit0。业务src、构建配置/依赖、原回归fixtures及UI输入不变；5个生产构建文件本轮前后SHA/mtime不变、native不变，按用户明确授权复用同业务版本的846完整/292联合/111安全/393Electron、strict/build和重启等既有主线证据，不称本轮重跑。全部必要验收闭环后登记R07/R08及联合集成**merged/verified**，关闭VALID-R78-BRIDGE-01。
+
+本次提交仅一个验证探针与治理文档，原失败提交28cb2f7、分支/15WT及历史保留。R09依赖满足而ready，未授权实施/创建Worktree，未启动；不实施R17、不发布。最终完整main SHA由本节所在提交及交付消息定位。真实Provider、系统Keychain、正式E2E/跨平台/发布等原限制不变。

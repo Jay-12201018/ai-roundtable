@@ -32,7 +32,7 @@ delete process.env.ELECTRON_RENDERER_URL;
 const root = resolve(__dirname, '../..');
 const entry = join(root, 'out/main/index.js'); const preload = join(root, 'out/preload/index.cjs'); const renderer = join(root, 'out/renderer/index.html');
 for (const file of [entry, preload, renderer]) assert.ok(fs.existsSync(file), 'Build missing: ' + file);
-const result = { status: 'RUNNING', phase: restarting ? 'restart' : 'first', directory, paths, entry, preload, renderer, isolationBeforeReady: !app.isReady(), chromiumMockKeychain: app.commandLine.hasSwitch('use-mock-keychain'), fakeSafeStorage: { replacedMethods: [], encrypt: 0, decrypt: 0 }, nodeNetworkAttempts: [], chromiumNetworkAttempts: [], consoleErrors: [], preloadErrors: [], checks: [] };
+const result = { status: 'RUNNING', phase: restarting ? 'restart' : 'first', directory, paths, entry, preload, renderer, runtime: { electron: process.versions.electron, node: process.versions.node, abi: process.versions.modules, arch: process.arch }, isolationBeforeReady: !app.isReady(), chromiumMockKeychain: app.commandLine.hasSwitch('use-mock-keychain'), fakeSafeStorage: { replacedMethods: [], encrypt: 0, decrypt: 0 }, nodeNetworkAttempts: [], chromiumNetworkAttempts: [], consoleErrors: [], preloadErrors: [], checks: [] };
 const resultPath = join(directory, restarting ? 'r78-restart.json' : 'r78-first.json');
 const save = () => fs.writeFileSync(resultPath, JSON.stringify(result, null, 2) + '\n', { mode: 0o600 });
 const fake = {
@@ -97,6 +97,35 @@ async function main() {
     check(csp.includes("connect-src 'none';") && !/unsafe-eval|localhost|127\\.0\\.0\\.1/u.test(csp), 'Production CSP broadened');
     return { groups: Object.keys(api).sort(), rooms: Object.keys(api.rooms).sort(), settings: Object.keys(api.settings).sort(), csp };
   })()`);
+  // Await real-bridge rejections after isolation/Main loading and before any PASS or quit.
+  result.bridgeErrors = await contents.executeJavaScript(`(async () => {
+    const checks = [], errors = [], marker = 'r78-bridge-fixture-secret';
+    const check = (condition, label) => { if (!condition) throw new Error(label); checks.push(label); };
+    const cases = [
+      [() => window.roundtable.rooms.getRoomConfiguration({ id: 'r78-never-created-room', apiKey: marker }), 'invalid_input', 'Invalid request parameters'],
+      [() => window.roundtable.settings.getProviderConfiguration({ id: 'r78-never-created-provider' }), 'not_found', 'Requested resource was not found'],
+    ];
+    for (const [action, code, message] of cases) {
+      let error;
+      try { await action(); } catch (rejected) { error = rejected; }
+      check(error && typeof error === 'object' && !(error instanceof Error), code + ': plain DTO');
+      check(Object.getPrototypeOf(error) === Object.prototype, code + ': object prototype');
+      check(error.code === code, code + ': exact code');
+      check(error.message === message, code + ': fixed message');
+      check(error.retryable === false, code + ': exact retryable');
+      const keys = Object.getOwnPropertyNames(error).sort();
+      const expected = code === 'invalid_input' ? ['code','field','message','retryable'] : ['code','message','retryable'];
+      check(JSON.stringify(keys) === JSON.stringify(expected) && Object.getOwnPropertySymbols(error).length === 0, code + ': strict fields');
+      check(!('stack' in error) && !('name' in error) && !('detail' in error) && !('cause' in error), code + ': no error internals');
+      check(code === 'invalid_input' ? error.field === 'arguments' : !('field' in error), code + ': whitelisted field');
+      check(!JSON.stringify(error).includes(marker) && !JSON.stringify(error).includes('/Users/'), code + ': no secret or local path');
+      errors.push({ code: error.code, message: error.message, retryable: error.retryable, keys });
+    }
+    return { checks, errors };
+  })()`);
+  assert.equal(result.bridgeErrors.checks.length, 18, 'Both real-bridge paths must execute all security assertions');
+  assert.deepEqual(result.bridgeErrors.errors.map(error => error.code), ['invalid_input', 'not_found']);
+  console.log('R78_REAL_BRIDGE_ASSERTIONS ' + JSON.stringify({ cases: 2, assertions: result.bridgeErrors.checks.length, errors: result.bridgeErrors.errors }));
   const ui = require('./r07r08-ui.cjs');
   if (restarting) {
     result.ui = await ui(contents, 'restart', prior.saved);

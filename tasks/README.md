@@ -1,6 +1,6 @@
 # AI Roundtable 任务索引
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02/R03 已验收；R03已合main并通过[本次主线复验](../docs/verification/2026-10-15-r03-main.md)。R04/R05/R06已按用户批准fast-forward合main并通过[本次主线验收](../docs/verification/2026-10-16-r04-r05-r06-main.md)，均verified；R07/R08已按最终授权ff-only合main，本次主线验收因补充桥脚本错误停止，当前merged/未verified，R09仍blocked；见[实际主线记录](../docs/verification/2026-10-17-r07-r08-main.md)。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02/R03 已验收；R03已合main并通过[本次主线复验](../docs/verification/2026-10-15-r03-main.md)。R04/R05/R06已按用户批准fast-forward合main并通过[本次主线验收](../docs/verification/2026-10-16-r04-r05-r06-main.md)，均verified；R07/R08已按最终授权ff-only合main，补充桥探针现按新授权修复并实际18/18及退出审计通过，最终merged/verified，R09仅ready、未授权启动；见[实际主线记录](../docs/verification/2026-10-17-r07-r08-main.md)。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
 
 ## 入口与共同约束
 
@@ -21,9 +21,9 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 | [R04-run-turn-mock.md](R04-run-turn-mock.md) | Run/Turn 状态机与 Mock 执行 | R03 | 已合main并verified；实际本次证据见STATUS |
 | [R05-public-context-limits.md](R05-public-context-limits.md) | 公共上下文与基本限制 | R03 | 已合main并verified；来源审计持久化仍延期 |
 | [R06-renderer-subscriptions.md](R06-renderer-subscriptions.md) | Renderer 状态与一致订阅 | R03 | 已合main并verified；后续App/公共投影接线归总控 |
-| [R07-rooms-agents-history.md](R07-rooms-agents-history.md) | 房间、成员与公共历史 | R04/R05/R06 | 已merged，最终验收停止、未verified；原分支/WT保留 |
-| [R08-key-provider-settings.md](R08-key-provider-settings.md) | Key 与 Provider 设置 | R04/R05/R06 | 已merged，最终验收停止、未verified；fake不证明真实Keychain/鉴权 |
-| [R09-openai-compatible-provider.md](R09-openai-compatible-provider.md) | OpenAI 与兼容端点真实闭环 | R07/R08 | blocked，前置最终验收待完成；未授权启动 |
+| [R07-rooms-agents-history.md](R07-rooms-agents-history.md) | 房间、成员与公共历史 | R04/R05/R06 | 已merged/verified，补充18/18真桥验证及退出审计通过；原分支/WT保留 |
+| [R08-key-provider-settings.md](R08-key-provider-settings.md) | Key 与 Provider 设置 | R04/R05/R06 | 已merged/verified；fake不证明真实Keychain/鉴权 |
+| [R09-openai-compatible-provider.md](R09-openai-compatible-provider.md) | OpenAI 与兼容端点真实闭环 | R07/R08 | ready仅依赖满足；未授权实施/创建Worktree，未启动 |
 | [R10A-anthropic-provider.md](R10A-anthropic-provider.md) | Anthropic Provider | R09 | 可与 R10B/R11 并行 |
 | [R10B-gemini-provider.md](R10B-gemini-provider.md) | Gemini Provider | R09 | 可与 R10A/R11 并行 |
 | [R11-declarative-workflows.md](R11-declarative-workflows.md) | 声明式工作流 | R07；真实验收另需 R09 | 先 Mock，再经明确触发真实验收 |

@@ -211,17 +211,17 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 待联合集成：真实 room/settings 服务实现后由总控注册双端handler/Preload、组装Main/App、刷新Provider摘要及R06选择投影，敏感命令独立脱敏。未接线方法不能假报可用。真实网络/factory能力留R09/R10，自动化仅Mock/fixture；真实配置当前明确unsupported且不创建请求。
 
 
-## R07/R08 联合接线（2026-10-17，已合 main、验收停止）
+## R07/R08 联合接线（2026-10-17，已合 main、补充验收完成）
 
-获批候选d3205b2c3fba2061437150e87a87508d44fbb660已从c1b5bea按授权ff-only合main，两个模块各引入一次。下列契约实现已合入，但本次main验收因补充验证脚本失败停止，未verified；见[实际主线记录](verification/2026-10-17-r07-r08-main.md)。Database、配置Schema、migration1/2/3、package/lock与原main字节一致。
+获批候选d3205b2c3fba2061437150e87a87508d44fbb660已从c1b5bea按授权ff-only合main，两个模块各引入一次。下列契约实现已合入；前次验证脚本失败已保留，本次仅修验证入口并实际完成18/18真桥断言及退出审计，现verified；见[主线及补充记录](verification/2026-10-17-r07-r08-main.md)。Database、配置Schema、migration1/2/3、package/lock与原main字节一致。
 
 - 完整 RoundtableApiContract 保留 room/run，增加 rooms/settings；RunSessionApiContract 仅投影所需 room/run。38 条受限 invoke 直接引用同一 input/output 契约，无通用 invoke/send、Key resolve 或文件能力。
 - 同一 Database 注入 RunService、RoomService、KeyService 和 ProviderSettingsService。Main 为唯一数据写入者；真实网络未接入时明确 unsupported，没有空成功 handler。
 - Main/Preload 都验证输入/输出及实体、Provider、房间和分页固定上界。异步成功和失败返回前重新校验 sender、senderFrame 与可信顶层页面；失信来源不能收到迟到响应或敏感事件。
-- **Bridge Promise 拒绝值为严格 ApiError 普通 DTO**（code、固定 message、retryable、可选白名单 field），不再依赖 Error/ContractError 实例、detail 或 stack。Main 内部 ContractError 保留，成功值和 IPC envelope 不变。真实 contextBridge 会剥离自定义 Error 字段；plain DTO 经候选阶段实际 Electron 实验证明能保留安全字段且不带内部路径/堆栈；本次main精确字段补充核验未完成，不能用该历史实验替代。
+- **Bridge Promise 拒绝值为严格 ApiError 普通 DTO**（code、固定 message、retryable、可选白名单 field），不再依赖 Error/ContractError 实例、detail 或 stack。Main 内部 ContractError 保留，成功值和 IPC envelope 不变。真实 contextBridge 会剥离自定义 Error 字段；plain DTO 经候选阶段实际 Electron 实验证明能保留安全字段且不带内部路径/堆栈；本次补充授权已另行实际完成invalid_input/not_found两路径18项精确字段断言，不以该历史实验替代。
 - IpcDisposer 立即撤注册/订阅，drain 等待已接受的 rooms/settings 操作结算。Main 关库前等待当前与已关闭窗口的配置操作；来源撤销不回滚、不重试已接受写入。Run 控制不加入此集合；后端永不结算时仍会等待，不能提前关库造成迟到写入。
 - RoomsFeatureProps 增加可选 onClearRoom()、initialRoomId。App 先恢复 Run 再挂 Rooms，找回归档房间，恢复失败保留重同步；末房删除/归档/过滤清除旧 Run、订阅投影和恢复位置。
 - Provider 创建/修改/删除、存 Key/删 Key 在结算后统一刷新安全摘要，离开设置仍有效。历史身份通过 Attempt→Turn→Run 冻结成员读取，未知显示未记录，不查当前配置覆盖。
 - RunService 统一 schedule 在任何状态修改前重新校验冻结 Provider/model，真实、禁用或失效配置禁止用当前 MockAdapter 执行。旧 Demo 只兼容 null Provider + mock model。R09 必须统一实现真实 resolver，不能仅删除门禁。
 
-本轮共享文件仍归总控独占。R07/R08及联合集成已merged、主线验收停止、未verified；R09仍blocked/未授权。真实桥本轮已确认invalid_input拒绝反馈，固定message/retryable/无stack精确真桥断言尚未执行成功，不能用候选实验或mock-contextBridge单元测试代替；真实网络与系统Keychain仍未验证。
+共享文件仍归总控独占。R07/R08及联合集成现merged/verified；R09仅ready、未授权。补充真桥实际验证普通对象/原型、精确code/固定message/retryable、严格自有字段与白名单field、无Error内部字段/堆栈/秘密回显。invalid_input是Preload拒绝到Renderer，not_found是Main→IPC→Preload→Renderer；未新增或修改产品契约，真实网络与系统Keychain仍未验证。
