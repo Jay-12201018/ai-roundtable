@@ -135,4 +135,3 @@ M	tests/unit/rendererSync.test.tsx
 ## Git与停止点
 
 完整历史/原分支/18个WT保留，原main与R09原模块干净且HEAD未变；集成分支代码已提交，交付文档另提交后应干净。只读核对其他WT状态，不覆盖他人内容。R09为review，R10A/R10B/R11/R17未开始。本轮交付到候选停止，不自动merge。
-
