@@ -178,3 +178,15 @@ D054的未合main边界已由用户授权取代；D055–D059协议与安全规�
 | D061 | 根据用户新授权，只将失败wrapper内的新增断言顺序接入原生产探针，既有隔离/真实Main后await，通过后才写PASS | npm包入口与Electron内置模块不同；复用正确require('electron')及现有FAIL/exit1，无新事件竞态、不改业务/构建/依赖 | 两路径18/18精确真桥安全断言、自然exit0及退出SQLite审计通过；源/既有输入/构建/native不变后按用户授权复用原主线证据，R07/R08最终verified，R09仅ready未授权 |
 
 D060的停止记录与原失败日志保留；仅本次授权及真实补充证据解除验收阻塞，不开始后续开发。
+
+
+## R09 联合集成候选（2026-10-17；未合 main）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D062 | 从验收 main e9cf24e 独立创建 codex/integrate-r09，以 cherry-pick -x 引入原 2d97af5 一次，入站 f5baaf07e1603a7c356fb0c9cedeb131977307ba | 不改原 main、分支/WT/历史；本轮仅候选，不自动启动后续模块 | 引入树与原模块相同，完整提交与文件检查见 R09 报告 |
+| D063 | Main 会话确认绑定 providerId/kind/规范化URL/Key修订，异步边界及返回结果复核 | Renderer checkbox 不替代 Main 目标确认；旧 Key/目标鉴权不得迟到误报成功 | Key/target/disable 竞态有实际 RED→GREEN；不回溯撤销已发生请求 |
+| D064 | 默认真实模型无获审计数/窗口/输出参数/费用规则时明确拒绝 | 不复用 Mock 词法，不按供应商名称猜模型能力，不把 R13 账本提前做进来 | 本轮只为本地 fixture 注入有依据零成本规则；live API 未验证 |
+| D065 | 标准库 transport：全部 DNS 校验、固定地址、连接后再 guard 发凭据、无重定向/自动重试 | 关闭 DNS 重绑定及连接等待期间的失效引用窗口，保留 TLS 校验 | identity 编码；压缩、真实 TLS/公网能力不外推 |
+| D066 | RunService 使用冻结 Provider/Model 实例和 R05 实例预算，保留原 Attempt/partial/usage 事件语义 | 真实 Provider 不静默回退；只有显式重试/续写/中断决策允许再调用 | 不改 migration 1/2/3，不伪造上游请求 ID |
+| D067 | 真实生产入口 fixture 烟测与 live API/OS Keychain/发布验收分列 | fixture 使用真实 App/Preload/IPC/Main 与 HTTP，但可信策略及官方目标 transport 受控替换 | 必须自然 exit0 加同轮退出 SQLite 审计；仅完成本轮授权，不标 main verified |

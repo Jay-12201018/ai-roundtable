@@ -40,7 +40,7 @@ R07/R08 已合入；R04/R05/R06 的公共历史、限制和状态联合 Mock 验
 | 拟新增 | src/main/providers/openai/**；src/main/providers/openai-compatible/** | R09 | 供应商适配、能力与流解析；不写其他 Provider 目录 |
 | 拟新增 | tests/unit/providers/openai/**；tests/unit/providers/openai-compatible/**；tests/integration/providers/openai/** | R09 | 流 fixture、能力/错误/取消及协议消费 |
 | 现存（135bf82） | src/main/providers/types.ts；src/main/index.ts；src/shared/** | 总控 | 共享能力/注册/工厂和消费接线 |
-| 拟新增 | src/main/providers/registry.ts | 总控 | 共享能力/注册/工厂和消费接线 |
+| 拟新增 | src/main/providers/ProviderRegistry.ts | 总控 | 共享能力/注册/工厂和消费接线 |
 | 现存（135bf82） | src/main/services/RunService.ts | 总控协调相应 owner | 真实模型选择与测试结果接线，R09 不跨模块编辑 |
 | 依赖任务提供（当前拟新增） | src/main/settings/**；src/renderer/features/settings/** | 总控协调相应 owner | 真实模型选择与测试结果接线，R09 不跨模块编辑 |
 

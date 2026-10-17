@@ -225,3 +225,16 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 - RunService 统一 schedule 在任何状态修改前重新校验冻结 Provider/model，真实、禁用或失效配置禁止用当前 MockAdapter 执行。旧 Demo 只兼容 null Provider + mock model。R09 必须统一实现真实 resolver，不能仅删除门禁。
 
 共享文件仍归总控独占。R07/R08及联合集成现merged/verified；R09仅ready、未授权。补充真桥实际验证普通对象/原型、精确code/固定message/retryable、严格自有字段与白名单field、无Error内部字段/堆栈/秘密回显。invalid_input是Preload拒绝到Renderer，not_found是Main→IPC→Preload→Renderer；未新增或修改产品契约，真实网络与系统Keychain仍未验证。
+
+
+## R09 联合候选：Provider 实例、会话目标与生成门禁（2026-10-17）
+
+本节仅适用于 `codex/integrate-r09` 候选，尚未合 main；不覆盖 R07/R08 的稳定引用、Key 修订/CAS 及冻结成员规则。
+
+- 唯一新增 IPC 为 `settings.confirmTarget({providerId, baseUrl, confirmed:true}) -> {providerId}`；Shared Schema strict，Main/Preload 双向校验并核对返回 providerId。普通 Bridge 不含 resolveKey、通用 invoke/send 或策略注入能力。现有 `settings.testConnection` 仅增加可选 `allowGeneration:true`；真实生成测试必须显式提供，缺失即拒绝。configuration 为本地校验，获取列表/鉴权均不证明生成可用。
+- Main `ProviderRegistry` 以稳定 providerId 读取当前配置及 KeyService 引用。会话确认绑定规范化目标、kind、key_revision；重启、目标/类型变更、Key 更换/撤销/删除重建后不能沿用旧确认。Key 异步读取后、DNS 后、TCP/TLS 连接完成发送前复核；stream 每个结果、列表与鉴权结果完成后再复核，防迟到成功。已发出的请求不能被解释为未发生或未收费。
+- `RunService` 新增可选第四构造参数 Registry；生产 Main 必须提供同一实例给 RunService 与 ProviderSettingsService。按冻结成员 providerId/modelId 选实际 Adapter，绑定模型的 Adapter 不接受其他 modelId。R05 resolver 增加 member 参数，预算按实例与模型查询。Database.listAgents 的可选可信 Main 验证回调只开启已校验的真实引用；不提供回调时保留旧 Mock 门禁。旧 null Demo 兼容只适用于原始未配置记录。
+- Main 专属 `ApprovedModelPolicy` 必须有可追溯计数方法（exact/upper_bound、模型身份匹配）、上下文窗口、输出上限、明确输出参数、输入/输出费率依据及单请求费用上界。计数/窗口/输出能力/费用任一未知或超限，在 Key/网络调用前拒绝。手动模型不以列表作为白名单。生产默认目录没有获审真实模型规则，真实生成明确 unsupported；不得拿 Mock 词法或厂商名称补数据。fixture 仅注入自有本地模型与零费用，不是官方模型计数或定价证据。完整费用账本仍留 R13。
+- 兼容端点不推测 capabilities，默认列表/鉴权/生成都 unsupported；官方列表/鉴权遵循现有 OpenAI 路由声明，但具体模型生成仍受独立规则门禁。真实网络操作只由用户显式动作触发，不自动重试或回退 Mock。
+- Node 原生 transport 对全部 DNS 结果检查，HTTPS 仅公共地址、HTTP 仅显式 loopback；固定地址/家族、禁代理复用和重定向，保持 TLS 主机名/证书验证。凭据直到连接完成并复核后才发送；支持取消和流关闭。只请求 identity 编码并拒绝压缩响应，不宣称支持 gzip/br。
+- 共享错误 `forbidden` 的固定 message 改为 `Permission denied`，code/retryable 不变；IPC 来源拒绝自身的内部异常保留，不将 Provider 403 错报成 IPC 来源错误。没有新增事件版本、usage 字段或 migration；usage 继续按已有带身份事件持久化，providerRequestId 缺失保持 null，不用 SSE completion id 伪造。
