@@ -224,3 +224,11 @@ D070/D071的候选未合main边界由本次合并授权取代，其计数阻塞�
 | D075 | OS Keychain 证据仅覆盖本任务随机服务名与假 Key，签名/锁定登录环境分别标未验证 | userData 隔离不能隔离系统 Keychain；原生调用守卫只允许测试自建服务，不读取既有用户项。28条真实后端断言与候选生产 fake 后端探针分列，用户明确批准后清理自建3项并精确复核不存在 | 不把旧 KeyService/DBv3 单模块 OS 测试宣传为候选 DBv4 整App或正式签名验收；失败与审批拒绝记录保留 |
 
 本节只描述 `codex/deepseek-controlled-trial` 候选，基线 main `ae5c24c6dd1410aedba6ef31894470b7cb668c8a` 未改。见[交付报告](verification/2026-10-18-deepseek-controlled-trial.md)及[实际命令](verification/2026-10-18-deepseek-controlled-trial-commands.md)；不提前实施 R13/R17、不启动其他任务或真实模型调用。
+
+## DeepSeek 单次受控测试主线验收（2026-10-18）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D076 | 用户最终授权后从ae5c24c严格ff-only合入获批db97b95，main独立必要复验通过后仅DEEPSEEK-TRIAL-01 merged/verified | 17个Worktree/原历史保留；合并后无业务/测试修改，原migration1–3不变；独立治理提交记录状态，不启动其他任务或真实请求 | main Node/Electron各1168、strict/build、双ABI、42/24受控生产/重启及退出审计、原R09/R07/R08生产回归均exit0；[本次证据](verification/2026-10-18-deepseek-controlled-trial-main.md) |
+
+D073–D075的候选未合main边界由本次合并授权取代；估算性质、严格TOKEN阻塞、未知费用保护及有限Keychain证据边界仍有效。正式真实API、实际账单、v4整App真实后端、签名/锁定登录Keychain及跨平台发布未验收。

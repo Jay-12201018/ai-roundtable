@@ -190,7 +190,7 @@ R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/nex
 
 用户另行授权后，完整获批30d5783已ff-only合main并通过本轮独立复验；仅安全准备merged/verified。DEEPSEEK-TOKEN-01继续blocked，R09已有fixture verified不外推为DeepSeek真实可用。R00–R18路线、其他任务状态及分工不变。价格候选使用高峰未命中输入¥2/M、输出¥8/M，单次¥0.05，有效至2026-10-18T00:00Z，过期须复核。真实计数/Keychain/公网账单、E2E/发布未验收；本轮到主线验收完成停止，不启动后续任务或真实请求。
 
-## DeepSeek 单次受控测试候选（2026-10-18）
+## DeepSeek 单次受控测试候选（2026-10-18，历史 review 阶段）
 
 | ID | 范围 | 负责人 | 状态 | 分支/基线与证据 |
 | --- | --- | --- | --- | --- |
@@ -200,3 +200,16 @@ R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/nex
 本次用户授权仅开发与本地模拟，未授权合 main 或任何公网模型请求。main 仍 `ae5c24c6dd1410aedba6ef31894470b7cb668c8a` 且干净，原分支/Worktree 保留；没有启动 R10/R11/R13/R17。既有 R00–R09 验收和路线不变。候选 Main-only 入口不扩展普通房间真实生成权限，原离线预览网络隔离保持；未结费用保留未知及¥0.05预留，不能自动恢复/重试或清零。
 
 新增 migration4，原1/2/3不变；Shared/IPC/Preload/Renderer、package/lock和 Mock 预算不变。价格重新核验于北京时间2026-10-18，至北京时间2026-10-19 00:00有效，过期安全拒绝。真实 API 请求数为0；实际账单、严格计数、正式签名及锁定登录 Keychain、完整E2E/跨平台/发布仍未验证。实际测试数量、失败修复和有限真实后端证据以本轮报告为准，不沿用旧1105或中间1160成绩充当最终成绩。
+
+## DeepSeek 单次受控测试正式合并与主线验收（2026-10-18）
+
+用户审核后明确授权最终合并。重新核验 main `ae5c24c6dd1410aedba6ef31894470b7cb668c8a`、获批候选 `db97b95c8d7ce279d76d304d9f4c9ea64259d16a`、17个干净Worktree及29文件范围后，实际 `git merge --ff-only codex/deepseek-controlled-trial` exit0。main直接推进获批候选，无新merge commit、冲突、重复引入或历史重写；所有原分支/Worktree保留。
+
+| ID | 最终状态 | 本轮证据及边界 |
+| --- | --- | --- |
+| DEEPSEEK-TRIAL-01 | merged / verified（仅受控入口、本地fixture） | main独立Node/Electron各81文件1168/1168、strict/build、双ABI原生、42条生产/24条重启断言及只读退出审计通过；原R09/R07/R08生产和重启回归通过；[主线证据](verification/2026-10-18-deepseek-controlled-trial-main.md) |
+| DEEPSEEK-TOKEN-01 | blocked（普通真实生成的严格计数） | 没有注册真实counter/ModelPolicy，不把未校准估算或¥0.05客户端预留视为精确计数/绝对账单上限 |
+
+本次必要检查全部exit0后才更新状态；合并后src/tests/依赖版本/价格窗口无修改，migration1–3逐字不变。v3→v4升级、失败回滚、备份恢复、关键索引/记录保护与未知预留跨重启均实测通过。main最终SHA为本节所在独立治理提交，完整值见交付消息与Git历史。未读真实Key/个人数据库，公网模型请求0；没有重新执行OS Keychain测试。原有限28条后端证据仍不等同v4整App、签名或锁定登录Keychain验收。
+
+首次真实调用仍需用户另行明确授权精确目标、单Agent/固定提示/128输出和¥0.05客户端预留风险，并在发送前核价、确认目标/当前Key归属、检查无未知预留、逐次原生确认。现有价格窗口至北京时间2026-10-19 00:00，过期拒绝、不自动续期。未知费用不自动清零。R10/R11/R17及GitHub发布未启动；本轮到主线验收停止，不自动发起真实请求。

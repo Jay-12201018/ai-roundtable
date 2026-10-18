@@ -264,3 +264,7 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 新增 migration4 仅建立 `controlled_trials` 及全局唯一未结预留索引；migration1/2/3 原文不变。request_id 唯一，JSON/身份/关键索引在恢复校验中检查。记录不外键绑定可删除 Provider，保存历史证据；不存明文 Key，不提供清零未知预留的通用接口。后续 migration 编号由总控重核主线后分配，其他分支不得同时占用4。
 
 本候选价格快照核验于北京时间2026-10-18，高峰未命中输入¥2/M、总输出¥8/M（推理 Token 属输出，不另加一遍），有效至北京时间2026-10-19 00:00；过期拒绝，不自动续期。¥0.05 是客户端预留而非服务商账单绝对硬上限。原 DEEPSEEK-TOKEN-01 的严格上界证明仍 blocked；本轮未获真实请求授权，main 未改变，候选等待用户审核及合并授权。
+
+### 单次受控测试主线生效登记（2026-10-18）
+
+以上候选已按用户最终授权，从 `ae5c24c6dd1410aedba6ef31894470b7cb668c8a` 严格ff-only合入完整 `db97b95c8d7ce279d76d304d9f4c9ea64259d16a`；本次main独立必要检查通过后，DEEPSEEK-TRIAL-01仅在本地fixture范围merged/verified，见[主线证据](verification/2026-10-18-deepseek-controlled-trial-main.md)。上述Main-only契约/migration4现已生效；本轮没有继续修改源码、Schema、IPC或测试。严格计数blocked、逐次明确确认、过期拒绝、unknown不释放、Key/目标/DNS安全规则及未验收边界不变。合并授权不是付费授权。
