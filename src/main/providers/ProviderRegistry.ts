@@ -122,6 +122,51 @@ export class ProviderRegistry {
     }
   }
 
+  controlledTrialTarget(providerId: string) {
+    const configuration = this.database.validateModelSelection(providerId, 'deepseek-flash');
+    const approval = this.trusted(providerId);
+    if (configuration.kind !== 'openai-compatible' || approval.baseUrl !== 'https://api.deepseek.com') throw new ContractError('unsupported');
+    if (configuration.defaultModelId !== 'deepseek-flash' && !configuration.customModels.some(model => model.id === 'deepseek-flash')) throw new ContractError('invalid_input');
+    return { configuration, revision: approval.revision };
+  }
+
+  // Main-only, single fixed-prompt test. This does not approve a policy for ordinary Runs.
+  async *streamControlledTrial(providerId: string, input: StreamChatInput, permit: () => void) {
+    try {
+      const { signal: _signal, ...parameters } = input;
+      const parsed = streamChatInputSchema.parse(parameters);
+      if (parsed.modelId !== 'deepseek-flash' || parsed.outputTokenLimit !== 128 || parsed.messages.length !== 1
+        || parsed.messages[0].role !== 'user' || parsed.messages[0].content !== 'Reply OK.'
+        || parsed.agentRole !== undefined || parsed.turnIndex !== undefined) throw new ContractError('invalid_input');
+      const { configuration, revision } = this.controlledTrialTarget(providerId);
+      const approval = this.trusted(providerId);
+      const guard = () => {
+        permit();
+        if (input.signal?.aborted) throw input.signal.reason instanceof ContractError ? input.signal.reason : new ContractError('cancelled');
+        if (this.controlledTrialTarget(providerId).revision !== revision) throw new ContractError('forbidden');
+      };
+      guard();
+      const adapter = this.createRealAdapter(configuration, approval, guard);
+      for await (const chunk of adapter.streamChat({ ...parsed, signal: input.signal })) { guard(); yield chunk; }
+    } catch (error) { yield { type: 'error' as const, requestId: input.requestId, error: toPublicError(error) }; }
+  }
+
+  private createRealAdapter(configuration: ProviderConfiguration, approval: Approval, guard: () => void): ProviderAdapter {
+    const providerId = configuration.id;
+    const transport = this.createTransport(guard);
+    const options = { configuration, confirmedBaseUrl: approval.baseUrl,
+      resolveKey: async (id: string) => {
+        guard();
+        if (id !== providerId) throw new ContractError('forbidden');
+        const state = await this.keys.getProviderKeyState(id); guard();
+        const key = state.keyReference ? await this.keys.resolveKey(id, state.keyReference) : undefined;
+        guard(); return key;
+      },
+      fetch: (async (url, init) => { guard(); return transport(url, init); }) as typeof fetch,
+    };
+    return configuration.kind === 'openai' ? new OpenAIProvider(options) : new OpenAICompatibleProvider({ ...options, capabilities: this.resolveCapabilities(configuration) });
+  }
+
   getAdapter(providerId: string, modelId?: string): ProviderAdapter {
     const configuration = this.configuration(providerId);
     if (configuration.kind === 'mock') {
@@ -135,18 +180,7 @@ export class ProviderRegistry {
       if (current.kind !== approval.kind || current.baseUrl !== approval.baseUrl || current.revision !== approval.revision) throw new ContractError('forbidden');
       if (modelId !== undefined) this.assertSelection(providerId, modelId);
     };
-    const transport = this.createTransport(guard);
-    const options = { configuration, confirmedBaseUrl: approval.baseUrl,
-      resolveKey: async (id: string) => {
-        guard();
-        if (id !== providerId) throw new ContractError('forbidden');
-        const state = await this.keys.getProviderKeyState(id); guard();
-        const key = state.keyReference ? await this.keys.resolveKey(id, state.keyReference) : undefined;
-        guard(); return key;
-      },
-      fetch: (async (url, init) => { guard(); return transport(url, init); }) as typeof fetch,
-    };
-    const adapter = configuration.kind === 'openai' ? new OpenAIProvider(options) : new OpenAICompatibleProvider({ ...options, capabilities: this.resolveCapabilities(configuration) });
+    const adapter = this.createRealAdapter(configuration, approval, guard);
     const stream = adapter.streamChat.bind(adapter);
     const registry = this;
     adapter.streamChat = async function* (input) {

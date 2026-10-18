@@ -29,7 +29,7 @@ describe('shared configuration migration 3', () => {
   it.each([1, 2])('upgrades v%i once, preserving original-version backup, partial output and unknown metadata', async version => {
     const f = legacy(version); const db = new Database(f.path); let raw: Sqlite.Database | undefined;
     try { await db.initialize(); await db.initialize(); raw = new Sqlite(f.path, { readonly: true });
-      expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1,2,3]);
+      expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1,2,3,4]);
       expect(db.getRun('run')).toMatchObject({ task: null, membersSnapshot: null, elapsedExecutionMs: null });
       expect(db.getMessage('m')?.content).toBe('partial'); expect(db.rawKeyRecord('key-ref')?.encryptedValue).toBe('opaque-ciphertext');
       expect(db.getProviderConfiguration('p')).toMatchObject({ id: 'p', keyReference: { id: 'key-ref' }, customModels: [], isDefault: false });
@@ -65,11 +65,11 @@ describe('shared configuration migration 3', () => {
       try { expect(backup.prepare('SELECT content FROM messages').pluck().get()).toBe('latest WAL text'); } finally { backup.close(); }
     } finally { db.close(); reader.exec('ROLLBACK'); reader.close(); writer.close(); f.dispose(); }
   });
-  it('restores a verified v3 backup including archived identity and Provider configuration', async () => {
+  it('restores a verified current backup including v3 archived identity and Provider configuration', async () => {
     const f = legacy(2); const db = new Database(f.path); let raw: Sqlite.Database | undefined;
     try { await db.initialize(); db.archiveAgent('a'); db.createProvider({ id: 'new', name: 'New', kind: 'mock', isDefault: true, defaultModelId: 'mock' }); raw = new Sqlite(f.path);
       const directory = join(f.directory, 'new-backups'); mkdirSync(directory, { mode: 0o700 }); const backup = await createVerifiedBackup(raw, directory); const restored = await prepareRestore(backup, directory);
-      const candidate = new Sqlite(restored.path, { readonly: true }); try { expect(validateDatabase(candidate).schemaVersion).toBe(3); expect(candidate.prepare("SELECT archived_at FROM agents WHERE id='a'").pluck().get()).not.toBeNull(); expect(candidate.prepare("SELECT default_model_id FROM providers WHERE id='new'").pluck().get()).toBe('mock'); } finally { candidate.close(); }
+      const candidate = new Sqlite(restored.path, { readonly: true }); try { expect(validateDatabase(candidate).schemaVersion).toBe(4); expect(candidate.prepare("SELECT archived_at FROM agents WHERE id='a'").pluck().get()).not.toBeNull(); expect(candidate.prepare("SELECT default_model_id FROM providers WHERE id='new'").pluck().get()).toBe('mock'); } finally { candidate.close(); }
     } finally { raw?.close(); db.close(); f.dispose(); }
   });
 });

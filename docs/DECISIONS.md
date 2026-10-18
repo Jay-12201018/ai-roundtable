@@ -214,3 +214,13 @@ D062的候选未合main边界已由用户本次授权取代，D063–D067的数�
 | D072 | 按用户授权从dc387146严格ff-only合入获批30d5783，主线独立复验后仅DEEPSEEK-PREP-01 merged/verified；TOKEN-01仍blocked | 不注册未经证明counter、不续期价格、不读取真实Key/用户DB、不调用公网模型；原18WT/分支/历史保留 | 本轮Node/Electron各1105、32专项、strict/build、双ABI、生产拒绝/重启HTTP0/退出审计均exit0，见[主线报告](verification/2026-10-18-deepseek-main.md)及台账 |
 
 D070/D071的候选未合main边界由本次合并授权取代，其计数阻塞、真实调用禁令及未验收限制保持。本轮不实施Tokenizer或其他任务。
+
+## DeepSeek Token 估算与单次受控测试候选（2026-10-18）
+
+| ID | 决定 | 理由与影响 | 验证边界 |
+| --- | --- | --- | --- |
+| D073 | 严格计数门禁保持；另设 Main 原生逐次确认的固定短文本试验，不注册估算为 ModelPolicy | 官方 Tokenizer 工具与1017生产API隐式计费封装的完整对应仍未证明。官方字符比例加64封装余量仅为未校准启发式；明确 estimated/unknown/provider_usage，不能冒充精确值或绝对账单上限 | 单 Provider/固定目标和模型、固定提示词、输出128、一次请求、无自动重试/恢复；本轮仅本地 fixture，不含真实 API 授权 |
+| D074 | migration4 以权威 SQLite 事务持久预留¥0.05；未知费用保留全额预留并阻止后续试验 | 内存锁不能跨重启保护；缺 usage/Abort/断流/异常终结不等于零费用。只在完整终结及合法 usage 后按冻结费率核算，不把观察到的片段 usage 当结算 | 原 migration1–3不变；唯一未结索引、备份恢复/失败回滚、部分证据及幂等恢复验证。普通 Run/试验双向互斥，退出等待两者结算 |
+| D075 | OS Keychain 证据仅覆盖本任务随机服务名与假 Key，签名/锁定登录环境分别标未验证 | userData 隔离不能隔离系统 Keychain；原生调用守卫只允许测试自建服务，不读取既有用户项。28条真实后端断言与候选生产 fake 后端探针分列，用户明确批准后清理自建3项并精确复核不存在 | 不把旧 KeyService/DBv3 单模块 OS 测试宣传为候选 DBv4 整App或正式签名验收；失败与审批拒绝记录保留 |
+
+本节只描述 `codex/deepseek-controlled-trial` 候选，基线 main `ae5c24c6dd1410aedba6ef31894470b7cb668c8a` 未改。见[交付报告](verification/2026-10-18-deepseek-controlled-trial.md)及[实际命令](verification/2026-10-18-deepseek-controlled-trial-commands.md)；不提前实施 R13/R17、不启动其他任务或真实模型调用。

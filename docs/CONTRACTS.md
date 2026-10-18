@@ -247,3 +247,20 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 - ChatCompletionCapabilities新增唯一受限字面字段thinkingDisabledForModel:'deepseek-flash'，只能由可信Main提供；SDK只对该modelId加入thinking.disabled，无通用extra_body或Renderer扩展能力。默认cap仅匹配openai-compatible+规范化后精确https://api.deepseek.com，列表/鉴权仍unsupported。
 - deepSeekFlashReview只是2026-10-17官方证据和候选1024输入/128输出、¥0.05限制，不是已批准counter。生产没有注册DeepSeek ModelPolicy；完整1017 API Token/隐式封装对应性未证实，DEEPSEEK-TOKEN-01保持blocked，生成先于Key/请求拒绝。单Agent限制仅验证本地fixture，不扩展调度契约或默认开放真实调用。
 - 本轮没改Mock价格/词法、RunService、状态机、KeyService、Shared或migration1/2/3。后续启用仍需计数证据、重新核价、独立审核/合入及用户明确的真实调用授权。
+
+## DeepSeek 单次受控测试候选（2026-10-18，未合 main）
+
+用户另行授权“请求前估算＋费用预留＋响应 usage 核算”，本候选由总控独占 Main、Database、migration4 及公共测试。完整证据见[交付报告](verification/2026-10-18-deepseek-controlled-trial.md)和[命令台账](verification/2026-10-18-deepseek-controlled-trial-commands.md)。这是独立试验入口，不将估算注册为普通 Run 的 `ApprovedModelPolicy` 或 R05 计数器；Shared DTO、IPC、Preload、Renderer、事件协议及 Mock 预算不变。
+
+| Main 私有接口 | 冻结规则 |
+| --- | --- |
+| `estimateDeepSeekInput(messages)` | `estimated` / `unknown`；单条短 ASCII user 文本使用官方英文字符比例加未校准封装余量。`strictUsable:false`，不是本地 Tokenizer、精确值或可证明上界；响应 `provider_usage` 单独区分 |
+| `ControlledTrialService.prepare(providerId)` / `execute(quoteId)` | 精确 DeepSeek 配置与会话目标确认；固定 `Reply OK.`、单 Agent/请求、输出128、20秒。报价至多2分钟且不超过价格有效期；报价不读 Key/不发请求。执行消耗单次报价并等待 Main 原生逐次确认，取消/Stop/退出不可被迟到确认复活 |
+| `ProviderRegistry.controlledTrialTarget` / `streamControlledTrial` | Main-only；绑定稳定 Provider ID、Key 修订、精确 root/model。保留原有 Key 归属、目标确认、DNS/连接后守卫、禁止重定向/自动重试；固定请求形状，真实参数 `max_tokens:128`、`thinking:{type:'disabled'}`。普通真实 Run 仍无获审策略而拒绝 |
+| Database `reserveControlledTrial` / `updateControlledTrialProgress` / `finishControlledTrial` / `listControlledTrials` / `recoverControlledTrials` | 权威 SQLite 唯一仓储；先事务预留50000 micro-CNY（¥0.05）再解析 Key。只在完整终结流＋合法 usage 后核算；中断/错误/缺 usage 保持 `unknown`、实际费用 NULL、完整预留及部分文本/已观察 usage，不填零、不重发。启动 `reserved→unknown/interrupted` 幂等 |
+| `RunService` 可选第五参数 `assertGenerationAllowed` | 生产 Main 双向注入互斥：普通 Run 活动时试验拒绝，试验等待确认/请求中时新建及恢复普通 Run 拒绝。默认 callback 保持既有调用兼容；不改 R04 状态机 |
+| Main 原生“受控测试”菜单 | 仅此入口申请逐次确认；普通 Bridge 无试验权限、无 `resolveKey`。关窗检查试验忙碌状态，退出屏障等待 Run 和试验全部结算再关闭 DB |
+
+新增 migration4 仅建立 `controlled_trials` 及全局唯一未结预留索引；migration1/2/3 原文不变。request_id 唯一，JSON/身份/关键索引在恢复校验中检查。记录不外键绑定可删除 Provider，保存历史证据；不存明文 Key，不提供清零未知预留的通用接口。后续 migration 编号由总控重核主线后分配，其他分支不得同时占用4。
+
+本候选价格快照核验于北京时间2026-10-18，高峰未命中输入¥2/M、总输出¥8/M（推理 Token 属输出，不另加一遍），有效至北京时间2026-10-19 00:00；过期拒绝，不自动续期。¥0.05 是客户端预留而非服务商账单绝对硬上限。原 DEEPSEEK-TOKEN-01 的严格上界证明仍 blocked；本轮未获真实请求授权，main 未改变，候选等待用户审核及合并授权。

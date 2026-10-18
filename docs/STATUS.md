@@ -189,3 +189,14 @@ R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/nex
 | DEEPSEEK-TOKEN-01 | 1017 API完整输入Token/隐式封装安全上界证明 | 待总控进一步审查 | blocked | 无获审真实counter，未注册ModelPolicy | 生成在Key/请求前拒绝，真实API数量0；不能用fixture计数/字符比例/预算授权绕过 |
 
 用户另行授权后，完整获批30d5783已ff-only合main并通过本轮独立复验；仅安全准备merged/verified。DEEPSEEK-TOKEN-01继续blocked，R09已有fixture verified不外推为DeepSeek真实可用。R00–R18路线、其他任务状态及分工不变。价格候选使用高峰未命中输入¥2/M、输出¥8/M，单次¥0.05，有效至2026-10-18T00:00Z，过期须复核。真实计数/Keychain/公网账单、E2E/发布未验收；本轮到主线验收完成停止，不启动后续任务或真实请求。
+
+## DeepSeek 单次受控测试候选（2026-10-18）
+
+| ID | 范围 | 负责人 | 状态 | 分支/基线与证据 |
+| --- | --- | --- | --- | --- |
+| DEEPSEEK-TRIAL-01 | 短文本估算、单次确认、持久预留与 usage 核算 | 总控唯一共享写入人；协作代理按文件归属 | review，未 merged/verified | `codex/deepseek-controlled-trial`，基线 `ae5c24c6dd1410aedba6ef31894470b7cb668c8a`；候选完整 SHA 由本节所在提交及交付消息定位；[报告](verification/2026-10-18-deepseek-controlled-trial.md)、[命令](verification/2026-10-18-deepseek-controlled-trial-commands.md) |
+| DEEPSEEK-TOKEN-01 | 严格模式完整1017输入/隐式封装安全上界 | 总控 | blocked（严格模式保持） | 本候选不注册真实 counter/ModelPolicy。另行用户批准的受控模式采用标明偏差/未知的估算，不能视为严格证明已解决 |
+
+本次用户授权仅开发与本地模拟，未授权合 main 或任何公网模型请求。main 仍 `ae5c24c6dd1410aedba6ef31894470b7cb668c8a` 且干净，原分支/Worktree 保留；没有启动 R10/R11/R13/R17。既有 R00–R09 验收和路线不变。候选 Main-only 入口不扩展普通房间真实生成权限，原离线预览网络隔离保持；未结费用保留未知及¥0.05预留，不能自动恢复/重试或清零。
+
+新增 migration4，原1/2/3不变；Shared/IPC/Preload/Renderer、package/lock和 Mock 预算不变。价格重新核验于北京时间2026-10-18，至北京时间2026-10-19 00:00有效，过期安全拒绝。真实 API 请求数为0；实际账单、严格计数、正式签名及锁定登录 Keychain、完整E2E/跨平台/发布仍未验证。实际测试数量、失败修复和有限真实后端证据以本轮报告为准，不沿用旧1105或中间1160成绩充当最终成绩。

@@ -5,6 +5,7 @@ import { requestAttemptSchema,executionMetadataSchema } from '../../../shared/sc
 import { timestampSchema } from '../../../shared/schemas/common';
 import { providerModelSchema } from '../../../shared/schemas/provider';
 import { runEventSchema } from '../../../shared/schemas/run';
+import { trialRecordSchema } from '../../providers/controlledTrial/record';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
 
@@ -22,6 +23,19 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
     const versions = tables.includes('schema_migrations') ? db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all() as number[] : [];
     if (versions.some((version, index) => version !== index + 1)) throw new Error('Invalid migration ledger');
     const modern = (versions.at(-1)??0)>=2;
+    if ((versions.at(-1) ?? 0) >= 4) {
+      if (!tables.includes('controlled_trials')) throw new Error('Recovery v4 schema is incomplete');
+      const unresolvedIndex = db.prepare("SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_controlled_trial_unresolved'").pluck().get() as string | undefined;
+      if (unresolvedIndex?.replace(/\s+/gu, '').toLowerCase().replace(/;$/u, '') !== "createuniqueindexidx_controlled_trial_unresolvedoncontrolled_trials((1))wherestatein('reserved','unknown')") throw new Error('Missing trial reservation uniqueness');
+      const indexes = db.prepare("PRAGMA index_list('controlled_trials')").all() as Array<{ name: string; unique: number; partial: number }>;
+      if (!indexes.some(index => index.unique === 1 && index.partial === 0 && JSON.stringify((db.prepare(`PRAGMA index_info("${index.name.replaceAll('"', '""')}")`).all() as Array<{ name: string }>).map(column => column.name)) === '["request_id"]')) throw new Error('Missing trial request identity uniqueness');
+      const unresolved = db.prepare("SELECT COUNT(*) FROM controlled_trials WHERE state IN ('reserved','unknown')").pluck().get() as number;
+      if (unresolved > 1) throw new Error('Multiple unresolved trial reservations');
+      for (const row of db.prepare('SELECT id,request_id,provider_id,state,data_json FROM controlled_trials').all() as Array<{ id: string; request_id: string; provider_id: string; state: string; data_json: string }>) {
+        const value = trialRecordSchema.parse(JSON.parse(row.data_json));
+        if (value.id !== row.id || value.requestId !== row.request_id || value.providerId !== row.provider_id || value.state !== row.state) throw new Error('Trial reservation identity mismatch');
+      }
+    }
     if ((versions.at(-1) ?? 0) >= 3) {
       for (const [table, required] of Object.entries({ rooms: ['archived_at'], agents: ['archived_at','configuration_version'], providers: ['is_default','default_model_id','custom_models_json','key_revision'] })) {
         const columns = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{name:string}>).map(c => c.name));

@@ -13,6 +13,9 @@ import { RoomService } from './room/RoomService';
 import { ProviderSettingsService } from './settings/ProviderSettingsService';
 import { registerIpc, type IpcDisposer } from './ipc/registerIpc';
 import { createPublicMessagesBuilder } from './context/wirePublicContext';
+import { ControlledTrialService } from './providers/controlledTrial/ControlledTrialService';
+import { confirmTrial, installTrialMenu } from './providers/controlledTrial/menu';
+import { ContractError } from '../shared/contracts/errors';
 
 let database: Database | undefined;
 let window: BrowserWindow | undefined;
@@ -21,6 +24,7 @@ let ipcCleanup = Promise.resolve();
 let roomService: RoomService | undefined;
 let settingsService: ProviderSettingsService | undefined;
 let runService: RunService | undefined;
+let controlledTrial: ControlledTrialService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
 let shutdownExitCode = 0;
@@ -50,13 +54,17 @@ if (!hasLock) {
       }
       if (shutdownRequested) return;
       database.markInFlightRunsInterrupted();
+      database.recoverControlledTrials();
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
       const providers = new ProviderRegistry(database, keyService);
       settingsService = new ProviderSettingsService(database, keyService, providers);
       runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }), createPublicMessagesBuilder((modelId, member) =>
-        member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined), providers);
+        member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined), providers,
+      () => { if (controlledTrial?.isBusy()) throw new ContractError('invalid_state'); });
+      controlledTrial = new ControlledTrialService(database, providers, confirmTrial, () => runService?.hasActiveRuns() ?? true);
+      installTrialMenu(database, controlledTrial, () => runService?.hasActiveRuns() ?? true);
       createAppWindow();
       app.on('activate', () => {
         if (!shutdownRequested && BrowserWindow.getAllWindows().length === 0) createAppWindow();
@@ -82,7 +90,7 @@ function createAppWindow(): void {
     const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
-      if (shutdownRequested || !runService || !runService.hasActiveRuns()) return;
+      if (shutdownRequested || (!runService?.hasActiveRuns() && !controlledTrial?.isBusy())) return;
       const result = dialog.showMessageBoxSync(createdWindow, { type: 'warning', buttons: ['取消', '退出并停止生成'], defaultId: 0, cancelId: 0, title: '正在生成', message: '仍有任务正在生成，确定退出吗？' });
       event.preventDefault();
       if (result !== 0) app.quit();
@@ -116,7 +124,14 @@ function requestShutdown(exitCode = 0): void {
   shutdownPromise = Promise.resolve().then(async () => {
     try {
       if (initializationPromise) await initializationPromise;
-      try { await runService?.shutdown(); }
+      try {
+        const results = await Promise.allSettled([
+          Promise.resolve().then(() => runService?.shutdown()),
+          Promise.resolve().then(() => controlledTrial?.shutdown()),
+        ]);
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure?.status === 'rejected') throw failure.reason;
+      }
       finally { await ipcCleanup; }
     } catch (error) {
       shutdownExitCode = 1;

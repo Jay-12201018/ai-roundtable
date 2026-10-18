@@ -5,6 +5,8 @@ import { mkdir, lstat, realpath, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { migration3 } from './migrations/v3';
+import { migration4 } from './migrations/v4';
+import { trialRecordSchema, type TrialRecord } from '../providers/controlledTrial/record';
 import { ContractError } from '../../shared/contracts/errors';
 import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions } from '../../shared/schemas/configuration';
 import type { RoomInput,RoomConfiguration,AgentInput,AgentConfiguration,ProviderInput,ProviderConfiguration,ProviderSummary,RoomMessagePageInput,RoomMessagePage,RoomRunPageInput,RoomRunPage } from '../../shared/contracts/configuration';
@@ -170,6 +172,7 @@ const migrations = [
   `,
   migration2,
   migration3,
+  migration4,
 ];
 
 export class Database {
@@ -847,6 +850,51 @@ export class Database {
       const rows = this.db.prepare(`SELECT id,room_id AS roomId,status,task,created_at AS createdAt,updated_at AS updatedAt FROM workflow_runs WHERE room_id=? AND rowid<=? ${afterSql} AND (created_at,id)<=(?,?) ORDER BY created_at,id LIMIT ?`).all(...args) as Array<{ id: string; createdAt: string }>;
       const selected = rows.slice(0, limit); const hasMore = rows.length > limit; const last = selected.at(-1)!;
       return configurationOutput(roomRunPageSchema, { items: selected, hasMore, nextCursor: hasMore ? { roomId, throughRowId, after: { createdAt: last.createdAt, id: last.id }, through } : null });
+    });
+  }
+
+  reserveControlledTrial(record: TrialRecord): void {
+    const value = trialRecordSchema.parse(record);
+    if (value.state !== 'reserved') throw new ContractError('invalid_input');
+    this.transaction(() => {
+      if (this.db.prepare("SELECT 1 FROM controlled_trials WHERE state IN ('reserved','unknown') LIMIT 1").get()) throw new ContractError('invalid_state');
+      this.db.prepare('INSERT INTO controlled_trials(id,request_id,provider_id,state,data_json) VALUES(?,?,?,?,?)')
+        .run(value.id, value.requestId, value.providerId, value.state, JSON.stringify(value));
+    });
+  }
+
+  listControlledTrials(): TrialRecord[] {
+    this.assertInitialized();
+    return (this.db.prepare('SELECT data_json FROM controlled_trials ORDER BY rowid DESC LIMIT 100').pluck().all() as string[])
+      .map(value => trialRecordSchema.parse(JSON.parse(value)));
+  }
+
+  updateControlledTrialProgress(id: string, patch: Partial<Pick<TrialRecord, 'text' | 'observedUsage'>>): void {
+    this.transaction(() => {
+      const row = this.db.prepare("SELECT data_json FROM controlled_trials WHERE id=? AND state='reserved'").pluck().get(id) as string | undefined;
+      if (!row) throw new ContractError('invalid_state');
+      const value = trialRecordSchema.parse({ ...JSON.parse(row), ...patch });
+      this.db.prepare('UPDATE controlled_trials SET data_json=? WHERE id=?').run(JSON.stringify(value), id);
+    });
+  }
+
+  finishControlledTrial(id: string, patch: Pick<TrialRecord, 'state' | 'outcome' | 'actualInputTokens' | 'actualOutputTokens' | 'accountedMicroCny' | 'errorCode'>): TrialRecord {
+    return this.transaction(() => {
+      const row = this.db.prepare("SELECT data_json FROM controlled_trials WHERE id=? AND state='reserved'").pluck().get(id) as string | undefined;
+      if (!row || patch.state === 'reserved' || patch.outcome === 'running') throw new ContractError('invalid_state');
+      const value = trialRecordSchema.parse({ ...JSON.parse(row), ...patch });
+      this.db.prepare('UPDATE controlled_trials SET state=?,data_json=? WHERE id=?').run(value.state, JSON.stringify(value), id);
+      return value;
+    });
+  }
+
+  recoverControlledTrials(): void {
+    this.transaction(() => {
+      const rows = this.db.prepare("SELECT id,data_json FROM controlled_trials WHERE state='reserved'").all() as Array<{ id: string; data_json: string }>;
+      for (const row of rows) {
+        const value = trialRecordSchema.parse({ ...JSON.parse(row.data_json), state: 'unknown', outcome: 'interrupted' });
+        this.db.prepare('UPDATE controlled_trials SET state=?,data_json=? WHERE id=?').run(value.state, JSON.stringify(value), row.id);
+      }
     });
   }
 

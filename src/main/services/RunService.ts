@@ -59,7 +59,8 @@ export class RunService {
 
   constructor(private readonly database: Database, private readonly provider: ProviderAdapter,
     private readonly buildMessages: RunMessagesBuilder = (run,_member,_index,preparation) => preparation.repeat?.messages ?? [{ role: 'user', content: run.task! }],
-    private readonly registry?: ProviderRegistry) {}
+    private readonly registry?: ProviderRegistry,
+    private readonly assertGenerationAllowed: () => void = () => {}) {}
 
   createDemoRoom(objective: string): string {
     const roomId = randomUUID();
@@ -291,6 +292,7 @@ export class RunService {
   }
 
   private assertAvailable(context?: RunContext): void {
+    this.assertGenerationAllowed();
     if (this.shuttingDown) throw new ContractError('invalid_state');
     if (this.activeRooms.size && (!context || this.contexts.get(context.runId) !== context)) throw new Error('Another room already has an active run');
   }

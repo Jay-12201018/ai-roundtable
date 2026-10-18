@@ -8,7 +8,7 @@ assert.equal(resolve(result.paths.userData),join(result.directory,'userData'));
 const db=new Sqlite(join(directory,'userData','ai-roundtable.db'),{readonly:true,fileMustExist:true});
 let checks=0;const check=(v,message)=>{checks++;assert.ok(v,message);};
 try{
- assert.deepEqual(db.prepare('PRAGMA integrity_check').pluck().all(),['ok']);assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(),[1,2,3]);
+ assert.deepEqual(db.prepare('PRAGMA integrity_check').pluck().all(),['ok']);assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(),[1,2,3,4]);
  const saved=result.saved;const run=db.prepare('SELECT status,members_snapshot FROM workflow_runs WHERE id=?').get(saved.runId);assert.equal(run.status,'completed');const members=JSON.parse(run.members_snapshot);assert.deepEqual(members.map(m=>m.providerId),[saved['openai-compatible'],saved.openai,saved['openai-compatible']]);
  const messages=id=>db.prepare('SELECT id,content,status FROM messages WHERE run_id=? ORDER BY rowid').all(id);
  const attempts=id=>db.prepare('SELECT request_id,input_snapshot,status FROM request_attempts WHERE run_id=? ORDER BY rowid').all(id);
