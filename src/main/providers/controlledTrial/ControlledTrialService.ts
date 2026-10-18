@@ -4,6 +4,7 @@ import type { ProviderRegistry } from '../ProviderRegistry';
 import { ContractError, toPublicError } from '../../../shared/contracts/errors';
 import { deepSeekTrialReview, estimateDeepSeekInput, type LocalTokenEstimate } from './estimate';
 import type { TrialRecord } from './record';
+import { TrialDiagnostics } from '../diagnostics';
 
 export type TrialQuote = TrialRecord & { expiresAt: string; estimate: Extract<LocalTokenEstimate, { kind: 'estimated' }> };
 const prompt = 'Reply OK.';
@@ -90,7 +91,21 @@ export class ControlledTrialService {
     if (!approved) throw new ContractError('forbidden');
     this.checkQuote(quote);
     const { expiresAt: _expiry, estimate: _estimate, ...record } = quote;
-    this.database.reserveControlledTrial(record);
+    let persistenceFailed = false;
+    const diagnostics = new TrialDiagnostics(value => {
+      try { this.database.updateControlledTrialProgress(quote.id, { diagnostics: value }); }
+      catch { persistenceFailed = true; controller.abort(new ContractError('internal_error')); }
+    });
+    this.database.reserveControlledTrial({ ...record, diagnostics: diagnostics.snapshot() });
+    const saveProgress = (patch: Partial<Pick<TrialRecord, 'text' | 'observedUsage'>>) => {
+      try { this.database.updateControlledTrialProgress(quote.id, patch); }
+      catch { persistenceFailed = true; throw new ContractError('internal_error'); }
+    };
+    const diagnosticSnapshot = () => persistenceFailed
+      ? { ...diagnostics.snapshot(), stage: 'accounting' as const, category: 'accounting_failed' as const }
+      : diagnostics.snapshot();
+    let observing = true;
+    const observe: typeof diagnostics.observe = event => { if (observing) diagnostics.observe(event); };
     const timer = setTimeout(() => controller.abort(new ContractError('timeout')), 20000);
     let usage: { inputTokens: number; outputTokens: number } | undefined;
     let completed = false; let error: TrialRecord['errorCode'] = null; let text = '';
@@ -98,27 +113,41 @@ export class ControlledTrialService {
       for await (const chunk of this.registry.streamControlledTrial(quote.providerId, {
         requestId: quote.requestId, modelId: quote.modelId, messages: [{ role: 'user', content: prompt }],
         outputTokenLimit: 128, signal: controller.signal,
-      }, () => this.checkQuote(quote))) {
+      }, () => this.checkQuote(quote), observe)) {
         if (chunk.type === 'text_delta') {
           text += chunk.text;
           if (text.length > 16384) throw new ContractError('invalid_response');
-          this.database.updateControlledTrialProgress(quote.id, { text });
+          saveProgress({ text });
         } else if (chunk.type === 'usage') {
           usage = { inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens };
-          this.database.updateControlledTrialProgress(quote.id, { observedUsage: usage });
+          saveProgress({ observedUsage: usage });
         }
-        else if (chunk.type === 'error') error = chunk.error.code;
+        else if (chunk.type === 'error') { error = chunk.error.code; diagnostics.fail(error); }
         else if (chunk.type === 'finish') completed = true;
       }
-    } catch (failure) { error = toPublicError(failure).code; }
-    finally { clearTimeout(timer); controller.abort(); }
+    } catch (failure) { error = toPublicError(failure).code; diagnostics.fail(error); }
+    finally { observing = false; clearTimeout(timer); controller.abort(); }
     // A full terminal stream and valid usage are required to release any reservation.
-    const accounted = completed && !error && usage ? usage.inputTokens * quote.inputMicroCnyPerToken + usage.outputTokens * quote.outputMicroCnyPerToken : null;
-    const settled = accounted !== null && Number.isSafeInteger(accounted);
-    return this.database.finishControlledTrial(quote.id, {
-      state: settled ? 'settled' : 'unknown', outcome: error === 'cancelled' ? 'cancelled' : error ? 'error' : completed ? 'completed' : 'interrupted',
+    if (persistenceFailed) { error = 'internal_error'; diagnostics.observe({ stage: 'accounting', category: 'accounting_failed' }); }
+    if (completed && !error && !usage) diagnostics.observe({ stage: 'usage', category: 'usage_missing' });
+    const accounted = completed && !error && !persistenceFailed && usage ? usage.inputTokens * quote.inputMicroCnyPerToken + usage.outputTokens * quote.outputMicroCnyPerToken : null;
+    if (accounted !== null && !Number.isSafeInteger(accounted)) diagnostics.observe({ stage: 'accounting', category: 'accounting_failed' });
+    if (accounted !== null && Number.isSafeInteger(accounted)) diagnostics.observe({ stage: 'complete' });
+    const settled = !persistenceFailed && accounted !== null && Number.isSafeInteger(accounted);
+    if (!settled && !diagnostics.snapshot().category) diagnostics.fail(error ?? 'network_error');
+    const patch = {
+      state: settled ? 'settled' as const : 'unknown' as const, outcome: error === 'cancelled' ? 'cancelled' as const : error ? 'error' as const : completed ? 'completed' as const : 'interrupted' as const,
       actualInputTokens: settled ? usage!.inputTokens : null, actualOutputTokens: settled ? usage!.outputTokens : null,
-      accountedMicroCny: settled ? accounted : null, errorCode: error,
-    });
+      accountedMicroCny: settled ? accounted : null, errorCode: persistenceFailed ? 'internal_error' as const : error, diagnostics: diagnosticSnapshot(),
+    };
+    try { return this.database.finishControlledTrial(quote.id, patch); }
+    catch {
+      // A failed settlement never releases the reservation or fabricates a zero charge.
+      diagnostics.observe({ stage: 'accounting', category: 'accounting_failed' });
+      return this.database.finishControlledTrial(quote.id, {
+        state: 'unknown', outcome: 'error', actualInputTokens: null, actualOutputTokens: null,
+        accountedMicroCny: null, errorCode: 'internal_error', diagnostics: diagnosticSnapshot(),
+      });
+    }
   }
 }

@@ -13,6 +13,7 @@ import { OpenAIProvider } from './openai/OpenAIProvider';
 import { OpenAICompatibleProvider } from './openai-compatible/OpenAICompatibleProvider';
 import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider';
 import { createSafeFetch } from './network';
+import type { DiagnosticObserver } from './diagnostics';
 import { deepSeekFlashCapabilities } from './modelPolicies/deepseekFlash';
 
 export interface ApprovedModelPolicy {
@@ -30,7 +31,7 @@ export interface ApprovedModelPolicy {
 type Options = {
   policyResolver?: (configuration: ProviderConfiguration, modelId: string) => ApprovedModelPolicy | undefined;
   capabilitiesResolver?: (configuration: ProviderConfiguration) => ChatCompletionCapabilities;
-  transportFactory?: (guard: () => void) => typeof fetch;
+  transportFactory?: (guard: () => void, diagnostics?: DiagnosticObserver) => typeof fetch;
 };
 type Approval = { kind: string; baseUrl: string; revision: string };
 const officialCapabilities: ChatCompletionCapabilities = { outputTokenParameter: 'max_completion_tokens', streamUsage: true, listModels: true, authentication: 'models' };
@@ -79,7 +80,7 @@ export class ProviderRegistry {
   resolveCapabilities(configuration: ProviderConfiguration): ChatCompletionCapabilities {
     return configuration.kind === 'openai' ? officialCapabilities : this.options.capabilitiesResolver?.(configuration) ?? deepSeekFlashCapabilities(configuration) ?? unknownCapabilities;
   }
-  createTransport(guard: () => void): typeof fetch { return this.options.transportFactory?.(guard) ?? createSafeFetch(guard); }
+  createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch { return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics); }
 
   assertSelection(providerId: string, modelId: string): void {
     const configuration = this.database.validateModelSelection(providerId, modelId);
@@ -131,7 +132,7 @@ export class ProviderRegistry {
   }
 
   // Main-only, single fixed-prompt test. This does not approve a policy for ordinary Runs.
-  async *streamControlledTrial(providerId: string, input: StreamChatInput, permit: () => void) {
+  async *streamControlledTrial(providerId: string, input: StreamChatInput, permit: () => void, diagnostics?: DiagnosticObserver) {
     try {
       const { signal: _signal, ...parameters } = input;
       const parsed = streamChatInputSchema.parse(parameters);
@@ -141,20 +142,26 @@ export class ProviderRegistry {
       const { configuration, revision } = this.controlledTrialTarget(providerId);
       const approval = this.trusted(providerId);
       const guard = () => {
-        permit();
-        if (input.signal?.aborted) throw input.signal.reason instanceof ContractError ? input.signal.reason : new ContractError('cancelled');
-        if (this.controlledTrialTarget(providerId).revision !== revision) throw new ContractError('forbidden');
+        try {
+          permit();
+          if (input.signal?.aborted) throw input.signal.reason instanceof ContractError ? input.signal.reason : new ContractError('cancelled');
+          if (this.controlledTrialTarget(providerId).revision !== revision) throw new ContractError('forbidden');
+        } catch (error) {
+          const code = toPublicError(error).code;
+          diagnostics?.({ category: code === 'cancelled' ? 'cancelled' : code === 'timeout' ? 'request_timeout' : 'policy_rejected' });
+          throw error;
+        }
       };
       guard();
-      const adapter = this.createRealAdapter(configuration, approval, guard);
+      const adapter = this.createRealAdapter(configuration, approval, guard, diagnostics);
       for await (const chunk of adapter.streamChat({ ...parsed, signal: input.signal })) { guard(); yield chunk; }
     } catch (error) { yield { type: 'error' as const, requestId: input.requestId, error: toPublicError(error) }; }
   }
 
-  private createRealAdapter(configuration: ProviderConfiguration, approval: Approval, guard: () => void): ProviderAdapter {
+  private createRealAdapter(configuration: ProviderConfiguration, approval: Approval, guard: () => void, diagnostics?: DiagnosticObserver): ProviderAdapter {
     const providerId = configuration.id;
-    const transport = this.createTransport(guard);
-    const options = { configuration, confirmedBaseUrl: approval.baseUrl,
+    const transport = this.createTransport(guard, diagnostics);
+    const options = { configuration, confirmedBaseUrl: approval.baseUrl, diagnostics,
       resolveKey: async (id: string) => {
         guard();
         if (id !== providerId) throw new ContractError('forbidden');

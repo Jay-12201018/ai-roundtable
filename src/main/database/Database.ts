@@ -869,7 +869,7 @@ export class Database {
       .map(value => trialRecordSchema.parse(JSON.parse(value)));
   }
 
-  updateControlledTrialProgress(id: string, patch: Partial<Pick<TrialRecord, 'text' | 'observedUsage'>>): void {
+  updateControlledTrialProgress(id: string, patch: Partial<Pick<TrialRecord, 'text' | 'observedUsage' | 'diagnostics'>>): void {
     this.transaction(() => {
       const row = this.db.prepare("SELECT data_json FROM controlled_trials WHERE id=? AND state='reserved'").pluck().get(id) as string | undefined;
       if (!row) throw new ContractError('invalid_state');
@@ -878,7 +878,7 @@ export class Database {
     });
   }
 
-  finishControlledTrial(id: string, patch: Pick<TrialRecord, 'state' | 'outcome' | 'actualInputTokens' | 'actualOutputTokens' | 'accountedMicroCny' | 'errorCode'>): TrialRecord {
+  finishControlledTrial(id: string, patch: Pick<TrialRecord, 'state' | 'outcome' | 'actualInputTokens' | 'actualOutputTokens' | 'accountedMicroCny' | 'errorCode'> & Pick<TrialRecord, 'diagnostics'>): TrialRecord {
     return this.transaction(() => {
       const row = this.db.prepare("SELECT data_json FROM controlled_trials WHERE id=? AND state='reserved'").pluck().get(id) as string | undefined;
       if (!row || patch.state === 'reserved' || patch.outcome === 'running') throw new ContractError('invalid_state');

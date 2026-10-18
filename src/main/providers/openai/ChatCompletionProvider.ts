@@ -8,6 +8,7 @@ import { idSchema } from '../../../shared/schemas/common';
 import type { ErrorCode } from '../../../shared/schemas/error';
 import type { ConnectionTestResult, ListModelsInput, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../types';
 import { readSse } from './sse';
+import type { DiagnosticObserver } from '../diagnostics';
 
 export interface ChatCompletionOptions {
   configuration: ProviderConfiguration;
@@ -16,6 +17,7 @@ export interface ChatCompletionOptions {
   resolveKey: (providerId: string, reference: KeyReference | null) => Promise<string | undefined>;
   timeoutMs?: number;
   fetch?: typeof fetch;
+  diagnostics?: DiagnosticObserver;
 }
 export interface ChatCompletionCapabilities {
   outputTokenParameter: 'max_tokens' | 'max_completion_tokens' | null;
@@ -50,6 +52,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
   private readonly timeoutMs: number;
   private readonly resolveKey: ChatCompletionOptions['resolveKey'];
   private readonly fetcher: typeof fetch;
+  private readonly diagnostics?: DiagnosticObserver;
 
   protected constructor(options: ChatCompletionOptions, kind: 'openai' | 'openai-compatible', capabilities: ChatCompletionCapabilities) {
     try {
@@ -62,6 +65,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
       this.resolveKey = options.resolveKey;
       this.fetcher = options.fetch ?? globalThis.fetch;
+      this.diagnostics = options.diagnostics;
     } catch (error) { throw new ContractError(error instanceof ContractError ? error.code : 'invalid_input'); }
   }
 
@@ -104,6 +108,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
     parse(idSchema, input?.requestId);
     const scope = new RequestScope(input.signal, this.timeoutMs);
     const { requestId } = input;
+    let parsingStream = false;
     try {
       const parsed = parse(streamChatInputSchema, withoutSignal(input)); scope.check();
       if (parsed.outputTokenLimit === undefined) throw new ContractError('invalid_input');
@@ -118,6 +123,8 @@ export class ChatCompletionProvider implements ProviderAdapter {
       };
       const response = await scope.wait(() => client.chat.completions.create(body, { signal: scope.signal, maxRetries: 0 }).asResponse());
       scope.check();
+      parsingStream = true;
+      this.diagnostics?.({ stage: 'stream' });
       yield { type: 'start', requestId };
       let finish: 'stop' | 'length' | 'content_filter' | undefined;
       let used = false;
@@ -151,26 +158,46 @@ export class ChatCompletionProvider implements ProviderAdapter {
         }
       }
       throw new ContractError('invalid_response');
-    } catch (error) { yield { type: 'error', requestId, error: this.failure(error, scope).detail }; }
+    } catch (error) {
+      const failure = this.failure(error, scope);
+      if (failure.code === 'cancelled' || failure.code === 'timeout') this.diagnostics?.({ category: failure.code === 'timeout' ? 'request_timeout' : 'cancelled' });
+      else if (failure.code === 'invalid_response' || parsingStream && failure.code === 'unsupported') this.diagnostics?.({ stage: 'stream', category: 'response_invalid' });
+      else if (error instanceof ContractError && ['forbidden', 'invalid_input', 'unsupported', 'invalid_state'].includes(error.code)) this.diagnostics?.({ category: 'policy_rejected' });
+      else this.diagnostics?.({ category: 'network_unknown' });
+      yield { type: 'error', requestId, error: failure.detail };
+    }
     finally { scope.close(); }
   }
 
   private async client(scope: RequestScope): Promise<OpenAI> {
-    const key = await scope.wait(() => this.resolveKey(this.configuration.id, this.configuration.keyReference));
-    scope.check();
-    if (typeof key !== 'string' || key.length === 0 || /\s|\p{Cc}/u.test(key)) throw new ContractError('authentication_failed');
+    this.diagnostics?.({ stage: 'credential' });
+    let key: string | undefined;
+    try { key = await scope.wait(() => this.resolveKey(this.configuration.id, this.configuration.keyReference)); scope.check(); }
+    catch (error) {
+      this.diagnostics?.({ stage: 'credential', category: scope.signal.aborted ? scope.signal.reason instanceof ContractError && scope.signal.reason.code === 'timeout' ? 'request_timeout' : 'cancelled' : 'credential_read_failed' });
+      throw error;
+    }
+    if (typeof key !== 'string' || key.length === 0 || /\s|\p{Cc}/u.test(key)) {
+      this.diagnostics?.({ stage: 'credential', category: 'credential_unavailable' }); throw new ContractError('authentication_failed');
+    }
     const baseUrl = this.baseUrl;
     const fetcher: typeof fetch = async (url, init) => {
       scope.check();
       const target = String(url);
       if (!(target === `${baseUrl}/models` && init?.method === 'GET'
         || target === `${baseUrl}/chat/completions` && init?.method === 'POST')) throw new ContractError('invalid_input');
+      this.diagnostics?.({ stage: 'network_client', evidence: 'client_invoked' });
+      scope.check();
       const response = await this.fetcher(url, { ...init, redirect: 'error' });
+      if (response.status >= 100 && response.status <= 599) this.diagnostics?.({ stage: 'response', evidence: 'http_response', httpStatus: response.status });
+      else this.diagnostics?.({ stage: 'response', category: 'response_invalid' });
       try { scope.check(); } catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
       if (response.redirected || response.status >= 300 && response.status < 400) {
+        this.diagnostics?.({ stage: 'response', category: 'http_error' });
         void response.body?.cancel().catch(() => {}); throw new ContractError('invalid_response');
       }
       if (!response.ok) {
+        this.diagnostics?.({ stage: 'response', category: 'http_error' });
         // Discard untrusted error bodies/headers before the SDK can retain or log credentials.
         void response.body?.cancel().catch(() => {});
         return new Response(null, { status: response.status });

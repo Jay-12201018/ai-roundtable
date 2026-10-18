@@ -47,6 +47,7 @@ for (const file of [entry, preload, renderer]) assert.ok(fs.existsSync(file), 'P
 const resultPath = join(directory, restarting ? 'trial-restart.json' : 'trial-first.json');
 const result = { status: 'RUNNING', phase: restarting ? 'restart' : 'first', directory, paths, dbPath,
   entry, preload, renderer, runtime: { electron: process.versions.electron, node: process.versions.node, abi: process.versions.modules, arch: process.arch },
+  fixtureClock: globalThis.__roundtableDiagnosticFixtureClock ?? null,
   isolatedBeforeReady: !app.isReady(), chromiumMockKeychain: true, realKeychainCalls: 0,
   fakeStorage: { replacedMethods: [], encrypt: 0, decrypt: 0 }, policyInjected: false,
   nodeNetworkAttempts: [], chromiumNetworkAttempts: [], mappedTargets: [], requests: [], dialogs: [],
@@ -126,7 +127,7 @@ dialog.showMessageBox = async (...values) => {
     for (const text of [providerId, 'https://api.deepseek.com', 'deepseek-flash', '单 Agent', 'Reply OK.', '估算', '未校准', '并非精确计数', 'max_tokens=128', '关闭思考', '¥0.05', '不是服务商账单的绝对硬上限', '不自动重试']) assert.ok(options.detail.includes(text), 'Missing authorization detail: ' + text);
     return { response: scenario === 'cancel' ? 0 : 1 };
   }
-  if (options.message === '没有发起新的自动重试' || options.message.startsWith('受控测试：')) return { response: 0 };
+  if (options.message === '没有发起新的自动重试' || options.message.startsWith('受控测试：') || options.message.startsWith('测试状态：')) return { response: 0 };
   throw new Error('Unexpected production dialog');
 };
 
@@ -187,8 +188,8 @@ async function main() {
   const originalModelPolicy = Registry.prototype.resolveModelPolicy;
   const originalCapabilities = Registry.prototype.resolveCapabilities;
   const createTransport = Registry.prototype.createTransport;
-  Registry.prototype.createTransport = function (guard) {
-    const transport = createTransport.call(this, guard);
+  Registry.prototype.createTransport = function (guard, diagnostics) {
+    const transport = createTransport.call(this, guard, diagnostics);
     return (url, init) => {
       const target = new URL(String(url));
       assert.equal(target.href, 'https://api.deepseek.com/chat/completions', 'Only the exact production DeepSeek generation route may map to the fixture');
@@ -207,7 +208,8 @@ async function main() {
   check('production native trial menu installed', Boolean(trialMenu?.submenu));
   const start = trialMenu.submenu.items.find(item => item.label === 'DeepSeek 单次测试…');
   const stop = trialMenu.submenu.items.find(item => item.label === '停止本次测试');
-  check('production start and Stop actions installed', Boolean(start && stop));
+  const recent = trialMenu.submenu.items.find(item => item.label === '查看最近测试记录…');
+  check('production start Stop and recent-record actions installed', Boolean(start && stop && recent));
 
   if (!restarting) {
     result.provider = await contents.executeJavaScript(`(async()=>{const a=window.roundtable.settings;const provider=await a.createProvider({name:'DeepSeek controlled fixture',kind:'openai-compatible',baseUrl:'https://api.deepseek.com',enabled:true,isDefault:false,defaultModelId:'deepseek-flash',customModels:[{id:'deepseek-flash',name:'DeepSeek Flash'}]});const key=await a.setKey({providerId:provider.id,apiKey:${JSON.stringify(fakeKey)}});await a.confirmTarget({providerId:provider.id,baseUrl:'https://api.deepseek.com',confirmed:true});return {provider,key};})()`);
@@ -234,6 +236,9 @@ async function main() {
     equal('preflight input remains a distinct estimate', settled.estimatedInputTokens, 67);
     equal('preflight estimated cost is not replaced by settlement', settled.estimatedMicroCny, 1158);
     equal('partial text persisted from production stream', settled.text, 'OK');
+    equal('safe diagnostic success retains HTTP evidence and completion', [settled.diagnostics?.version, settled.diagnostics?.stage, settled.diagnostics?.evidence, settled.diagnostics?.httpStatus, settled.diagnostics?.category], [1, 'complete', 'http_response', 200, null]);
+    check('safe diagnostic success retains client and response timestamps', Number.isFinite(Date.parse(settled.diagnostics.clientInvokedAt)) && Number.isFinite(Date.parse(settled.diagnostics.httpResponseAt)));
+    result.settledDiagnostics = settled.diagnostics;
     result.settledId = settled.id;
     const beforeStrict = result.fakeStorage.decrypt;
     result.strict = await contents.executeJavaScript(`window.roundtable.settings.testConnection({providerId:${JSON.stringify(providerId)},level:'generation',modelId:'deepseek-flash',allowGeneration:true})`);
@@ -263,6 +268,8 @@ async function main() {
     equal('Stop cancellation is retained', unknown.outcome, 'cancelled');
     equal('Stop retains full CNY reservation', unknown.reservedMicroCny, 50000);
     equal('missing usage never becomes zero cost', [unknown.actualInputTokens, unknown.actualOutputTokens, unknown.accountedMicroCny, unknown.observedUsage], [null, null, null, null]);
+    equal('safe diagnostic Stop retains cancellation and HTTP response', [unknown.diagnostics?.category, unknown.diagnostics?.evidence, unknown.diagnostics?.httpStatus], ['cancelled', 'http_response', 200]);
+    result.unknownDiagnostics = unknown.diagnostics;
     result.unknownId = unknown.id;
   } else {
     equal('restart makes zero automatic requests', result.requests.length, 0);
@@ -271,6 +278,8 @@ async function main() {
     equal('settled usage and accounting survive restart', [rows[0].id, rows[0].state, rows[0].accountedMicroCny], [prior.settledId, 'settled', 206]);
     equal('unresolved reservation survives restart', [rows[1].id, rows[1].state, rows[1].reservedMicroCny], [prior.unknownId, 'unknown', 50000]);
     equal('restart preserves partial and unknown cost', [rows[1].text, rows[1].accountedMicroCny], ['partial controlled fixture', null]);
+    equal('safe diagnostic settled observations survive a fresh process unchanged', rows[0].diagnostics, prior.settledDiagnostics);
+    equal('safe diagnostic unknown observations survive a fresh process unchanged', rows[1].diagnostics, prior.unknownDiagnostics);
     result.restoredKey = await contents.executeJavaScript(`window.roundtable.settings.getProviderKeyState({providerId:${JSON.stringify(providerId)}})`);
     equal('fake encrypted Key restores in fresh process', result.restoredKey.state, 'configured');
     await contents.executeJavaScript(`window.roundtable.settings.confirmTarget({providerId:${JSON.stringify(providerId)},baseUrl:'https://api.deepseek.com',confirmed:true})`);
@@ -282,6 +291,12 @@ async function main() {
     equal('restart and blocked test send zero requests', result.requests.length, 0);
     equal('blocked test creates no new trial record', readTrials().length, 2);
   }
+  const beforeRecentRequests = result.requests.length; const beforeRecentDecrypt = result.fakeStorage.decrypt;
+  scenario = 'recent-record'; recent.click();
+  const recentDialog = result.dialogs.find(value => value.scenario === 'recent-record' && value.message.startsWith('测试状态：'));
+  check('safe diagnostic recent-record dialog explains cancellation HTTP evidence and retained reserve', Boolean(recentDialog) && ['请求已取消', '已观察到 HTTP 响应', 'HTTP 200', '仍保留 ¥0.05', '人工核对'].every(text => recentDialog.detail.includes(text)));
+  equal('safe diagnostic viewing recent records sends no HTTP request', result.requests.length, beforeRecentRequests);
+  equal('safe diagnostic viewing recent records never reads Key', result.fakeStorage.decrypt, beforeRecentDecrypt);
   result.records = readTrials(); result.providerId = providerId;
   check('trial and ordinary DTOs contain no fake Key', !JSON.stringify({ records: result.records, provider: result.provider, strict: result.strict, restoredKey: result.restoredKey, dialogs: result.dialogs }).includes(fakeKey));
   equal('Node network remains inside owned fixture', result.nodeNetworkAttempts, []);
@@ -293,9 +308,11 @@ async function main() {
     && Object.getOwnPropertyNames(safeStorage).filter(name => typeof safeStorage[name] === 'function').every(name => safeStorage[name] === fake[name]));
   check('no model policy or counter injected', Registry.prototype.resolveModelPolicy === originalModelPolicy && Registry.prototype.resolveCapabilities === originalCapabilities);
   check('assertions actually executed', result.checks.length >= (restarting ? 20 : 35));
+  result.diagnosticAssertions = result.checks.filter(name => name.startsWith('safe diagnostic ')).length;
+  check('safe diagnostic assertions actually execute', result.diagnosticAssertions >= (restarting ? 5 : 6));
   result.assertions = result.checks.length; result.status = 'PASS'; save();
-  if (!restarting) fs.writeFileSync(manifestPath, JSON.stringify({ status: 'PASS', directory, providerId, settledId: result.settledId, unknownId: result.unknownId }, null, 2), { mode: 0o600, flag: 'wx' });
-  console.log('DEEPSEEK_TRIAL_PRODUCTION_PASS ' + JSON.stringify({ resultPath, manifestPath, assertions: result.assertions, localFixtureRequests: result.requests.length, liveApi: false }));
+  if (!restarting) fs.writeFileSync(manifestPath, JSON.stringify({ status: 'PASS', directory, providerId, settledId: result.settledId, unknownId: result.unknownId, settledDiagnostics: result.settledDiagnostics, unknownDiagnostics: result.unknownDiagnostics, fixtureClock: result.fixtureClock }, null, 2), { mode: 0o600, flag: 'wx' });
+  console.log('DEEPSEEK_TRIAL_PRODUCTION_PASS ' + JSON.stringify({ resultPath, manifestPath, assertions: result.assertions, diagnosticAssertions: result.diagnosticAssertions, fixtureClock: result.fixtureClock, localFixtureRequests: result.requests.length, liveApi: false }));
   await new Promise(resolveClose => { fixture.closeAllConnections(); fixture.close(resolveClose); });
   app.quit();
 }

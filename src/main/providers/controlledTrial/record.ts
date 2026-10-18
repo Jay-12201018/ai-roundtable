@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema, timestampSchema } from '../../../shared/schemas/common';
 import { errorCodeSchema } from '../../../shared/schemas/error';
+import { trialDiagnosticsSchema } from '../diagnostics';
 
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const trialRecordSchema = z.object({
@@ -14,6 +15,7 @@ export const trialRecordSchema = z.object({
   outcome: z.enum(['running', 'completed', 'cancelled', 'error', 'interrupted']),
   actualInputTokens: count.nullable(), actualOutputTokens: count.nullable(),
   observedUsage: z.object({ inputTokens: count, outputTokens: count }).strict().nullable(),
+  diagnostics: trialDiagnosticsSchema.optional(),
   accountedMicroCny: count.nullable(), text: z.string().max(16384), errorCode: errorCodeSchema.nullable(),
 }).strict().superRefine((value, ctx) => {
   const settled = value.state === 'settled';

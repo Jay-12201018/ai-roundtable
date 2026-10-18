@@ -2,6 +2,9 @@ import { app, dialog, Menu, MenuItem } from 'electron';
 import type { Database } from '../../database/Database';
 import { ControlledTrialService, type TrialQuote } from './ControlledTrialService';
 import { toPublicError } from '../../../shared/contracts/errors';
+import { errorCodeSchema } from '../../../shared/schemas/error';
+import { trialDiagnosticsSchema } from '../diagnostics';
+import type { TrialRecord } from './record';
 
 export const trialWarning = (quote: TrialQuote) => [
   `Provider：${quote.providerId}；目标：${quote.baseUrl} · ${quote.modelId}`,
@@ -12,6 +15,39 @@ export const trialWarning = (quote: TrialQuote) => [
   '缺失 usage 或中断将保留未知费用及全部预留，阻止后续测试。',
   `价格有效至 ${quote.priceExpiresAt}；确认只授权该 Provider、该提示词和本次请求。`,
 ].join('\n');
+
+export function formatTrialDiagnostics(record: TrialRecord): string {
+  const code = errorCodeSchema.safeParse(record.errorCode);
+  const header = `错误代码：${record.errorCode === null ? '无' : code.success ? code.data : '未知'}`;
+  const parsed = trialDiagnosticsSchema.safeParse(record.diagnostics);
+  if (!parsed.success) return `${header}\n当时未记录诊断，无法追溯发送阶段或 HTTP 状态。请求是否到达及费用须人工核对账单。`;
+  const value = parsed.data;
+  const stages = {
+    validation: '发送前安全检查', credential: '凭据读取', network_client: '网络客户端调用', dns: 'DNS 解析',
+    tcp: 'TCP 连接', tls: 'TLS 握手', request: '请求发送', response: 'HTTP 响应', stream: 'SSE 响应解析',
+    usage: 'usage 检查', accounting: '费用核算与持久化', complete: '完成',
+  };
+  const categories = {
+    credential_unavailable: '凭据不可用', credential_read_failed: '凭据读取失败', dns_failed: 'DNS 解析失败',
+    target_rejected: '请求目标被安全策略拒绝', tcp_failed: 'TCP 连接失败', tcp_timeout: 'TCP 连接超时',
+    tls_failed: 'TLS 握手或证书验证失败', http_error: 'HTTP 状态错误', request_timeout: '请求超时',
+    request_interrupted: '请求或响应中断', response_invalid: '响应或 SSE 解析失败', usage_missing: '服务商 usage 缺失',
+    accounting_failed: '费用核算或记录失败', cancelled: '请求已取消', policy_rejected: '安全检查未通过',
+    network_unknown: '网络异常，具体原因未知',
+  };
+  const evidence = {
+    not_started: '未开始网络调用',
+    client_invoked: '已调用网络客户端，无法确认服务商是否收到',
+    http_response: '已观察到 HTTP 响应；不证明生成完成或计费结果',
+  };
+  return [header, `阶段：${stages[value.stage]}`, `类别：${value.category === null ? '未观察到错误' : categories[value.category]}`,
+    `证据：${evidence[value.evidence]}`, `开始：${value.startedAt}`, `更新：${value.updatedAt}`,
+    ...(value.clientInvokedAt ? [`客户端调用：${value.clientInvokedAt}`] : []),
+    ...(value.httpResponseAt ? [`HTTP 响应：${value.httpResponseAt}`] : []),
+    ...(value.httpStatus === undefined ? [] : [`HTTP ${value.httpStatus}`]),
+    '诊断不替代服务商账单；unknown 记录与全部预留须保留，等待人工核对。',
+  ].join('\n');
+}
 
 export async function confirmTrial(quote: TrialQuote): Promise<boolean> {
   const choice = await dialog.showMessageBox({ type: 'warning', title: '授权一次 DeepSeek 受控测试',
@@ -31,7 +67,7 @@ export function installTrialMenu(database: Database, service: ControlledTrialSer
     { label: '查看最近测试记录…', click: () => {
       const row = database.listControlledTrials()[0];
       void dialog.showMessageBox({ type: 'info', message: row ? `测试状态：${row.outcome} / ${row.state}` : '尚无受控测试',
-        detail: row ? `${row.text}\n服务商 usage：${row.actualInputTokens ?? '未知'} 输入 / ${row.actualOutputTokens ?? '未知'} 输出\n输入估算偏差：${row.actualInputTokens === null ? '未知' : row.actualInputTokens - row.estimatedInputTokens} tokens\n按核验费率核算：${row.accountedMicroCny === null ? '未知（仍保留 ¥0.05）' : '¥' + (row.accountedMicroCny / 1000000).toFixed(6)}\n这是 usage 核算，不是账单证明。` : '查看记录不会发送请求。' });
+        detail: row ? `${row.text}\n服务商 usage：${row.actualInputTokens ?? '未知'} 输入 / ${row.actualOutputTokens ?? '未知'} 输出\n输入估算偏差：${row.actualInputTokens === null ? '未知' : row.actualInputTokens - row.estimatedInputTokens} tokens\n按核验费率核算：${row.accountedMicroCny === null ? '未知（仍保留 ¥0.05）' : '¥' + (row.accountedMicroCny / 1000000).toFixed(6)}\n这是 usage 核算，不是账单证明。\n${formatTrialDiagnostics(row)}` : '查看记录不会发送请求。' });
     } },
   ] }));
   Menu.setApplicationMenu(menu);
@@ -50,9 +86,9 @@ export function installTrialMenu(database: Database, service: ControlledTrialSer
       const quote = service.prepare(providers[choice.response - 1].id);
       const record = await service.execute(quote.id);
       await dialog.showMessageBox({ type: record.state === 'settled' ? 'info' : 'warning',
-        message: `受控测试：${record.outcome} / ${record.state}`, detail: record.state === 'settled'
+        message: `受控测试：${record.outcome} / ${record.state}`, detail: (record.state === 'settled'
           ? `${record.text}\n服务商实际 usage：${record.actualInputTokens} 输入 / ${record.actualOutputTokens} 输出。\n按核验费率核算 ¥${(record.accountedMicroCny! / 1000000).toFixed(6)}，账单以服务商为准。`
-          : `${record.text}\n费用未知，¥0.05 预留仍保留；禁止自动重试。` });
+          : `${record.text}\n费用未知，¥0.05 预留仍保留；禁止自动重试。`) + `\n${formatTrialDiagnostics(record)}` });
     } catch (error) {
       if (!app.isReady()) return;
       const code = toPublicError(error).code;

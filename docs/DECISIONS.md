@@ -232,3 +232,11 @@ D070/D071的候选未合main边界由本次合并授权取代，其计数阻塞�
 | D076 | 用户最终授权后从ae5c24c严格ff-only合入获批db97b95，main独立必要复验通过后仅DEEPSEEK-TRIAL-01 merged/verified | 17个Worktree/原历史保留；合并后无业务/测试修改，原migration1–3不变；独立治理提交记录状态，不启动其他任务或真实请求 | main Node/Electron各1168、strict/build、双ABI、42/24受控生产/重启及退出审计、原R09/R07/R08生产回归均exit0；[本次证据](verification/2026-10-18-deepseek-controlled-trial-main.md) |
 
 D073–D075的候选未合main边界由本次合并授权取代；估算性质、严格TOKEN阻塞、未知费用保护及有限Keychain证据边界仍有效。正式真实API、实际账单、v4整App真实后端、签名/锁定登录Keychain及跨平台发布未验收。
+
+## DeepSeek 受控失败诊断候选（2026-10-19）
+
+| 决策 | 依据和实施边界 | 验证和限制 |
+| --- | --- | --- |
+| D077：保留公开错误 DTO，另在 Main-only 受控记录增加白名单诊断 | SDK/ContractError 脱敏会丢弃不同底层错误。通过凭据、DNS、TCP、TLS、HTTP、SSE、usage/核算阶段采集固定类别/时间/数字状态，不保留敏感异常和原始响应 | 三种证据区分网络未开始、客户端已调用但收取未知、HTTP响应已观察；均不能代替账单。仅解释未来请求，不追溯第一次 network_error |
+| D078：复用 v4 JSON 可选字段，不分配无 SQL 变化的 migration | 新 reader 兼容原无诊断记录，migration1–4原文不动；原未结唯一索引/预留保护保持 | 旧 strict reader 不能读取新扩展，明确不支持降级读取；独立候选不连接真实 profile。诊断/结算失败、晚到事件、重复恢复、备份恢复均须验证 |
+| D079：真实价格过期仍拒绝；生产诊断验证使用明确标识的本地 fixture 测试时钟 | 本轮无核新价或真实请求授权，不延长/修改价格窗口。测试 wrapper 只在生产 Main 导入前注入已知快照时钟、隔离数据和网络 | 这不是当前价格验证，也不是付费授权、真实 Keychain 或正式 E2E。源 main、旧未知记录及 ¥0.05 预留不动 |
