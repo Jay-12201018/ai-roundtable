@@ -221,3 +221,15 @@ R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/nex
 - 第一次真实请求的 `network_error / unknown` 不能由新代码追溯判定是否送达或计费；本轮不访问其 profile/Keychain/数据库、不清零/删除记录或 ¥0.05 预留。仍须服务商账单人工核对，未知预留继续阻止下一次测试。
 - `DEEPSEEK-TOKEN-01` 普通真实 Run 严格模式仍 **blocked**。既有价格快照已于北京时间2026-10-19 00:00到期；本轮不续期/核新价、不发真实 API，请求前门禁继续拒绝。
 - 新诊断为 v4 JSON 可选扩展，不变更 migration1–4；只保证新代码读旧记录，旧二进制读取新诊断记录不支持。当前运行 App、原分支和 Worktree 保留，不自动部署候选或重启用户应用。
+
+## DEEPSEEK-DIAG-01 正式合并与主线验收（2026-10-19）
+
+用户最终授权后，main从`524f5052736dd8fbb7e093873d2a1f3c2732fc82`严格ff-only到获批`7599949087e0fc0a09c6ca99a33a376eaba9d3f7`，无冲突/重复引入；原18个Worktree和所有分支保留。上述候选review边界由本次主线验收取代，历史报告不改。
+
+| ID | 当前状态 | 本次证据及边界 |
+| --- | --- | --- |
+| DEEPSEEK-DIAG-01 | **merged / verified**（安全诊断、本地fixture） | main实际Electron84文件1255/1255、Node诊断66/66、strict、独立输出生产构建、原生ABI139、49/30生产/重启及35退出检查全部exit0；[主线报告](verification/2026-10-19-deepseek-diagnostics-main.md)、[命令](verification/2026-10-19-deepseek-diagnostics-main-commands.md) |
+| 原首次真实试验 | **unknown，原¥0.05预留保留，未核销** | 本轮不读取/写入真实profile/DB/Keychain，不倒推送达或失败根因；仅人工账单核对，未核验真实DB当前实时状态 |
+| DEEPSEEK-TOKEN-01 | **blocked**（普通真实Run严格模式） | 无新counter/ModelPolicy；价快照过期仍拒绝，未开新单次许可，公网模型API0 |
+
+本次只追加验收文档，src/tests/Shared/Schema/依赖/迁移/价格不另改。main原out全文件及.node哈希/inode前后不变，当前用户应用未部署/重启。旧reader不支持读取新诊断；临时transport覆写须转发observer，未来部署另授权。最终main为本节所在独立文档提交，完整SHA见交付消息/Git历史；完成后停止，不启动其他任务。

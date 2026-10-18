@@ -280,3 +280,7 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 - 沿用 migration4 表的 `data_json` 可选扩展，不新增 SQL 列/索引/migration，不改变 migration1–4。新代码读取旧记录时保留诊断缺失，不从历史 `network_error` 推测原因。旧版 strict reader 不认识新诊断字段，因此不承诺旧二进制读取新记录；不能将新数据交给旧版应用或旧版恢复校验器。升级前须保留兼容备份，未来降级另行审查。
 - `updateControlledTrialProgress` 和 `finishControlledTrial` 接受经 Schema 验证的可选诊断；结算只在完整流及合法 usage 时执行。诊断/进度/结算写入失败不清零费用或释放预留；持续写失败保持原预留供启动恢复，不伪称已成功保存最终诊断。终态后不接收迟到网络诊断。
 - 原生最近记录和结果显示固定中文诊断；查看记录不读 Key、不联网。旧 unknown 与 ¥0.05 预留须保留，只有真实服务商账单证据可供人工核对，本候选没有核销/清除权限或新自动重试入口。
+
+### DEEPSEEK-DIAG-01 主线生效登记（2026-10-19）
+
+用户最终授权后已从524f505严格ff-only合入完整7599949087e0fc0a09c6ca99a33a376eaba9d3f7，main必要独立验收全部通过，诊断仅在本地fixture/安全边界范围merged/verified；见[本次主线报告](verification/2026-10-19-deepseek-diagnostics-main.md)。上述候选契约已生效，migration1–4及普通Shared/IPC不变。当前App未部署本候选；unknown/完整预留、计数阻塞、过期拒绝和每次原生确认保持，没有核销或新联网许可。新代码不能追溯首次失败，不能证明真实Key或网络正常。

@@ -240,3 +240,11 @@ D073–D075的候选未合main边界由本次合并授权取代；估算性质�
 | D077：保留公开错误 DTO，另在 Main-only 受控记录增加白名单诊断 | SDK/ContractError 脱敏会丢弃不同底层错误。通过凭据、DNS、TCP、TLS、HTTP、SSE、usage/核算阶段采集固定类别/时间/数字状态，不保留敏感异常和原始响应 | 三种证据区分网络未开始、客户端已调用但收取未知、HTTP响应已观察；均不能代替账单。仅解释未来请求，不追溯第一次 network_error |
 | D078：复用 v4 JSON 可选字段，不分配无 SQL 变化的 migration | 新 reader 兼容原无诊断记录，migration1–4原文不动；原未结唯一索引/预留保护保持 | 旧 strict reader 不能读取新扩展，明确不支持降级读取；独立候选不连接真实 profile。诊断/结算失败、晚到事件、重复恢复、备份恢复均须验证 |
 | D079：真实价格过期仍拒绝；生产诊断验证使用明确标识的本地 fixture 测试时钟 | 本轮无核新价或真实请求授权，不延长/修改价格窗口。测试 wrapper 只在生产 Main 导入前注入已知快照时钟、隔离数据和网络 | 这不是当前价格验证，也不是付费授权、真实 Keychain 或正式 E2E。源 main、旧未知记录及 ¥0.05 预留不动 |
+
+## DeepSeek 诊断最终主线验收（2026-10-19）
+
+| 决策 | 实施与证据 | 边界 |
+| --- | --- | --- |
+| D080：按明确授权ff-only合入7599949，main新鲜必要证据通过后登记DIAG merged/verified | 完整1255在main自身ElectronABI139运行，Node66专项/strict；正式--outDir独立生产构建及49/30真实入口/重启、35只读退出检查全部exit0。复用有效原生压力/Node候选历史而不冒充新PASS | 不切main ABI或覆盖当前out；原out/.node SHA和inode审计不变，不重启部署当前App。真实unknown/¥0.05不访问不核销，无新联网许可，价格过期仍拒绝；[主线证据](verification/2026-10-19-deepseek-diagnostics-main.md) |
+
+D077–D079的候选未合main边界由本次最终授权取代；白名单诊断、送达证据级别、旧reader不支持降级、严格计数与未知费用限制继续生效。本轮只完成主线验收，不启动真实API或其他任务。
