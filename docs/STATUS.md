@@ -1,5 +1,10 @@
 # R00–R18 状态与授权看板
 
+
+## DeepSeek 三项最终收尾（2026-10-19）
+
+**候选本地验证通过，待本次已授权ff-only及主线独立验收。** 分支codex/deepseek-final-readiness，基线dc8a7a0a4b8f2469a39c87403d26dd7d48d0b220。重新核价24小时快照、migration5人工audit+release marker、会话双原生确认单次lease已接通；原unknown不改、迁移不自动释放、普通真实生成blocked。完整Electron1322、strict/build、原生生产37/重启18及费用/迁移/许可专项exit0；失败与限制见[本次记录](verification/2026-10-19-deepseek-final-readiness.md)。本轮尚未操作实际旧profile、Key、预留或发送许可，真实API0。
+
 ## DEEPSEEK-PROXY-01 正式合并与主线验收（2026-10-19）
 
 **merged / verified（仅本地 fixture 与安全接线）**。用户批准获审 `04bf8a20e047f3c46cb3017921ddac049ba9f5ae` 后，从干净 main `1c4d2afb1afbae288ac1201c618ffd9cc39999bb` 执行 `git merge --ff-only codex/deepseek-loopback-proxy`，exit0，无冲突/额外merge commit，原分支和20个Worktree全部保留。

@@ -22,7 +22,7 @@ class VersionBindingTests(unittest.TestCase):
         self.git('init', '-b', 'main')
         self.git('config', 'user.name', 'Local Fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')
-        for name in ('launcher.py', 'main.cjs', 'controlled-network.cjs'):
+        for name in ('launcher.py', 'main.cjs', 'controlled-network.cjs', 'session-authorization.cjs'):
             p = self.repo / 'scripts/controlled-desktop' / name
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text('fixture\n')

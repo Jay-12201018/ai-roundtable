@@ -298,3 +298,14 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 ### DEEPSEEK-LAUNCH-01 主线生效（2026-10-19）
 
 获批f04候选已严格ff-only合main并通过[独立验收](verification/2026-10-19-deepseek-launcher-main.md)。受控包装器必须转发streamControlledTrial第四参数和createTransport第二参数diagnostics；不记录原异常、请求头或凭据。仓库内prepare/open绑定最新干净main及产物/关键依赖；保留原profile/data/appName/Keyguard身份，拒绝活动旧进程，默认cancel-only且不claim旧许可。Shared/IPC、数据库migration1–4及预算协议未改变；新诊断不能倒推旧network_error。原unknown/¥0.05只读核对一致，无核销/新授权。
+
+
+## DeepSeek 最终收尾契约（2026-10-19）
+
+本次总控独占 migration5、Database、原生菜单与启动器；不增加通用IPC、resolveKey、普通Run豁免或新Provider能力。
+
+- migration1–4原文保持。migration5新增 controlled_trials.reservation_released（默认0）和 controlled_trial_reconciliations；保留原trial state/data_json。全局未处理预留唯一索引改为 reserved/unknown且marker0；每trial最多一个release，审计append-only。旧unknown默认继续阻塞，迁移本身不释放。
+- Database.hasUnresolvedControlledTrials()直接查询全部未处理预留，不依赖最近100条；reserve与Service共同使用。reconcileControlledTrial仅Main原生明确操作调用，严格校验trial/request/provider/Keyrevision、固定页面证据枚举、决定及uncertainty acknowledgement；DB生成时间/id并原子写audit/marker。listControlledTrialReconciliations用于只读展示；不给Renderer写入口。
+- 控制台0用量仅是用户页面核对声明，非provider_usage或绝对零费用证明。不得把unknown变成settled或填usage0。固定证据说明不接受自由文本、请求头、凭据或异常堆栈。30天证据不应用于范围外记录。
+- 启动器默认未授权。仅原生准备入口捕获生产Service的结构化quote，双原生确认后建立session内绑定providerId/requestId/Keyrevision/报价期限的lease；固定目标/body/TLS/proxy门禁继续检查。取消/Stop/关窗/退出撤销；无自动retry/恢复，普通真实Run严格门禁不变。
+- 重新核价于2026-10-19T11:08:06Z，deepseek-flash=DeepSeek-V4.1-Flash-1017；CNY高峰缓存未命中输入2/百万、总completion输出8/百万，不使用缓存或闲时折扣。官方缓存命中高峰0.04/百万仅记录证据不折算费用；24小时快照，2026-10-20T11:08:06Z到期拒绝。新的报价不是付费授权。

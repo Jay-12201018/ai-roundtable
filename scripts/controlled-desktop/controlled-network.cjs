@@ -7,8 +7,9 @@ const assert = require('node:assert/strict');
 function installControlledNetwork(options = {}) {
   const target = 'https://api.deepseek.com/chat/completions';
   assert.ok(options.target === undefined || options.target === target);
-  const expires = Date.parse(options.priceExpiresAt);
-  assert.ok(Number.isFinite(expires));
+  const priceExpiry = () => typeof options.priceExpiresAt === 'function' ? options.priceExpiresAt() : options.priceExpiresAt;
+  const expires = () => Date.parse(priceExpiry());
+  assert.ok(Number.isFinite(expires()));
   let proxy;
   if (options.proxyUrl !== undefined || options.trustProxyDns) {
     const match = typeof options.proxyUrl === 'string' && /^http:\/\/(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})\/?$/u.exec(options.proxyUrl);
@@ -28,10 +29,10 @@ function installControlledNetwork(options = {}) {
   const original = { httpRequest: http.request, httpGet: http.get, httpsRequest: https.request, httpsGet: https.get,
     netConnect: net.connect, netCreate: net.createConnection, socketConnect: net.Socket.prototype.connect,
     tlsConnect: tls.connect, fetch: globalThis.fetch };
-  let pending, used = false, attached;
+  let pending, liveLease, used = false, attached;
   const deny = () => { metrics.denied++; throw new Error('Controlled request is not authorized by this launch policy'); };
   const current = lease => {
-    if (!lease || !lease.active || Date.now() >= expires || Date.now() >= lease.until) deny();
+    if (!lease || !lease.active || !Number.isFinite(expires()) || Date.now() >= expires() || Date.now() >= lease.until) deny();
   };
   const socketOptions = args => {
     const context = wire.getStore(); current(context?.lease);
@@ -118,9 +119,26 @@ function installControlledNetwork(options = {}) {
   };
   globalThis.fetch = async () => deny(); syncBuiltinESMExports();
   function approve(providerId) {
-    if (options.sendAuthorized !== true || pending || used || Date.now() >= expires || typeof providerId !== 'string' || !providerId) return false;
-    pending = { providerId, until: Math.min(Date.now() + 120000, expires), active: true, sent: false };
-    metrics.granted++; return true;
+    if (options.sendAuthorized !== true || pending || used || !Number.isFinite(expires()) || Date.now() >= expires() || typeof providerId !== 'string' || !providerId) return false;
+    pending = { providerId, until: Math.min(Date.now() + 120000, expires()), active: true, sent: false };
+    metrics.granted++; options.onStateChange?.(); return true;
+  }
+  function approveQuote(quote) {
+    if (options.allowSessionAuthorization !== true || pending || used || !Number.isFinite(expires()) || Date.now() >= expires()
+      || !quote || ['id', 'providerId', 'requestId', 'keyRevision'].some(key => typeof quote[key] !== 'string' || !quote[key])
+      || quote.baseUrl !== 'https://api.deepseek.com' || quote.modelId !== 'deepseek-flash' || quote.prompt !== 'Reply OK.'
+      || quote.maxOutputTokens !== 128 || quote.reservedMicroCny !== 50000
+      || !Number.isSafeInteger(quote.estimatedMicroCny) || quote.estimatedMicroCny < 0 || quote.estimatedMicroCny > 50000
+      || quote.priceExpiresAt !== priceExpiry() || !Number.isFinite(Date.parse(quote.expiresAt))
+      || Date.now() >= Date.parse(quote.expiresAt) || Date.parse(quote.expiresAt) > expires()) return false;
+    pending = { providerId: quote.providerId, boundRequestId: quote.requestId, keyRevision: quote.keyRevision,
+      until: Math.min(Date.parse(quote.expiresAt), expires()), active: true, sent: false };
+    metrics.granted++; options.onStateChange?.(); return true;
+  }
+  function revoke() {
+    if (pending) pending.active = false;
+    if (liveLease) liveLease.active = false;
+    pending = undefined; options.onStateChange?.();
   }
   function attachRegistry(proto) {
     assert.ok(!attached);
@@ -129,11 +147,13 @@ function installControlledNetwork(options = {}) {
     attached = { proto, stream, transport };
     proto.streamControlledTrial = async function* (providerId, input, permit, diagnostics) {
       const lease = pending;
-      if (options.sendAuthorized !== true || !lease || used || lease.providerId !== providerId) deny();
+      if (!lease || used || lease.providerId !== providerId) deny();
       current(lease);
+      if (lease.boundRequestId && (input.requestId !== lease.boundRequestId
+        || this.controlledTrialTarget(providerId).revision !== lease.keyRevision)) { revoke(); used = true; deny(); }
       if (input.modelId !== 'deepseek-flash' || input.outputTokenLimit !== 128 || input.agentRole !== undefined || input.turnIndex !== undefined
         || input.messages?.length !== 1 || input.messages[0].role !== 'user' || input.messages[0].content !== 'Reply OK.' || typeof input.requestId !== 'string') deny();
-      pending = undefined; used = true; lease.requestId = input.requestId;
+      pending = undefined; used = true; liveLease = lease; lease.requestId = input.requestId; options.onStateChange?.();
       const iterator = stream.call(this, providerId, input, permit, diagnostics);
       try {
         for (;;) {
@@ -142,7 +162,7 @@ function installControlledNetwork(options = {}) {
           yield next.value;
         }
       } finally {
-        lease.active = false;
+        lease.active = false; liveLease = undefined; options.onStateChange?.();
         if (iterator.return) await controlled.run(lease, () => iterator.return());
       }
     };
@@ -160,7 +180,7 @@ function installControlledNetwork(options = {}) {
           || Object.keys(body.thinking ?? {}).length !== 1 || body.thinking.type !== 'disabled'
           || Object.keys(body.stream_options ?? {}).length !== 1 || body.stream_options.include_usage !== true) deny();
         init.signal?.throwIfAborted(); guard();
-        lease.sent = true; metrics.started++;
+        lease.sent = true; metrics.started++; options.onStateChange?.();
         // Headers and their secret values are forwarded untouched, never inspected or logged.
         return wire.run({ lease, nativeStarted: false, body: init.body }, () => fetcher(wireTarget.href, init));
       };
@@ -174,7 +194,7 @@ function installControlledNetwork(options = {}) {
     net.Socket.prototype.connect = original.socketConnect; tls.connect = original.tlsConnect; globalThis.fetch = original.fetch;
     syncBuiltinESMExports();
   }
-  return { approve, attachRegistry, status: () => ({ ...metrics, sendAuthorized: options.sendAuthorized === true,
-    networkRoute: proxy ? 'trusted-loopback-connect' : 'direct', expiresAt: options.priceExpiresAt }), restore };
+  return { approve, approveQuote, revoke, attachRegistry, status: () => ({ ...metrics, sendAuthorized: !!pending?.active && Date.now() < pending.until && Date.now() < expires(),
+    networkRoute: proxy ? 'trusted-loopback-connect' : 'direct', expiresAt: priceExpiry() }), restore };
 }
 module.exports = { installControlledNetwork };

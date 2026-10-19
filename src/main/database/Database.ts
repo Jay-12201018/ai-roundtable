@@ -6,6 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { migration3 } from './migrations/v3';
 import { migration4 } from './migrations/v4';
+import { migration5 } from './migrations/v5';
+import { reconciliationInputSchema, reconciliationAuditSchema, reconciliationEvidenceSummary, type ReconciliationInput, type TrialReconciliation } from '../providers/controlledTrial/reconciliation';
 import { trialRecordSchema, type TrialRecord } from '../providers/controlledTrial/record';
 import { ContractError } from '../../shared/contracts/errors';
 import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions } from '../../shared/schemas/configuration';
@@ -173,6 +175,7 @@ const migrations = [
   migration2,
   migration3,
   migration4,
+  migration5,
 ];
 
 export class Database {
@@ -857,7 +860,7 @@ export class Database {
     const value = trialRecordSchema.parse(record);
     if (value.state !== 'reserved') throw new ContractError('invalid_input');
     this.transaction(() => {
-      if (this.db.prepare("SELECT 1 FROM controlled_trials WHERE state IN ('reserved','unknown') LIMIT 1").get()) throw new ContractError('invalid_state');
+      if (this.hasUnresolvedControlledTrials()) throw new ContractError('invalid_state');
       this.db.prepare('INSERT INTO controlled_trials(id,request_id,provider_id,state,data_json) VALUES(?,?,?,?,?)')
         .run(value.id, value.requestId, value.providerId, value.state, JSON.stringify(value));
     });
@@ -867,6 +870,41 @@ export class Database {
     this.assertInitialized();
     return (this.db.prepare('SELECT data_json FROM controlled_trials ORDER BY rowid DESC LIMIT 100').pluck().all() as string[])
       .map(value => trialRecordSchema.parse(JSON.parse(value)));
+  }
+
+  hasUnresolvedControlledTrials(): boolean {
+    this.assertInitialized();
+    return Boolean(this.db.prepare("SELECT 1 FROM controlled_trials WHERE state IN ('reserved','unknown') AND reservation_released=0 LIMIT 1").get());
+  }
+
+  reconcileControlledTrial(input: ReconciliationInput): TrialReconciliation {
+    const value = configurationInput(reconciliationInputSchema, input);
+    return this.transaction(() => {
+      const row = this.db.prepare("SELECT data_json FROM controlled_trials WHERE id=? AND state='unknown' AND reservation_released=0").pluck().get(value.trialId) as string | undefined;
+      if (!row) throw new ContractError('invalid_state');
+      const trial = trialRecordSchema.parse(JSON.parse(row));
+      if (trial.requestId !== value.requestId || trial.providerId !== value.providerId || trial.keyRevision !== value.keyRevision) throw new ContractError('forbidden');
+      const reviewedAt = now();
+      const age = Date.parse(reviewedAt) - Date.parse(trial.createdAt);
+      if (age < 0 || age > 30 * 86400000) throw new ContractError('invalid_input');
+      const audit = reconciliationAuditSchema.parse({ ...value, id: randomUUID(), reviewedAt, evidenceSummary: reconciliationEvidenceSummary });
+      this.db.prepare('INSERT INTO controlled_trial_reconciliations(id,trial_id,decision,reviewed_at,data_json) VALUES(?,?,?,?,?)')
+        .run(audit.id, audit.trialId, audit.decision, audit.reviewedAt, JSON.stringify(audit));
+      if (audit.decision === 'release_reservation') {
+        this.db.prepare("UPDATE controlled_trials SET reservation_released=1 WHERE id=? AND state='unknown' AND reservation_released=0").run(audit.trialId);
+      }
+      return audit;
+    });
+  }
+
+  listControlledTrialReconciliations(trialId?: string): TrialReconciliation[] {
+    this.assertInitialized();
+    if (trialId !== undefined) configurationInput(idSchema, trialId);
+    const query = trialId === undefined
+      ? this.db.prepare('SELECT data_json FROM controlled_trial_reconciliations ORDER BY rowid')
+      : this.db.prepare('SELECT data_json FROM controlled_trial_reconciliations WHERE trial_id=? ORDER BY rowid');
+    return (query.pluck().all(...(trialId === undefined ? [] : [trialId])) as string[])
+      .map(row => reconciliationAuditSchema.parse(JSON.parse(row)));
   }
 
   updateControlledTrialProgress(id: string, patch: Partial<Pick<TrialRecord, 'text' | 'observedUsage' | 'diagnostics'>>): void {

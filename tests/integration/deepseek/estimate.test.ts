@@ -39,8 +39,17 @@ it('preserves every printable ASCII character without normalizing the actual inp
 
 it('pins a new reviewed CNY price window and small trial limits without inheriting an expired review', () => {
   expect(deepSeekTrialReview).toMatchObject({ baseUrl: 'https://api.deepseek.com', modelId: 'deepseek-flash',
-    modelVersion: 'DeepSeek-V4.1-Flash-1017', reviewedDate: '2026-10-18', maxInputCharacters: 256, maxOutputTokens: 128,
+    modelVersion: 'DeepSeek-V4.1-Flash-1017', reviewedDate: '2026-10-19', maxInputCharacters: 256, maxOutputTokens: 128,
     price: { currency: 'CNY', inputMicroCnyPerToken: 2, outputMicroCnyPerToken: 8, maxRequestMicroCny: 50000,
-      reviewedAt: '2026-10-17T16:00:00.000Z', expiresAt: '2026-10-18T16:00:00.000Z' } });
+      reviewedAt: '2026-10-19T11:08:06.000Z', expiresAt: '2026-10-20T11:08:06.000Z' } });
   expect(deepSeekTrialReview.price.evidence).toContain('https://api-docs.deepseek.com/zh-cn/quick_start/pricing/');
+});
+
+it('uses freshly reviewed peak/cache-miss CNY pricing without discounting output or claiming an absolute budget', () => {
+  const p = deepSeekTrialReview.price;
+  expect(Date.parse(p.expiresAt) - Date.parse(p.reviewedAt)).toBe(24 * 60 * 60 * 1000);
+  expect(p.inputMicroCnyPerToken * 67 + p.outputMicroCnyPerToken * 128).toBe(1158);
+  expect(p.evidence).toContain('peak/cache-miss');
+  expect(p.evidence).toContain('2026-10-19');
+  expect(estimateDeepSeekInput([{ role: 'user', content: 'Reply OK.' }])).toHaveProperty('strictUsable', false);
 });

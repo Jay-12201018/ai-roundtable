@@ -5,7 +5,7 @@ const { app } = require('electron');
 assert.ok(process.versions.electron && app && typeof app.isReady === 'function', 'Run with the actual Electron executable, not the npm package entry');
 assert.equal(app.isReady(), false, 'Fixture clock must precede production Main');
 const RealDate = Date;
-const epoch = RealDate.parse('2026-10-18T00:00:00.000Z');
+const epoch = RealDate.parse('2026-10-19T12:00:00.000Z');
 const origin = performance.now();
 const now = () => epoch + Math.floor(performance.now() - origin);
 globalThis.__roundtableDiagnosticFixtureClock = Object.freeze({

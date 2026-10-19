@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCRIPTS = ('launcher.py', 'main.cjs', 'controlled-network.cjs')
+SCRIPTS = ('launcher.py', 'main.cjs', 'controlled-network.cjs', 'session-authorization.cjs')
 DEPENDENCIES = ('node_modules/electron/dist/Electron.app/Contents/MacOS/Electron',
                 'node_modules/better-sqlite3/build/Release/better_sqlite3.node',
                 'node_modules/.pnpm/lock.yaml')

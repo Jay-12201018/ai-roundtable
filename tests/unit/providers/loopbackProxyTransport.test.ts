@@ -138,7 +138,7 @@ it('rejects target revocation at CONNECT before TLS or any API bytes', async () 
   expect(f.calls).toHaveLength(0); expect(f.resolver).not.toHaveBeenCalled();
 });
 it('persists proxy failure as unknown and retains the entire reservation across recovery', async () => {
-  const f = await fixture(407); vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T00:00:00Z'));
+  const f = await fixture(407); vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-19T12:00:00Z'));
   const database = new Database(join(root, 'owned-proxy-reservation.db')); database.initialize();
   cleanups.push(async () => database.close());
   database.createProvider({ id: 'p', name: 'Owned proxy fixture', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: 'deepseek-flash', name: 'Flash' }] });

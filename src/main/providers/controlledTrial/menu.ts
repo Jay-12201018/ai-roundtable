@@ -5,6 +5,7 @@ import { toPublicError } from '../../../shared/contracts/errors';
 import { errorCodeSchema } from '../../../shared/schemas/error';
 import { trialDiagnosticsSchema } from '../diagnostics';
 import type { TrialRecord } from './record';
+import { reconciliationEvidenceSummary } from './reconciliation';
 
 export const trialWarning = (quote: TrialQuote) => [
   `Provider：${quote.providerId}；目标：${quote.baseUrl} · ${quote.modelId}`,
@@ -46,7 +47,7 @@ export function formatTrialDiagnostics(record: TrialRecord): string {
     ...(value.clientInvokedAt ? [`客户端调用：${value.clientInvokedAt}`] : []),
     ...(value.httpResponseAt ? [`HTTP 响应：${value.httpResponseAt}`] : []),
     ...(value.httpStatus === undefined ? [] : [`HTTP ${value.httpStatus}`]),
-    '诊断不替代服务商账单；unknown 记录与全部预留须保留，等待人工核对。',
+    '诊断不替代服务商账单；unknown 历史须保留；客户端预留是否人工释放须另查人工对账记录。',
   ].join('\n');
 }
 
@@ -64,14 +65,63 @@ export function installTrialMenu(database: Database, service: ControlledTrialSer
   let busy = false;
   menu.append(new MenuItem({ label: '受控测试', submenu: [
     { label: 'DeepSeek 单次测试…', click: () => { void start(); } },
+    { label: '人工对账与预留处理…', click: () => { void reconcile(); } },
+    { label: '查看人工对账记录…', click: () => {
+      const rows = database.listControlledTrialReconciliations();
+      void dialog.showMessageBox({ type: 'info', message: '人工对账记录',
+        detail: rows.length ? rows.map(row => `请求 ${row.requestId} · ${row.reviewedAt}\n${row.decision === 'release_reservation' ? '用户明确释放客户端预留' : '记录核对并保留预留'}\n${row.evidenceSummary}`).join('\n\n') : '尚无人工对账；不会自动核销或发送请求。' });
+    } },
     { label: '停止本次测试', click: () => service.abort() },
     { label: '查看最近测试记录…', click: () => {
       const row = database.listControlledTrials()[0];
+      const released = row && database.listControlledTrialReconciliations(row.id).some(audit => audit.decision === 'release_reservation');
+      const reservation = released ? '未知（原 ¥0.05 客户端预留已按人工决定释放，不代表账单为零）' : '未知（仍保留 ¥0.05）';
       void dialog.showMessageBox({ type: 'info', message: row ? `测试状态：${row.outcome} / ${row.state}` : '尚无受控测试',
-        detail: row ? `${row.text}\n服务商 usage：${row.actualInputTokens ?? '未知'} 输入 / ${row.actualOutputTokens ?? '未知'} 输出\n输入估算偏差：${row.actualInputTokens === null ? '未知' : row.actualInputTokens - row.estimatedInputTokens} tokens\n按核验费率核算：${row.accountedMicroCny === null ? '未知（仍保留 ¥0.05）' : '¥' + (row.accountedMicroCny / 1000000).toFixed(6)}\n这是 usage 核算，不是账单证明。\n${formatTrialDiagnostics(row)}` : '查看记录不会发送请求。' });
+        detail: row ? `${row.text}\n服务商 usage：${row.actualInputTokens ?? '未知'} 输入 / ${row.actualOutputTokens ?? '未知'} 输出\n输入估算偏差：${row.actualInputTokens === null ? '未知' : row.actualInputTokens - row.estimatedInputTokens} tokens\n按核验费率核算：${row.accountedMicroCny === null ? reservation : '¥' + (row.accountedMicroCny / 1000000).toFixed(6)}\n这是 usage 核算，不是账单证明。\n${formatTrialDiagnostics(row)}` : '查看记录不会发送请求。' });
     } },
   ] }));
   Menu.setApplicationMenu(menu);
+  async function reconcile() {
+    if (busy || service.isBusy() || hasActiveRuns()) return;
+    busy = true;
+    try {
+      const rows = database.listControlledTrials().filter(row => row.state === 'unknown'
+        && !database.listControlledTrialReconciliations(row.id).some(audit => audit.decision === 'release_reservation'));
+      if (!rows.length) {
+        await dialog.showMessageBox({ type: 'info', message: '没有待人工处理的 unknown 预留',
+          detail: '原始历史始终保留；此操作不会发送请求。', buttons: ['关闭'], defaultId: 0, cancelId: 0 });
+        return;
+      }
+      const selected = await dialog.showMessageBox({ type: 'question', message: '选择人工核对的请求',
+        detail: '选择不修改记录。仅处理当前 unknown，不代替服务商账单。',
+        buttons: ['取消', ...rows.map(row => `${row.createdAt} · ${row.requestId}`)], defaultId: 0, cancelId: 0, noLink: true });
+      const row = rows[selected.response - 1];
+      if (!row) return;
+      const identity = `Provider：${row.providerId}\n请求：${row.requestId}\n创建时间：${row.createdAt}\n客户端预留：¥0.05；原 usage、费用及错误保持 unknown。`;
+      const reviewed = await dialog.showMessageBox({ type: 'warning', title: '人工核对服务商控制台',
+        message: '官方页面未显示消费，不证明绝对没有费用', detail: `${identity}\n\n${reconciliationEvidenceSummary}\n\n若账号、API Key、时间范围或页面数据延迟不能核实，请取消并继续保留预留。`,
+        checkboxLabel: '我已亲自核对同一账号、同一 API Key 和覆盖本次请求的最近30天页面', checkboxChecked: false,
+        buttons: ['取消', '记录核对并保留预留', '继续申请释放本笔预留…'], defaultId: 0, cancelId: 0, noLink: true });
+      if (!reviewed.checkboxChecked || ![1, 2].includes(reviewed.response)) return;
+      const decision = reviewed.response === 1 ? 'retain_reservation' : 'release_reservation';
+      if (decision === 'release_reservation') {
+        const approved = await dialog.showMessageBox({ type: 'warning', title: '明确批准处理此笔客户端预留',
+          message: '仅释放本笔 ¥0.05 客户端预留', detail: `${identity}\n\n这不是确认实际费用为零，也不证明服务商未收到请求。原 unknown、usage 未知及错误不变；会永久登记本次人工决定，不授权任何新请求。`,
+          checkboxLabel: '我理解上述不确定性，并明确批准仅处理这笔预留', checkboxChecked: false,
+          buttons: ['取消', '仅释放此笔客户端预留'], defaultId: 0, cancelId: 0, noLink: true });
+        if (approved.response !== 1 || !approved.checkboxChecked) return;
+      }
+      if (!app.isReady() || service.isBusy() || hasActiveRuns()) return;
+      database.reconcileControlledTrial({ trialId: row.id, requestId: row.requestId, providerId: row.providerId,
+        keyRevision: row.keyRevision, evidence: 'dashboard_no_displayed_usage', decision, acknowledgedUncertainty: true });
+      await dialog.showMessageBox({ type: 'info', message: '人工决定已记录',
+        detail: decision === 'release_reservation' ? '仅客户端预留已按你的决定释放；原 unknown 历史不变。新请求仍需独立许可和最后确认。' : '¥0.05 预留继续保留；原 unknown 历史不变。',
+        buttons: ['关闭'], defaultId: 0, cancelId: 0 });
+    } catch (error) {
+      if (app.isReady()) await dialog.showMessageBox({ type: 'warning', message: '人工对账未完成',
+        detail: `安全错误：${toPublicError(error).code}。未确认成功前请继续视为预留未释放。`, buttons: ['关闭'], defaultId: 0, cancelId: 0 });
+    } finally { busy = false; }
+  }
   async function start() {
     if (busy) return;
     busy = true;

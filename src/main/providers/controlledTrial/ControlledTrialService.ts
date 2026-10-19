@@ -24,7 +24,7 @@ export class ControlledTrialService {
   isBusy(): boolean { return this.activeId !== undefined; }
 
   prepare(providerId: string): TrialQuote {
-    if (this.closing || this.active || this.hasActiveRuns() || this.database.listControlledTrials().some(value => value.state !== 'settled')) throw new ContractError('invalid_state');
+    if (this.closing || this.active || this.hasActiveRuns() || this.database.hasUnresolvedControlledTrials()) throw new ContractError('invalid_state');
     const { revision } = this.registry.controlledTrialTarget(providerId);
     this.checkPrice();
     const estimate = estimateDeepSeekInput([{ role: 'user', content: prompt }]);

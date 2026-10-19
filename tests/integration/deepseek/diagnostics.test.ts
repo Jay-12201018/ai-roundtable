@@ -36,7 +36,7 @@ it('records HTTP evidence only with a valid numeric status and never downgrades 
 });
 
 async function fixture(mode: 'ok' | 'missing' | 'bad-json' | 'credentials' | 'credential-empty' | 'accounting' | 'network' | number) {
-  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T00:00:00Z'));
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-19T12:00:00Z'));
   const db = new Database(':memory:'); db.initialize(); cleanup.push(() => db.close());
   db.createProvider({ id: 'p', name: 'Diagnostic fixture', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: 'deepseek-flash', name: 'Flash' }] });
   const keys = new KeyService(db, createMemoryKeyBackend()); await keys.storeKey('p', 'diagnostics-fake-secret');
@@ -125,14 +125,14 @@ it('ignores late transport callbacks after the result has been finalized', async
   expect(row.state).toBe('settled');
 });
 
-it('preserves new diagnostics and unknown charges through a validated v4 backup and restore', async () => {
+it('preserves new diagnostics and unknown charges through a validated current-schema backup and restore', async () => {
   const f = await fixture(429); const record = await f.service.execute(f.service.prepare('p').id);
   const directory = mkdtempSync(join(tmpdir(), 'roundtable-diagnostic-backup-')); cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
   const path = join(directory, 'owned.db'); const database = new Database(path); database.initialize(); cleanup.push(() => database.close());
   database.reserveControlledTrial({ ...record, state: 'reserved', outcome: 'running' }); database.recoverControlledTrials();
   const expected = database.listControlledTrials(); const raw = new Sqlite(path); cleanup.push(() => { raw.close(); });
   const backups = join(directory, 'backups'); mkdirSync(backups, { mode: 0o700 });
-  const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(4);
+  const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(5);
   const restored = await prepareRestore(backup, backups); const candidate = new Database(restored.path); cleanup.push(() => candidate.close()); candidate.initialize(); candidate.recoverControlledTrials();
   expect(candidate.listControlledTrials()).toEqual(expected);
   expect(candidate.listControlledTrials()[0]).toMatchObject({ state: 'unknown', reservedMicroCny: 50000, diagnostics: { httpStatus: 429, category: 'http_error' } });

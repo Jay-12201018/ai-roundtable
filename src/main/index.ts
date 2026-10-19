@@ -15,6 +15,8 @@ import { ProviderSettingsService } from './settings/ProviderSettingsService';
 import { registerIpc, type IpcDisposer } from './ipc/registerIpc';
 import { createPublicMessagesBuilder } from './context/wirePublicContext';
 import { ControlledTrialService } from './providers/controlledTrial/ControlledTrialService';
+export { ControlledTrialService };
+export { deepSeekTrialReview } from './providers/controlledTrial/estimate';
 import { confirmTrial, installTrialMenu } from './providers/controlledTrial/menu';
 import { ContractError } from '../shared/contracts/errors';
 

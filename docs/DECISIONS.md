@@ -1,5 +1,14 @@
 # 架构与工程决策
 
+
+## DeepSeek 三项最终收尾（2026-10-19）
+
+总控获授权一次实现报价刷新、人工预留处理、会话单次许可及必要验证后ff-only合main，不再拆独立纯审查任务。人工决定与服务商usage分开：新增migration5/audit+marker保留原unknown证据，不能伪造0用量或由升级自动释放。菜单只接受固定安全证据并由用户两层确认；准备本轮不操作实际旧预留。
+
+真实生成仅可在明确Provider选择、会话许可和最后原生确认后走既有固定HTTPS网络通道；配置、报价、迁移或打开软件均不构成发送授权。生产wrapper可读取可信构建导出的Service/报价绑定quote，不解析展示文本、不读取真实Key。旧原生入口维持无许可不能发，普通真实Run继续blocked。
+
+使用官方当前高峰缓存未命中价格，24小时有效；保守usage核算不宣传为实际账单或绝对上限。真实请求/Keychain/当前用户profile完全不参与本轮验证。详细证据见[收尾验收](verification/2026-10-19-deepseek-final-readiness.md)。
+
 ## DEEPSEEK-PROXY-01：正式合并（2026-10-19）
 
 用户明确批准后从1c4d2af严格ff-only合入04bf8a20，并在main上新跑本地代理/诊断/启动器、完整回归、strict、独立生产构建及隔离生产/重启后，登记merged/verified。没有业务修补、重建main原生文件或覆盖运行中构建；复用有效原生环境，但不把候选历史成绩当新PASS。详细[主线证据](verification/2026-10-19-deepseek-loopback-proxy-main.md)。实际代理/公网验证和新发送许可须另行授权；以下为保留的候选设计记录。

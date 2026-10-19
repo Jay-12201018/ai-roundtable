@@ -6,6 +6,7 @@ import { timestampSchema } from '../../../shared/schemas/common';
 import { providerModelSchema } from '../../../shared/schemas/provider';
 import { runEventSchema } from '../../../shared/schemas/run';
 import { trialRecordSchema } from '../../providers/controlledTrial/record';
+import { reconciliationAuditSchema } from '../../providers/controlledTrial/reconciliation';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
 
@@ -23,18 +24,39 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
     const versions = tables.includes('schema_migrations') ? db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all() as number[] : [];
     if (versions.some((version, index) => version !== index + 1)) throw new Error('Invalid migration ledger');
     const modern = (versions.at(-1)??0)>=2;
+    const reconciliations = (versions.at(-1) ?? 0) >= 5;
     if ((versions.at(-1) ?? 0) >= 4) {
       if (!tables.includes('controlled_trials')) throw new Error('Recovery v4 schema is incomplete');
       const unresolvedIndex = db.prepare("SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_controlled_trial_unresolved'").pluck().get() as string | undefined;
-      if (unresolvedIndex?.replace(/\s+/gu, '').toLowerCase().replace(/;$/u, '') !== "createuniqueindexidx_controlled_trial_unresolvedoncontrolled_trials((1))wherestatein('reserved','unknown')") throw new Error('Missing trial reservation uniqueness');
+      if (unresolvedIndex?.replace(/\s+/gu, '').toLowerCase().replace(/;$/u, '') !== "createuniqueindexidx_controlled_trial_unresolvedoncontrolled_trials((1))wherestatein('reserved','unknown')" + (reconciliations ? "andreservation_released=0" : "")) throw new Error('Missing trial reservation uniqueness');
       const indexes = db.prepare("PRAGMA index_list('controlled_trials')").all() as Array<{ name: string; unique: number; partial: number }>;
       if (!indexes.some(index => index.unique === 1 && index.partial === 0 && JSON.stringify((db.prepare(`PRAGMA index_info("${index.name.replaceAll('"', '""')}")`).all() as Array<{ name: string }>).map(column => column.name)) === '["request_id"]')) throw new Error('Missing trial request identity uniqueness');
-      const unresolved = db.prepare("SELECT COUNT(*) FROM controlled_trials WHERE state IN ('reserved','unknown')").pluck().get() as number;
+      const unresolved = db.prepare("SELECT COUNT(*) FROM controlled_trials WHERE state IN ('reserved','unknown')" + (reconciliations ? ' AND reservation_released=0' : '')).pluck().get() as number;
       if (unresolved > 1) throw new Error('Multiple unresolved trial reservations');
       for (const row of db.prepare('SELECT id,request_id,provider_id,state,data_json FROM controlled_trials').all() as Array<{ id: string; request_id: string; provider_id: string; state: string; data_json: string }>) {
         const value = trialRecordSchema.parse(JSON.parse(row.data_json));
         if (value.id !== row.id || value.requestId !== row.request_id || value.providerId !== row.provider_id || value.state !== row.state) throw new Error('Trial reservation identity mismatch');
       }
+    }
+    if (reconciliations) {
+      if (!tables.includes('controlled_trial_reconciliations')) throw new Error('Recovery v5 schema is incomplete');
+      for (const action of ['update', 'delete']) {
+        const name = `prevent_trial_reconciliation_${action}`;
+        const trigger = db.prepare("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?").pluck().get(name) as string | undefined;
+        const expected = `CREATE TRIGGER ${name} BEFORE ${action.toUpperCase()} ON controlled_trial_reconciliations BEGIN SELECT RAISE(ABORT,'Reconciliation audits are append-only'); END`;
+        if (trigger?.replace(/\s+/gu, '').toLowerCase().replace(/;$/u, '') !== expected.replace(/\s+/gu, '').toLowerCase()) throw new Error('Missing immutable reconciliation audit protection');
+      }
+      const releaseIndex = db.prepare("SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_controlled_trial_release'").pluck().get() as string | undefined;
+      if (releaseIndex?.replace(/\s+/gu, '').toLowerCase().replace(/;$/u, '') !== "createuniqueindexidx_controlled_trial_releaseoncontrolled_trial_reconciliations(trial_id)wheredecision='release_reservation'") throw new Error('Missing reconciliation release uniqueness');
+      assertNoRows(db, "SELECT 1 FROM controlled_trials WHERE typeof(reservation_released)<>'integer' OR reservation_released NOT IN (0,1) OR (reservation_released=1 AND state<>'unknown') LIMIT 1", 'Invalid trial release marker');
+      for (const row of db.prepare('SELECT id,trial_id,decision,reviewed_at,data_json FROM controlled_trial_reconciliations').all() as Array<{ id: string; trial_id: string; decision: string; reviewed_at: string; data_json: string }>) {
+        const value = reconciliationAuditSchema.parse(JSON.parse(row.data_json));
+        const original = db.prepare('SELECT data_json FROM controlled_trials WHERE id=?').pluck().get(value.trialId) as string | undefined;
+        if (!original) throw new Error('Missing reconciled trial');
+        const trial = trialRecordSchema.parse(JSON.parse(original));
+        if (value.id !== row.id || value.trialId !== row.trial_id || value.decision !== row.decision || value.reviewedAt !== row.reviewed_at || trial.state !== 'unknown' || value.requestId !== trial.requestId || value.providerId !== trial.providerId || value.keyRevision !== trial.keyRevision) throw new Error('Reconciliation audit identity mismatch');
+      }
+      assertNoRows(db, "SELECT 1 FROM controlled_trials t WHERE t.reservation_released <> EXISTS(SELECT 1 FROM controlled_trial_reconciliations a WHERE a.trial_id=t.id AND a.decision='release_reservation') LIMIT 1", 'Trial release is missing explicit reconciliation evidence');
     }
     if ((versions.at(-1) ?? 0) >= 3) {
       for (const [table, required] of Object.entries({ rooms: ['archived_at'], agents: ['archived_at','configuration_version'], providers: ['is_default','default_model_id','custom_models_json','key_revision'] })) {

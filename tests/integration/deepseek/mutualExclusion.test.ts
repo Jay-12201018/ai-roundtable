@@ -9,7 +9,7 @@ import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/K
 import { RunService } from '../../../src/main/services/RunService';
 
 const cleanup: Array<() => void | Promise<void>> = [];
-beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T00:00:00Z')));
+beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-19T12:00:00Z')));
 afterEach(async () => {
   for (const dispose of cleanup.splice(0).reverse()) await dispose();
   vi.restoreAllMocks();

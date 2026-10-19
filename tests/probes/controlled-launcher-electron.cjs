@@ -51,8 +51,8 @@ const result = { status: 'RUNNING', phase: restart ? 'restart' : 'first', direct
 const save = () => fs.writeFileSync(resultPath, JSON.stringify(result, null, 2) + '\n', { mode: 0o600 });
 const check = (name, test) => { assert.ok(test, name); assert.ok(!result.checks.includes(name)); result.checks.push(name); };
 const equal = (name, actual, expected) => { assert.deepEqual(actual, expected, name); assert.ok(!result.checks.includes(name)); result.checks.push(name); };
-// The clock only permits reaching the cancel path; the launch gate itself is expired and unarmed.
-const RealDate = Date, tick = performance.now(), epoch = RealDate.parse('2026-10-18T00:00:00Z');
+// The fixture clock permits reaching confirmation; a valid price never grants permission.
+const RealDate = Date, tick = performance.now(), epoch = RealDate.parse('2026-10-19T12:00:00Z');
 globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [epoch + performance.now() - tick])); } static now() { return epoch + Math.floor(performance.now() - tick); } };
 app.commandLine.appendSwitch('use-mock-keychain');
 const fakeKey = 'owned-launcher-fixture-key-only';
@@ -121,7 +121,7 @@ async function main() {
   equal('real entry reports the expected main SHA', startup.main, sha);
   check('launcher has no send permission', startup.sendAuthorized === false && startup.network.sendAuthorized === false && startup.network.granted === 0 && startup.network.started === 0);
   equal('actual Main and launch gate use the explicit network route', startup.network.networkRoute, proxyMode ? 'trusted-loopback-connect' : 'direct');
-  check('launch network lease is expired', RealDate.parse(startup.network.expiresAt) === 0);
+  check('valid reviewed price is not a send lease', RealDate.parse(startup.network.expiresAt) > Date.now() && startup.network.granted === 0);
   const window = BrowserWindow.getAllWindows()[0], contents = window.webContents;
   const { ProviderRegistry } = await import(pathToFileURL(path.join(buildRoot, 'out/main/index.js')).href);
   const confirmTarget = ProviderRegistry.prototype.confirmTarget;

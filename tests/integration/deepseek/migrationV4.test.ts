@@ -59,7 +59,7 @@ describe('controlled trial migration 4 and durable unknown charges', () => {
       expect(database.listControlledTrials()).toEqual([]);
       raw = new Sqlite(f.path, { readonly: true });
       const versions = raw.prepare('SELECT version,applied_at FROM schema_migrations ORDER BY version').all();
-      expect(versions).toEqual([1, 2, 3, 4].map(version => ({ version, applied_at: expect.any(String) })));
+      expect(versions).toEqual([1, 2, 3, 4, 5].map(version => ({ version, applied_at: expect.any(String) })));
       const receipt = raw.prepare('SELECT id,version FROM schema_backups').get() as { id: number; version: number };
       expect(receipt.version).toBe(3);
       const restored = await database.prepareRegisteredRestore(receipt.id);
@@ -74,7 +74,7 @@ describe('controlled trial migration 4 and durable unknown charges', () => {
       raw = new Sqlite(f.path, { readonly: true });
       expect(raw.prepare('SELECT version,applied_at FROM schema_migrations ORDER BY version').all()).toEqual(versions);
       expect(raw.prepare('SELECT COUNT(*) FROM schema_backups').pluck().get()).toBe(1);
-      expect(validateDatabase(raw).schemaVersion).toBe(4);
+      expect(validateDatabase(raw).schemaVersion).toBe(5);
     } finally { raw?.close(); database.close(); f.dispose(); }
   });
 
@@ -124,13 +124,13 @@ describe('controlled trial migration 4 and durable unknown charges', () => {
     } finally { database.close(); f.dispose(); }
   });
 
-  it('backs up and restores v4 unknown charges without releasing their reservation or altering historical messages', async () => {
+  it('backs up and restores latest-schema unknown charges without releasing their reservation or altering historical messages', async () => {
     const f = legacyV3(); const database = new Database(f.path); let raw: Sqlite.Database | undefined;
     try {
       await database.initialize(); database.reserveControlledTrial(reservation()); database.updateControlledTrialProgress('trial-one', { text: 'partial' }); database.recoverControlledTrials();
       const expected = database.listControlledTrials(); raw = new Sqlite(f.path);
       const backups = join(f.directory, 'v4-backups'); mkdirSync(backups, { mode: 0o700 });
-      const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(4);
+      const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(5);
       const restored = await prepareRestore(backup, backups); expect(statSync(restored.path).mode & 0o777).toBe(0o600);
       const candidate = new Database(restored.path);
       try {
@@ -152,7 +152,7 @@ describe('controlled trial migration 4 and durable unknown charges', () => {
       CREATE TABLE controlled_trials(id TEXT PRIMARY KEY,request_id TEXT NOT NULL,provider_id TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('reserved','unknown','settled')),data_json TEXT NOT NULL CHECK(json_valid(data_json)));
       CREATE UNIQUE INDEX idx_controlled_trial_unresolved ON controlled_trials((1)) WHERE state IN ('reserved','unknown');
       DROP TABLE discarded_trials;`],
-  ])('rejects a claimed v4 schema with %s before altering bytes', async (_name, corruption) => {
+  ])('rejects a claimed current schema with %s before altering bytes', async (_name, corruption) => {
     const f = legacyV3(); let database = new Database(f.path);
     try {
       await database.initialize(); database.close();

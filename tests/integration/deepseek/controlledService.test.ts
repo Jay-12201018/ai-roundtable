@@ -9,7 +9,7 @@ import { ControlledTrialService, type TrialQuote } from '../../../src/main/provi
 import { createSafeFetch } from '../../../src/main/providers/network';
 import { deepSeekTrialReview } from '../../../src/main/providers/controlledTrial/estimate';
 const cleanup: Array<() => void | Promise<void>> = [];
-beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T00:00:00Z')));
+beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-19T12:00:00Z')));
 afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn(); vi.restoreAllMocks(); });
 async function fixture(mode: 'ok' | 'missing' | 'broken' | 'hang' | 'usage-broken' | 'overrun' | 400 | 401 | 429 = 'ok', confirm: (quote: TrialQuote) => Promise<boolean> = async () => true) {
   const db = new Database(':memory:'); db.initialize(); cleanup.push(() => db.close());

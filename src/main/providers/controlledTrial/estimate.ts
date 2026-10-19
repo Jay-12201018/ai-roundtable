@@ -12,10 +12,10 @@ export type TokenMeasurement = LocalTokenEstimate | {
 // A separately reviewed price snapshot, never a strict-model policy or permission to make a request.
 export const deepSeekTrialReview = {
   baseUrl: 'https://api.deepseek.com', modelId: 'deepseek-flash', modelVersion: 'DeepSeek-V4.1-Flash-1017',
-  reviewedDate: '2026-10-18', maxInputCharacters: 256, maxOutputTokens: 128,
+  reviewedDate: '2026-10-19', maxInputCharacters: 256, maxOutputTokens: 128,
   price: { currency: 'CNY', inputMicroCnyPerToken: 2, outputMicroCnyPerToken: 8, maxRequestMicroCny: 50000,
-    reviewedAt: '2026-10-17T16:00:00.000Z', expiresAt: '2026-10-18T16:00:00.000Z',
-    evidence: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/; reviewed 2026-10-18; peak/cache-miss input and total completion output' },
+    reviewedAt: '2026-10-19T11:08:06.000Z', expiresAt: '2026-10-20T11:08:06.000Z',
+    evidence: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/; reviewed 2026-10-19; Flash-1017 CNY peak/cache-miss input 2/million, cache-hit 0.04/million not assumed; total completion output 8/million, including reasoning; no off-peak discount assumed' },
 } as const;
 
 export function estimateDeepSeekInput(messages: unknown): LocalTokenEstimate {

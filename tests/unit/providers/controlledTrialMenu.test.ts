@@ -58,7 +58,7 @@ it('shows only numerical HTTP status and recorded phase times', () => {
 });
 it('recent-record action displays diagnostics and retained reservation without executing a request', async () => {
   const row = record(diagnostic({ stage: 'usage', category: 'usage_missing', evidence: 'http_response', httpStatus: 200 }));
-  const database = { listControlledTrials: vi.fn(() => [row]) };
+  const database = { listControlledTrials: vi.fn(() => [row]), listControlledTrialReconciliations: vi.fn(() => []) };
   const service = { execute: vi.fn(), prepare: vi.fn(), abort: vi.fn() };
   installTrialMenu(database as never, service as never, () => false);
   const menu = fixture.menu.append.mock.calls[0][0] as { submenu: { label: string; click: () => void }[] };
@@ -103,4 +103,57 @@ it('post-request error dialog includes safe diagnosis while keeping unknown char
     detail: expect.stringContaining('HTTP 403') });
   expect(fixture.showMessageBox.mock.calls[1][0].detail).toContain('¥0.05 预留仍保留');
   expect(service.execute).toHaveBeenCalledExactlyOnceWith('trial');
+});
+
+function reconciliationFixture() {
+  const row = { ...record(), id: 'old-trial', requestId: 'old-request', providerId: 'p', keyRevision: 'old-revision', createdAt: time };
+  const database = { listControlledTrials: vi.fn(() => [row]), listControlledTrialReconciliations: vi.fn(() => []), reconcileControlledTrial: vi.fn() };
+  const service = { execute: vi.fn(), prepare: vi.fn(), abort: vi.fn(), isBusy: vi.fn(() => false) };
+  installTrialMenu(database as never, service as never, () => false);
+  const submenu = fixture.menu.append.mock.calls[0][0].submenu as { label: string; click: () => void }[];
+  const action = submenu.find(i => i.label === '人工对账与预留处理…');
+  expect(action).toBeDefined();
+  return { row, database, service, action: action! };
+}
+it('manual reconciliation defaults to cancel without changing original charges or sending', async () => {
+  const f = reconciliationFixture(); f.action.click();
+  await vi.waitFor(() => expect(fixture.showMessageBox).toHaveBeenCalled());
+  expect(f.database.reconcileControlledTrial).not.toHaveBeenCalled();
+  expect(f.service.execute).not.toHaveBeenCalled();
+  expect(fixture.showMessageBox.mock.calls[0][0]).toMatchObject({ defaultId: 0, cancelId: 0 });
+});
+it('requires the user to attest the displayed evidence before retaining or releasing a reservation', async () => {
+  const f = reconciliationFixture();
+  fixture.showMessageBox.mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: 2, checkboxChecked: false });
+  f.action.click(); await vi.waitFor(() => expect(fixture.showMessageBox).toHaveBeenCalledTimes(2));
+  await Promise.resolve(); expect(f.database.reconcileControlledTrial).not.toHaveBeenCalled();
+});
+it.each(['retain_reservation', 'release_reservation'] as const)('records %s only after exact identity and explicit uncertainty acknowledgement', async decision => {
+  const f = reconciliationFixture();
+  fixture.showMessageBox.mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: decision === 'retain_reservation' ? 1 : 2, checkboxChecked: true });
+  if (decision === 'release_reservation') fixture.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: true });
+  f.action.click(); await vi.waitFor(() => expect(f.database.reconcileControlledTrial).toHaveBeenCalledExactlyOnceWith({
+    trialId: 'old-trial', requestId: 'old-request', providerId: 'p', keyRevision: 'old-revision', evidence: 'dashboard_no_displayed_usage', decision, acknowledgedUncertainty: true,
+  }));
+  expect(f.service.execute).not.toHaveBeenCalled(); expect(f.row.accountedMicroCny).toBeNull();
+  const dialogs = fixture.showMessageBox.mock.calls.map(c => c[0]);
+  expect(dialogs.some(d => d.detail?.includes('不证明绝对没有费用'))).toBe(true);
+  expect(dialogs.every(d => d.defaultId === 0 && d.cancelId === 0)).toBe(true);
+});
+it('release needs its final confirmation and cannot be approved by a stale first dialog alone', async () => {
+  const f = reconciliationFixture();
+  fixture.showMessageBox.mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: 2, checkboxChecked: true }).mockResolvedValueOnce({ response: 0 });
+  f.action.click(); await vi.waitFor(() => expect(fixture.showMessageBox).toHaveBeenCalledTimes(3));
+  await Promise.resolve(); expect(f.database.reconcileControlledTrial).not.toHaveBeenCalled();
+});
+
+it('recent unknown shows a separate manual release without inventing actual usage or zero charges', () => {
+  const row = record();
+  const database = { listControlledTrials: () => [row], listControlledTrialReconciliations: () => [{ decision: 'release_reservation' }] };
+  installTrialMenu(database as never, {} as never, () => false);
+  const menu = fixture.menu.append.mock.calls[0][0].submenu as { label: string; click: () => void }[];
+  menu.find(i => i.label === '查看最近测试记录…')!.click();
+  expect(fixture.showMessageBox.mock.calls[0][0].detail).toContain('不代表账单为零');
+  expect(fixture.showMessageBox.mock.calls[0][0].detail).toContain('未知 输入 / 未知 输出');
+  expect(row.state).toBe('unknown'); expect(row.accountedMicroCny).toBeNull();
 });
