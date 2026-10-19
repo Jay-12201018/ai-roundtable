@@ -144,3 +144,10 @@ GUI 前先串行完成 Node24.18.1 原生与测试→Electron38.8.6/ABI139重建
 原r01-electron恢复探针的精确settings白名单漏新confirmTarget，实际exit1；本轮只补该方法后新profile重跑及退出审计exit0。业务、构建、既有测试/fixture输入未变，保留同业务版本本轮有效全回归证据，不将空集/提前退出视为成功。所有GUI仍先隔离真实数据及系统Keychain，仅fake后端和自有loopback HTTP，不扩大真实API授权。
 
 R09的verified只限fixture；默认无获审真实model policy时生成拒绝。真实模型能力/计数/费用、公网调用、OS Keychain、正式E2E与跨平台发布均未验证。后续Provider/工作流仍需独立授权与共享契约冻结，不因ready自动实施。
+
+
+## Provider Catalog 后续验收规划（2026-10-20，未执行）
+
+按[目录增强规划的验收门槛](PROVIDER_CATALOG_PLAN.md#后续验收门槛未执行)开展未来 R08/R09 增强与 R17 最终验证；不是当前 R10A/R10B/R11 新增用例或任务范围。至少分别记录：目录数据与来源/有效期校验、预设/自定义多实例及 Key 隔离、同一 R09 Adapter 服务多个独立实例、未知/过期生成政策拒绝、独立分级连接测试、同房间异 Provider/模型的上下文与历史归属、真实隔离 Electron 生产路径。
+
+厂商官方文档声明、fixture 协议证据和另行获授权的公网/实际费用证据分别呈现；一个兼容端点成功不能证明所有预设或所有模型支持，不将 Coding 订阅、模型列表、近似计数或缺失 usage 变成 API/生成/精确费用证明。没有证据的条目标未知/未验证，不自行发付费请求。当前仅检查文档链接、一致性和文件边界，不将未来测试标 PASS。

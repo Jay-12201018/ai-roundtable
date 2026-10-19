@@ -311,3 +311,12 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 - 重新核价于2026-10-19T11:08:06Z，deepseek-flash=DeepSeek-V4.1-Flash-1017；CNY高峰缓存未命中输入2/百万、总completion输出8/百万，不使用缓存或闲时折扣。官方缓存命中高峰0.04/百万仅记录证据不折算费用；24小时快照，2026-10-20T11:08:06Z到期拒绝。新的报价不是付费授权。
 
 本节已随实施715c2ebe获授权ff-only合入main，并通过独立主线验收；状态merged/verified仅限本地fixture和安全操作路径，真实模型调用仍未经本轮授权。人工决定不能改写首次历史结论。
+
+
+## Provider Catalog 契约规划边界（2026-10-20，未实施）
+
+[目录增强规划](PROVIDER_CATALOG_PLAN.md) 只登记未来要求，本轮不新增已生效 DTO/IPC、Schema、ProviderKind 值、migration 或政策。品牌/平台是目录元数据，kind 沿用协议类别；Provider 实例仍是稳定 providerId，Model 是 (providerId, modelId)，预设标识不得代替它们或串用 Key。目录数据不能自动生成可用计数/价格政策、网络授权或通用请求入口。
+
+未来由总控冻结 preset 身份/修订、协议/鉴权白名单、经核实默认 URL、模型/能力/证据/有效期的概念到正式 wire shape 的映射；Registry 能力与模型政策继续 Main-only，未知/过期不伪造、不静默回退 Mock。具体目录/API/存储变化先完成兼容性及必要迁移审查，再分配唯一文件归属。目录更新不覆盖用户配置/Key 或历史成员快照；目标变更沿用撤销/重新确认。
+
+当前 R10A/R10B/R11 的 Shared/Registry/Main/IPC/Preload/App 接线申请仍按各自原任务执行，不因目录规划争用文件；三模块不负责实现目录或大量预设 UI。目录不改变现有 DeepSeek 单次许可、限定目标/代理、费用未知保留及普通真实 Run 的安全门禁。
