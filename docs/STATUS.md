@@ -239,3 +239,9 @@ R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/nex
 用户授权从7900a4fbc75aca6c9c4aedb330636bbbea128490在独立Worktree实施，分支`codex/deepseek-launcher-network-fix`。状态 **review，未合main、未部署或重启当前App**；R00–R09既有状态与R00–R18路线不变。只纳入受控包装器、修复两处observer透传、动态最新干净main构建/产物绑定和安全启动，默认cancel-only，不claim旧发送许可。证据见[候选报告](verification/2026-10-19-deepseek-launcher-network.md)/[逐命令台账](verification/2026-10-19-deepseek-launcher-network-commands.md)。
 
 本次Node1255、Electron诊断178、Python21、包装器8场景、TLS30断言、实际ABI139、真实生产入口28/重启21与prepare执行通过；src/Shared/IPC/迁移1–4/package/lock/价格不改。当前系统代理和TUN差异不足以证明需要专用代理，本轮不实现。首次unknown/¥0.05未触碰，严格计数blocked/价格过期拒绝/真实Keychain和公网未验收/每次本人确认保持。下一步只等待候选审核；合并、部署/关闭旧窗口、核价、核销和真实单次请求分别需要授权，不自动继续。
+
+## DEEPSEEK-LAUNCH-01 正式合并及main验收（2026-10-19）
+
+用户授权后已将获批f04ed4873066eefd7161dd721f104caf4ad1ac30从7900a4fbc75aca6c9c4aedb330636bbbea128490严格ff-only合main，原分支/19个Worktree全部保留。此前review为历史阶段；当前 **merged / verified（安全诊断、最新main构建绑定、本地fixture）**。本次main新跑Python21、Node/Electron包装器各8场景、Electron受影响178、TLS30、ABI139内存4、strict/build、生产入口28/重启21、实际prepare均exit0；原沙箱失败保留。见[主线报告](verification/2026-10-19-deepseek-launcher-main.md)/[台账](verification/2026-10-19-deepseek-launcher-main-commands.md)。
+
+按用户本轮只读授权核对原controlled_trials费用/状态投影：unknown1条、¥0.05预留、实际费用NULL前后一致，未读Key表或真实Key。当前PID27099/旧冻结构建/加密身份未换；新版只提供未授权入口，Finder文件准备不等于真实profile部署。价格过期、严格计数blocked、unknown保护及另行单次许可要求不变；真实网络/Keychain仍未验证，不启动后续任务。最终main为本节所在治理提交，完整SHA见Git和交付消息；最终快照须匹配该HEAD。

@@ -284,3 +284,7 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 ### DEEPSEEK-DIAG-01 主线生效登记（2026-10-19）
 
 用户最终授权后已从524f505严格ff-only合入完整7599949087e0fc0a09c6ca99a33a376eaba9d3f7，main必要独立验收全部通过，诊断仅在本地fixture/安全边界范围merged/verified；见[本次主线报告](verification/2026-10-19-deepseek-diagnostics-main.md)。上述候选契约已生效，migration1–4及普通Shared/IPC不变。当前App未部署本候选；unknown/完整预留、计数阻塞、过期拒绝和每次原生确认保持，没有核销或新联网许可。新代码不能追溯首次失败，不能证明真实Key或网络正常。
+
+### DEEPSEEK-LAUNCH-01 主线生效（2026-10-19）
+
+获批f04候选已严格ff-only合main并通过[独立验收](verification/2026-10-19-deepseek-launcher-main.md)。受控包装器必须转发streamControlledTrial第四参数和createTransport第二参数diagnostics；不记录原异常、请求头或凭据。仓库内prepare/open绑定最新干净main及产物/关键依赖；保留原profile/data/appName/Keyguard身份，拒绝活动旧进程，默认cancel-only且不claim旧许可。Shared/IPC、数据库migration1–4及预算协议未改变；新诊断不能倒推旧network_error。原unknown/¥0.05只读核对一致，无核销/新授权。
