@@ -7,6 +7,13 @@ const { execFileSync } = require('node:child_process');
 const { syncBuiltinESMExports } = require('node:module');
 const { app, BrowserWindow, Menu, dialog, safeStorage } = require('electron');
 assert.ok(app && !app.isReady(), 'Actual Electron before-ready isolation required');
+// Capture values at installation time; a mutable JS Menu can diverge from the macOS menu bar.
+const nativeInstallations = [];
+const installNativeMenu = Menu.setApplicationMenu.bind(Menu);
+Menu.setApplicationMenu = menu => {
+  nativeInstallations.push(menu?.items.map(item => ({ label: item.label, children: item.submenu?.items.map(child => child.label) })) ?? []);
+  return installNativeMenu(menu);
+};
 const root = path.resolve(__dirname, '../..');
 const args = process.argv.slice(2), restart = args.length === 2 && args[0] === '--restart';
 assert.ok(args.length === 0 || restart);
@@ -126,8 +133,8 @@ app.exit = code => {
     return nativeExit(0);
   } catch (error) { fail(error); }
 };
-async function waitFor(read, accepts, message) {
-  const end = performance.now() + 10000;
+async function waitFor(read, accepts, message, milliseconds = 10000) {
+  const end = performance.now() + milliseconds;
   for (;;) { const value = await read(); if (accepts(value)) return value; assert.ok(performance.now() < end, message); await new Promise(r => setTimeout(r, 20)); }
 }
 const doneDialog = rows => rows.some(row => ['没有发起新的自动重试', '人工决定已记录', '当前会话不能再次准备许可'].includes(row.message) || row.message.startsWith('受控测试：'));
@@ -168,6 +175,12 @@ async function main() {
   const prefs = wc.getLastWebPreferences(); check('real restricted sandbox bridge', prefs.sandbox && prefs.contextIsolation && !prefs.nodeIntegration && prefs.webSecurity);
   check('real preload offers no generic invoke or Key resolution', await wc.executeJavaScript(`!!window.roundtable && !('invoke' in window.roundtable) && !('resolveKey' in window.roundtable.settings) && typeof require==='undefined'`));
   const menu = Menu.getApplicationMenu().items.find(i => i.label === '受控测试');
+  check('native installation includes the session-permit item', nativeInstallations.at(-1).find(i => i.label === '受控测试')?.children?.includes('准备本会话单次许可…'));
+  if (process.env.ROUNDTABLE_PROBE_HOLD_NATIVE_MENU === '1') {
+    const resume = path.join(dir, 'native-menu-continue');
+    console.log('NATIVE_MENU_AX_READY ' + JSON.stringify({ directory: dir, resume }));
+    await waitFor(() => fs.existsSync(resume), Boolean, 'Native menu AX observation did not finish', 45000);
+  }
   const item = label => { const value = menu.submenu.items.find(i => i.label === label); assert.ok(value, label); return value; };
   const start = item('DeepSeek 单次测试…'), permit = item('准备本会话单次许可…'), reconcile = item('人工对账与预留处理…');
   if (!restart) {

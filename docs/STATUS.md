@@ -1,6 +1,11 @@
 # R00–R18 状态与授权看板
 
 
+## DeepSeek 原生许可入口修复（2026-10-19）
+
+候选针对main6c90732实际macOS菜单缺项，一行重新安装菜单修复；不改IPC/Service/授权和费用数据。安装时快照RED→GREEN，实际自有fixture原生AX确认许可入口可见，生产38/重启19、权限22、菜单回归37、启动器24和strict均exit0；待本次已授权ff-only与主线必要验收。[本轮证据](verification/2026-10-19-deepseek-native-menu.md)。当前用户窗口/Key/old unknown/人工对账决定不操作。
+
+
 ## DeepSeek 三项最终收尾（2026-10-19）
 
 **merged / verified（本地fixture、费用/安全与人工操作路径；不代表真实付费成功）。** 分支codex/deepseek-final-readiness，基线dc8a7a0a4b8f2469a39c87403d26dd7d48d0b220。重新核价24小时快照、migration5人工audit+release marker、会话双原生确认单次lease已接通；原unknown不改、迁移不自动释放、普通真实生成blocked。完整Electron1322、strict/build、原生生产37/重启18及费用/迁移/许可专项exit0；失败与限制见[本次记录](verification/2026-10-19-deepseek-final-readiness.md)。本次已从干净dc8a7a0严格ff-only到715c2ebe4bd1b669a938eb866daceaf9640ae485，主线新跑88文件1322/1322、strict/生产构建/ABI139内存SQLite、Python24、许可22/quote28、真实生产37/重启18全部exit0。主线证据另立独立临时根，没有复用候选PASS。治理登记是独立后续提交；最终HEAD可由本节所在commit读取。原分支/全部Worktree保留。本轮未操作实际旧profile、Key、预留或发送许可，真实API0；R10/R11/R17未启动。

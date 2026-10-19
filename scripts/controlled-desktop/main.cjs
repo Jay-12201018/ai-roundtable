@@ -86,6 +86,7 @@ async function main() {
     else void nativeDialog({ type: 'info', message: '当前会话不能再次准备许可',
       detail: '本会话已使用或取消许可，或价格已过期。关闭后重新启动也不会自动获得发送权限。', buttons: ['确定'] });
   } }));
+  Menu.setApplicationMenu(Menu.getApplicationMenu()); // macOS needs reinstallation after changing an installed submenu.
   w.on('close', () => authorization.cancel());
   result.checks = ['same owned profile and Keychain identity', 'version-bound production build', 'sandbox Preload intact', 'native controlled menu installed', 'real requests remain unarmed'];
   result.status = 'READY'; w.setTitle('AI 圆桌 · main ' + mainSha.slice(0, 7) + ' · 未授权发送');
