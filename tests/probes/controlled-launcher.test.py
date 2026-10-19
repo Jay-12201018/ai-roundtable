@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 
 SCRIPT = Path(__file__).resolve().parents[2] / 'scripts/controlled-desktop/launcher.py'
 
@@ -203,6 +204,64 @@ class ProfileProtectionTests(unittest.TestCase):
         process.wait(timeout=5)
         (self.profile / 'last-open.json').write_text(json.dumps({'pid': process.pid}))
         self.launcher.refuse_running_profile(self.profile)
+
+    def test_proxy_requires_explicit_remote_dns_trust(self):
+        self.assertIsNone(self.launcher.validate_proxy(None, False))
+        self.assertEqual(self.launcher.validate_proxy('http://127.0.0.1:7890', True), 'http://127.0.0.1:7890')
+        self.assertEqual(self.launcher.validate_proxy('http://[::1]:8080/', True), 'http://[::1]:8080')
+        for proxy, trust in [(None, True), ('http://127.0.0.1:7890', False), ('https://127.0.0.1:7890', True),
+                             ('http://localhost:7890', True), ('http://127.1:7890', True), ('http://1.2.3.4:7890', True),
+                             ('http://user:secret@127.0.0.1:7890', True), ('http://127.0.0.1:0', True),
+                             ('http://127.0.0.1:65536', True), ('http://127.0.0.1:7890/path', True),
+                             ('http://127.0.0.1:7890?x', True), ('http://127.0.0.1:07890', True)]:
+            with self.subTest(proxy=proxy, trust=trust), self.assertRaisesRegex(ValueError, 'proxy'):
+                self.launcher.validate_proxy(proxy, trust)
+
+    def test_proxy_launch_keeps_identity_unarmed_and_ignores_ambient_proxy(self):
+        identity = (self.profile / 'owner.json').read_bytes()
+        captured = {}
+        native_popen = subprocess.Popen
+
+        def fake_open(argv, **kwargs):
+            if 'env' not in kwargs:
+                return native_popen(argv, **kwargs)
+            captured.update(argv=argv, **kwargs)
+            Path(kwargs['env']['ROUNDTRIAL_RESULT']).write_text('{"status":"READY"}')
+            return SimpleNamespace(pid=999999, poll=lambda: None)
+
+        with patch.dict(os.environ, {'HTTP_PROXY': 'http://user:fake@remote.invalid:1', 'ROUNDTABLE_CONNECT_PROXY': 'http://remote.invalid:2'}):
+            with patch.object(self.launcher.subprocess, 'Popen', side_effect=fake_open):
+                self.launcher.open_app(self.repo, self.build, self.profile, 'http://127.0.0.1:7890', True)
+        env = captured['env']
+        self.assertEqual(env['ROUNDTABLE_CONNECT_PROXY'], 'http://127.0.0.1:7890')
+        self.assertEqual(env['ROUNDTABLE_TRUST_PROXY_DNS'], '1')
+        self.assertNotIn('HTTP_PROXY', env)
+        self.assertEqual(env['ROUNDTRIAL_SERVICE'], 'fake-service')
+        self.assertEqual(env['ROUNDTRIAL_ACCOUNT'], 'fake-account')
+        self.assertEqual(captured['argv'][-2], str(self.profile))
+        self.assertEqual((self.profile / 'owner.json').read_bytes(), identity)
+        self.assertFalse(json.loads((self.profile / 'last-open.json').read_text())['sendAuthorized'])
+
+    def test_default_route_does_not_inherit_proxy_and_invalid_route_never_opens(self):
+        captured = {}
+        native_popen = subprocess.Popen
+
+        def fake_open(argv, **kwargs):
+            if 'env' not in kwargs:
+                return native_popen(argv, **kwargs)
+            captured.update(kwargs['env'])
+            Path(kwargs['env']['ROUNDTRIAL_RESULT']).write_text('{"status":"READY"}')
+            return SimpleNamespace(pid=999999, poll=lambda: None)
+
+        with patch.dict(os.environ, {'ROUNDTABLE_CONNECT_PROXY': 'http://127.0.0.1:7890', 'ROUNDTABLE_TRUST_PROXY_DNS': '1'}):
+            with patch.object(self.launcher.subprocess, 'Popen', side_effect=fake_open):
+                self.launcher.open_app(self.repo, self.build, self.profile)
+        self.assertNotIn('ROUNDTABLE_CONNECT_PROXY', captured)
+        self.assertNotIn('ROUNDTABLE_TRUST_PROXY_DNS', captured)
+        with patch.object(self.launcher.subprocess, 'Popen') as opened:
+            with self.assertRaisesRegex(ValueError, 'proxy'):
+                self.launcher.open_app(self.repo, self.build, self.profile, 'http://remote.invalid:7890', True)
+            opened.assert_not_called()
 
 
 if __name__ == '__main__':

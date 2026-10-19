@@ -4,6 +4,7 @@ import { request as httpsRequest } from 'node:https';
 import { isIP, type LookupFunction } from 'node:net';
 import type { DiagnosticEvent, DiagnosticObserver } from './diagnostics';
 import { ContractError } from '../../shared/contracts/errors';
+import { assertProxyTarget, LoopbackProxyAgent, type LoopbackProxy } from './loopbackProxy';
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {
@@ -27,8 +28,8 @@ function loopback(address: string): boolean {
   return isIP(address) === 4 && address.startsWith('127.') || address === '::1';
 }
 
-/** Main-only transport: validate every DNS answer, then connect without another resolver or proxy. */
-export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver): typeof fetch {
+/** Main-only transport: pin public DNS directly, or use the explicitly trusted, narrowly scoped proxy. */
+export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver, proxy?: LoopbackProxy): typeof fetch {
   return async (input, init = {}) => {
     if (typeof input !== 'string' && !(input instanceof URL)) throw new TypeError('Unsupported request');
     const raw = String(input);
@@ -45,8 +46,11 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     const signal = init.signal;
     const abortReason = () => signal?.reason instanceof Error ? signal.reason : new DOMException('Request aborted', 'AbortError');
     signal?.throwIfAborted(); guard?.();
+    if (proxy) assertProxyTarget(url, method);
     observe?.({ stage: 'network_client', evidence: 'client_invoked' });
     signal?.throwIfAborted();
+    let selected: { address: string; family: number } | undefined;
+    if (!proxy) {
     observe?.({ stage: 'dns' });
     signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
     let stopDns!: () => void;
@@ -67,14 +71,19 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     if (addresses.length === 0 || addresses.some(value => value.family !== isIP(value.address) || !(local ? loopback(value.address) : publicAddress(value.address)))) {
       observe?.({ stage: 'dns', category: 'target_rejected' }); throw new TypeError('Unsafe network target');
     }
-    const selected = addresses[0];
+    selected = addresses[0];
+    }
     const pinned: LookupFunction = (_host, options, callback) => {
-      if (options.all) callback(null, [selected]);
-      else callback(null, selected.address, selected.family);
+      if (options.all) callback(null, [selected!]);
+      else callback(null, selected!.address, selected!.family);
     };
     return await new Promise<Response>((resolve, reject) => {
       let request: ClientRequest | undefined; let response: IncomingMessage | undefined;
-      let phase: 'tcp' | 'tls' | 'request' | 'response' = 'tcp';
+      let phase: 'tcp' | 'proxy' | 'tls' | 'request' | 'response' = 'tcp';
+      const agent = proxy ? new LoopbackProxyAgent(proxy, guard, signal, event => {
+        if (event.stage === 'tcp' || event.stage === 'proxy' || event.stage === 'tls') phase = event.stage;
+        observe?.(event);
+      }) : undefined;
       const diagnose = (error: unknown) => {
         const code = nativeCode(error);
         let category: DiagnosticEvent['category'];
@@ -85,7 +94,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         else category = 'network_unknown';
         observe?.({ stage: phase, category });
       };
-      const cleanup = () => signal?.removeEventListener('abort', abort);
+      const cleanup = () => { signal?.removeEventListener('abort', abort); agent?.destroy(); };
       const fail = (error: Error) => { diagnose(error); cleanup(); reject(error); };
       const abort = () => {
         const error = abortReason();
@@ -96,8 +105,9 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         const send = local ? httpRequest : httpsRequest;
         observe?.({ stage: 'tcp' });
         signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
-        request = send(url, { method, headers: Object.fromEntries(headers), agent: false, lookup: pinned,
-          family: selected.family, ...(local ? {} : { rejectUnauthorized: true, servername: isIP(hostname) ? '' : hostname }),
+        request = send(url, { method, headers: Object.fromEntries(headers), agent: agent ?? false,
+          ...(proxy ? {} : { lookup: pinned, family: selected!.family }),
+          ...(local ? {} : { rejectUnauthorized: true, servername: isIP(hostname) ? '' : hostname }),
         }, incoming => {
           response = incoming; phase = 'response';
           const status = incoming.statusCode ?? 0;
@@ -147,7 +157,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         signal?.addEventListener('abort', abort, { once: true });
         if (signal?.aborted) { abort(); return; }
         request.once('socket', socket => {
-          if (!local) socket.once('connect', () => { phase = 'tls'; observe?.({ stage: 'tls' }); });
+          if (!local && !proxy) socket.once('connect', () => { phase = 'tls'; observe?.({ stage: 'tls' }); });
           socket.once(local ? 'connect' : 'secureConnect', () => {
             try {
               signal?.throwIfAborted(); guard?.();

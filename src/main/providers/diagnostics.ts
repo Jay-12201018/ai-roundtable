@@ -2,9 +2,9 @@ import { z } from 'zod';
 import { timestampSchema } from '../../shared/schemas/common';
 import type { ErrorCode } from '../../shared/schemas/error';
 
-const stage = z.enum(['validation', 'credential', 'network_client', 'dns', 'tcp', 'tls', 'request', 'response', 'stream', 'usage', 'accounting', 'complete']);
+const stage = z.enum(['validation', 'credential', 'network_client', 'dns', 'tcp', 'proxy', 'tls', 'request', 'response', 'stream', 'usage', 'accounting', 'complete']);
 const evidence = z.enum(['not_started', 'client_invoked', 'http_response']);
-const category = z.enum(['credential_unavailable', 'credential_read_failed', 'dns_failed', 'target_rejected', 'tcp_failed', 'tcp_timeout', 'tls_failed', 'http_error', 'request_timeout', 'request_interrupted', 'response_invalid', 'usage_missing', 'accounting_failed', 'cancelled', 'policy_rejected', 'network_unknown']);
+const category = z.enum(['credential_unavailable', 'credential_read_failed', 'dns_failed', 'target_rejected', 'tcp_failed', 'tcp_timeout', 'proxy_failed', 'proxy_rejected', 'tls_failed', 'http_error', 'request_timeout', 'request_interrupted', 'response_invalid', 'usage_missing', 'accounting_failed', 'cancelled', 'policy_rejected', 'network_unknown']);
 const status = z.number().int().min(100).max(599);
 const eventSchema = z.object({ stage: stage.optional(), evidence: evidence.optional(), category: category.nullable().optional(), httpStatus: status.optional() }).strict();
 export type DiagnosticEvent = z.infer<typeof eventSchema>;

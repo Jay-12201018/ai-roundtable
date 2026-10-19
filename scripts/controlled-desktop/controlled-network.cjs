@@ -9,6 +9,13 @@ function installControlledNetwork(options = {}) {
   assert.ok(options.target === undefined || options.target === target);
   const expires = Date.parse(options.priceExpiresAt);
   assert.ok(Number.isFinite(expires));
+  let proxy;
+  if (options.proxyUrl !== undefined || options.trustProxyDns) {
+    const match = typeof options.proxyUrl === 'string' && /^http:\/\/(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})\/?$/u.exec(options.proxyUrl);
+    assert.ok(options.trustProxyDns === true && match && Number(match[2]) <= 65535, 'Explicit trusted loopback HTTP proxy required');
+    proxy = { host: match[1].replace(/^\[|\]$/gu, ''), port: Number(match[2]) };
+    assert.equal(options.fixtureOrigin, undefined, 'Proxy uses the fixed production origin');
+  }
   let wireTarget = new URL(target);
   if (options.fixtureOrigin !== undefined) {
     assert.equal(options.fixtureOnly, true);
@@ -29,25 +36,82 @@ function installControlledNetwork(options = {}) {
   const socketOptions = args => {
     const context = wire.getStore(); current(context?.lease);
     const first = Array.isArray(args[0]) ? args[0][0] : args[0];
-    if (!context.nativeStarted || !first || typeof first !== 'object' || first.path
-      || first.host !== wireTarget.hostname || Number(first.port) !== Number(wireTarget.port || 443)
+    if (!context.nativeStarted || !first || typeof first !== 'object' || first.path) deny();
+    if (proxy) {
+      if (!context.proxyStarted || context.tunnel || first.host !== proxy.host || Number(first.port) !== proxy.port
+        || first.lookup !== undefined) deny();
+    } else if (first.host !== wireTarget.hostname || Number(first.port) !== Number(wireTarget.port || 443)
       || first.lookup !== context.lookup) deny();
     return context;
   };
   const rawRequest = (native, protocol) => function (url, opts, callback) {
     const context = wire.getStore(); current(context?.lease);
+    if (proxy && protocol === 'http:') {
+      const config = url;
+      if (!context.nativeStarted || context.proxyStarted || !config || typeof config !== 'object'
+        || config.hostname !== proxy.host || Number(config.port) !== proxy.port || config.method !== 'CONNECT'
+        || config.path !== 'api.deepseek.com:443' || config.agent !== false || config.lookup !== undefined
+        || config.auth !== undefined || config.maxHeaderSize !== 8192
+        || !config.headers || Object.keys(config.headers).length !== 1 || config.headers.Host !== 'api.deepseek.com:443') deny();
+      context.proxyStarted = true;
+      const request = native.call(this, config, opts);
+      const end = request.end;
+      const refuse = () => { request.destroy(); return deny(); };
+      request.write = refuse;
+      request.end = function (body, ...rest) { current(context.lease); if (body !== undefined && body !== null) refuse(); return end.call(this, body, ...rest); };
+      request.prependOnceListener('connect', (response, socket, head) => {
+        try { current(context.lease); } catch (error) { socket.destroy(); request.destroy(error); return; }
+        if (response.statusCode !== 200 || head.length !== 0 || socket !== context.rawSocket) return;
+        context.tunnel = socket;
+      });
+      return request;
+    }
     if (context.nativeStarted || protocol !== wireTarget.protocol || String(url) !== wireTarget.href
-      || opts?.method !== 'POST' || opts.agent !== false || typeof opts.lookup !== 'function'
+      || opts?.method !== 'POST'
+      || (proxy ? !(opts.agent instanceof https.Agent) || opts.lookup !== undefined : opts.agent !== false || typeof opts.lookup !== 'function')
       || protocol === 'https:' && (opts.rejectUnauthorized !== true || opts.servername !== wireTarget.hostname)) deny();
     context.nativeStarted = true; context.lookup = opts.lookup;
-    return native.call(this, url, opts, callback);
+    const request = native.call(this, url, opts, callback);
+    if (proxy) {
+      const end = request.end;
+      const refuse = () => { request.destroy(); return deny(); };
+      request.write = refuse;
+      request.end = function (body, ...rest) {
+        current(context.lease);
+        if (context.originEnded || !context.tlsVerified || !context.tlsSocket?.authorized || body !== context.body) refuse();
+        context.originEnded = true;
+        return end.call(this, body, ...rest);
+      };
+      request.prependOnceListener('socket', socket => {
+        if (socket !== context.tlsSocket) { socket.destroy(); request.destroy(new Error('Controlled TLS socket rejected')); }
+      });
+    }
+    return request;
   };
   http.request = rawRequest(original.httpRequest, 'http:'); https.request = rawRequest(original.httpsRequest, 'https:');
   http.get = https.get = deny;
-  net.Socket.prototype.connect = function (...args) { socketOptions(args); return original.socketConnect.apply(this, args); };
+  net.Socket.prototype.connect = function (...args) {
+    const context = socketOptions(args);
+    if (proxy) { if (context.rawSocket && context.rawSocket !== this) deny(); context.rawSocket = this; }
+    return original.socketConnect.apply(this, args);
+  };
   net.connect = function (...args) { socketOptions(args); return original.netConnect.apply(this, args); };
   net.createConnection = function (...args) { socketOptions(args); return original.netCreate.apply(this, args); };
   tls.connect = function (...args) {
+    if (proxy) {
+      const context = wire.getStore(); current(context?.lease);
+      const config = args[0];
+      if (!context.tunnel || context.tlsSocket || config?.socket !== context.tunnel
+        || config.rejectUnauthorized !== true || config.servername !== wireTarget.hostname
+        || Object.keys(config).some(key => !['socket', 'servername', 'rejectUnauthorized'].includes(key))) deny();
+      const socket = original.tlsConnect.apply(this, args);
+      context.tlsSocket = socket;
+      socket.prependOnceListener('secureConnect', () => {
+        try { current(context.lease); if (!socket.authorized) deny(); context.tlsVerified = true; }
+        catch (error) { socket.destroy(error); }
+      });
+      return socket;
+    }
     socketOptions(args);
     if (args[0].rejectUnauthorized !== true || args[0].servername !== wireTarget.hostname) deny();
     return original.tlsConnect.apply(this, args);
@@ -98,7 +162,7 @@ function installControlledNetwork(options = {}) {
         init.signal?.throwIfAborted(); guard();
         lease.sent = true; metrics.started++;
         // Headers and their secret values are forwarded untouched, never inspected or logged.
-        return wire.run({ lease, nativeStarted: false }, () => fetcher(wireTarget.href, init));
+        return wire.run({ lease, nativeStarted: false, body: init.body }, () => fetcher(wireTarget.href, init));
       };
     };
   }
@@ -110,6 +174,7 @@ function installControlledNetwork(options = {}) {
     net.Socket.prototype.connect = original.socketConnect; tls.connect = original.tlsConnect; globalThis.fetch = original.fetch;
     syncBuiltinESMExports();
   }
-  return { approve, attachRegistry, status: () => ({ ...metrics, sendAuthorized: options.sendAuthorized === true, expiresAt: options.priceExpiresAt }), restore };
+  return { approve, attachRegistry, status: () => ({ ...metrics, sendAuthorized: options.sendAuthorized === true,
+    networkRoute: proxy ? 'trusted-loopback-connect' : 'direct', expiresAt: options.priceExpiresAt }), restore };
 }
 module.exports = { installControlledNetwork };

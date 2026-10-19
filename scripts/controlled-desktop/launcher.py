@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -88,6 +89,15 @@ def base_env():
     return {key: os.environ[key] for key in ('HOME', 'USER', 'LOGNAME', 'LANG', 'LC_CTYPE', 'SHELL', '__CF_USER_TEXT_ENCODING') if key in os.environ}
 
 
+def validate_proxy(proxy, trust_remote_dns):
+    if proxy is None and not trust_remote_dns:
+        return None
+    match = re.fullmatch(r'http://(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})/?', proxy or '')
+    if not trust_remote_dns or not match or int(match[2]) > 65535:
+        raise ValueError('Use an explicit loopback HTTP proxy and acknowledge trust in its remote DNS')
+    return f'http://{match[1]}:{match[2]}'
+
+
 def prepare(repo, build, node):
     initial = source_state(repo)
     initial_dependencies = dependency_hashes(repo)
@@ -150,7 +160,8 @@ def refuse_running_profile(profile):
             raise ValueError('Previous profile process is active or cannot be checked; close it manually before opening a new version')
 
 
-def open_app(repo, build, profile):
+def open_app(repo, build, profile, connect_proxy=None, trust_proxy_dns=False):
+    connect_proxy = validate_proxy(connect_proxy, trust_proxy_dns)
     manifest = validate_build(repo, build)
     refuse_running_profile(profile)
     owner = profile_owner(repo, profile)
@@ -162,6 +173,8 @@ def open_app(repo, build, profile):
                DYLD_INSERT_LIBRARIES=str(profile / 'keyguard.dylib'), ROUNDTRIAL_SERVICE=owner['service'],
                ROUNDTRIAL_ACCOUNT=owner['accounts'][0], ROUNDTRIAL_LEGACY_ACCOUNT=owner['accounts'][1],
                ROUNDTRIAL_GUARD_LOG=str(guard), ROUNDTRIAL_RESULT=str(result), ROUNDTRIAL_DRY='0')
+    if connect_proxy:
+        env.update(ROUNDTABLE_CONNECT_PROXY=connect_proxy, ROUNDTABLE_TRUST_PROXY_DNS='1')
     argv = [str(repo / DEPENDENCIES[0]), str(repo / 'scripts/controlled-desktop/main.cjs'), str(build), str(profile), manifest['main']]
     validate_build(repo, build)
     refuse_running_profile(profile)
@@ -169,7 +182,8 @@ def open_app(repo, build, profile):
         raise ValueError('Independent profile identity changed before launch')
     with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
         process = subprocess.Popen(argv, cwd=repo, env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
-    record = {'main': manifest['main'], 'argv': argv, 'pid': process.pid, 'startedUtc': datetime.now(timezone.utc).isoformat(), 'sendAuthorized': False}
+    record = {'main': manifest['main'], 'argv': argv, 'pid': process.pid, 'startedUtc': datetime.now(timezone.utc).isoformat(), 'sendAuthorized': False,
+              'networkRoute': 'trusted-loopback-connect' if connect_proxy else 'direct'}
     (profile / 'last-open.json').write_text(json.dumps(record, indent=2) + '\n')
     for _ in range(300):
         if result.exists():
@@ -193,13 +207,15 @@ def main():
     open_parser = commands.add_parser('open')
     open_parser.add_argument('--build-root', type=Path, required=True)
     open_parser.add_argument('--profile-root', type=Path, required=True)
+    open_parser.add_argument('--connect-proxy', help='Explicit http://127.0.0.1:port or http://[::1]:port; credentials are refused')
+    open_parser.add_argument('--trust-proxy-dns', action='store_true', help='Trust this local proxy to resolve the fixed HTTPS origin; does not authorize sending')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     build = args.build_root.absolute()
     if args.command == 'prepare':
         prepare(repo, build, args.node)
     else:
-        open_app(repo, build, args.profile_root.absolute())
+        open_app(repo, build, args.profile_root.absolute(), args.connect_proxy, args.trust_proxy_dns)
 
 
 if __name__ == '__main__':

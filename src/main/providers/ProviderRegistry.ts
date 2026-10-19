@@ -15,6 +15,7 @@ import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider
 import { createSafeFetch } from './network';
 import type { DiagnosticObserver } from './diagnostics';
 import { deepSeekFlashCapabilities } from './modelPolicies/deepseekFlash';
+import { assertProxyTarget, type LoopbackProxy } from './loopbackProxy';
 
 export interface ApprovedModelPolicy {
   evidence: string;
@@ -29,6 +30,7 @@ export interface ApprovedModelPolicy {
   };
 }
 type Options = {
+  proxy?: LoopbackProxy;
   policyResolver?: (configuration: ProviderConfiguration, modelId: string) => ApprovedModelPolicy | undefined;
   capabilitiesResolver?: (configuration: ProviderConfiguration) => ChatCompletionCapabilities;
   transportFactory?: (guard: () => void, diagnostics?: DiagnosticObserver) => typeof fetch;
@@ -80,7 +82,7 @@ export class ProviderRegistry {
   resolveCapabilities(configuration: ProviderConfiguration): ChatCompletionCapabilities {
     return configuration.kind === 'openai' ? officialCapabilities : this.options.capabilitiesResolver?.(configuration) ?? deepSeekFlashCapabilities(configuration) ?? unknownCapabilities;
   }
-  createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch { return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics); }
+  createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch { return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics, this.options.proxy); }
 
   assertSelection(providerId: string, modelId: string): void {
     const configuration = this.database.validateModelSelection(providerId, modelId);
@@ -159,6 +161,7 @@ export class ProviderRegistry {
   }
 
   private createRealAdapter(configuration: ProviderConfiguration, approval: Approval, guard: () => void, diagnostics?: DiagnosticObserver): ProviderAdapter {
+    if (this.options.proxy) assertProxyTarget(new URL(`${approval.baseUrl}/chat/completions`), 'POST');
     const providerId = configuration.id;
     const transport = this.createTransport(guard, diagnostics);
     const options = { configuration, confirmedBaseUrl: approval.baseUrl, diagnostics,

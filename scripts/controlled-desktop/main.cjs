@@ -23,7 +23,8 @@ for (const name of ['appData', 'userData', 'sessionData', 'logs', 'crashDumps'])
   assert.ok(fs.statSync(p).isDirectory() && !fs.lstatSync(p).isSymbolicLink()); app.setPath(name, p);
 }
 // Unarmed desktop has no valid network lease; Main retains its own reviewed price expiry checks.
-const gate = installControlledNetwork({ sendAuthorized: false, priceExpiresAt: new Date(0).toISOString() });
+const gate = installControlledNetwork({ sendAuthorized: false, priceExpiresAt: new Date(0).toISOString(),
+  proxyUrl: process.env.ROUNDTABLE_CONNECT_PROXY, trustProxyDns: process.env.ROUNDTABLE_TRUST_PROXY_DNS === '1' });
 const result = { main: mainSha, pid: process.pid, status: 'STARTING', sendAuthorized: false, keyContentInspected: false };
 const write = () => { result.network = gate.status(); fs.writeFileSync(process.env.ROUNDTRIAL_RESULT, JSON.stringify(result, null, 2) + '\n', { mode: 0o600 }); };
 const denyElectron = () => { throw new Error('Renderer and Electron network access remain disabled'); };

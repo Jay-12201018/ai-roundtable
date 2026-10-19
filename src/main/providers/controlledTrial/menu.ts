@@ -24,12 +24,13 @@ export function formatTrialDiagnostics(record: TrialRecord): string {
   const value = parsed.data;
   const stages = {
     validation: '发送前安全检查', credential: '凭据读取', network_client: '网络客户端调用', dns: 'DNS 解析',
-    tcp: 'TCP 连接', tls: 'TLS 握手', request: '请求发送', response: 'HTTP 响应', stream: 'SSE 响应解析',
+    tcp: 'TCP 连接', proxy: '本机代理 CONNECT 隧道', tls: 'TLS 握手', request: '请求发送', response: 'HTTP 响应', stream: 'SSE 响应解析',
     usage: 'usage 检查', accounting: '费用核算与持久化', complete: '完成',
   };
   const categories = {
     credential_unavailable: '凭据不可用', credential_read_failed: '凭据读取失败', dns_failed: 'DNS 解析失败',
     target_rejected: '请求目标被安全策略拒绝', tcp_failed: 'TCP 连接失败', tcp_timeout: 'TCP 连接超时',
+    proxy_failed: '代理连接或 CONNECT 握手失败', proxy_rejected: '代理响应或目标被拒绝',
     tls_failed: 'TLS 握手或证书验证失败', http_error: 'HTTP 状态错误', request_timeout: '请求超时',
     request_interrupted: '请求或响应中断', response_invalid: '响应或 SSE 解析失败', usage_missing: '服务商 usage 缺失',
     accounting_failed: '费用核算或记录失败', cancelled: '请求已取消', policy_rejected: '安全检查未通过',

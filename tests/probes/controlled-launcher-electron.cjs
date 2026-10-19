@@ -5,12 +5,15 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { performance } = require('node:perf_hooks');
+const { pathToFileURL } = require('node:url');
 const { execFileSync } = require('node:child_process');
 const { app, BrowserWindow, Menu, dialog, safeStorage, session } = require('electron');
 const { syncBuiltinESMExports } = require('node:module');
 assert.ok(app && !app.isReady(), 'Use the actual Electron executable before readiness');
 const root = path.resolve(__dirname, '../..');
 const args = process.argv.slice(2);
+const proxyMode = args.includes('--proxy-mode');
+if (proxyMode) args.splice(args.indexOf('--proxy-mode'), 1);
 assert.ok(args.length === 0 || args.length === 2 && args[0] === '--restart');
 const restart = args.length === 2;
 const dir = restart ? path.dirname(path.resolve(args[1])) : fs.mkdtempSync(path.join(os.tmpdir(), 'roundtable-launcher-probe-'));
@@ -21,7 +24,7 @@ const manifestFile = path.join(dir, 'probe-manifest.json');
 if (restart) assert.equal(path.resolve(args[1]), manifestFile);
 const prior = restart ? JSON.parse(fs.readFileSync(manifestFile, 'utf8')) : undefined;
 if (restart) { assert.equal(prior.status, 'PASS'); assert.equal(prior.directory, dir); }
-const sha = execFileSync('git', ['rev-parse', 'main'], { cwd: root, encoding: 'utf8' }).trim();
+const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 assert.match(sha, /^[a-f0-9]{40}$/u);
 const buildRoot = path.join(dir, 'build');
 const profileRoot = path.join(dir, 'profile');
@@ -68,6 +71,8 @@ fs.writeFileSync(guardLog, '{"fixtureOnly":true,"event":"loaded-no-OS"}\n', { mo
 Object.assign(process.env, { ROUNDTRIAL_SERVICE: owner.service, ROUNDTRIAL_ACCOUNT: owner.accounts[0],
   ROUNDTRIAL_LEGACY_ACCOUNT: owner.accounts[1], ROUNDTRIAL_GUARD_LOG: guardLog,
   ROUNDTRIAL_DRY: '1', ROUNDTRIAL_RESULT: path.join(dir, restart ? 'startup-restart.json' : 'startup-first.json') });
+delete process.env.ROUNDTABLE_CONNECT_PROXY; delete process.env.ROUNDTABLE_TRUST_PROXY_DNS;
+if (proxyMode) Object.assign(process.env, { ROUNDTABLE_CONNECT_PROXY: 'http://127.0.0.1:9', ROUNDTABLE_TRUST_PROXY_DNS: '1' });
 delete process.env.DYLD_INSERT_LIBRARIES; delete process.env.ELECTRON_RENDERER_URL;
 let scenario = 'idle';
 dialog.showMessageBox = async (...values) => {
@@ -115,8 +120,13 @@ async function main() {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => { const remote = /^(https?|wss?|ftp):/u.test(details.url); if (remote) result.blockedNetworkAttempts.push('Chromium remote'); callback({ cancel: remote }); });
   equal('real entry reports the expected main SHA', startup.main, sha);
   check('launcher has no send permission', startup.sendAuthorized === false && startup.network.sendAuthorized === false && startup.network.granted === 0 && startup.network.started === 0);
+  equal('actual Main and launch gate use the explicit network route', startup.network.networkRoute, proxyMode ? 'trusted-loopback-connect' : 'direct');
   check('launch network lease is expired', RealDate.parse(startup.network.expiresAt) === 0);
   const window = BrowserWindow.getAllWindows()[0], contents = window.webContents;
+  const { ProviderRegistry } = await import(pathToFileURL(path.join(buildRoot, 'out/main/index.js')).href);
+  const confirmTarget = ProviderRegistry.prototype.confirmTarget;
+  let mainProxy;
+  ProviderRegistry.prototype.confirmTarget = function (input) { mainProxy = this.options.proxy; return confirmTarget.call(this, input); };
   check('dynamic main title', window.getTitle().includes(sha.slice(0, 7)) && window.getTitle().includes('未授权发送'));
   const prefs = contents.getLastWebPreferences();
   check('actual production sandbox bridge boundary', prefs.sandbox && prefs.contextIsolation && !prefs.nodeIntegration && prefs.webSecurity);
@@ -145,16 +155,20 @@ async function main() {
       priceReviewedAt: '2026-10-17T16:00:00.000Z', priceExpiresAt: '2026-10-18T16:00:00.000Z', priceEvidence: 'owned fixture only',
       inputMicroCnyPerToken: 2, outputMicroCnyPerToken: 8, estimatedInputTokens: 67, estimatedMicroCny: 1158, reservedMicroCny: 50000, maxOutputTokens: 128,
       state: 'unknown', outcome: 'error', actualInputTokens: null, actualOutputTokens: null, observedUsage: null, accountedMicroCny: null, text: '', errorCode: 'network_error',
-      diagnostics: { version: 1, stage: 'dns', category: 'dns_failed', evidence: 'client_invoked', startedAt: now, updatedAt: now, clientInvokedAt: now } };
+      diagnostics: { version: 1, stage: proxyMode ? 'proxy' : 'dns', category: proxyMode ? 'proxy_rejected' : 'dns_failed', evidence: 'client_invoked', startedAt: now, updatedAt: now, clientInvokedAt: now } };
     const db = new Sqlite(dbPath); try { db.prepare('INSERT INTO controlled_trials(id,request_id,provider_id,state,data_json) VALUES(?,?,?,?,?)').run(result.unknown.id, result.unknown.requestId, result.providerId, 'unknown', JSON.stringify(result.unknown)); } finally { db.close(); }
   } else {
     result.providerId = prior.providerId; result.unknown = prior.unknown;
     equal('restart preserves unknown reservation and evidence', trials(), [prior.unknown]);
+    await contents.executeJavaScript(`window.roundtable.settings.confirmTarget({providerId:${JSON.stringify(result.providerId)},baseUrl:'https://api.deepseek.com',confirmed:true})`);
   }
+  equal('production Registry receives the same explicit route', mainProxy, proxyMode ? { hostname: '127.0.0.1', port: 9 } : undefined);
+  ProviderRegistry.prototype.confirmTarget = confirmTarget;
   const beforeRecent = result.fakeDecrypt;
   scenario = 'recent'; recent.click();
   const shown = result.dialogs.find(row => row.scenario === 'recent');
-  check('recent record displays safe DNS evidence and retained reserve', Boolean(shown) && ['DNS 解析失败', '无法确认服务商是否收到', '仍保留 ¥0.05', '人工核对'].every(t => shown.detail.includes(t)));
+  check('recent record displays safe route evidence and retained reserve', Boolean(shown) && [proxyMode ? '代理响应或目标被拒绝' : 'DNS 解析失败', '无法确认服务商是否收到', '仍保留 ¥0.05', '人工核对'].every(t => shown.detail.includes(t)));
+  if (proxyMode) check('proxy diagnostics do not claim an origin HTTP response', shown.detail.includes('本机代理 CONNECT 隧道') && !/HTTP \d{3}/u.test(shown.detail));
   equal('recent viewing does not read a Key', result.fakeDecrypt, beforeRecent);
   const beforeConfirmations = result.dialogs.filter(row => row.title === '授权一次 DeepSeek 受控测试').length;
   await clickStart('unknown-blocked');
