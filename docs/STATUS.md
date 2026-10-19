@@ -233,3 +233,9 @@ R10A/R10B仅ready未授权；R11仅独立有限计划/Mock范围ready，plan/nex
 | DEEPSEEK-TOKEN-01 | **blocked**（普通真实Run严格模式） | 无新counter/ModelPolicy；价快照过期仍拒绝，未开新单次许可，公网模型API0 |
 
 本次只追加验收文档，src/tests/Shared/Schema/依赖/迁移/价格不另改。main原out全文件及.node哈希/inode前后不变，当前用户应用未部署/重启。旧reader不支持读取新诊断；临时transport覆写须转发observer，未来部署另授权。最终main为本节所在独立文档提交，完整SHA见交付消息/Git历史；完成后停止，不启动其他任务。
+
+## DEEPSEEK-LAUNCH-01 诊断与启动器修复候选（2026-10-19）
+
+用户授权从7900a4fbc75aca6c9c4aedb330636bbbea128490在独立Worktree实施，分支`codex/deepseek-launcher-network-fix`。状态 **review，未合main、未部署或重启当前App**；R00–R09既有状态与R00–R18路线不变。只纳入受控包装器、修复两处observer透传、动态最新干净main构建/产物绑定和安全启动，默认cancel-only，不claim旧发送许可。证据见[候选报告](verification/2026-10-19-deepseek-launcher-network.md)/[逐命令台账](verification/2026-10-19-deepseek-launcher-network-commands.md)。
+
+本次Node1255、Electron诊断178、Python21、包装器8场景、TLS30断言、实际ABI139、真实生产入口28/重启21与prepare执行通过；src/Shared/IPC/迁移1–4/package/lock/价格不改。当前系统代理和TUN差异不足以证明需要专用代理，本轮不实现。首次unknown/¥0.05未触碰，严格计数blocked/价格过期拒绝/真实Keychain和公网未验收/每次本人确认保持。下一步只等待候选审核；合并、部署/关闭旧窗口、核价、核销和真实单次请求分别需要授权，不自动继续。
