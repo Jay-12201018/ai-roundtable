@@ -3,7 +3,7 @@
 
 ## DeepSeek 原生许可入口修复（2026-10-19）
 
-候选针对main6c90732实际macOS菜单缺项，一行重新安装菜单修复；不改IPC/Service/授权和费用数据。安装时快照RED→GREEN，实际自有fixture原生AX确认许可入口可见，生产38/重启19、权限22、菜单回归37、启动器24和strict均exit0；待本次已授权ff-only与主线必要验收。[本轮证据](verification/2026-10-19-deepseek-native-menu.md)。当前用户窗口/Key/old unknown/人工对账决定不操作。
+候选针对main6c90732实际macOS菜单缺项，一行重新安装菜单修复；不改IPC/Service/授权和费用数据。安装时快照RED→GREEN，实际自有fixture原生AX确认许可入口可见，生产38/重启19、权限22、菜单回归37、启动器24和strict均exit0；已按本次授权严格ff-only从6c90732合入68bfba571a429530dfabf90004686745e578ff51，merged/verified。主线新跑生产38/重启19、权限22、菜单回归37、strict全部exit0；没有重复无关全量回归。[本轮证据](verification/2026-10-19-deepseek-native-menu.md)。当前用户窗口/Key/old unknown/人工对账决定不操作。
 
 
 ## DeepSeek 三项最终收尾（2026-10-19）
