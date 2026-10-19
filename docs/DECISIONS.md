@@ -1,6 +1,10 @@
 # 架构与工程决策
 
-## DEEPSEEK-PROXY-01：显式受限回环 CONNECT 候选（2026-10-19）
+## DEEPSEEK-PROXY-01：正式合并（2026-10-19）
+
+用户明确批准后从1c4d2af严格ff-only合入04bf8a20，并在main上新跑本地代理/诊断/启动器、完整回归、strict、独立生产构建及隔离生产/重启后，登记merged/verified。没有业务修补、重建main原生文件或覆盖运行中构建；复用有效原生环境，但不把候选历史成绩当新PASS。详细[主线证据](verification/2026-10-19-deepseek-loopback-proxy-main.md)。实际代理/公网验证和新发送许可须另行授权；以下为保留的候选设计记录。
+
+## DEEPSEEK-PROXY-01：显式受限回环 CONNECT 候选（2026-10-19，历史）
 
 - 直连安全策略不变；不放行198.18/15。仅用户显式信任的回环 HTTP 代理可代为解析固定 DeepSeek HTTPS 域名；不自动采用系统/环境代理，不支持代理凭据、任意兼容域名或失败降级。
 - 普通域名 CONNECT 不能证明远端 IP 公网；信任用户指定代理及 OS CA，凭据仅在固定 origin 的 TLS 证书/SNI/主机名验证后发送。要求远端公网 IP 证明时继续拒绝，不能宣称已有证明。

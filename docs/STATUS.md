@@ -1,6 +1,14 @@
 # R00–R18 状态与授权看板
 
-## DEEPSEEK-PROXY-01 候选（2026-10-19）
+## DEEPSEEK-PROXY-01 正式合并与主线验收（2026-10-19）
+
+**merged / verified（仅本地 fixture 与安全接线）**。用户批准获审 `04bf8a20e047f3c46cb3017921ddac049ba9f5ae` 后，从干净 main `1c4d2afb1afbae288ac1201c618ffd9cc39999bb` 执行 `git merge --ff-only codex/deepseek-loopback-proxy`，exit0，无冲突/额外merge commit，原分支和20个Worktree全部保留。
+
+main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/Electron各10场景121条CONNECT/TLS断言及各13场景57条gate断言、Python24、strict/独立输出生产构建、ABI139内存SQL、真实隔离生产31/重启24，全部exit0；分组重叠不累加。Node24.18.1只执行纯网络/类型/构建，本轮没有重新运行Node完整回归或原生压力。main原out/native的7文件SHA/inode前后一致。[主线报告](verification/2026-10-19-deepseek-loopback-proxy-main.md)/[台账](verification/2026-10-19-deepseek-loopback-proxy-main-commands.md)。
+
+没有部署/重启当前应用、读取真实Key/profile/unknown记录、改FClash/系统网络或授予发送。普通严格生成blocked、价格过期拒绝和unknown/¥0.05保护不变。实际FClash/公网/真实Keychain未验证；用户明确配置并信任本机代理的远端DNS，不能视为客户端证明远端IP公网。旧Finder入口仍绑定1c4d2af快照，不能当作本次最新版；启用方法见主线报告。以下review为历史候选，不取代本节。
+
+## DEEPSEEK-PROXY-01 候选（2026-10-19，历史）
 
 **review，未 merged/verified、未部署。** 总控分支 `codex/deepseek-loopback-proxy` 基于干净 main `1c4d2afb1afbae288ac1201c618ffd9cc39999bb`；实现 `746c4de5df871697c7975ba69bbb75c56b9d46b8`，最终候选另含本节治理提交。main 未移动；所有原分支/Worktree 保留，不启动 R10/R11/R17。
 

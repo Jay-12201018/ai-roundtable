@@ -1,6 +1,8 @@
 # 原生模块与干净安装环境治理
 
-## 可选回环 CONNECT 候选（2026-10-19，未部署）
+## 可选回环 CONNECT（2026-10-19，已合 main、未部署当前 App）
+
+获批04bf8a20已严格ff-only合main并通过[本轮主线验证](verification/2026-10-19-deepseek-loopback-proxy-main.md)。本轮不安装依赖、不重编译main SQLite，直接实际验证现有Electron38.8.6/ABI139内存SQL并在该运行时执行完整1292项；Node24.18.1只做纯网络/strict/构建，避免覆盖当前运行中原生文件。新TMPDIR与独立构建/profiles，原out/native七个文件SHA/inode未变；没有重复压力、Node全回归或冷缓存安装。
 
 仅通过 Main 显式环境 `ROUNDTABLE_CONNECT_PROXY=http://127.0.0.1:<port>`（或规范IPv6回环）与 `ROUNDTABLE_TRUST_PROXY_DNS=1` 成对配置；正式独立启动器只从 `open --connect-proxy URL --trust-proxy-dns` 注入，清除环境代理继承。默认直连，不更改系统代理/TUN/DNS/证书。配置只选择路由，不授权发送，不改变 profile/appName/Keychain 身份；实际部署须另获授权。
 

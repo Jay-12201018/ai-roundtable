@@ -1,6 +1,10 @@
 # 真实验证与数据隔离
 
-## 回环代理候选验证（2026-10-19）
+## 回环代理主线验证（2026-10-19）
+
+用户批准04bf8a20后在main新执行Electron1292完整/279专项、Node/Electron各121实际CONNECT/TLS及57gate、Python24、strict/独立构建、真实生产31/重启24和ABI139内存SQL，全部exit0；见[主线台账](verification/2026-10-19-deepseek-loopback-proxy-main-commands.md)。本轮未重编译、未重复压力或Node完整测试；构建使用正式 `--outDir` 临时路径，原main out/native的SHA/inode审计保持一致。旧候选证据仍为历史，下面fixture方法继续有效；本轮不等于真实代理/公网/Keychain验收。
+
+## 回环代理候选验证（2026-10-19，历史）
 
 新专项 `tests/unit/providers/loopbackProxy*.test.ts` 使用假Key/自建回环HTTP CONNECT及TLS，验证直连Fake-IP拒绝、显式代理范围、TLS/目标错误、异常响应、超时/取消、unknown预留和恢复。`tests/probes/controlled-proxy-gate.cjs` 模拟恶意原生调用；`controlled-proxy-tls.cjs` 用实际Registry/Adapter/gate/CONNECT/TLS/SSE，但外层只允许自建回环端口，公共DNS/API阻断，测试CA仅在fixture注入。
 

@@ -1,6 +1,8 @@
 # 共享接口登记与变更规则
 
-## DEEPSEEK-PROXY-01 候选（2026-10-19，未合 main）
+## DEEPSEEK-PROXY-01 共享接线（2026-10-19）
+
+用户正式授权后，获批04bf8a20已从1c4d2af严格ff-only合main，本轮[独立主线验收](verification/2026-10-19-deepseek-loopback-proxy-main.md)通过；以下接口不再是未合main候选。无新wire shape、migration或发送权限；原真实费用/严格计数/Keychain/发布限制保留。
 
 总控在 `codex/deepseek-loopback-proxy` 独占 Main transport/Registry/装配、受控启动器及本轮公共测试。`readLoopbackProxy` 仅读 Main 显式 `ROUNDTABLE_CONNECT_PROXY` 和 `ROUNDTABLE_TRUST_PROXY_DNS=1`；启动器仅从 `open --connect-proxy ... --trust-proxy-dns` 注入，不采用环境/系统自动代理。可选 `LoopbackProxy` 仅规范回环 HTTP 地址/端口；默认无值维持原直连 DNS/pinning。
 
