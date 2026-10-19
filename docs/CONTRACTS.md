@@ -309,3 +309,5 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 - 控制台0用量仅是用户页面核对声明，非provider_usage或绝对零费用证明。不得把unknown变成settled或填usage0。固定证据说明不接受自由文本、请求头、凭据或异常堆栈。30天证据不应用于范围外记录。
 - 启动器默认未授权。仅原生准备入口捕获生产Service的结构化quote，双原生确认后建立session内绑定providerId/requestId/Keyrevision/报价期限的lease；固定目标/body/TLS/proxy门禁继续检查。取消/Stop/关窗/退出撤销；无自动retry/恢复，普通真实Run严格门禁不变。
 - 重新核价于2026-10-19T11:08:06Z，deepseek-flash=DeepSeek-V4.1-Flash-1017；CNY高峰缓存未命中输入2/百万、总completion输出8/百万，不使用缓存或闲时折扣。官方缓存命中高峰0.04/百万仅记录证据不折算费用；24小时快照，2026-10-20T11:08:06Z到期拒绝。新的报价不是付费授权。
+
+本节已随实施715c2ebe获授权ff-only合入main，并通过独立主线验收；状态merged/verified仅限本地fixture和安全操作路径，真实模型调用仍未经本轮授权。人工决定不能改写首次历史结论。

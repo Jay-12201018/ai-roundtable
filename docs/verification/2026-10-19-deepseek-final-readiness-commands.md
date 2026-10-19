@@ -268,3 +268,87 @@ node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tests/probes/con
 ```
 
 日志SHA256：`43761215e8c58232bc9ef116597b1c5c9dca1abf5b72b8b9c5952ba15dabbd7b`。
+
+# main 合并后独立复验
+
+合并方式：`git merge --ff-only codex/deepseek-final-readiness`，dc8a7a0→715c2ebe，exit0。以下全部cwd为主仓库，未访问真实profile/Key。
+
+## main-regression
+
+UTC 2026-10-19T11:22:39.865571+00:00；exit 0；耗时 21.407秒；timeout=False。
+
+```sh
+node_modules/electron/dist/Electron.app/Contents/MacOS/Electron node_modules/vitest/vitest.mjs run --reporter=dot
+```
+
+日志SHA256：`41972be83ac7ad5b37c76b0069efb39430af2878aa0a75ac2061e3f2a595c789`。
+
+## main-startup-prepare
+
+UTC 2026-10-19T11:22:43.621214+00:00；exit 0；耗时 6.579秒；timeout=False。
+
+```sh
+python3 -B scripts/controlled-desktop/launcher.py prepare --node /private/var/folders/qk/z0rypzwd1_18tfqhzyswz7b00000gn/T/roundtable-loopback-proxy-i1dgt4lu/runtime/node-v24.18.1-darwin-arm64/bin/node --build-root '/Users/zhangwenjie/Documents/ChatGPT/AI交互/.cache/controlled-desktop-main/builds/715c2ebe4bd1b669a938eb866daceaf9640ae485'
+```
+
+日志SHA256：`cc6c1f6c54d67da87218bfc8af1d47093a9400cf60ec7fe26be1f9c7aae1ef54`。
+
+## main-production-first
+
+UTC 2026-10-19T11:23:12.849604+00:00；exit 0；耗时 0.826秒；timeout=False。
+
+```sh
+env 'ROUNDTABLE_PROBE_OUT=/Users/zhangwenjie/Documents/ChatGPT/AI交互/.cache/controlled-desktop-main/builds/715c2ebe4bd1b669a938eb866daceaf9640ae485/out' node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tests/probes/deepseek-final-readiness.cjs
+```
+
+日志SHA256：`58deb26d93534318099903dbe6d7ed45682da0b61d39089403d9e4ab64274d18`。
+
+## main-session-safety
+
+UTC 2026-10-19T11:23:32.288176+00:00；exit 0；耗时 0.081秒；timeout=False。
+
+```sh
+node tests/probes/controlled-session-authorization.cjs
+```
+
+日志SHA256：`4f62b32684fb472671f559d673f1218bf865bfadc784e4dffce89ff9b26e3912`。
+
+## main-production-restart
+
+UTC 2026-10-19T11:23:32.371764+00:00；exit 0；耗时 0.506秒；timeout=False。
+
+```sh
+env 'ROUNDTABLE_PROBE_OUT=/Users/zhangwenjie/Documents/ChatGPT/AI交互/.cache/controlled-desktop-main/builds/715c2ebe4bd1b669a938eb866daceaf9640ae485/out' node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tests/probes/deepseek-final-readiness.cjs --restart /private/var/folders/qk/z0rypzwd1_18tfqhzyswz7b00000gn/T/roundtable-final-main-0crem0dr/test-tmp/roundtable-final-readiness-probe-B9D9V2/manifest.json
+```
+
+日志SHA256：`c1f7a14f2cac3ea09991a2d096d61baa296672abd1417856213a30f89bbe9d00`。
+
+## main-launcher-python
+
+UTC 2026-10-19T11:23:32.668275+00:00；exit 0；耗时 3.644秒；timeout=False。
+
+```sh
+python3 -B tests/probes/controlled-launcher.test.py
+```
+
+日志SHA256：`3dd2661b5c12c89203dde9196d5a5539a9702e0450aeaa36f718eac3fe0ae428`。
+
+## main-quote-lease
+
+UTC 2026-10-19T11:24:01.072981+00:00；exit 0；耗时 0.116秒；timeout=False。
+
+```sh
+node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tests/probes/controlled-quote-lease.cjs
+```
+
+日志SHA256：`43761215e8c58232bc9ef116597b1c5c9dca1abf5b72b8b9c5952ba15dabbd7b`。
+
+## main-proxy-gate
+
+UTC 2026-10-19T11:26:31.309955+00:00；exit 0；耗时 0.112秒；timeout=False。
+
+```sh
+node_modules/electron/dist/Electron.app/Contents/MacOS/Electron tests/probes/controlled-proxy-gate.cjs
+```
+
+日志SHA256：`ec385446afc4966b67d95ebf43b2424dbe797a5b4d70100bbb1c07c9cd5a521b`。

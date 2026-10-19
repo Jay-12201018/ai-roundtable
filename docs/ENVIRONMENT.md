@@ -1,5 +1,12 @@
 # 原生模块与干净安装环境治理
 
+
+## DeepSeek 最终收尾主线（2026-10-19）
+
+独立Worktree按原冻结锁文件、独立store/cache及copy导入安装646包，24.18.1同版完整headers编译Node ABI137后串行重建Electron38.8.6 ABI139；完整候选Electron1322及数据库/费用/权限/生产37+重启18通过。初次离线缓存缺metadata、RED及旧fixture时钟失败保留于[台账](verification/2026-10-19-deepseek-final-readiness-commands.md)。
+
+获授权ff-only到715c2ebe后，main不安装、不重编译native、不覆盖原out，以既有独立ABI139实际SQLite读写/完整1322，受控Node24.18.1 strict及独立新目录build，再新的fakeStorage/mock-keychain临时profile跑生产37/重启18。原用户profile/Keychain/未知预留不参与测试，没有公网模型API请求。原报价更新源于本次官方核验，不是延长旧TTL；真实发送仍需用户逐次确认。
+
 ## 可选回环 CONNECT（2026-10-19，已合 main、未部署当前 App）
 
 获批04bf8a20已严格ff-only合main并通过[本轮主线验证](verification/2026-10-19-deepseek-loopback-proxy-main.md)。本轮不安装依赖、不重编译main SQLite，直接实际验证现有Electron38.8.6/ABI139内存SQL并在该运行时执行完整1292项；Node24.18.1只做纯网络/strict/构建，避免覆盖当前运行中原生文件。新TMPDIR与独立构建/profiles，原out/native七个文件SHA/inode未变；没有重复压力、Node全回归或冷缓存安装。

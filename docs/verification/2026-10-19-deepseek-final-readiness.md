@@ -1,6 +1,6 @@
 # DeepSeek 三项最终收尾实施与主线验收
 
-2026-10-19。基线 dc8a7a0a4b8f2469a39c87403d26dd7d48d0b220；独立分支 codex/deepseek-final-readiness。当前为候选验证已完成、等待本次授权范围内ff-only与主线独立验收；主线结果另在下方追加。
+2026-10-19。基线 dc8a7a0a4b8f2469a39c87403d26dd7d48d0b220；独立分支 codex/deepseek-final-readiness。实施715c2ebe4bd1b669a938eb866daceaf9640ae485已依本次授权严格ff-only合入main，主线独立验收通过；治理登记另建独立提交。
 
 ## 实现与使用
 
@@ -43,3 +43,16 @@ src/main/providers/controlledTrial/{estimate,ControlledTrialService,menu,reconci
 ## 证据与失败保留
 
 本轮监督器与log/receipt根目录 `/private/var/folders/qk/z0rypzwd1_18tfqhzyswz7b00000gn/T/roundtable-final-readiness-b3vrv8e3`；每条有argv/cwd/超时/真实exit/源码指纹。命令台账另附；RED、旧fixture时钟及初次安装失败不删除。不执行真实API/OS Keychain/正式发布和跨平台E2E。
+
+
+## 主线独立验收与最终状态
+
+合并前再次确认main=dc8a7a0、候选=715c2ebe4bd1b669a938eb866daceaf9640ae485，两侧干净且直接祖先；ff-only自然exit0，无额外merge commit、重写/删除历史或修改原Worktree。
+
+main新证据根 `/private/var/folders/qk/z0rypzwd1_18tfqhzyswz7b00000gn/T/roundtable-final-main-0crem0dr`：完整Electron88文件1322/1322（其中包含v4→v5/回滚/备份恢复/费用/引用/原有功能），新的launcher.prepare实际strict+三端生产构建+ABI139内存SQL、Python24、Node会话22、Electron quote28、代理gate57、真实新版launcher/Main/App37断言/1次自有fixture、重启18断言/0请求，全部exit0。未重新编译main native或覆盖main/out；独立构建在.cache版本目录，生产探针明确使用该新out。stdout sandbox_extension提示及Rollup注释警告保留，进程自然exit0，不能外推真实OS Keychain/E2E/付费网络。
+
+三项软件阻塞在上述本地安全验收范围merged/verified。迁移1–4原文不变，新migration5默认保留原unknown锁；不会自动把旧¥0.05释放、核销或记为零。当前用户应用没有被关闭/重启/授予许可；用户需自行退出旧窗口，打开绑定最终干净main的新版本，再使用原生人工对账及许可菜单。旧profile仍不应交给老版本读取。
+
+最新Finder入口（本地生成，非正式发布）：`.cache/controlled-desktop-main/打开最新版AI圆桌-受控单次测试.command`，显式127.0.0.1:7890与trust-proxy-dns，原独立profile及Keychain身份不变，打开仍未授权。
+
+本轮未验证真实Key解密/系统Keychain/付费回复，未发公网模型请求。价格截止北京时间2026-10-20 19:08:06；超过后须重新官方核价，不自动续期。人工释放只解除客户端预留阻塞，不代表账单无费用。普通真实Run仍blocked。
