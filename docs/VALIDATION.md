@@ -1,5 +1,11 @@
 # 真实验证与数据隔离
 
+## 回环代理候选验证（2026-10-19）
+
+新专项 `tests/unit/providers/loopbackProxy*.test.ts` 使用假Key/自建回环HTTP CONNECT及TLS，验证直连Fake-IP拒绝、显式代理范围、TLS/目标错误、异常响应、超时/取消、unknown预留和恢复。`tests/probes/controlled-proxy-gate.cjs` 模拟恶意原生调用；`controlled-proxy-tls.cjs` 用实际Registry/Adapter/gate/CONNECT/TLS/SSE，但外层只允许自建回环端口，公共DNS/API阻断，测试CA仅在fixture注入。
+
+先严格Node原生/完整回归，再串行重建Electron ABI139并实际验证；`controlled-launcher-electron.cjs --proxy-mode` 在ready前隔离profile和fake safeStorage，通过真实生产Main/Preload/App验证代理注入、取消、诊断和退出；`--proxy-mode --restart <本轮自有manifest>` 验证恢复。默认始终未授权，不得把fixture lease或测试CA用于用户应用，不能冒充真实Keychain、FClash公网或正式E2E。[实际命令与失败](verification/2026-10-19-deepseek-loopback-proxy-commands.md)。
+
 最新共享前置主线验收：用户批准1e1f971后已ff-only合main，本次612完整/78共享/190 Electron与双ABI、类型/构建、隔离UI/恢复/退出核验见[2026-10-16主线报告](verification/2026-10-16-r07-r08-shared-main.md)。以下阶段记录按历史保留；任何历史PASS不替代新任务实际运行。
 
 R04/R05/R06已按用户批准fast-forward合main，最新实际主线验证见[本次主线报告](verification/2026-10-16-r04-r05-r06-main.md)；R03等历史结果仍保留。原[集成报告](verification/2026-10-15-r03-integration.md)和[集成命令台账](verification/2026-10-15-r03-commands.md)保持历史身份，不代替主线新鲜结果；下列历史阶段规则/结果保留。

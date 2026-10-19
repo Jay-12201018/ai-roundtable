@@ -1,5 +1,13 @@
 # 共享接口登记与变更规则
 
+## DEEPSEEK-PROXY-01 候选（2026-10-19，未合 main）
+
+总控在 `codex/deepseek-loopback-proxy` 独占 Main transport/Registry/装配、受控启动器及本轮公共测试。`readLoopbackProxy` 仅读 Main 显式 `ROUNDTABLE_CONNECT_PROXY` 和 `ROUNDTABLE_TRUST_PROXY_DNS=1`；启动器仅从 `open --connect-proxy ... --trust-proxy-dns` 注入，不采用环境/系统自动代理。可选 `LoopbackProxy` 仅规范回环 HTTP 地址/端口；默认无值维持原直连 DNS/pinning。
+
+`createSafeFetch` 第四参数为可选 Main-only proxy；不进入 Shared、IPC、Renderer 或 DB。代理目标首期固定 POST `https://api.deepseek.com/chat/completions`，其他目标在 Key 读取前拒绝。用户明确信任本机代理负责远端 DNS，客户端不能证明其实际远端 IP 公网；固定目标及有效 TLS 验证约束凭据目的地。不得把本机 Fake-IP 加入公网白名单，不能向任意兼容端点开放代理或在失败时回退。
+
+诊断只增加白名单阶段 `proxy` 和类别 `proxy_failed/proxy_rejected`；代理响应不提升服务商 `http_response`/`httpStatus`，没有原始异常、代理响应或凭据字段。旧记录兼容，新枚举记录不能降级给旧 strict reader。无 SQL/migration1–4、普通 DTO、Key/费用算法或真实模型权限变化；详见[候选报告](verification/2026-10-19-deepseek-loopback-proxy.md)。
+
 本文先记录 `135bf82` 的实际接口，再列 V1 目标；R00 不修改运行时代码。产品要求见 [SPEC](../SPEC.md)，已知风险见 [V0 审查](V0_AUDIT.md)。
 
 ## 现有运行接口

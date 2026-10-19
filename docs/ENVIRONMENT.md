@@ -1,5 +1,11 @@
 # 原生模块与干净安装环境治理
 
+## 可选回环 CONNECT 候选（2026-10-19，未部署）
+
+仅通过 Main 显式环境 `ROUNDTABLE_CONNECT_PROXY=http://127.0.0.1:<port>`（或规范IPv6回环）与 `ROUNDTABLE_TRUST_PROXY_DNS=1` 成对配置；正式独立启动器只从 `open --connect-proxy URL --trust-proxy-dns` 注入，清除环境代理继承。默认直连，不更改系统代理/TUN/DNS/证书。配置只选择路由，不授权发送，不改变 profile/appName/Keychain 身份；实际部署须另获授权。
+
+本次独立Worktree冻结离线安装646包、Node24.18.1/同版headers/ABI137→Electron38.8.6/ABI139串行重建及完整本地验证见[候选报告](verification/2026-10-19-deepseek-loopback-proxy.md)。测试CA仅在fixture进程注入；不是系统CA变更或实际FClash/公网验收。不要把回环代理当作远端IP公网证明，也不要自动回退直连。
+
 2026-10-14，R02 集成审核建立。当前 R02 已按用户批准合入 main，并在严格配对的官方 Node 24.18.1 环境通过[本次主线验收](verification/2026-10-14-r02-main.md)；ENV-R02-INSTALL-01 保持已解决。以下各阶段证据按历史保留，不把 R02 验收外推为 V1/发布验收；不升级项目依赖、不修改全局 Node。
 
 ## 原则与本轮发现

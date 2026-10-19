@@ -1,5 +1,13 @@
 # R00–R18 状态与授权看板
 
+## DEEPSEEK-PROXY-01 候选（2026-10-19）
+
+**review，未 merged/verified、未部署。** 总控分支 `codex/deepseek-loopback-proxy` 基于干净 main `1c4d2afb1afbae288ac1201c618ffd9cc39999bb`；实现 `746c4de5df871697c7975ba69bbb75c56b9d46b8`，最终候选另含本节治理提交。main 未移动；所有原分支/Worktree 保留，不启动 R10/R11/R17。
+
+显式可信回环 HTTP CONNECT、固定目标/TLS/socket gate、Main 注入及安全代理诊断已实现。Node/Electron 各86文件1292项、strict/build、Python24、代理gate各57、真实CONNECT/TLS各121、生产31/重启24及双ABI/内存SQLite均exit0；失败记录保留。[报告](verification/2026-10-19-deepseek-loopback-proxy.md)与[命令](verification/2026-10-19-deepseek-loopback-proxy-commands.md)。
+
+本轮只用自建代理/CA/fake Key/隔离DB；真实 API 0，不读原 Key/费用记录、不改首次 unknown/¥0.05、不更新当前应用、不授予发送。原严格计数 blocked、已过期价格拒绝及未知费用保护保持。代理远端 DNS 依赖用户明确信任，不证明实际远端IP公网；真实 FClash、公网/Keychain及付费烟测仍未验证，等待审核。
+
 原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。完整范围和归属见[任务索引](../tasks/README.md)，原始产品状态见[V0审查](V0_AUDIT.md)。R00/R01/R02/R03 已验收。用户批准的 R03 候选 `439e3c6cb58437298e94fe2536f26e22eae66f6c` 已以 `e642b96a8dded195be44749dd6f267798de95198` 合入 main，并通过[本次主线复验](verification/2026-10-15-r03-main.md)。用户已批准联合候选d4a0d274，本次fast-forward合main并通过[独立主线验收](verification/2026-10-16-r04-r05-r06-main.md)，R04/R05/R06及联合集成均verified。R07/R08获批候选d3205b2已严格ff-only合main；此前补充桥包装器失败记录保留，本次另获授权修复验证入口，18/18真实桥安全断言及退出审计通过，两模块及联合集成现为merged/verified；见[主线与补充记录](verification/2026-10-17-r07-r08-main.md)。R09获批候选f3a8fee已按用户最终授权ff-only合main，本轮[独立主线验收](verification/2026-10-17-r09-main.md)完成后仅登记fixture merged/verified；真实模型/费用策略、系统Keychain与发布未验收。共享前置1e1f971先前已按相应授权合main并完成当时的独立主线验收，保持merged/verified，见文末历史专节。ENV-R02-INSTALL-01 保持已解决；Node 24.21.0 上游风险保留，继续采用严格配对的官方 24.18.1。
 
 状态定义：not_started 未开始；ready 依赖满足但仍需实施授权；in_progress 正在执行；review 交付待审核；merged 已由总控集成；verified 验收确认；blocked 前置未满足或存在阻塞。状态与授权分列，不能推断。
