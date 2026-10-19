@@ -1,0 +1,46 @@
+.workflows-feature {
+  --wf-panel: #fff; --wf-subtle: #f0f1ee; --wf-text: #202722; --wf-muted: #535e57;
+  --wf-border: #7a897f; --wf-accent: #2f6b52; --wf-on-accent: #fff; --wf-error: #a93434;
+  color: var(--wf-text); background: var(--wf-panel); color-scheme: light;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  padding: 24px; max-width: 760px; min-width: 0; margin-inline: auto; overflow-wrap: anywhere;
+}
+.workflows-feature[data-theme="dark"] {
+  --wf-panel: #1d2420; --wf-subtle: #252e28; --wf-text: #e6ebe6; --wf-muted: #bac5bc;
+  --wf-border: #768a7c; --wf-accent: #9ac7aa; --wf-on-accent: #161b18; --wf-error: #f09a94; color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  .workflows-feature[data-theme="system"] {
+    --wf-panel: #1d2420; --wf-subtle: #252e28; --wf-text: #e6ebe6; --wf-muted: #bac5bc;
+    --wf-border: #768a7c; --wf-accent: #9ac7aa; --wf-on-accent: #161b18; --wf-error: #f09a94; color-scheme: dark;
+  }
+}
+.workflows-feature *, .workflows-feature *::before, .workflows-feature *::after { box-sizing: border-box; }
+.workflows-feature h1 { font-size: 20px; line-height: 28px; margin: 0 0 8px; }
+.workflows-feature h2 { font-size: 16px; line-height: 24px; margin: 0 0 12px; }
+.workflows-feature p { margin: 8px 0; }
+.workflows-feature header p, .workflow-limits p { color: var(--wf-muted); }
+.workflows-feature label { display: grid; gap: 4px; min-width: 0; }
+.workflows-feature input, .workflows-feature select, .workflows-feature button {
+  font: inherit; color: var(--wf-text); background: var(--wf-panel); border: 1px solid var(--wf-border);
+  border-radius: 8px; min-height: 36px; min-width: 0; max-width: 100%; padding: 8px 12px;
+}
+.workflows-feature input, .workflows-feature select { width: 100%; }
+.workflows-feature button { cursor: pointer; white-space: normal; }
+.workflows-feature button:hover:enabled { background: var(--wf-subtle); }
+.workflows-feature button:disabled { cursor: default; border-style: dashed; }
+.workflows-feature :focus-visible { outline: 2px solid var(--wf-accent); outline-offset: 2px; }
+.workflows-feature .workflow-primary { color: var(--wf-on-accent); background: var(--wf-accent); }
+.workflows-feature .workflow-primary:hover:enabled { color: var(--wf-text); }
+.workflows-feature fieldset { margin: 16px 0; padding: 16px; border: 1px solid var(--wf-border); border-radius: 8px; min-width: 0; }
+.workflows-feature legend { padding-inline: 4px; font-weight: 600; }
+.workflow-phases { list-style: none; margin: 16px 0; padding: 0; }
+.workflow-member { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.workflow-member > label { flex: 1 1 180px; }
+.workflow-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.workflow-limits { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.workflow-limits p { grid-column: 1 / -1; }
+.workflows-feature section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--wf-border); }
+.workflows-feature progress { width: 100%; accent-color: var(--wf-accent); }
+.workflow-error { color: var(--wf-error); }
+@media (max-width: 600px) { .workflows-feature { padding: 16px; } .workflow-member { align-items: stretch; } }
