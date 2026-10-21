@@ -20,3 +20,4 @@
 .host-instructions li p { margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .host-instructions small { color: var(--secondary); display: block; }
 .host-version-actions button:focus-visible, .host-panel button:focus-visible, .host-panel textarea:focus-visible, .host-edit textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.host-row button[aria-pressed="true"] { border: 2px solid var(--accent); font-weight: 600; }

@@ -88,7 +88,7 @@ describe('R12 host UI', () => {
     expect(screen.getByText('旧开场')).toBeTruthy();
     expect(screen.getByText(/未生效的历史版本/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '设为当前版本' })).toBeTruthy();
-    expect(screen.getByRole('note').textContent).toContain('受影响');
+    expect(screen.getByRole('note').textContent).toContain('受影响：生成时依据的「成员 a」的发言已被修改');
     expect(screen.getByText('主持人插话')).toBeTruthy();
     expect(screen.getByText(/下一位：成员 c（按计划）/)).toBeTruthy();
     expect(screen.getByText('只用中文')).toBeTruthy();
@@ -99,16 +99,15 @@ describe('R12 host UI', () => {
     const api = hostApi(input => new Promise(resolve => { finish = () => resolve({ runId: input.runId, actionId: 'o', kind: input.kind, duplicate: false }); }));
     const onApplied = vi.fn();
     render(<Harness snapshot={pausedSnapshot()} api={api} onApplied={onApplied} />);
-    fireEvent.change(screen.getByLabelText('点名成员'), { target: { value: 'c' } });
-    const button = screen.getByRole('button', { name: '点名下一位' });
+    const button = screen.getByRole('button', { name: '点名 成员 c' });
     fireEvent.click(button); fireEvent.click(button);
     expect(api.command).toHaveBeenCalledTimes(1);
     expect(api.command.mock.calls[0][0]).toMatchObject({ runId: 'run', kind: 'setOverride', agentId: 'c', clientRequestId: expect.any(String) });
     expect(screen.getByText('主持人操作已发送，等待主进程确认')).toBeTruthy();
     await act(async () => { finish(); });
     expect(onApplied).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('已点名，将在当前回合结束后发言。')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '点名下一位' }));
+    expect(screen.getByText('已点名成员 c，将在下一回合发言。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '点名 成员 c' }));
     await waitFor(() => expect(api.command).toHaveBeenCalledTimes(2));
     expect(api.command.mock.calls[1][0].clientRequestId).not.toBe(api.command.mock.calls[0][0].clientRequestId);
   });
@@ -126,12 +125,18 @@ describe('R12 host UI', () => {
     render(<Harness snapshot={pausedSnapshot()} api={api} />);
     fireEvent.click(screen.getAllByRole('button', { name: '修改' })[0]);
     const editor = screen.getByLabelText('修改消息内容');
+    expect(document.activeElement).toBe(editor);
+    expect((screen.getByRole('button', { name: '保存为新版本' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(editor, { target: { value: '主持人修订\n第二行' } });
     fireEvent.click(screen.getByRole('button', { name: '保存为新版本' }));
     await waitFor(() => expect(api.command).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'editMessage', messageId: 'm1b', content: '主持人修订\n第二行' })));
     fireEvent.change(screen.getByLabelText('主持人插话'), { target: { value: '补充一点' } });
     fireEvent.keyDown(screen.getByLabelText('主持人插话'), { key: 'Enter' });
     await waitFor(() => expect(api.command).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'interject', content: '补充一点' })));
+    fireEvent.click(screen.getAllByRole('button', { name: '修改' }).at(-1)!);
+    expect(document.activeElement).toBe(screen.getByLabelText('修改持续指令'));
+    expect((screen.getByRole('button', { name: '保存修改' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
     fireEvent.click(screen.getByRole('button', { name: '清除' }));
     await waitFor(() => expect(api.command).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'clearInstruction', instructionId: 'i1' })));
     fireEvent.change(screen.getByLabelText('新增持续指令'), { target: { value: '给出编号' } });
@@ -152,5 +157,22 @@ describe('R12 host UI', () => {
     expect(screen.getByText(/正在重新生成版本 3/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
     expect(screen.getByRole('button', { name: '中止重新生成' })).toBeTruthy();
+  });
+
+  it('explains instead of offering an unusable composer once the Run is completed, and labels an unfinished current version', () => {
+    const base = pausedSnapshot();
+    const failed = pausedSnapshot({ status: 'error', messages: base.messages.map(m => m.id === 'm2' ? { ...m, status: 'failed' as const } : m),
+      turns: base.turns.map(t => t.turnId === 't2' ? { ...t, status: 'failed' as const } : t),
+      versions: [...base.versions!.slice(0, 2), { ...base.versions![2], affectedBy: [] }, base.versions![3],
+        { messageId: 'm2b', slotId: 't2', turnId: 't2', author: 'agent' as const, versionNumber: 2, origin: 'retry' as const, active: true, affectedBy: [] }].map(v => v.messageId === 'm2' ? { ...v, active: false } : v),
+    });
+    failed.messages.push({ id: 'm2b', senderName: '成员 b', content: '再次中断', status: 'failed' });
+    const { unmount } = render(<Harness snapshot={failed} api={hostApi()} />);
+    expect(screen.getByText(/重试 · 当前版本（未完成）/)).toBeTruthy();
+    unmount();
+    render(<Harness snapshot={pausedSnapshot({ status: 'completed' })} api={hostApi()} />);
+    expect(screen.queryByLabelText('主持人插话')).toBeNull();
+    expect(screen.getByText(/运行已完成，不能再插话/)).toBeTruthy();
+    expect(screen.getByText('下一位：无（运行已完成）')).toBeTruthy();
   });
 });

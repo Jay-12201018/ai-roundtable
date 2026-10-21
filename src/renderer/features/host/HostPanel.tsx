@@ -9,10 +9,9 @@ type Props = { snapshot: RunSnapshot | undefined; commands: HostCommands };
 
 /** Host controls for the selected Run: next speaker, interjection and standing instructions. */
 export function HostPanel({ snapshot, commands }: Props) {
-  const [target, setTarget] = useState('');
   const [message, setMessage] = useState('');
   const [instruction, setInstruction] = useState('');
-  const [editing, setEditing] = useState<{ instructionId: string; content: string }>();
+  const [editing, setEditing] = useState<{ instructionId: string; content: string; original: string }>();
   const disabled = !commands.available || commands.pending !== undefined;
   const directable = canDirectRun(snapshot);
   const candidates = overrideCandidates(snapshot);
@@ -31,41 +30,43 @@ export function HostPanel({ snapshot, commands }: Props) {
     if (await commands.send('instruction:new', { kind: 'setInstruction', content: instruction }, '持续指令已生效，从下一个新请求起使用。')) setInstruction('');
   };
   const saveInstruction = async () => {
-    if (!editing?.content.trim()) return;
+    if (!editing?.content.trim() || editing.content === editing.original) return;
     if (await commands.send(`instruction:${editing.instructionId}`, { kind: 'setInstruction', instructionId: editing.instructionId, content: editing.content }, '持续指令已修改，从下一个新请求起使用。')) setEditing(undefined);
   };
   if (!snapshot) return null;
   return <section className="host-panel" aria-label="主持人指令">
-    <h3>下一位</h3>
-    <p className="host-next">{next ? `下一位：${next.name}${next.source === 'override' ? '（主持人点名，当前回合结束后发言）' : '（按计划）'}` : '下一位：无（运行未在进行或已达上限）'}</p>
-    {directable && <div className="host-row">
-      <label>点名成员<select value={target} onChange={event => setTarget(event.target.value)} disabled={disabled || !candidates.length}>
-        <option value="">选择成员</option>
-        {candidates.map(member => <option key={member.agentId} value={member.agentId}>{member.name}</option>)}
-      </select></label>
-      <button type="button" disabled={disabled || !target} onClick={() => void commands.send('override', { kind: 'setOverride', agentId: target }, '已点名，将在当前回合结束后发言。')}>点名下一位</button>
-      {snapshot.host?.override && <button type="button" disabled={disabled} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名。')}>取消点名</button>}
+    <h3>下一位发言</h3>
+    <p className="host-next">{next ? `下一位：${next.name}${next.source === 'override' ? '（主持人点名，排在下一回合，不打断正在进行的发言）' : '（按计划）'}`
+      : snapshot.status === 'completed' ? '下一位：无（运行已完成）' : '下一位：暂无（运行未在进行，或已达回合上限）'}</p>
+    {directable && candidates.length > 0 && <div className="host-row" role="group" aria-label="点名下一位成员">
+      <span className="host-hint">点名后，被点名的成员在下一回合发言（正在进行的发言不会被打断）：</span>
+      {candidates.map(member => {
+        const chosen = snapshot.host?.override?.agentId === member.agentId;
+        return <button type="button" key={member.agentId} aria-pressed={chosen} disabled={disabled || chosen}
+          onClick={() => void commands.send('override', { kind: 'setOverride', agentId: member.agentId }, `已点名${member.name}，将在下一回合发言。`)}>点名 {member.name}</button>;
+      })}
+      {snapshot.host?.override && <button type="button" disabled={disabled} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名，恢复按计划发言。')}>取消点名</button>}
     </div>}
     {snapshot.workflow && directable && <p className="host-hint">工作流运行中只能点名当前阶段成员；点名回合为计划外插入，不占用计划步骤，但计入回合上限。</p>}
 
     <h3>插话</h3>
-    <form className="host-compose" onSubmit={event => { event.preventDefault(); void send(); }}>
-      <HostTextArea aria-label="主持人插话" rows={3} value={message} placeholder="Enter 发送，Shift+Enter 换行" disabled={!directable} onChange={event => setMessage(event.target.value)} onSubmit={() => void send()} />
-      <button type="submit" disabled={disabled || !directable || !message.trim()}>发送插话</button>
-    </form>
+    {directable ? <form className="host-compose" onSubmit={event => { event.preventDefault(); void send(); }}>
+      <HostTextArea aria-label="主持人插话" rows={3} value={message} placeholder="Enter 发送，Shift+Enter 换行" onChange={event => setMessage(event.target.value)} onSubmit={() => void send()} />
+      <button type="submit" disabled={disabled || !message.trim()}>发送插话</button>
+    </form> : <p className="host-hint">{snapshot.status === 'completed' ? '运行已完成，不能再插话；仍可修改消息或重新生成某条回复。' : '运行开始后可以插话。'}</p>}
 
     <h3>持续指令</h3>
     {active.length === 0 && <p className="host-hint">没有生效中的持续指令。</p>}
     <ul className="host-instructions">
       {active.map(item => <li key={item.instructionId}>
         {editing?.instructionId === item.instructionId ? <form onSubmit={event => { event.preventDefault(); void saveInstruction(); }}>
-          <HostTextArea aria-label="修改持续指令" rows={3} value={editing.content} onChange={event => setEditing({ ...editing, content: event.target.value })} onSubmit={() => void saveInstruction()} />
-          <button type="submit" disabled={disabled || !editing.content.trim()}>保存修改</button>
+          <HostTextArea aria-label="修改持续指令" rows={3} autoFocus value={editing.content} onChange={event => setEditing({ ...editing, content: event.target.value })} onSubmit={() => void saveInstruction()} />
+          <button type="submit" disabled={disabled || !editing.content.trim() || editing.content === editing.original}>保存修改</button>
           <button type="button" onClick={() => setEditing(undefined)}>取消</button>
         </form> : <>
           <p>{item.content}</p>
           <small>生效中 · 第 {item.revision} 版 · 仅影响之后开始的请求</small>
-          <button type="button" disabled={disabled || !instructionsWritable} onClick={() => setEditing({ instructionId: item.instructionId, content: item.content })}>修改</button>
+          <button type="button" disabled={disabled || !instructionsWritable} onClick={() => setEditing({ instructionId: item.instructionId, content: item.content, original: item.content })}>修改</button>
           <button type="button" disabled={disabled || !instructionsWritable} onClick={() => void commands.send(`clear:${item.instructionId}`, { kind: 'clearInstruction', instructionId: item.instructionId }, '持续指令已清除，从下一个新请求起不再使用。')}>清除</button>
         </>}
       </li>)}

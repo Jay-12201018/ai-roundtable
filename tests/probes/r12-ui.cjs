@@ -56,7 +56,7 @@ async function page(stage, saved = {}) {
   const runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run absent'); saved.runId = runId;
   await wait(() => api.run.getSnapshot(runId), run => run.messages[0]?.content, 'No streamed output');
   const synthesizer = `${roomId}-agent-synthesizer`;
-  await fill('点名成员', synthesizer); await click('点名下一位');
+  await click('点名 综合者');
   const queued = await api.run.getSnapshot(runId);
   check(queued.host.override?.agentId === synthesizer, 'Override not queued');
   check(queued.turns.length === 1 && queued.turns[0].status === 'running', 'Override was not queued while the first Turn was running');

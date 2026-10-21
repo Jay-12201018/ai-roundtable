@@ -27,6 +27,17 @@ export function HostTimeline({ snapshot, commands }: Props) {
   return <>{slots.map(slot => <SlotView key={slot.slotId} slot={slot} snapshot={snapshot!} commands={commands} />)}</>;
 }
 
+/** Names the upstream messages a version was based on, e.g. 「起草者」「主持人」的发言. */
+function upstream(snapshot: RunSnapshot, messageIds: string[]): string {
+  const names = messageIds.map(id => {
+    const version = snapshot.versions?.find(item => item.messageId === id);
+    if (version?.author === 'host') return '主持人';
+    const turn = snapshot.turns.find(item => item.turnId === version?.turnId);
+    return identity(snapshot, turn?.agentId).member?.displayName ?? snapshot.messages.find(item => item.id === id)?.senderName ?? '上游';
+  });
+  return [...new Set(names)].map(name => `「${name}」`).join('') + '的发言';
+}
+
 function SlotView({ slot, snapshot, commands }: { slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands }) {
   const [viewing, setViewing] = useState<string>();
   const [draft, setDraft] = useState<string>();
@@ -46,7 +57,7 @@ function SlotView({ slot, snapshot, commands }: { slot: TimelineSlot; snapshot: 
   const disabled = !commands.available || commands.pending !== undefined;
   const name = slot.author === 'host' ? '主持人' : member?.displayName ?? shown.message.senderName;
   const save = async () => {
-    if (draft === undefined || !draft.trim()) return;
+    if (draft === undefined || !draft.trim() || draft === shown.message.content) return;
     if (await commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content: draft }, '已保存为新版本。')) { setDraft(undefined); setViewing(undefined); }
   };
   return <article className={`message host-slot${slot.author === 'host' ? ' is-host' : ''}`} data-slot={slot.slotId}>
@@ -55,8 +66,8 @@ function SlotView({ slot, snapshot, commands }: { slot: TimelineSlot; snapshot: 
     {slot.author === 'host' && <span className="host-badge">主持人插话</span>}
     {slot.author === 'agent' && <div className="message-identity">{line}</div>}
     <p>{shown.message.content}</p>
-    <small>{statusLabels[shown.message.status] ?? '未知状态'} · {originLabels[shown.origin]}{shown.active ? (slot.versions.length > 1 ? ' · 当前有效' : '') : ' · 未生效的历史版本'}</small>
-    {shown.affectedBy.length > 0 && <p className="host-affected" role="note">受影响：生成时依据的 {shown.affectedBy.length} 条上游内容已被修改、重新生成或本身受影响；此内容仍基于旧版本。</p>}
+    <small>{statusLabels[shown.message.status] ?? '未知状态'} · {originLabels[shown.origin]}{shown.active ? (slot.versions.length > 1 ? (shown.message.status === 'completed' ? ' · 当前有效' : ' · 当前版本（未完成）') : '') : ' · 未生效的历史版本'}</small>
+    {shown.affectedBy.length > 0 && <p className="host-affected" role="note">受影响：生成时依据的{upstream(snapshot, shown.affectedBy)}已被修改、重新生成或本身受影响，此内容仍基于旧版本，可点“重新生成”更新。</p>}
     {generating && <p className="host-generation" role="status">正在重新生成版本 {generating.versionNumber}：{generating.message.content || '等待输出…'}</p>}
     <div className="host-version-actions" role="group" aria-label={`${name} 的消息操作`}>
       {slot.versions.length > 1 && <>
@@ -69,8 +80,8 @@ function SlotView({ slot, snapshot, commands }: { slot: TimelineSlot; snapshot: 
       {canRegenerate && <button type="button" disabled={disabled} onClick={() => void commands.send(`regenerate:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId }, '已发送重新生成请求。')}>重新生成</button>}
     </div>
     {draft !== undefined && <form className="host-edit" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <label>修改为新版本（原文保留）<HostTextArea aria-label="修改消息内容" value={draft} rows={4} onChange={event => setDraft(event.target.value)} onSubmit={() => void save()} /></label>
-      <button type="submit" disabled={disabled || !draft.trim()}>保存为新版本</button>
+      <label>修改为新版本（原文保留）<HostTextArea aria-label="修改消息内容" autoFocus value={draft} rows={4} onChange={event => setDraft(event.target.value)} onSubmit={() => void save()} /></label>
+      <button type="submit" disabled={disabled || !draft.trim() || draft === shown.message.content}>保存为新版本</button>
       <button type="button" onClick={() => setDraft(undefined)}>取消</button>
     </form>}
   </article>;
