@@ -46,11 +46,16 @@
 
 交接前除主仓库外有 16 个 Worktree，都在 `~/.codex/worktrees/<名字>/AI交互`。2026-10-21 迁移处理：
 
-- `codex/integrate-r10a-r10b-r11`（原目录名 `deepseek-final-readiness`，历史遗留命名）有未提交改动，已用 `git worktree move` 移到 `~/Documents/ChatGPT/AI交互-worktrees/integrate-r10a-r10b-r11`；移动后 32 项改动完整，`./node_modules/.bin/tsc --noEmit` exit 0。
+- `codex/integrate-r10a-r10b-r11`（原目录名 `deepseek-final-readiness`，历史遗留命名）有未提交改动，已用 `git worktree move` 移出 `~/.codex`；移动后 32 项改动完整，`./node_modules/.bin/tsc --noEmit` exit 0。
 - 其余 15 个 Worktree 无未提交改动，已用 `git worktree remove`（不带 `--force`）删除目录；全部分支保留在主仓库，包括 detached `9684` 指向的 `e9cf24e`（已被 `codex/deepseek-*` 分支包含）。需要时可用 `git worktree add <路径> <分支>` 重新检出。
 - `codex/r01`…`codex/r09` 原子项目分支显示“领先 main 1 个提交”，是因为总控以重新引入（cherry-pick）方式合入，内容已在 main，见 STATUS 的“原/引入/接线”提交列。
 
-新的 Worktree 统一放在仓库同级目录 `~/Documents/ChatGPT/AI交互-worktrees/`，不再依赖 `~/.codex`。
+### 仓库位置（2026-10-21 迁移）
+
+- 主仓库从 `~/Documents/ChatGPT/AI交互` 整体移到 **`~/Documents/Claude/AI交互`**；Worktree 目录移到 **`~/Documents/Claude/AI交互-worktrees/`**（当前只有 `integrate-r10a-r10b-r11`），已执行 `git worktree repair`，两处 `tsc --noEmit` exit 0、`node_modules` 无断链。
+- 新的 Worktree 统一放在 `~/Documents/Claude/AI交互-worktrees/`，不再依赖 `~/.codex`。
+- `docs/verification/` 历史记录中的 `Documents/ChatGPT/AI交互` 是当时证据，保持原样不改。
+- 受控桌面启动器的 `build-manifest.json` 绑定构建时的仓库绝对路径和 main HEAD；旧 `.cache/controlled-desktop-main` 构建已过期（路径和 HEAD 都变了），使用前须按 `scripts/controlled-desktop/README.md` 重新 `prepare`。
 
 ## Codex 原始资料位置（只读参考，不要提交进仓库）
 
