@@ -7,20 +7,20 @@
   "main": "./out/main/index.js",
   "packageManager": "pnpm@11.25.0",
   "scripts": {
-    "predev": "pnpm native:electron",
+    "predev": "node scripts/ensure-native.cjs",
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
     "typecheck": "tsc --noEmit --pretty false",
-    "pretest": "pnpm native:node",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "pretest": "node scripts/ensure-native.cjs",
+    "test": "node scripts/electron-node.cjs node_modules/vitest/vitest.mjs run",
+    "test:watch": "node scripts/electron-node.cjs node_modules/vitest/vitest.mjs",
     "e2e": "playwright test",
-    "prepreview": "pnpm native:electron",
+    "prepreview": "node scripts/ensure-native.cjs",
     "preview": "electron-vite preview",
     "pack": "pnpm build && electron-builder",
     "dist": "pnpm build && electron-builder",
-    "native:node": "pnpm rebuild better-sqlite3",
-    "native:electron": "electron-rebuild --force --which-module better-sqlite3"
+    "native:electron": "electron-rebuild --force --which-module better-sqlite3",
+    "native:check": "node scripts/ensure-native.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.62.0",
