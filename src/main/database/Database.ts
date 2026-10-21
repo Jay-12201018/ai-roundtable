@@ -234,7 +234,10 @@ export class Database {
   }
 
   private async backupDirectory(): Promise<string> {
-    const directory = join(dirname(resolve(this.filename)), 'backups');
+    // Canonicalize the database's parent first so legitimate ancestor symlinks
+    // (macOS /var -> /private/var, relocated home folders) are accepted, while a
+    // symlinked or redirected `backups` directory itself is still rejected below.
+    const directory = join(await realpath(dirname(resolve(this.filename))), 'backups');
     await mkdir(directory, { mode: 0o700, recursive: true });
     const info = await lstat(directory);
     if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0 || await realpath(directory) !== directory) throw new Error('Unsafe backup directory');
