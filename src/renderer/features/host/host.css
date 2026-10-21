@@ -1,0 +1,22 @@
+.host-badge { display: inline-block; margin-left: 8px; padding: 0 8px; border: 1px solid var(--control); border-radius: 999px; font-size: 12px; line-height: 20px; color: var(--secondary); }
+.host-slot.is-host strong { color: var(--accent); }
+.host-affected { margin: 8px 0 0; padding: 8px 12px; border-left: 3px solid var(--warning); background: var(--subtle); color: var(--text); font-size: 13px; line-height: 20px; }
+.host-generation { margin: 8px 0 0; color: var(--secondary); font-size: 13px; white-space: pre-wrap; }
+.host-version-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.host-version-actions span { color: var(--secondary); font-size: 13px; }
+.host-edit, .host-compose { display: grid; gap: 8px; margin-top: 8px; }
+.host-edit label { display: grid; gap: 4px; color: var(--secondary); }
+.host-edit textarea, .host-compose textarea, .host-instructions textarea, .host-row select {
+  width: 100%; min-width: 0; border: 1px solid var(--control); border-radius: 8px; background: var(--panel); color: var(--text); padding: 8px 12px; font: inherit; resize: vertical;
+}
+.host-panel { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 8px; }
+.host-panel h3 { font-size: 14px; line-height: 20px; margin: 16px 0 4px; }
+.host-next { margin: 0; overflow-wrap: anywhere; }
+.host-row { display: grid; gap: 4px; }
+.host-row label { display: grid; gap: 4px; color: var(--secondary); }
+.host-hint { color: var(--secondary); font-size: 13px; line-height: 20px; margin: 4px 0; }
+.host-instructions { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.host-instructions li { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.host-instructions li p { margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.host-instructions small { color: var(--secondary); display: block; }
+.host-version-actions button:focus-visible, .host-panel button:focus-visible, .host-panel textarea:focus-visible, .host-edit textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
