@@ -320,3 +320,21 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 未来由总控冻结 preset 身份/修订、协议/鉴权白名单、经核实默认 URL、模型/能力/证据/有效期的概念到正式 wire shape 的映射；Registry 能力与模型政策继续 Main-only，未知/过期不伪造、不静默回退 Mock。具体目录/API/存储变化先完成兼容性及必要迁移审查，再分配唯一文件归属。目录更新不覆盖用户配置/Key 或历史成员快照；目标变更沿用撤销/重新确认。
 
 当前 R10A/R10B/R11 的 Shared/Registry/Main/IPC/Preload/App 接线申请仍按各自原任务执行，不因目录规划争用文件；三模块不负责实现目录或大量预设 UI。目录不改变现有 DeepSeek 单次许可、限定目标/代理、费用未知保留及普通真实 Run 的安全门禁。
+
+## R12 主持人命令与消息版本（2026-10-21，子会话候选，未合 main）
+
+总控授权 R12 子会话（分支 `codex/r12-host-message-versions`）直接修改本节列出的共享文件；共享改动以 `contract:`/`wire:` 提交与模块提交分开，等待总控审查合并。决策依据见 [DECISIONS](DECISIONS.md) D081–D088。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Shared `schemas/host.ts`（新） | `hostCommandSchema`：strict 判别联合，`kind` ∈ interject/setOverride/cancelOverride/setInstruction/clearInstruction/editMessage/regenerateMessage/selectVersion/abortGeneration，统一带 `runId`、`clientRequestId`；文本原样保留、拒绝纯空白（消息 ≤20000、指令 ≤4000 字符）。结果 `{runId,actionId,kind,duplicate}`。`messageVersionSchema`、`hostStateSchema`（pending override、指令最新修订、最近 200 条动作、进行中的版本生成） | 新增文件 |
+| Shared `schemas/run.ts` | `turnSnapshot.overrideActionId?`；`runSnapshot.versions?`/`host?`（superRefine：每槽恰一个有效版本、父版本与依据都在快照内、请求身份与 Attempt 一致）；新增 run 级事件 `host_updated {actionId,kind}`（无 turnId/requestId），订阅校验按 run 级事件处理 | 只增可选字段/事件；旧 Renderer 遇未知事件按既有规则重同步，但同构建交付 |
+| Shared `schemas/error.ts` | `ErrorField` 增加 clientRequestId/kind/agentId/instructionId/content | 只增枚举值 |
+| Shared `contracts/ipc.ts`、`app.ts` | 新通道 `host.command`（输出须与请求 runId、kind 一致）；`RoundtableApiContract.host.command` | 新增通道；无通用 invoke |
+| Preload | `window.roundtable.host.command` 仅转发该 typed 通道 | Bridge 键集合变为 host/room/rooms/run/settings |
+| Main IPC/装配 | `registerIpc` 服务参数增加 `host`；`host.command` 计入关窗前待完成写入；`main/index.ts` 组装 `HostService(database, runService)` | — |
+| Database / migration6 | 新表 `host_actions`（每 run 的 clientRequestId 唯一、同一 run 至多一个 pending Override、身份不可变、仅 pending→consumed/superseded/cancelled/expired、run 存在时禁删）、`host_instruction_revisions`（不可变修订，content NULL 表示清除）、`message_versions`（槽、序号、来源、动作、依据 basis_json）、`message_slots`（每槽当前有效版本）；`turns.override_action_id`；回填既有消息为版本（Turn 一槽、最新 Attempt 有效、续写按固定提示识别、basis 为空），`messages.parent_version_id` 开始使用 | migration1–5 原文不变；validateDatabase 增加 v6 结构与一致性检查；启动时把任何遗留 running/pending Attempt 标为 interrupted、streaming 消息标为 aborted |
+| RunService（Main 私有） | `assertOverrideAllowed`、`applyHostChange`（变更与 `host_updated` 同事务）、`regenerateMessage`、`abortGeneration`、`isRegenerating/isExecuting`；调度先消费 pending Override；计划进度只计非点名 Turn；结算/证据改为"每个 Turn 的有效版本"；retry/continue/recover 在已有执行上下文时拒绝（invalid_state） | 无 Override/编辑时行为与原 R04/R11 相同，原测试全部通过 |
+| R05 context（Main 私有） | `contextInput.snapshot.versions?`（缺省仍按最新 Attempt）；`current.mode: 'regenerate'`；非有效版本 `inactive_version`；主持人修改版本以 `editedByHost:true`、受影响内容以 `basedOnRevisedHistory:true` 标注；后续版本保持其槽的原位置；有效持续指令作为 host 指令进入 system 段 | 新增可选输入 |
+
+安全影响：主持人权限只来自 `host.command` 可信通道；模型文本、引用和历史从不被解析为命令。命令不读取 Key、不新增网络能力；重新生成复用原成员冻结的 Provider/Model 与既有生成门禁和预算，只在显式命令后发送，不自动重发。
