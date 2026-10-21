@@ -6,6 +6,7 @@ import { WorkflowFeature, type WorkflowDraft, type WorkflowPreviewResult } from 
 import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressForFeature, workflowTemplateLabels } from './features/workflows/productionAdapter';
 import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
 import { SettingsFeature } from './features/settings/SettingsFeature';
+import { HostPanel, HostTimeline, useHostCommands } from './features/host';
 import { statusLabels } from './locales/zhCN';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
 import { createRendererSession } from './subscriptions/rendererSession';
@@ -139,6 +140,8 @@ export function App() {
   const closeSettings = useCallback(() => setPage('discussion'), []);
   const activeTurn = snapshot?.turns.find(turn => turn.status === 'running');
   const messages = snapshot?.messages ?? [];
+  const synchronizeHost = useCallback(() => { void session.synchronize(); }, [session]);
+  const hostCommands = useHostCommands(api.host, snapshot?.runId, synchronizeHost);
 
   return <div className="app-shell">
     <nav className="app-navigation" aria-label="应用导航">
@@ -158,12 +161,7 @@ export function App() {
         </header>
         <div className="messages">
           {messages.length === 0 && <div className="empty">{roomId ? '配置成员后，输入目标并开始协作。' : '请先在“房间与成员”中创建或选择房间。'}</div>}
-          {messages.map(message => {
-            const attempt = snapshot?.attempts?.find(value => value.messageId === message.id);
-            const turn = snapshot?.turns.find(value => attempt ? value.turnId === attempt.turnId : value.messageId === message.id);
-            const member = snapshot?.execution?.membersSnapshot?.find(value => value.agentId === turn?.agentId);
-            return <article className="message" key={message.id}><strong>{member?.displayName ?? message.senderName}</strong><div className="message-identity">{member?.roleTemplateId ?? '角色未记录'} · Provider：{member?.providerId ?? '未记录'} · Model：{member?.modelId ?? '未记录'}</div><p>{message.content}</p><small>{statusLabels[message.status] ?? '未知状态'}</small></article>;
-          })}
+          <HostTimeline snapshot={snapshot} commands={hostCommands} />
         </div>
         <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={startRun} disabled={!startEnabled || workflowInvalidated}>开始协作</button></div>
         {appliedWorkflow && <p role="status">下次开始将使用「{workflowTemplateLabels[appliedWorkflow.config.templateId]}」，此配置尚未启动。</p>}
@@ -189,6 +187,7 @@ export function App() {
           <button onClick={() => void session.recover('resume')} disabled={!recoverEnabled}>恢复后续回合</button>
           <button onClick={() => void session.recover('discard')} disabled={!inspectEnabled}>放弃中断执行</button>
         </>}
+        <HostPanel snapshot={snapshot} commands={hostCommands} />
         <dl><dt>事件序列</dt><dd>{snapshot?.sequence ?? 0}</dd><dt>回合</dt><dd>{snapshot?.turns.length ?? 0}</dd></dl>
       </aside>
     </div>

@@ -1,0 +1,64 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { App } from '../../../src/renderer/App';
+import { Database } from '../../../src/main/database/Database';
+import { RunService } from '../../../src/main/services/RunService';
+import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
+import { appApiFor } from '../joint/fixtures';
+import { ScriptedProvider } from './fixtures';
+
+afterEach(() => { cleanup(); localStorage.clear(); });
+
+describe('R12 App with the real Main services', () => {
+  it('queues a trusted Override from the UI, then edits and regenerates versions with visible affected marks', async () => {
+    const db = new Database(':memory:'); db.initialize();
+    const provider = new ScriptedProvider();
+    const service = new RunService(db, provider, createPublicMessagesBuilder());
+    window.roundtable = appApiFor(service, db);
+    service.createDemoRoom('主持人联合测试');
+    provider.hold.add(0);
+    provider.answers.set(0, '开场观点 @Override 审查者');
+    provider.answers.set(1, '综合者被点名发言');
+    provider.answers.set(2, '审查者按计划发言');
+    try {
+      render(<App />);
+      await waitFor(() => expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(screen.getByRole('button', { name: '开始协作' }));
+      await screen.findByText('开场观点 @Override 审查者');
+      await waitFor(() => expect(screen.getByLabelText('点名成员')).toBeTruthy());
+      fireEvent.change(screen.getByLabelText('点名成员'), { target: { value: within(screen.getByLabelText('点名成员')).getByText('综合者').getAttribute('value') } });
+      fireEvent.click(screen.getByRole('button', { name: '点名下一位' }));
+      await screen.findByText(/下一位：综合者（主持人点名/);
+      await act(async () => { provider.release(0); });
+      await screen.findByText('审查者按计划发言');
+      await waitFor(() => expect(document.querySelector('.timeline .status')!.textContent).toContain('已完成'));
+      const runId = db.getAttempt(provider.inputs[0].requestId)!.runId;
+      expect(service.getSnapshot(runId).turns.map(turn => turn.agentId.split('-agent-')[1])).toEqual(['drafter', 'synthesizer', 'critic']);
+      expect(screen.getByText('主持人点名')).toBeTruthy();
+
+      // Edit the first message: a new version becomes effective and both later answers are marked affected.
+      fireEvent.click(screen.getAllByRole('button', { name: '修改' })[0]);
+      fireEvent.change(screen.getByLabelText('修改消息内容'), { target: { value: '主持人修订后的开场' } });
+      fireEvent.click(screen.getByRole('button', { name: '保存为新版本' }));
+      await screen.findByText('主持人修订后的开场');
+      await waitFor(() => expect(screen.getAllByRole('note')).toHaveLength(2));
+      expect(screen.getByText('版本 2/2')).toBeTruthy();
+
+      // Regenerate the last answer from the revised history: a version job in the completed Run.
+      provider.answers.set(3, '依据修订重新生成');
+      const regenerate = screen.getAllByRole('button', { name: '重新生成' });
+      fireEvent.click(regenerate[regenerate.length - 1]);
+      await screen.findByText('依据修订重新生成');
+      // Still affected, transitively: its new basis includes the second answer, itself based on the replaced opening.
+      await waitFor(() => expect(screen.getAllByRole('button', { name: '查看上一个版本' })).toHaveLength(2));
+      expect(screen.getAllByRole('note')).toHaveLength(2);
+      expect(service.getSnapshot(runId).status).toBe('completed');
+      const history = provider.inputs[3].messages.filter(message => message.role !== 'system').slice(1).map(message => JSON.parse(message.content).publicText);
+      expect(history).toEqual(['主持人修订后的开场', '综合者被点名发言']);
+      expect(provider.inputs).toHaveLength(4);
+    } finally {
+      cleanup();
+      await service.shutdown(); db.close();
+    }
+  });
+});
