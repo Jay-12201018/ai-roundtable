@@ -10,7 +10,7 @@ description: AI Roundtable 的标准本地检查（typecheck、Vitest 单元/集
 ## 原则
 
 - 所有测试都在 **Electron 自带的 Node（ABI139）** 里跑，不在宿主 Node 里跑。better-sqlite3 只保留 Electron 这一套编译产物，彻底省掉 Node/Electron 两套 ABI 来回重建（这是 Codex 时期反复出问题的根源），也避开 Node 24.19+ 的 #65446 崩溃。
-- 不调用 `pnpm test`：它的 `pretest` 会把 better-sqlite3 重新编译成宿主 Node 的 ABI。
+- 用 `pnpm test` 而不是 `pnpm exec vitest`：前者经 `scripts/electron-node.cjs` 在 Electron 里运行，后者用宿主 Node，加载不了 Electron ABI 的 SQLite。
 - 命令输出只看结尾：`2>&1 | tail -n 20`。不要把整份日志读进上下文。
 - 每一项单独记录退出码。用 zsh 的 `${pipestatus[1]}` 取管道里第一个命令的退出码，不能被 `tail` 的 0 掩盖。
 - 不启动应用窗口、不碰 `~/Library/Application Support/ai-roundtable`、不发网络请求。
