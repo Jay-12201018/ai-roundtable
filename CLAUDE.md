@@ -17,6 +17,14 @@
 - subagent（Agent 工具）只用于本会话内的搜索、审查等辅助工作，不代替 R 任务子会话。
 - 分支沿用 `codex/rxx-<topic>` 命名，以便和既有分支、STATUS 看板保持一致；只有用户另行指定时才更换前缀。Worktree 不再放在 `~/.codex/worktrees/`，由 App 为子会话创建；手动创建的统一放在 `~/Documents/Claude/AI交互-worktrees/`。
 
+## 验收分三层（用户 2026-10-21 指定：不能只做测试，要实操验证是否真正可用）
+
+1. **自动化测试**：每次都要做，按 `verify` skill 执行。
+2. **实操验收**：凡是改了界面、IPC/Preload 接线、运行调度或 Provider 的任务都要做。用构建出的真实应用，在隔离的临时 profile 中像真人一样点击和输入（包括中文输入），把用户会用到的每条路径完整走一遍；每一步用 `webContents.capturePage()` 截图，存到 `docs/verification/<任务>-screens/`，并在报告里逐张说明。实操中发现的体验问题按缺陷修复，不能只写进报告。子会话交付时就要完成这一层。
+3. **真实模型实测**：合并 main 前，涉及 Provider、运行或上下文的功能要做。由总控和用户一起，使用用户自己的 Key 和真实模型，在隔离的试用 profile 里跑一次，事先说明预计花费并取得用户同意。不能用 Mock 结果代替。
+
+报告里三层分开列出，没做的那层写"未验证"。用户想自己上手试用时，提供隔离试用 profile 的启动方式；新的 migration 在合并前不得作用于用户的真实数据库。
+
 ## 工程约定
 - 测试统一在 Electron 自带的 Node 里跑：全量用 `pnpm test`，部分测试用 `pnpm test <路径>`。不要用 `pnpm exec vitest`（宿主 Node 加载不了 Electron ABI 的 SQLite），也不要写 `pnpm run test -- <路径>`（pnpm 11 会跑全量）。检查流程见 `verify` skill，收尾流程见 `deliver` skill。
 - 工具链：pnpm 11.25.0 和 Node 24（Homebrew `node@24`）都已经通过 Homebrew 安装。2026-10-21 已把 `/opt/homebrew/bin/node` 从 ChatGPT.app 内置的签名 Node 改为指向 Homebrew 的 Node（它原先导致原生模块报 Team ID 错误）。如果再出现 Team ID 报错，先用 `ls -l $(which node)` 检查这个链接有没有被改回去。
