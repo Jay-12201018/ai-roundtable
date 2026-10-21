@@ -3,7 +3,7 @@
 ## 当前状态（2026-10-21，Claude Code 接手后）
 
 - **R10A Anthropic / R10B Gemini / R11 声明式工作流：review，待用户批准合 main。** 分支 `codex/integrate-r10a-r10b-r11`，生产接线提交 `8a7f293`。验证：Electron ABI139 下 109 文件 / 1732 测试、typecheck、build、隔离生产探针（首次 53 断言 / 26 次 fixture 请求，重启 17 断言 / 0 请求，liveApi=false）。真实 Claude/Gemini API、价格策略、桌面 E2E 未验证。
-- **环境根治**（`bf3a6d9`）：测试在 Electron 自带 Node 中运行，better-sqlite3 只保留 Electron ABI；`ensure-native` 按需重建。已查明 Codex 时期 Team ID 报错的根因是 `/opt/homebrew/bin/node` 指向 ChatGPT.app 内置的带签名 Node。
+- **环境根治**（`bf3a6d9`）：测试在 Electron 自带 Node 中运行，better-sqlite3 只保留 Electron ABI；`ensure-native` 按需重建。已查明 Codex 时期 Team ID 报错的根因是 `/opt/homebrew/bin/node` 指向 ChatGPT.app 内置的带签名 Node，现已改为 Homebrew `node@24`，`pnpm run build` 无需任何绕法即可通过。
 - **缺陷修复**（`3378436`）：数据库父目录含符号链接时，迁移备份必定失败（Codex 时期靠改 TMPDIR 绕过），已修复并补回归测试。
 - 已知后续：开启回环代理时，原生 Claude/Gemini 会被拒绝（代理目标检查写死了 `/chat/completions`）；每次运行工作流后都需要重新预览和应用。
 

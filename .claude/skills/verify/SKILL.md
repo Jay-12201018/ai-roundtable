@@ -29,7 +29,7 @@ description: AI Roundtable 的标准本地检查（typecheck、Vitest 单元/集
 
 ## 构建报 Team ID / code signature 错误
 
-这说明宿主 `node` 是带签名的应用内置 Node（交接时 `/opt/homebrew/bin/node` 指向 ChatGPT.app）。解决办法是改用正常的 Node：`PATH=/opt/homebrew/opt/node@24/bin:$PATH pnpm run build`；或者经用户同意后修正那个符号链接。不要再复制 Node 重新签名来绕过。
+这说明宿主 `node` 又变成了带签名的应用内置 Node（交接时 `/opt/homebrew/bin/node` 指向 ChatGPT.app，2026-10-21 已改为 Homebrew `node@24`）。先用 `ls -l $(which node)` 确认；如果链接被改回去了，告诉用户并建议执行 `brew link --overwrite --force node@24`。不要再复制 Node 重新签名来绕过。
 
 ## 报告格式
 
