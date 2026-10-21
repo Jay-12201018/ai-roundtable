@@ -43,7 +43,7 @@ const fixture = vi.hoisted(() => {
     service: { shutdown: vi.fn(), hasActiveRuns: vi.fn() },
     trial: { shutdown: vi.fn(), isBusy: vi.fn() },
     confirmTrial: vi.fn(), installTrialMenu: vi.fn(),
-    rooms: {}, settings: {}, keys: { getStatus: async () => ({}) },
+    rooms: {}, settings: {}, host: {}, keys: { getStatus: async () => ({}) },
     createWindow: vi.fn(),
     windowLoad: vi.fn(),
     registerIpc: vi.fn(),
@@ -59,6 +59,7 @@ vi.mock('../../src/main/room/RoomService', () => ({ RoomService: vi.fn(function 
 vi.mock('../../src/main/settings/ProviderSettingsService', () => ({ ProviderSettingsService: vi.fn(function () { return fixture.settings; }) }));
 vi.mock('../../src/main/providers/mock/MockProvider', () => ({ MockProvider: vi.fn() }));
 vi.mock('../../src/main/services/RunService', () => ({ RunService: vi.fn(function () { return fixture.service; }) }));
+vi.mock('../../src/main/host/HostService', () => ({ HostService: vi.fn(function () { return fixture.host; }) }));
 vi.mock('../../src/main/providers/controlledTrial/ControlledTrialService', () => ({ ControlledTrialService: vi.fn(function () { return fixture.trial; }) }));
 vi.mock('../../src/main/providers/controlledTrial/menu', () => ({ confirmTrial: fixture.confirmTrial, installTrialMenu: fixture.installTrialMenu }));
 vi.mock('../../src/main/windows/createMainWindow', () => ({ createMainWindow: fixture.createWindow }));
@@ -129,7 +130,7 @@ describe('application lifecycle', () => {
     expect(ControlledTrialService).toHaveBeenCalledExactlyOnceWith(fixture.database, registry, fixture.confirmTrial, expect.any(Function));
     expect(fixture.database.recoverControlledTrials).toHaveBeenCalledOnce();
     expect(fixture.installTrialMenu).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.trial, expect.any(Function));
-    expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings });
+    expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host });
   });
 
   it('waits for current and already closed window configuration writes before closing SQLite', async () => {
@@ -233,7 +234,7 @@ describe('application lifecycle', () => {
     emit('activate');
 
     expect(fixture.unregister[0]).toHaveBeenCalledTimes(1);
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings });
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host });
     expect(fixture.windows[1]?.destroyed).toBe(false);
   });
 
@@ -537,7 +538,7 @@ describe('application lifecycle', () => {
     fixture.windows[0]!.close();
     emit('second-instance');
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings });
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host });
     expect(fixture.windows.filter((window) => !window.destroyed)).toHaveLength(1);
   });
 });

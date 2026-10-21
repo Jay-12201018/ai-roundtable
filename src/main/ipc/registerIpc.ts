@@ -7,13 +7,14 @@ import { inputError, publicError } from '../../shared/schemas/error';
 import { runEventSchema } from '../../shared/schemas/run';
 import type { RoomManagementApiContract, ProviderSettingsApiContract } from '../../shared/contracts/configuration';
 import type { RunService } from '../services/RunService';
+import type { HostApiContract } from '../../shared/contracts/app';
 import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
 
 export type IpcDisposer = (() => void) & { drain(): Promise<void> };
 let currentDisposer: IpcDisposer | undefined;
 
-export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract }): IpcDisposer {
-  const { run: service, rooms, settings } = services;
+export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract }): IpcDisposer {
+  const { run: service, rooms, settings, host } = services;
   currentDisposer?.();
   let disposed = false;
   let unsubscribe: (() => void) | undefined;
@@ -46,6 +47,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'run.retryTurn': ({ runId, turnId }) => service.retryTurn(runId, turnId),
     'run.continueMessage': ({ runId, messageId }) => service.continueMessage(runId, messageId),
     'run.recoverInterruptedRun': ({ runId, decision }) => service.recoverInterruptedRun(runId, decision),
+    'host.command': (input) => host.command(input),
     'rooms.createRoom': (input) => rooms.createRoom(input),
     'rooms.updateRoom': (input) => rooms.updateRoom(input),
     'rooms.getRoomConfiguration': (input) => rooms.getRoomConfiguration(input),
@@ -92,7 +94,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         ensureSender(event);
         return response;
       })();
-      if (channel.startsWith('rooms.') || channel.startsWith('settings.')) {
+      if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
       }

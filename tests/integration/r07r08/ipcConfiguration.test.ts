@@ -6,6 +6,7 @@ import { Database } from '../../../src/main/database/Database';
 import { RoomService } from '../../../src/main/room/RoomService';
 import { ProviderSettingsService } from '../../../src/main/settings';
 import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/KeyService';
+import { HostService } from '../../../src/main/host/HostService';
 import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { registerIpc } from '../../../src/main/ipc/registerIpc';
@@ -42,7 +43,7 @@ beforeEach(() => {
   keys = new KeyService(database, createMemoryKeyBackend());
   settings = new ProviderSettingsService(database, keys);
   dispose = registerIpc({ webContents: { send: () => {} } } as unknown as BrowserWindow, {
-    run: new RunService(database, new MockProvider()), rooms: new RoomService(database), settings,
+    ...withHost(new RunService(database, new MockProvider())), rooms: new RoomService(database), settings,
   });
 });
 afterEach(async () => { dispose(); await dispose.drain(); database.close(); vi.restoreAllMocks(); });
@@ -142,7 +143,7 @@ describe('production configuration IPC and Preload with actual services', () => 
     settings = new ProviderSettingsService(database, keys);
     dispose();
     dispose = registerIpc({ webContents: { send: () => {} } } as unknown as BrowserWindow, {
-      run: new RunService(database, new MockProvider()), rooms: new RoomService(database), settings,
+      ...withHost(new RunService(database, new MockProvider())), rooms: new RoomService(database), settings,
     });
     const provider = await settings.createProvider({ name: 'Delayed', kind: 'openai' });
     const pending = fixture.api!.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-drain-key' }).catch(error => error);
@@ -192,9 +193,11 @@ describe('production configuration IPC and Preload with actual services', () => 
     if (change === 'navigation') fixture.trusted = false;
     else if (change === 'disposal') dispose();
     else dispose = registerIpc({ webContents: { send: () => {} } } as unknown as BrowserWindow, {
-      run: new RunService(database, new MockProvider()), rooms: new RoomService(database), settings,
+      ...withHost(new RunService(database, new MockProvider())), rooms: new RoomService(database), settings,
     });
     if (outcome === 'success') resolve(provider); else reject(new Error('fixture-private-backend-error'));
     await expect(pending).rejects.toMatchObject({ code: 'transport_error', message: 'IPC connection failed' });
   });
 });
+
+function withHost(run: RunService) { return { run, host: new HostService(database, run) }; }

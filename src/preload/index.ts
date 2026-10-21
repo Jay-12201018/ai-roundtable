@@ -36,6 +36,9 @@ const api: RoundtableApiContract = {
     createDemo: (objective) => invoke('room.createDemo', objective),
     getMessages: (roomId) => invoke('room.getMessages', roomId),
   },
+  host: {
+    command: (input) => invoke('host.command', input),
+  },
   rooms: {
     createRoom: (input) => invoke('rooms.createRoom', input),
     updateRoom: (input) => invoke('rooms.updateRoom', input),

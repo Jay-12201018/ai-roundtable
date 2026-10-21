@@ -9,6 +9,7 @@ export { ProviderRegistry };
 import { mockModelBudget } from './providers/mock/tokenBudget';
 import { MockProvider } from './providers/mock/MockProvider';
 import { RunService } from './services/RunService';
+import { HostService } from './host/HostService';
 import { createMainWindow } from './windows/createMainWindow';
 import { RoomService } from './room/RoomService';
 import { ProviderSettingsService } from './settings/ProviderSettingsService';
@@ -27,6 +28,7 @@ let ipcCleanup = Promise.resolve();
 let roomService: RoomService | undefined;
 let settingsService: ProviderSettingsService | undefined;
 let runService: RunService | undefined;
+let hostService: HostService | undefined;
 let controlledTrial: ControlledTrialService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
@@ -66,6 +68,7 @@ if (!hasLock) {
       runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }), createPublicMessagesBuilder((modelId, member) =>
         member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined), providers,
       () => { if (controlledTrial?.isBusy()) throw new ContractError('invalid_state'); });
+      hostService = new HostService(database, runService);
       controlledTrial = new ControlledTrialService(database, providers, confirmTrial, () => runService?.hasActiveRuns() ?? true);
       installTrialMenu(database, controlledTrial, () => runService?.hasActiveRuns() ?? true);
       createAppWindow();
@@ -86,11 +89,11 @@ if (!hasLock) {
 function createAppWindow(): void {
   if (shutdownRequested) return;
   try {
-    if (!runService || !roomService || !settingsService) throw new Error('Run service is not initialized');
+    if (!runService || !roomService || !settingsService || !hostService) throw new Error('Run service is not initialized');
     disposeCurrentIpc();
     const createdWindow = createMainWindow();
     window = createdWindow;
-    const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService });
+    const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService, host: hostService });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
       if (shutdownRequested || (!runService?.hasActiveRuns() && !controlledTrial?.isBusy())) return;

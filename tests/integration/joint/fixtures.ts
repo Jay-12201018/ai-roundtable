@@ -6,6 +6,7 @@ import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import type { NormalizedChunk,StreamChatInput } from '../../../src/main/providers/types';
 import type { RoundtableApiContract, RunSessionApiContract } from '../../../src/shared/contracts/app';
 import type { RunService } from '../../../src/main/services/RunService';
+import { HostService } from '../../../src/main/host/HostService';
 import { publicError } from '../../../src/shared/schemas/error';
 
 export class PublicProvider extends MockProvider {
@@ -35,5 +36,5 @@ export function apiFor(service:RunService):RunSessionApiContract {
 }
 
 export function appApiFor(service: RunService, database: Database): RoundtableApiContract {
-  return { ...apiFor(service), rooms: new RoomService(database), settings: new ProviderSettingsService(database, new KeyService(database, createMemoryKeyBackend())) };
+  return { ...apiFor(service), host: new HostService(database, service), rooms: new RoomService(database), settings: new ProviderSettingsService(database, new KeyService(database, createMemoryKeyBackend())) };
 }

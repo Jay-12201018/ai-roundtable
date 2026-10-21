@@ -14,7 +14,7 @@ afterEach(() => { cleanup(); localStorage.clear(); delete document.documentEleme
 function fixture() {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
   const fake = bridge();
-  const api = { ...fake.api, rooms: new RoomService(db), settings: new ProviderSettingsService(db, new KeyService(db, createMemoryKeyBackend())) };
+  const api = { ...fake.api, host: { command: vi.fn(async () => { throw new Error('Host command not configured in fixture'); }) }, rooms: new RoomService(db), settings: new ProviderSettingsService(db, new KeyService(db, createMemoryKeyBackend())) };
   window.roundtable = api;
   return { ...fake, db, api };
 }

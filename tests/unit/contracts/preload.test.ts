@@ -18,7 +18,8 @@ const emit = (value: unknown) => { for (const handler of fixture.handlers) handl
 beforeEach(() => { fixture.invoke.mockReset(); fixture.handlers.clear(); });
 describe('restricted Preload contract', () => {
   it('exposes only typed feature methods and sends one explicit undefined argument for no-input requests', async () => {
-    expect(Object.keys(fixture.api!).sort()).toEqual(['room', 'rooms', 'run', 'settings']);
+    expect(Object.keys(fixture.api!).sort()).toEqual(['host', 'room', 'rooms', 'run', 'settings']);
+    expect(Object.keys(fixture.api!.host)).toEqual(['command']);
     expect(fixture.api!.settings).not.toHaveProperty('resolveKey');
     fixture.invoke.mockResolvedValue({ version: 1, ok: true, data: [] });
     await fixture.api!.settings.listProviderSummaries();
