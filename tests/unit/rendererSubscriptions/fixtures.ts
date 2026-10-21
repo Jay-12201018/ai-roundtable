@@ -33,6 +33,7 @@ export function bridge() {
   const api: RunSessionApiContract = {
     room: { createDemo: vi.fn(async () => ({ roomId: 'created-room' })), getMessages: vi.fn(async () => []) },
     run: {
+      previewWorkflow: vi.fn(async () => { throw new Error('Workflow preview not configured in fixture'); }),
       subscribe: vi.fn(async (id) => subscription(snapshot(id))), getSnapshot: vi.fn(async (id) => snapshot(id)),
       start: vi.fn(async (input) => ({ ...snapshot('new'), roomId: input.roomId })),
       onEvent: vi.fn((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }),

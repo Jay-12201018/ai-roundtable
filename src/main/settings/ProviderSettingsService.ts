@@ -112,7 +112,10 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
         if (provider.kind === 'mock') {
           return schemas.providerConnectionTestResultSchema.parse({ providerId, result: await this.mock.testConnection({ requestId, level, ...(modelId === undefined ? {} : { modelId }) }) });
         }
-        if (level === 'configuration') return schemas.providerConnectionTestResultSchema.parse({ providerId, result: { requestId, level, ok: true } });
+        if (level === 'configuration') {
+          this.runtime?.validateConfiguration(providerId);
+          return schemas.providerConnectionTestResultSchema.parse({ providerId, result: { requestId, level, ok: true } });
+        }
         if (!this.runtime) throw new ContractError('unsupported');
         if (level === 'generation') {
           if (allowGeneration !== true) throw new ContractError('forbidden');

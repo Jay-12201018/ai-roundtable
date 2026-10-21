@@ -1,42 +1,6 @@
-import { z } from 'zod';
-import { idSchema, sequenceSchema } from '../../shared/schemas/common';
-import { memberSnapshotSchema } from '../../shared/schemas/persistence';
-
-// Main-only until the owner approves one Shared schema and its persistence semantics.
-export const workflowStageKindSchema = z.enum([
-  'discussion', 'dialogue', 'draft', 'review', 'revise', 'rereview', 'finalize', 'opening', 'rebuttal', 'closing',
-]);
-export const workflowConfigSchema = z.object({
-  version: z.literal(1),
-  templateId: z.enum(['free-chat', 'two-model-dialogue', 'review-revision', 'deep-debate']),
-  stages: z.array(z.object({
-    id: idSchema, kind: workflowStageKindSchema,
-    memberIds: z.array(idSchema).min(1).max(32), rounds: z.number().int().min(1).max(32),
-  }).strict()).min(1).max(16),
-  limits: z.object({
-    maxTurns: z.number().int().min(1).max(256),
-    maxDurationMs: z.number().int().min(1).max(86400000),
-    outputTokenLimit: z.number().int().min(1).max(65536),
-  }).strict(),
-  endCondition: z.discriminatedUnion('type', [
-    z.object({ type: z.literal('plan_complete') }).strict(),
-    z.object({ type: z.literal('after_stage'), stageId: idSchema }).strict(),
-  ]),
-}).strict();
-export const workflowStepSchema = z.object({
-  index: sequenceSchema, stageId: idSchema, kind: workflowStageKindSchema, agentId: idSchema,
-  round: z.number().int().min(1).max(32),
-}).strict();
-export const workflowSnapshotSchema = z.object({
-  version: z.literal(1), roomId: idSchema, config: workflowConfigSchema,
-  members: z.array(memberSnapshotSchema).min(1).max(32),
-  steps: z.array(workflowStepSchema).min(1).max(256),
-}).strict();
-
-export type WorkflowConfig = z.infer<typeof workflowConfigSchema>;
-export type WorkflowStep = z.infer<typeof workflowStepSchema>;
-export type WorkflowSnapshot = z.infer<typeof workflowSnapshotSchema>;
-export type WorkflowStageKind = z.infer<typeof workflowStageKindSchema>;
+import { workflowStageKindSchema, type WorkflowStageKind } from '../../shared/schemas/workflow';
+export { workflowConfigSchema, workflowStepSchema, compiledWorkflowSnapshotSchema as workflowSnapshotSchema, workflowStageKindSchema } from '../../shared/schemas/workflow';
+export type { WorkflowConfig, WorkflowStep, WorkflowSnapshot, WorkflowStageKind } from '../../shared/schemas/workflow';
 
 const instructions: Record<WorkflowStageKind, string> = {
   discussion: '围绕当前任务讨论，结合公共历史补充信息、回应前序意见。',

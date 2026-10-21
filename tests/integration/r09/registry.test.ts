@@ -24,12 +24,15 @@ function confirm(registry:ProviderRegistry, providerId='p',baseUrl='http://127.0
   return registry.confirmTarget({providerId,baseUrl,confirmed:true});
 }
 it('registers both actual adapters, never a kind/model-name Mock fallback', () => {
-  const {db,keys}=fixture(); const registry=new ProviderRegistry(db,keys);
+  const {db,keys}=fixture(); const sent=vi.fn(); const read=vi.spyOn(keys,'getProviderKeyState');
+  const registry=new ProviderRegistry(db,keys,{transportFactory:()=>sent});
   confirm(registry); expect(registry.getAdapter('p')).toBeInstanceOf(OpenAICompatibleProvider);
   db.createProvider({id:'official',name:'official',kind:'openai'});
   confirm(registry,'official','https://api.openai.com/v1'); expect(registry.getAdapter('official')).toBeInstanceOf(OpenAIProvider);
   db.createProvider({id:'future',name:'future',kind:'anthropic'});
-  expect(()=>registry.getAdapter('future')).toThrowError(expect.objectContaining({code:'unsupported'}));
+  // Native Anthropic is registered; it still needs an explicit session target approval.
+  expect(()=>registry.getAdapter('future')).toThrowError(expect.objectContaining({code:'forbidden'}));
+  expect(read).not.toHaveBeenCalled(); expect(sent).not.toHaveBeenCalled();
 });
 it('requires exact Main session confirmation; no persisted or inherited target approval', () => {
   const {db,keys}=fixture(); const registry=new ProviderRegistry(db,keys);

@@ -4,8 +4,10 @@ import { idSchema, PROTOCOL_VERSION, sequenceSchema, timestampSchema, workflowSn
 import { apiErrorSchema } from './error';
 import { executionMetadataSchema, attemptSnapshotSchema } from './persistence';
 
+import { workflowConfigSchema, workflowProgressSchema } from './workflow';
+
 export const startRunInputSchema = z.object({
-  roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema,
+  roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema.optional(), workflowConfig: workflowConfigSchema.optional(), workflowPreviewId: idSchema.optional(),
   mode: z.enum(['automatic', 'step']).optional(),
   maxTurns: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   maxDurationMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
@@ -18,7 +20,7 @@ export const continueMessageInputSchema = z.object({ runId: idSchema, messageId:
 export const recoveryInputSchema = z.object({ runId: idSchema, decision: interruptedRunDecisionSchema }).strict();
 
 export const turnSnapshotSchema = z.object({
-  turnId: idSchema, runId: idSchema, agentId: idSchema, status: z.enum(turnStatusValues),
+  turnId: idSchema, runId: idSchema, agentId: idSchema, turnIndex: sequenceSchema.optional(), status: z.enum(turnStatusValues),
   requestId: idSchema.optional(), messageId: idSchema.optional(), outputText: z.string().optional(),
   startedAt: timestampSchema.optional(), completedAt: timestampSchema.optional(),
 }).strict();
@@ -30,7 +32,7 @@ export const runSnapshotSchema = z.object({
   workflowSnapshot: workflowSnapshotSchema, currentTurnId: idSchema.optional(), activeAgentId: idSchema.optional(),
   turns: z.array(turnSnapshotSchema), messages: z.array(messageSnapshotSchema),
   startedAt: timestampSchema.optional(), updatedAt: timestampSchema,
-  execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
+  workflow: workflowProgressSchema.optional(), execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
 }).strict().superRefine((snapshot, ctx) => {
   const current = snapshot.turns.find((turn) => turn.turnId === snapshot.currentTurnId);
   if (snapshot.turns.some((turn) => turn.runId !== snapshot.runId)

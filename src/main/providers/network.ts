@@ -2,9 +2,63 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP, type LookupFunction } from 'node:net';
+import { z } from 'zod';
 import type { DiagnosticEvent, DiagnosticObserver } from './diagnostics';
 import { ContractError } from '../../shared/contracts/errors';
 import { assertProxyTarget, LoopbackProxyAgent, type LoopbackProxy } from './loopbackProxy';
+
+const nativeText = z.object({ text: z.string() }).strict();
+const positiveTokens = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const anthropicBody = z.object({
+  model: z.string().trim().min(1), stream: z.literal(true), max_tokens: positiveTokens,
+  system: z.array(z.object({ type: z.literal('text'), text: z.string() }).strict()).optional(),
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().trim().min(1) }).strict()).min(1),
+}).strict();
+const geminiBody = z.object({
+  contents: z.array(z.object({ role: z.enum(['user', 'model']), parts: z.array(nativeText).min(1) }).strict()).min(1),
+  systemInstruction: z.object({ parts: z.array(nativeText).min(1) }).strict().optional(),
+  generationConfig: z.object({ candidateCount: z.literal(1), maxOutputTokens: positiveTokens }).strict(),
+}).strict();
+
+/** Native protocols add an exact credential boundary on top of DNS-pinned/TLS transport. */
+export function createNativeSafeFetch(kind: 'anthropic' | 'gemini', transport: typeof fetch, guard?: () => void): typeof fetch {
+  return async (input, init = {}) => {
+    guard?.();
+    try {
+      if (typeof input !== 'string' && !(input instanceof URL) || /\s|\\|\p{Cc}/u.test(String(input))) throw new Error();
+      const url = new URL(String(input)); const method = init.method ?? 'GET';
+      const headers = new Headers(init.headers);
+      if (url.username || url.password || url.hash || init.redirect !== 'error' || headers.has('authorization')
+        || headers.has('proxy-authorization') || headers.has('cookie')) throw new Error();
+      const keyHeader = kind === 'anthropic' ? 'x-api-key' : 'x-goog-api-key';
+      const otherKey = kind === 'anthropic' ? 'x-goog-api-key' : 'x-api-key';
+      const key = headers.get(keyHeader);
+      if (!key || /\s|\p{Cc}/u.test(key) || headers.has(otherKey)) throw new Error();
+      const entries = [...url.searchParams];
+      if (new Set(entries.map(([name]) => name)).size !== entries.length) throw new Error();
+      let listing = false; let generation = false;
+      if (kind === 'anthropic') {
+        if (url.origin !== 'https://api.anthropic.com' || headers.get('anthropic-version') !== '2023-06-01') throw new Error();
+        listing = method === 'GET' && url.pathname === '/v1/models' && url.searchParams.get('limit') === '1000'
+          && entries.every(([name, value]) => name === 'limit' || name === 'after_id' && value.length > 0 && value.length <= 4096);
+        generation = method === 'POST' && url.pathname === '/v1/messages' && !url.search;
+      } else {
+        if (url.origin !== 'https://generativelanguage.googleapis.com') throw new Error();
+        listing = method === 'GET' && url.pathname === '/v1beta/models' && url.searchParams.get('pageSize') === '100'
+          && entries.every(([name, value]) => name === 'pageSize' || name === 'pageToken' && value.length > 0 && value.length <= 4096);
+        generation = method === 'POST' && /^\/v1beta\/models\/[a-zA-Z0-9][a-zA-Z0-9._-]*:streamGenerateContent$/u.test(url.pathname)
+          && entries.length === 1 && url.searchParams.get('alt') === 'sse';
+      }
+      if (listing ? init.body !== undefined && init.body !== null : !generation) throw new Error();
+      if (generation && (typeof init.body !== 'string' || !(kind === 'anthropic' ? anthropicBody : geminiBody).safeParse(JSON.parse(init.body)).success)) throw new Error();
+    } catch { throw new ContractError('forbidden'); }
+    guard?.();
+    const response = await transport(input, init);
+    try { guard?.(); }
+    catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
+    return response;
+  };
+}
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {

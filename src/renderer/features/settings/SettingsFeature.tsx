@@ -12,6 +12,7 @@ type TestLevel = z.infer<typeof connectionLevelSchema>;
 type Draft = { name: string; kind: ProviderKind; baseUrl: string; enabled: boolean; isDefault: boolean; defaultModelId: string; customModels: Model[] };
 const emptyDraft = (): Draft => ({ name: '', kind: 'openai-compatible', baseUrl: '', enabled: true, isDefault: false, defaultModelId: '', customModels: [] });
 const toDraft = (value: ProviderConfiguration): Draft => ({ name: value.name, kind: value.kind, baseUrl: value.baseUrl ?? '', enabled: value.enabled, isDefault: value.isDefault, defaultModelId: value.defaultModelId ?? '', customModels: value.customModels });
+const defaultTargets: Partial<Record<ProviderKind, string>> = { openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' };
 const kinds: Record<ProviderKind, string> = { mock: 'Mock（离线演示）', openai: 'OpenAI', 'openai-compatible': 'OpenAI-Compatible', anthropic: 'Anthropic', gemini: 'Gemini' };
 const messages: Record<ErrorCode, string> = {
   invalid_input: '配置无效，请检查名称、模型与请求地址。', invalid_response: '返回结果无效，请重新加载。',
@@ -156,7 +157,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   const endpoint = draft.kind === 'mock' || draft.baseUrl.trim() === '' ? null : providerBaseUrlSchema.safeParse(draft.baseUrl);
   const endpointInvalid = endpoint !== null && !endpoint.success;
   const normalizedEndpoint = endpoint?.success ? endpoint.data : null;
-  const effectiveTarget = normalizedEndpoint ?? (draft.kind === 'openai' ? 'https://api.openai.com/v1' : null);
+  const effectiveTarget = normalizedEndpoint ?? defaultTargets[draft.kind] ?? null;
   const target = draft.kind === 'mock' ? 'Mock 离线演示，不发送网络请求。' : effectiveTarget ?? '请填写并核对实际请求地址；此类型的默认目标尚未配置。';
   const targetChanged = !saved || saved.kind !== draft.kind || saved.baseUrl !== normalizedEndpoint;
   const dirty = saved === null || JSON.stringify(toDraft(saved)) !== JSON.stringify(draft);
@@ -217,7 +218,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   async function confirmSavedTarget(): Promise<boolean> {
     if (!saved || dirty || !targetReady) throw new ContractError('invalid_state');
     if (saved.kind === 'mock') return true;
-    const baseUrl = saved.baseUrl ?? (saved.kind === 'openai' ? 'https://api.openai.com/v1' : null);
+    const baseUrl = saved.baseUrl ?? defaultTargets[saved.kind] ?? null;
     if (!baseUrl) throw new ContractError('invalid_input');
     const response = await api.confirmTarget({ providerId: saved.id, baseUrl, confirmed: true });
     if (!alive.current) return false;

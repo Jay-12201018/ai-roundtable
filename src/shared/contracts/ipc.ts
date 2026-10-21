@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { workflowPreviewInputSchema, workflowPreviewSchema } from '../schemas/workflow';
 import { createDemoInputSchema, createDemoResultSchema, roomMessagesSchema } from '../schemas/app';
 import { idSchema, PROTOCOL_VERSION } from '../schemas/common';
 import { apiErrorSchema } from '../schemas/error';
@@ -18,6 +19,7 @@ export const ipcContracts = {
   'room.getMessages': { input: idSchema, output: roomMessagesSchema },
   'run.getSnapshot': { input: idSchema, output: runSnapshotSchema },
   'run.subscribe': { input: runCursorSchema, output: runSubscriptionSchema },
+  'run.previewWorkflow': { input: workflowPreviewInputSchema, output: workflowPreviewSchema },
   'run.start': { input: startRunInputSchema, output: runSnapshotSchema },
   'run.pause': { input: idSchema, output: z.undefined() },
   'run.stop': { input: idSchema, output: z.undefined() },
@@ -64,6 +66,11 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
   const data = parsed.data;
   let matches = true;
   if (channel === 'run.getSnapshot') matches = (data as IpcOutput<'run.getSnapshot'>).runId === input;
+  if (channel === 'run.previewWorkflow') {
+    const preview = data as IpcOutput<'run.previewWorkflow'>;
+    const request = input as IpcInput<'run.previewWorkflow'>;
+    matches = preview.snapshot.roomId === request.roomId && JSON.stringify(preview.snapshot.config) === JSON.stringify(request.config);
+  }
   if (channel === 'run.start') matches = (data as IpcOutput<'run.start'>).roomId === (input as IpcInput<'run.start'>).roomId;
   if (channel === 'room.getMessages') matches = (data as IpcOutput<'room.getMessages'>).every((message) => message.roomId === input);
   if (channel === 'run.subscribe') {

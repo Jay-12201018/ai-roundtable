@@ -8,6 +8,7 @@ import type {
 export type StartRunInput = import('zod').infer<typeof import('../schemas/run').startRunInputSchema>;
 
 export interface RunApiContract {
+  previewWorkflow(input: import('../schemas/workflow').WorkflowPreviewInput): Promise<import('../schemas/workflow').WorkflowPreview>;
   getSnapshot(runId: string): Promise<RunSnapshot>;
   subscribe(runId: string, cursor: number): Promise<RunSubscription>;
   start(input: StartRunInput): Promise<RunSnapshot>;

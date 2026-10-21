@@ -37,6 +37,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'room.getMessages': (roomId) => service.getMessages(roomId),
     'run.getSnapshot': (runId) => service.getSnapshot(runId),
     'run.subscribe': ({ runId, cursor }) => service.subscribe(runId, cursor),
+    'run.previewWorkflow': (input) => service.previewWorkflow(input),
     'run.start': (input) => service.start(input),
     'run.pause': (runId) => service.pause(runId),
     'run.stop': (runId) => service.stop(runId),

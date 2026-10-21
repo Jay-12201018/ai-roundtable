@@ -59,6 +59,16 @@ function confirmTarget() { fireEvent.click(screen.getByLabelText('我已核对�
 afterEach(cleanup);
 
 describe('R08 standalone settings interactions', () => {
+  it.each([['anthropic', 'https://api.anthropic.com'], ['gemini', 'https://generativelanguage.googleapis.com/v1beta']] as const)('displays and explicitly confirms the fixed %s native target without sending a connection test', async (kind, target) => {
+    const { api } = fixture([{ ...base, kind, baseUrl: null }]); await open(api);
+    expect(screen.getByText(target)).toBeTruthy();
+    expect((screen.getByRole('button', { name: '确认本次会话目标' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(api.confirmTarget).not.toHaveBeenCalled();
+    confirmTarget(); fireEvent.click(screen.getByRole('button', { name: '确认本次会话目标' }));
+    await waitFor(() => expect(api.confirmTarget).toHaveBeenCalledExactlyOnceWith({ providerId: 'one', baseUrl: target, confirmed: true }));
+    expect(api.listModels).not.toHaveBeenCalled(); expect(api.testConnection).not.toHaveBeenCalled();
+  });
+
   it('creates another instance of the same kind and saves custom models, enabled and default fields', async () => {
     const { api } = fixture(); await open(api);
     fireEvent.click(screen.getByRole('button', { name: '新增 Provider' }));

@@ -11,20 +11,31 @@ import { MockProvider } from './mock/MockProvider';
 import { mockModelBudget } from './mock/tokenBudget';
 import { OpenAIProvider } from './openai/OpenAIProvider';
 import { OpenAICompatibleProvider } from './openai-compatible/OpenAICompatibleProvider';
+import { AnthropicProvider, buildAnthropicMessages } from './anthropic/AnthropicProvider';
+import { GeminiProvider, buildGeminiContents } from './gemini/GeminiProvider';
 import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider';
-import { createSafeFetch } from './network';
+import { createNativeSafeFetch, createSafeFetch } from './network';
 import type { DiagnosticObserver } from './diagnostics';
 import { deepSeekFlashCapabilities } from './modelPolicies/deepseekFlash';
 import { assertProxyTarget, type LoopbackProxy } from './loopbackProxy';
 
+export type ApprovedNativeInputCounter = {
+  protocol: 'anthropic-messages-v1'; evidence: string;
+  countNativeWire: (wire: ReturnType<typeof buildAnthropicMessages>) => number | undefined;
+} | {
+  protocol: 'gemini-generate-content-v1'; evidence: string;
+  countNativeWire: (wire: ReturnType<typeof buildGeminiContents>) => number | undefined;
+};
 export interface ApprovedModelPolicy {
   evidence: string;
-  outputTokenParameter: 'max_tokens' | 'max_completion_tokens';
+  outputTokenParameter: 'max_tokens' | 'max_completion_tokens' | 'maxOutputTokens';
   contextWindowTokens: number;
   maxOutputTokens: number;
   maxInputTokens?: number;
   counter: ModelTokenCounter;
-  price: { inputUsdPerMillion: number; outputUsdPerMillion: number; maxRequestUsd: number; evidence: string } | {
+  nativeInputCounter?: ApprovedNativeInputCounter;
+  price: { inputUsdPerMillion: number; outputUsdPerMillion: number; maxRequestUsd: number; evidence: string;
+    reviewedAt?: string; expiresAt?: string } | {
     currency: 'CNY'; inputMicroCnyPerToken: number; outputMicroCnyPerToken: number; maxRequestMicroCny: number;
     reviewedAt: string; expiresAt: string; evidence: string;
   };
@@ -38,6 +49,8 @@ type Options = {
 type Approval = { kind: string; baseUrl: string; revision: string };
 const officialCapabilities: ChatCompletionCapabilities = { outputTokenParameter: 'max_completion_tokens', streamUsage: true, listModels: true, authentication: 'models' };
 const unknownCapabilities: ChatCompletionCapabilities = { outputTokenParameter: null, streamUsage: false, listModels: false, authentication: 'unsupported' };
+type RegistryCapabilities = Omit<ChatCompletionCapabilities, 'outputTokenParameter'> & { outputTokenParameter: ApprovedModelPolicy['outputTokenParameter'] | null };
+const nativeTargets = { anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' } as const;
 
 // Main owns approvals and reviewed model evidence. Renderer/model names cannot supply either.
 export class ProviderRegistry {
@@ -48,15 +61,21 @@ export class ProviderRegistry {
     const configuration = this.database.getProviderConfiguration(id);
     if (!configuration) throw new ContractError('not_found');
     if (!configuration.enabled) throw new ContractError('invalid_state');
-    if (!['mock', 'openai', 'openai-compatible'].includes(configuration.kind)) throw new ContractError('unsupported');
+    if (!['mock', 'openai', 'openai-compatible', 'anthropic', 'gemini'].includes(configuration.kind)) throw new ContractError('unsupported');
     return configuration;
   }
   private target(configuration: ProviderConfiguration): string {
-    const base = configuration.baseUrl ?? (configuration.kind === 'openai' ? 'https://api.openai.com/v1' : '');
+    const official = configuration.kind === 'anthropic' || configuration.kind === 'gemini' ? nativeTargets[configuration.kind]
+      : configuration.kind === 'openai' ? 'https://api.openai.com/v1' : undefined;
+    const base = configuration.baseUrl ?? official ?? '';
     if (!base) throw new ContractError('invalid_input');
     const target = new URL(base).toString().replace(/\/+$/u, '');
-    if (configuration.kind === 'openai' && target !== 'https://api.openai.com/v1') throw new ContractError('invalid_input');
+    if (official && target !== official) throw new ContractError('invalid_input');
     return target;
+  }
+  validateConfiguration(providerId: string): void {
+    const configuration = this.configuration(providerId);
+    if (configuration.kind !== 'mock') this.target(configuration);
   }
   confirmTarget(input: ConfirmProviderTargetInput): { providerId: string } {
     const parsed = confirmProviderTargetInputSchema.safeParse(input);
@@ -79,7 +98,11 @@ export class ProviderRegistry {
     // shortcut: no real-model tokenizer/price profiles are approved yet; add sourced profiles under separate review.
     return this.options.policyResolver?.(configuration, modelId);
   }
-  resolveCapabilities(configuration: ProviderConfiguration): ChatCompletionCapabilities {
+  resolveCapabilities(configuration: ProviderConfiguration): RegistryCapabilities {
+    if (configuration.kind === 'anthropic' || configuration.kind === 'gemini') return {
+      outputTokenParameter: configuration.kind === 'gemini' ? 'maxOutputTokens' : 'max_tokens',
+      streamUsage: true, listModels: true, authentication: 'models',
+    };
     return configuration.kind === 'openai' ? officialCapabilities : this.options.capabilitiesResolver?.(configuration) ?? deepSeekFlashCapabilities(configuration) ?? unknownCapabilities;
   }
   createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch { return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics, this.options.proxy); }
@@ -96,12 +119,23 @@ export class ProviderRegistry {
       || policy.maxOutputTokens > policy.contextWindowTokens
       || policy.maxInputTokens !== undefined && (!Number.isSafeInteger(policy.maxInputTokens) || policy.maxInputTokens <= 0 || policy.maxInputTokens > policy.contextWindowTokens)
       || !validPrice(policy.price)
+      || (configuration.kind === 'anthropic' || configuration.kind === 'gemini') && (!validReviewWindow(policy.price)
+        || !policy.nativeInputCounter?.evidence.trim() || typeof policy.nativeInputCounter.countNativeWire !== 'function'
+        || policy.nativeInputCounter.protocol !== (configuration.kind === 'anthropic' ? 'anthropic-messages-v1' : 'gemini-generate-content-v1'))
       || !policy.outputTokenParameter || this.resolveCapabilities(configuration).outputTokenParameter !== policy.outputTokenParameter) throw new ContractError('unsupported');
   }
   budget(providerId: string, modelId: string) {
     this.assertSelection(providerId, modelId);
     const configuration = this.configuration(providerId);
-    return configuration.kind === 'mock' ? mockModelBudget : this.resolveModelPolicy(configuration, modelId);
+    if (configuration.kind === 'mock') return mockModelBudget;
+    const policy = this.resolveModelPolicy(configuration, modelId)!;
+    return { ...policy, counter: this.inputCounter(configuration, policy) };
+  }
+  private inputCounter(configuration: ProviderConfiguration, policy: ApprovedModelPolicy): ModelTokenCounter {
+    if (configuration.kind !== 'anthropic' && configuration.kind !== 'gemini') return policy.counter;
+    const native = policy.nativeInputCounter!;
+    return { ...policy.counter, countMessages: messages => native.protocol === 'anthropic-messages-v1'
+      ? native.countNativeWire(buildAnthropicMessages(messages)) : native.countNativeWire(buildGeminiContents(messages)) };
   }
   checkGeneration(providerId: string, input: StreamChatInput): void {
     // StreamChatInput includes AbortSignal only inside Main; validate its serializable request separately.
@@ -111,7 +145,7 @@ export class ProviderRegistry {
     const configuration = this.configuration(providerId);
     if (configuration.kind === 'mock') return;
     const policy = this.resolveModelPolicy(configuration, input.modelId)!;
-    const count = countModelTokens(input.messages, input.modelId, policy.counter);
+    const count = countModelTokens(input.messages, input.modelId, this.inputCounter(configuration, policy));
     if (count === undefined || input.outputTokenLimit === undefined || input.outputTokenLimit > policy.maxOutputTokens
       || policy.maxInputTokens !== undefined && count > policy.maxInputTokens
       || count + input.outputTokenLimit > policy.contextWindowTokens) throw new ContractError('invalid_input');
@@ -163,7 +197,9 @@ export class ProviderRegistry {
   private createRealAdapter(configuration: ProviderConfiguration, approval: Approval, guard: () => void, diagnostics?: DiagnosticObserver): ProviderAdapter {
     if (this.options.proxy) assertProxyTarget(new URL(`${approval.baseUrl}/chat/completions`), 'POST');
     const providerId = configuration.id;
-    const transport = this.createTransport(guard, diagnostics);
+    const safeTransport = this.createTransport(guard, diagnostics);
+    const transport = configuration.kind === 'anthropic' || configuration.kind === 'gemini'
+      ? createNativeSafeFetch(configuration.kind, safeTransport, guard) : safeTransport;
     const options = { configuration, confirmedBaseUrl: approval.baseUrl, diagnostics,
       resolveKey: async (id: string) => {
         guard();
@@ -174,7 +210,12 @@ export class ProviderRegistry {
       },
       fetch: (async (url, init) => { guard(); return transport(url, init); }) as typeof fetch,
     };
-    return configuration.kind === 'openai' ? new OpenAIProvider(options) : new OpenAICompatibleProvider({ ...options, capabilities: this.resolveCapabilities(configuration) });
+    if (configuration.kind === 'anthropic') return new AnthropicProvider(options);
+    if (configuration.kind === 'gemini') return new GeminiProvider(options);
+    if (configuration.kind === 'openai') return new OpenAIProvider(options);
+    const capabilities = this.resolveCapabilities(configuration);
+    if (capabilities.outputTokenParameter === 'maxOutputTokens') throw new ContractError('unsupported');
+    return new OpenAICompatibleProvider({ ...options, capabilities: { ...capabilities, outputTokenParameter: capabilities.outputTokenParameter } });
   }
 
   getAdapter(providerId: string, modelId?: string): ProviderAdapter {
@@ -203,9 +244,21 @@ export class ProviderRegistry {
     const list = adapter.listModels.bind(adapter);
     adapter.listModels = async input => { guard(); const models = await list(input); guard(); return models; };
     const test = adapter.testConnection.bind(adapter);
-    adapter.testConnection = async input => { guard(); const result = await test(input); guard(); return result; };
+    adapter.testConnection = async input => {
+      try {
+        guard();
+        if (input.level === 'generation') this.checkGeneration(providerId, { requestId: input.requestId, modelId: input.modelId!,
+          messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8, signal: input.signal });
+        const result = await test(input); guard(); return result;
+      } catch (error) { return { requestId: input.requestId, level: input.level, ok: false, error: toPublicError(error) }; }
+    };
     return adapter;
   }
+}
+
+function validReviewWindow(price: ApprovedModelPolicy['price']): boolean {
+  const reviewed = Date.parse(price.reviewedAt ?? ''); const expires = Date.parse(price.expiresAt ?? ''); const now = Date.now();
+  return Number.isFinite(reviewed) && Number.isFinite(expires) && reviewed <= now && now < expires && expires > reviewed;
 }
 
 function validPrice(price: ApprovedModelPolicy['price']): boolean {

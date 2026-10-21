@@ -4,11 +4,12 @@ import { buildPublicContext,countModelTokens } from './buildPublicContext';
 import type { ModelTokenCounter } from './types';
 import type { MemberSnapshot } from '../../shared/schemas/persistence';
 import type { RunMessagesBuilder } from '../services/RunService';
+import { workflowStageInstruction } from '../workflow';
 import { mockModelBudget } from '../providers/mock/tokenBudget';
 
 type ModelBudget={contextWindowTokens:number;counter:ModelTokenCounter};
 export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:MemberSnapshot)=>ModelBudget|undefined=id=>id==='mock'?mockModelBudget:undefined):RunMessagesBuilder{
-  return (run,member,turnIndex,{snapshot,current,repeat})=>{
+  return (run,member,turnIndex,{snapshot,current,repeat,workflowStep})=>{
     const budget=resolve(member.modelId,member);
     if(!budget||!Number.isSafeInteger(budget.contextWindowTokens)||budget.contextWindowTokens<=0)throw new ContractError('unsupported');
     if(snapshot.run.id!==run.id||snapshot.run.roomId!==run.roomId||current.agentId!==member.agentId||current.turnIndex!==turnIndex
@@ -33,7 +34,7 @@ export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:
       run:{id:run.id,roomId:run.roomId,task:run.task,membersSnapshot:run.membersSnapshot,nextTurnIndex:run.nextTurnIndex,elapsedExecutionMs:run.elapsedExecutionMs,maxTurns:run.maxTurns,maxDurationMs:run.maxDurationMs,outputTokenLimit:run.outputTokenLimit},
       current:{agentId:current.agentId,turnId:current.turnId,requestId:current.requestId,turnIndex},
       snapshot:{messages:snapshot.messages,turns:snapshot.turns.map(t=>({id:t.id,runId:t.runId,agentId:t.agentId,status:t.status,requestId:t.requestId,turnIndex:t.turnIndex})),attempts:snapshot.attempts.map(a=>({requestId:a.requestId,runId:a.runId,turnId:a.turnId,messageId:a.messageId,attemptIndex:a.attemptIndex,status:a.status}))},
-      visibleMessageIds:snapshot.messages.map(m=>m.id),applicationInstructions:[],hostInstructions:[],contextWindowTokens:budget.contextWindowTokens,
+      visibleMessageIds:snapshot.messages.map(m=>m.id),applicationInstructions:workflowStep?[{id:`workflow-${workflowStep.stageId}`,content:workflowStageInstruction(workflowStep.kind)}]:[],hostInstructions:[],contextWindowTokens:budget.contextWindowTokens,
     },budget.counter);
     if(!result.ok)throw new ContractError(result.reason==='token_count_unavailable'?'unsupported':'invalid_input');
     return result.messages;

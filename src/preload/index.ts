@@ -68,6 +68,7 @@ const api: RoundtableApiContract = {
     testConnection: (input) => invoke('settings.testConnection', input),
   },
   run: {
+    previewWorkflow: (input) => invoke('run.previewWorkflow', input),
     getSnapshot: (runId) => invoke('run.getSnapshot', runId),
     subscribe: (runId, cursor) => invoke('run.subscribe', { runId, cursor }),
     start: (input) => invoke('run.start', input),

@@ -6,7 +6,7 @@ import { providerBaseUrlSchema, providerConfigurationSchema } from '../../../sha
 import { connectionLevelSchema, listModelsInputSchema, providerModelSchema, streamChatInputSchema, testConnectionInputSchema } from '../../../shared/schemas/provider';
 import { idSchema } from '../../../shared/schemas/common';
 import type { ErrorCode } from '../../../shared/schemas/error';
-import type { ConnectionTestResult, ListModelsInput, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../types';
+import type { ConnectionTestResult, ListModelsInput, NormalizedChunk, ProviderAdapter, ProviderMessage, StreamChatInput, TestConnectionInput } from '../types';
 import { createSafeFetch } from '../network';
 import { readSse } from '../openai/sse';
 import { RequestScope } from './requestScope';
@@ -84,21 +84,8 @@ export class GeminiProvider implements ProviderAdapter {
       const parsed = parse(streamChatInputSchema, withoutSignal(input)); scope.check();
       const model = modelId(parsed.modelId);
       if (parsed.outputTokenLimit === undefined) throw new ContractError('invalid_input');
-      const contents: Content[] = []; const system: Part[] = [];
-      for (const message of parsed.messages) {
-        if (message.role === 'system') {
-          if (contents.length) throw new ContractError('invalid_input');
-          system.push({ text: message.content });
-        } else {
-          const role = message.role === 'assistant' ? 'model' : 'user';
-          const previous = contents.at(-1);
-          if (previous?.role === role) previous.parts!.push({ text: message.content });
-          else contents.push({ role, parts: [{ text: message.content }] });
-        }
-      }
-      if (!contents.length) throw new ContractError('invalid_input');
       const generationConfig = { candidateCount: 1, maxOutputTokens: parsed.outputTokenLimit } satisfies GenerateContentConfig;
-      const body = { contents, ...(system.length ? { systemInstruction: { parts: system } } : {}), generationConfig };
+      const body = { ...buildGeminiContents(parsed.messages), generationConfig };
       const key = await this.key(scope);
       const response = await this.request(scope, `/models/${model}:streamGenerateContent?alt=sse`, key, JSON.stringify(body));
       let finish: 'stop' | 'length' | 'content_filter' | undefined;
@@ -192,6 +179,24 @@ export class GeminiProvider implements ProviderAdapter {
     }
     throw new ContractError('invalid_response');
   }
+}
+
+/** One native transformation shared by generation and Main's reviewed wire counter. */
+export function buildGeminiContents(messages: readonly Readonly<ProviderMessage>[]) {
+  const contents: Content[] = []; const system: Part[] = [];
+  for (const message of messages) {
+    if (message.role === 'system') {
+      if (contents.length) throw new ContractError('invalid_input');
+      system.push({ text: message.content });
+    } else {
+      const role = message.role === 'assistant' ? 'model' : 'user';
+      const previous = contents.at(-1);
+      if (previous?.role === role) previous.parts!.push({ text: message.content });
+      else contents.push({ role, parts: [{ text: message.content }] });
+    }
+  }
+  if (!contents.length) throw new ContractError('invalid_input');
+  return { contents, ...(system.length ? { systemInstruction: { parts: system } } : {}) };
 }
 
 function modelId(value: string): string {

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
-import type { ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
+import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
 import { RoomsFeature } from './features/rooms/RoomsFeature';
+import { WorkflowFeature, type WorkflowDraft, type WorkflowPreviewResult } from './features/workflows';
+import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressForFeature, workflowTemplateLabels } from './features/workflows/productionAdapter';
+import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
 import { SettingsFeature } from './features/settings/SettingsFeature';
 import { statusLabels } from './locales/zhCN';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
@@ -12,7 +15,7 @@ type Theme = 'system' | 'light' | 'dark';
 export function App() {
   const [api] = useState(() => window.roundtable);
   const [session] = useState(() => createRendererSession(api, localStorage, { requireRoom: true }));
-  const [page, setPage] = useState<'discussion' | 'rooms' | 'settings'>('discussion');
+  const [page, setPage] = useState<'discussion' | 'rooms' | 'settings' | 'workflow'>('discussion');
   const [bootReady, setBootReady] = useState(false);
   const [roomsReady, setRoomsReady] = useState(false);
   const [showControls, setShowControls] = useState(false);
@@ -25,6 +28,12 @@ export function App() {
   });
   const snapshot = useStore(session.store, state => state.snapshot);
   const roomId = useStore(session.store, state => state.roomId);
+  const generation = useStore(session.store, state => state.generation);
+  const [workflowMembers, setWorkflowMembers] = useState<{ roomId: string; members: AgentConfiguration[] }>();
+  const [workflowMembersError, setWorkflowMembersError] = useState(false);
+  const [appliedWorkflow, setAppliedWorkflow] = useState<{ roomId: string; scope: string; config: WorkflowConfig; previewId: string }>();
+  const [workflowInvalidated, setWorkflowInvalidated] = useState(false);
+  const workflowPreview = useRef<{ scope: string; config: WorkflowConfig; previewId: string; snapshot: WorkflowSnapshot } | undefined>(undefined);
   const draft = useStore(session.store, state => state.draft);
   const title = useStore(session.store, selectTaskTitle);
   const error = useStore(session.store, state => state.error);
@@ -83,6 +92,46 @@ export function App() {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem('roundtable.theme', theme); } catch { /* Appearance still applies for this window. */ }
   }, [theme]);
+  useEffect(() => {
+    setAppliedWorkflow(undefined); setWorkflowInvalidated(false); workflowPreview.current = undefined;
+  }, [generation]);
+  useEffect(() => {
+    if (!roomId) { setWorkflowMembers(undefined); return; }
+    if (page !== 'workflow' && !(page === 'discussion' && appliedWorkflow)) return;
+    let cancelled = false; setWorkflowMembersError(false);
+    void api.rooms.listAgentConfigurations({ roomId }).then(members => {
+      if (!cancelled) setWorkflowMembers({ roomId, members });
+    }).catch(() => { if (!cancelled) { setWorkflowMembers(undefined); setWorkflowMembersError(true); } });
+    return () => { cancelled = true; };
+  }, [api, roomId, page, generation, appliedWorkflow]);
+  const workflowScope = `${generation}:${roomId ?? ''}:${workflowMembers && workflowMembers.roomId === roomId ? JSON.stringify(workflowMembers.members) : 'loading'}`;
+  const currentWorkflowScope = useRef(workflowScope); currentWorkflowScope.current = workflowScope;
+  useEffect(() => {
+    if (appliedWorkflow && appliedWorkflow.scope !== workflowScope) {
+      setAppliedWorkflow(undefined);
+      if (appliedWorkflow.scope.startsWith(`${generation}:`)) setWorkflowInvalidated(true);
+    }
+    workflowPreview.current = undefined;
+  }, [workflowScope]);
+  const previewWorkflow = useCallback(async (draft: WorkflowDraft): Promise<WorkflowPreviewResult> => {
+    if (!roomId || workflowMembers?.roomId !== roomId) return { ok: false, errors: ['请先加载当前房间成员。'] };
+    const config = workflowConfigFromDraft(draft);
+    const result = await api.run.previewWorkflow({ roomId, config });
+    if (currentWorkflowScope.current !== workflowScope || result.snapshot.roomId !== roomId) return { ok: false, errors: ['房间或成员已变化，请重新验证。'] };
+    workflowPreview.current = { scope: workflowScope, config, ...result };
+    return { ok: true, preview: workflowPreviewForFeature(result.previewId, result.snapshot) };
+  }, [api, roomId, workflowScope]);
+  const applyWorkflow = useCallback(async ({ previewId, draft }: { previewId: string; draft: WorkflowDraft }) => {
+    const preview = workflowPreview.current;
+    const config = workflowConfigFromDraft(draft);
+    if (!roomId || !preview || preview.previewId !== previewId || preview.scope !== workflowScope || currentWorkflowScope.current !== workflowScope || JSON.stringify(preview.config) !== JSON.stringify(config)) throw new Error('Workflow preview expired');
+    setAppliedWorkflow({ roomId, scope: workflowScope, config, previewId }); setWorkflowInvalidated(false);
+    workflowPreview.current = undefined;
+  }, [roomId, workflowScope]);
+  const startRun = () => {
+    if (workflowInvalidated || appliedWorkflow && (appliedWorkflow.roomId !== roomId || appliedWorkflow.scope !== workflowScope)) return;
+    void session.startRun(appliedWorkflow ? { workflowConfig: appliedWorkflow.config, workflowPreviewId: appliedWorkflow.previewId } : undefined);
+  };
   const selectRoom = useCallback((id: string) => session.selectRoom(id), [session]);
   const clearRoom = useCallback(() => session.selectRoom(undefined), [session]);
   const selectRun = useCallback((id: string) => { setPage('discussion'); void session.selectRun(id); }, [session]);
@@ -96,6 +145,7 @@ export function App() {
       <div className="brand">AI 圆桌 <span>本地协作 · 用户自备 Key</span></div>
       <button type="button" aria-current={page === 'discussion' ? 'page' : undefined} onClick={() => setPage('discussion')}>讨论</button>
       <button type="button" aria-current={page === 'rooms' ? 'page' : undefined} disabled={!bootReady} onClick={() => { setRoomsReady(true); setPage('rooms'); }}>房间与成员</button>
+      <button type="button" aria-current={page === 'workflow' ? 'page' : undefined} disabled={!roomId} onClick={() => setPage('workflow')}>工作流</button>
       {page !== 'rooms' && <button type="button" aria-current={page === 'settings' ? 'page' : undefined} onClick={openSettings}>模型设置</button>}
       <label className="theme-control">外观<select value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
     </nav>
@@ -115,7 +165,9 @@ export function App() {
             return <article className="message" key={message.id}><strong>{member?.displayName ?? message.senderName}</strong><div className="message-identity">{member?.roleTemplateId ?? '角色未记录'} · Provider：{member?.providerId ?? '未记录'} · Model：{member?.modelId ?? '未记录'}</div><p>{message.content}</p><small>{statusLabels[message.status] ?? '未知状态'}</small></article>;
           })}
         </div>
-        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={() => void session.startRun()} disabled={!startEnabled}>开始协作</button></div>
+        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={startRun} disabled={!startEnabled || workflowInvalidated}>开始协作</button></div>
+        {appliedWorkflow && <p role="status">下次开始将使用「{workflowTemplateLabels[appliedWorkflow.config.templateId]}」，此配置尚未启动。</p>}
+        {workflowInvalidated && <p role="alert">房间成员已变化，请重新验证并应用工作流后再开始。</p>}
         {syncStatus === 'syncing' && <div role="status" className="sync-feedback">正在同步运行状态</div>}
         {pending && <div role="status" className="sync-feedback">操作已发送，等待确认</div>}
         {snapshot?.status === 'interrupted' && <div className="sync-feedback">执行已中断，部分输出已保留。请先检查历史记录。</div>}
@@ -141,6 +193,14 @@ export function App() {
       </aside>
     </div>
     {roomsReady && <div hidden={page !== 'rooms'}><RoomsFeature api={api.rooms} initialRoomId={roomId} providers={providers} providerLoadState={providerLoadState} onReloadProviders={reloadProviders} onSelectRoom={selectRoom} onClearRoom={clearRoom} onSelectRun={selectRun} onOpenSettings={openSettings} /></div>}
+    {page === 'workflow' && <main>
+      {appliedWorkflow && <p role="status">下次开始将使用「{workflowTemplateLabels[appliedWorkflow.config.templateId]}」，此配置尚未启动。</p>}
+      {workflowMembersError && <p role="alert">无法加载工作流成员，请返回讨论后重试。</p>}
+      {roomId && workflowMembers?.roomId === roomId ? <WorkflowFeature scopeKey={workflowScope}
+        members={workflowMembers.members.map(member => ({ id: member.id, name: member.displayName, enabled: member.enabled && !member.archivedAt }))}
+        theme={theme} onPreview={previewWorkflow} onApply={applyWorkflow} progress={workflowProgressForFeature(snapshot)} />
+        : <p role="status">正在加载工作流成员…</p>}
+    </main>}
     {page === 'settings' && <SettingsFeature api={settingsApi} onClose={closeSettings} />}
   </div>;
 }

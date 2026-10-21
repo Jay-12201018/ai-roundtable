@@ -7,6 +7,9 @@ import type { InterruptedRunDecision } from '../../shared/types/run';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
 import { publicError } from '../../shared/schemas/error';
 import { interruptedRunDecisionSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
+import { compileWorkflow, nextWorkflowStep, readWorkflowSnapshot } from '../workflow';
+import type { WorkflowConfig, WorkflowSnapshot, WorkflowStep } from '../workflow';
+import { workflowPreviewInputSchema } from '../../shared/schemas/workflow';
 import { roomMessagesSchema } from '../../shared/schemas/app';
 import { PROTOCOL_VERSION } from '../../shared/schemas/common';
 import { normalizedChunkSchema, streamChatInputSchema } from '../../shared/schemas/provider';
@@ -37,10 +40,17 @@ type RunContext = {
 export type RequestPreparation = {
   snapshot: ReturnType<Database['readRunSnapshot']>;
   current: { turnId: string; requestId: string; messageId: string; agentId: string; turnIndex: number };
+  workflowStep?: WorkflowStep;
   repeat?: { messages: StreamChatInput['messages']; sourceRequestId: string; kind: 'retry' | 'continue' };
 };
 export type RunMessagesBuilder = (run: RunRecord, member: MemberSnapshot, turnIndex: number, preparation: RequestPreparation) => StreamChatInput['messages'];
 type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string; sourceRequestId: string; kind: 'retry' | 'continue' };
+
+// Compare persisted DTO identity by fields; JSON property insertion order is not identity.
+const memberIdentity = (member: MemberSnapshot) => JSON.stringify([member.agentId, member.displayName, member.roleTemplateId,
+  member.systemPrompt, member.providerId, member.modelId, member.displayOrder]);
+const sameMembers = (left: readonly MemberSnapshot[] | null, right: readonly MemberSnapshot[]) =>
+  left !== null && left.length === right.length && left.every((member, index) => memberIdentity(member) === memberIdentity(right[index]));
 
 type EventListener = (event: RunEvent) => void;
 
@@ -56,6 +66,7 @@ export class RunService {
   private readonly activeRooms = new Set<string>();
   private shutdownPromise?: Promise<void>;
   private shuttingDown = false;
+  private readonly workflowPreviews = new Map<string, WorkflowSnapshot>();
 
   constructor(private readonly database: Database, private readonly provider: ProviderAdapter,
     private readonly buildMessages: RunMessagesBuilder = (run,_member,_index,preparation) => preparation.repeat?.messages ?? [{ role: 'user', content: run.task! }],
@@ -71,24 +82,60 @@ export class RunService {
     return roomId;
   }
 
+  /** A bounded configuration preview; this neither acquires a Key nor authorizes generation. */
+  previewWorkflow(input: { roomId: string; config: WorkflowConfig }): { previewId: string; snapshot: WorkflowSnapshot } {
+    const parsed = workflowPreviewInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    input = parsed.data;
+    const snapshot = this.compileCurrentWorkflow(input.roomId, input.config);
+    for (const [id, old] of this.workflowPreviews) if (old.roomId === input.roomId) this.workflowPreviews.delete(id);
+    while (this.workflowPreviews.size >= 32) this.workflowPreviews.delete(this.workflowPreviews.keys().next().value!);
+    const previewId = randomUUID();
+    this.workflowPreviews.set(previewId, snapshot);
+    return { previewId, snapshot };
+  }
+
+  private compileCurrentWorkflow(roomId: string, config: unknown): WorkflowSnapshot {
+    if (!this.database.getRoom(roomId)) throw new ContractError('not_found');
+    // listAgents enforces archived/configuration/provider rules, including the narrow legacy Demo exception.
+    const executable = this.database.listAgents(roomId, this.registry ? (providerId, modelId) => this.registry!.assertSelection(providerId, modelId) : undefined);
+    const current = this.database.listAgentConfigurations(roomId).map(member => {
+      const verified = executable.find(agent => agent.id === member.id);
+      return verified ? { ...member, modelId: verified.modelId ?? 'mock' } : member;
+    });
+    return compileWorkflow(config, roomId, current);
+  }
+
   async start(input: StartRunInput): Promise<RunSnapshot> {
     const parsed = startRunInputSchema.safeParse(input);
     if (!parsed.success) throw new ContractError('invalid_input');
     input = parsed.data;
     this.assertAvailable();
     if (!this.database.getRoom(input.roomId)) throw new ContractError('not_found');
-    const members = this.database.listAgents(input.roomId, this.registry ? (providerId, modelId) => this.registry!.assertSelection(providerId, modelId) : undefined).map(({ id, roomId: _roomId, ...member }) => ({ ...member, agentId: id, modelId: member.modelId ?? 'mock' }));
+    let workflow: WorkflowSnapshot | undefined;
+    if (input.workflowConfig) {
+      workflow = this.compileCurrentWorkflow(input.roomId, input.workflowConfig);
+      const preview = input.workflowPreviewId ? this.workflowPreviews.get(input.workflowPreviewId) : undefined;
+      if (!preview || JSON.stringify(preview) !== JSON.stringify(workflow)) throw new ContractError('invalid_state');
+    } else if (input.workflowPreviewId || this.hasWorkflowPlan(input.workflowSnapshot ?? {})) {
+      // Caller-supplied frozen rosters/steps cannot bypass Main compilation or preview freshness.
+      throw new ContractError('invalid_input');
+    }
+    const members = workflow?.members ?? this.database.listAgents(input.roomId, this.registry ? (providerId, modelId) => this.registry!.assertSelection(providerId, modelId) : undefined)
+      .map(({ id, roomId: _roomId, ...member }) => ({ ...member, agentId: id, modelId: member.modelId ?? 'mock' }));
     if (!members.length) throw new ContractError('invalid_state');
     const runId = randomUUID();
     const context: RunContext = { runId, roomId: input.roomId, members,
-      mode: input.mode ?? 'automatic', maxTurns: input.maxTurns ?? 3, maxDurationMs: input.maxDurationMs ?? 300000,
-      outputTokenLimit: input.outputTokenLimit ?? 1024, abortController: new AbortController(),
-      stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
+      mode: input.mode ?? 'automatic', maxTurns: Math.min(input.maxTurns ?? workflow?.config.limits.maxTurns ?? 3, workflow?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
+      maxDurationMs: Math.min(input.maxDurationMs ?? workflow?.config.limits.maxDurationMs ?? 300000, workflow?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
+      outputTokenLimit: Math.min(input.outputTokenLimit ?? workflow?.config.limits.outputTokenLimit ?? 1024, workflow?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
+      abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
     this.schedule(context, () => {
-      this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: input.workflowSnapshot, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
+      this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: workflow ?? input.workflowSnapshot ?? {}, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
         task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 });
       this.setRunState(runId, { status: 'running', startedAt: new Date().toISOString() }, { status: 'running' });
     });
+    if (input.workflowPreviewId) this.workflowPreviews.delete(input.workflowPreviewId);
     return this.getSnapshot(runId);
   }
 
@@ -110,18 +157,48 @@ export class RunService {
         status: run.status,
         sequence,
         workflowSnapshot: run.workflowSnapshot,
+        workflow: this.workflowProgress(data),
         currentTurnId: turns.find((turn) => turn.status === 'running')?.id,
         activeAgentId: turns.find((turn) => turn.status === 'running')?.agentId,
         turns: turns.map((turn) => {
           const attempt = attempts.filter(a=>a.turnId===turn.id).at(-1);
           const legacyMessages = messages.filter(m=>m.turnId===turn.id);
           const message = attempt ? messages.find(m=>m.id===attempt.messageId) : legacyMessages.length===1?legacyMessages[0]:undefined;
-          return {turnId:turn.id,runId:turn.runId,agentId:turn.agentId,status:turn.status,requestId:attempt?.requestId??turn.requestId,messageId:message?.id,outputText:message?.content??turn.partialContent};
+          return {turnId:turn.id,runId:turn.runId,agentId:turn.agentId,turnIndex:turn.turnIndex,status:turn.status,requestId:attempt?.requestId??turn.requestId,messageId:message?.id,outputText:message?.content??turn.partialContent};
         }),
         messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed' })),
         updatedAt: run.updatedAt,startedAt:run.startedAt??undefined,execution,
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
       });
+  }
+
+  private workflowProgress(data: ReturnType<Database['readRunSnapshot']>): RunSnapshot['workflow'] {
+    const { run, turns, attempts } = data;
+    let plan: WorkflowSnapshot | undefined;
+    try { plan = this.workflowPlan(run); } catch { return; }
+    if (!plan) return;
+    const ordered = [...turns].sort((a, b) => a.turnIndex - b.turnIndex);
+    if (run.nextTurnIndex !== ordered.length || ordered.some((turn, index) => turn.turnIndex !== index || turn.agentId !== plan!.steps[index]?.agentId)) return;
+    let completedTurns = 0;
+    for (const turn of ordered) {
+      if (turn.status !== 'completed' || attempts.filter(attempt => attempt.turnId === turn.id).at(-1)?.status !== 'completed') break;
+      completedTurns++;
+    }
+    const context = this.contexts.get(run.id);
+    const elapsedMs = context?.executing ? this.elapsed(context) : run.elapsedExecutionMs ?? 0;
+    const limitReason = completedTurns < plan.steps.length ? (elapsedMs >= Math.min(run.maxDurationMs, plan.config.limits.maxDurationMs) ? 'max_duration'
+      : (run.nextTurnIndex ?? 0) >= Math.min(run.maxTurns, plan.config.limits.maxTurns) ? 'max_turns' : undefined) : undefined;
+    const nextStep = !limitReason && completedTurns === run.nextTurnIndex ? plan.steps[completedTurns] : undefined;
+    const currentStage = (ordered.length > completedTurns ? plan.steps[ordered.at(-1)!.turnIndex] : nextStep ?? plan.steps.at(-1))?.stageId;
+    return { templateId: plan.config.templateId, completedTurns, totalTurns: plan.steps.length, elapsedMs, currentStage, nextStep, limitReason,
+      stages: plan.config.stages.filter(stage => plan!.steps.some(step => step.stageId === stage.id)).map(stage => {
+        const steps = plan!.steps.filter(step => step.stageId === stage.id);
+        const completed = steps.filter(step => step.index < completedTurns).length;
+        const started = steps.some(step => step.index < ordered.length);
+        const status = completed === steps.length ? 'completed' as const : started || stage.id === currentStage && (run.status === 'running' || run.status === 'pausing') ? 'running' as const : 'pending' as const;
+        return { id: stage.id, kind: stage.kind, status, completedTurns: completed, totalTurns: steps.length };
+      }),
+    };
   }
 
   getMessages(roomId: string) {
@@ -201,6 +278,7 @@ export class RunService {
   private async resumePaused(runId: string, mode: RunContext['mode']): Promise<void> {
     const run = this.requireRun(runId);
     assertRunCommand(mode === 'step' ? 'step' : 'resumeRun', run.status);
+    this.workflowPlan(run);
     const context = this.contexts.get(runId) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
     this.assertSettled(runId);
@@ -275,9 +353,56 @@ export class RunService {
 
   private contextFrom(run: RunRecord): RunContext {
     if (run.task === null || run.membersSnapshot === null || !run.membersSnapshot.length || run.nextTurnIndex === null || run.elapsedExecutionMs === null) throw new ContractError('unsupported');
+    const plan = this.workflowPlan(run);
     return { runId: run.id, roomId: run.roomId, members: run.membersSnapshot,
-      mode: run.mode, maxTurns: run.maxTurns, maxDurationMs: run.maxDurationMs, outputTokenLimit: run.outputTokenLimit,
+      mode: run.mode, maxTurns: Math.min(run.maxTurns, plan?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
+      maxDurationMs: Math.min(run.maxDurationMs, plan?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
+      outputTokenLimit: Math.min(run.outputTokenLimit, plan?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: run.elapsedExecutionMs, executing: false };
+  }
+
+  private hasWorkflowPlan(value: RunRecord['workflowSnapshot']): boolean {
+    return 'config' in value || 'steps' in value;
+  }
+
+  private workflowPlan(run: RunRecord): WorkflowSnapshot | undefined {
+    if (!this.hasWorkflowPlan(run.workflowSnapshot)) return;
+    let plan: WorkflowSnapshot;
+    try { plan = readWorkflowSnapshot(run.workflowSnapshot); } catch { throw new ContractError('invalid_state'); }
+    if (plan.roomId !== run.roomId || !sameMembers(run.membersSnapshot, plan.members)) throw new ContractError('invalid_state');
+    return plan;
+  }
+
+  private assertRequestEvidence(context: RunContext, snapshot: ReturnType<Database['readRunSnapshot']>, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt): WorkflowStep | undefined {
+    const { run, turns, attempts, messages } = snapshot;
+    if (this.contexts.get(context.runId) !== context || !context.executing || !this.activeRooms.has(context.roomId)
+      || run.id !== context.runId || run.roomId !== context.roomId || run.status !== 'running'
+      || !sameMembers(run.membersSnapshot, context.members)
+      || !run.membersSnapshot?.some(frozen => memberIdentity(frozen) === memberIdentity(member))) throw new ContractError('invalid_state');
+    const plan = this.workflowPlan(run);
+    const ordered = [...turns].sort((a, b) => a.turnIndex - b.turnIndex);
+    if (run.nextTurnIndex !== ordered.length || ordered.some((turn, index) => {
+      const latest = attempts.filter(attempt => attempt.turnId === turn.id).at(-1);
+      const message = latest ? messages.find(item => item.id === latest.messageId) : undefined;
+      return turn.runId !== run.id || turn.turnIndex !== index || plan && turn.agentId !== plan.steps[index]?.agentId
+        || !latest || latest.runId !== run.id || !message || message.runId !== run.id || message.roomId !== run.roomId || message.turnId !== turn.id
+        || (repeat && index === ordered.length - 1 ? latest.requestId !== repeat.sourceRequestId || turn.id !== repeat.turn.id
+          || !canRetryTurn(turn.status as TurnStatus) || !canRetryTurn(latest.status) : turn.status !== 'completed' || latest.status !== 'completed' || (message.status ?? 'completed') !== 'completed');
+    })) throw new ContractError('invalid_state');
+    if (repeat) {
+      if (!ordered.length || repeat.turn.turnIndex !== turnIndex || repeat.turn.agentId !== member.agentId
+        || turnIndex !== ordered.length - 1 || repeat.modelId !== member.modelId) throw new ContractError('invalid_state');
+      return plan?.steps[turnIndex];
+    }
+    if (turnIndex !== run.nextTurnIndex) throw new ContractError('invalid_state');
+    if (!plan) return;
+    // The loop checked the deadline before this transaction; if it expired since, end as a timeout
+    // rather than letting the plan's own `limit` decision surface as invalid_state.
+    const elapsed = this.elapsed(context);
+    if (elapsed >= context.maxDurationMs && this.deadlineReached(context)) throw new ContractError('timeout');
+    const decision = nextWorkflowStep(plan, { ...run, elapsedExecutionMs: elapsed }, turns);
+    if (decision.kind !== 'next' || decision.step.index !== turnIndex || decision.step.agentId !== member.agentId) throw new ContractError('invalid_state');
+    return decision.step;
   }
 
   private assertSettled(runId: string): void {
@@ -361,17 +486,19 @@ export class RunService {
         if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
         if (this.deadlineReached(context)) throw new ContractError('timeout');
         const run = this.requireRun(context.runId);
-        if (!repeat && run.nextTurnIndex! >= context.maxTurns) { this.finishRun(context, 'completed'); return; }
+        const plan = this.workflowPlan(run);
+        if (!repeat && run.nextTurnIndex! >= Math.min(context.maxTurns, plan?.steps.length ?? Number.MAX_SAFE_INTEGER)) { this.finishRun(context, 'completed'); return; }
         if (run.status === 'pausing') { this.finishRun(context, 'paused'); return; }
         const turnIndex = repeat?.turn.turnIndex ?? run.nextTurnIndex!;
         const repeatedAgentId = repeat?.turn.agentId;
-        const member = repeat ? context.members.find(a => a.agentId === repeatedAgentId) : context.members[turnIndex % context.members.length];
+        const plannedAgentId = plan?.steps[turnIndex]?.agentId;
+        const member = repeat ? context.members.find(a => a.agentId === repeatedAgentId) : plan ? context.members.find(a => a.agentId === plannedAgentId) : context.members[turnIndex % context.members.length];
         if (!member) throw new ContractError('invalid_state');
         await this.executeTurn(context, member, turnIndex, repeat);
         repeat = undefined;
         if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
         if (this.deadlineReached(context)) throw new ContractError('timeout');
-        if (this.requireRun(context.runId).nextTurnIndex! >= context.maxTurns) { this.finishRun(context, 'completed'); return; }
+        if (this.requireRun(context.runId).nextTurnIndex! >= Math.min(context.maxTurns, plan?.steps.length ?? Number.MAX_SAFE_INTEGER)) { this.finishRun(context, 'completed'); return; }
         if (context.mode === 'step' || this.requireRun(context.runId).status === 'pausing') { this.finishRun(context, 'paused'); return; }
       }
     } catch (error) {
@@ -408,7 +535,8 @@ export class RunService {
     const requestId = randomUUID();
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
-      const preparation:RequestPreparation={snapshot,current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
+      const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat);
+      const preparation:RequestPreparation={snapshot,workflowStep,current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
         repeat:repeat?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}:undefined};
       const inputSnapshot=streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
         outputTokenLimit:context.outputTokenLimit,agentRole:member.roleTemplateId,turnIndex,
@@ -433,6 +561,14 @@ export class RunService {
       let started = false;
       let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
       if (this.deadlineReached(context) || signal?.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
+      const dispatch = this.database.readRunSnapshot(context.runId);
+      const attempt = dispatch.attempts.filter(value => value.turnId === turnId).at(-1);
+      const turn = dispatch.turns.find(value => value.id === turnId);
+      this.workflowPlan(dispatch.run);
+      if (this.contexts.get(context.runId) !== context || !context.executing || !this.activeRooms.has(context.roomId)
+        || dispatch.run.roomId !== context.roomId || !sameMembers(dispatch.run.membersSnapshot, context.members) || !['running', 'pausing'].includes(dispatch.run.status)
+        || !turn || turn.agentId !== member.agentId || turn.turnIndex !== turnIndex || turn.status !== 'running'
+        || attempt?.requestId !== requestId || attempt.messageId !== messageId || !['pending', 'running'].includes(attempt.status)) throw new ContractError('invalid_state');
       const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId) : this.provider;
       iterator = provider.streamChat(input)[Symbol.asyncIterator]();
       await this.withAbort(context, async () => {
