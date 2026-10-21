@@ -1,5 +1,14 @@
 # R00–R18 状态与授权看板
 
+## 当前状态（2026-10-21，Claude Code 接手后）
+
+- **R10A Anthropic / R10B Gemini / R11 声明式工作流：review，待用户批准合 main。** 分支 `codex/integrate-r10a-r10b-r11`，生产接线提交 `8a7f293`。验证：Electron ABI139 下 109 文件 / 1732 测试、typecheck、build、隔离生产探针（首次 53 断言 / 26 次 fixture 请求，重启 17 断言 / 0 请求，liveApi=false）。真实 Claude/Gemini API、价格策略、桌面 E2E 未验证。
+- **环境根治**（`bf3a6d9`）：测试在 Electron 自带 Node 中运行，better-sqlite3 只保留 Electron ABI；`ensure-native` 按需重建。已查明 Codex 时期 Team ID 报错的根因是 `/opt/homebrew/bin/node` 指向 ChatGPT.app 内置的带签名 Node。
+- **缺陷修复**（`3378436`）：数据库父目录含符号链接时，迁移备份必定失败（Codex 时期靠改 TMPDIR 绕过），已修复并补回归测试。
+- 已知后续：开启回环代理时，原生 Claude/Gemini 会被拒绝（代理目标检查写死了 `/chat/completions`）；每次运行工作流后都需要重新预览和应用。
+
+以下为 Codex 时期的历史记录，保留作证据。
+
 
 ## 多服务商目录需求登记（2026-10-20）
 
@@ -51,9 +60,9 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 | R07 | 房间、成员、历史 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d991178；引入f718f829；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
 | R08 | Key 与 Provider 设置 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d2aed6c；引入5f01e978；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
 | R09 | OpenAI 与兼容端点 | R07/R08已合main verified；Mock联合验收 | 原模块交付；总控独占联合接线 | verified（fixture） | 用户批准最终合main及主线独立验收；真实付费测试未授权 | 已合main；codex/integrate-r09与原分支/WT保留 | 原2d97af571debf106aadad708a2c0418f299c6eef；唯一引入f5baaf07e1603a7c356fb0c9cedeb131977307ba；接线da512e7a64a6ec4a596b0f7fda820b3d62b04e42；ff入站f3a8fee38f5b7d75b5144c2997d72373fda6ddd6 | [本轮main报告](verification/2026-10-17-r09-main.md)/[台账](verification/2026-10-17-r09-main-commands.md)：Node/Electron各1073、R09专项227、strict/build、双ABI/SQLite、真实生产fixture12请求/重启HTTP0及退出审计；旧探针白名单一行修复，原失败保留 |
-| R10A | Anthropic | R09 fixture已合main verified | 未分派 | ready | 未授权实施/创建Worktree或真实调用 | 未创建 | 无 | 前置链路满足；公共factory/Shared接线由总控负责，模块未运行 |
-| R10B | Gemini | R09 fixture已合main verified | 未分派 | ready | 未授权实施/创建Worktree或真实调用 | 未创建 | 无 | 前置链路满足；公共factory/Shared接线由总控负责，模块未运行 |
-| R11 | 声明式工作流 | R07/R04–R06具备；生产接线仍需总控冻结计划/进度契约；真实验收另需获审模型规则 | 未分派 | ready（仅独立计划/Mock范围） | 未授权实施/创建Worktree；真实调用未授权 | 未创建 | 无 | 不把generic workflowSnapshot当完整协议；模块未运行 |
+| R10A | Anthropic | R09 fixture已合main verified | 总控（Claude Code） | review | 用户授权继续；合main待批准；真实调用未授权 | codex/r10a-anthropic-provider → codex/integrate-r10a-r10b-r11 | 原7d14b11；接线8a7f293 | 见顶部“当前状态”：1732测试、build、生产探针fixture通过 |
+| R10B | Gemini | R09 fixture已合main verified | 总控（Claude Code） | review | 用户授权继续；合main待批准；真实调用未授权 | codex/r10b-gemini-provider → codex/integrate-r10a-r10b-r11 | 原17b7b62；接线8a7f293 | 见顶部“当前状态”：1732测试、build、生产探针fixture通过 |
+| R11 | 声明式工作流 | R07/R04–R06 | 总控（Claude Code） | review | 用户授权继续；合main待批准；真实调用未授权 | codex/r11-declarative-workflows → codex/integrate-r10a-r10b-r11 | 原9341a33；接线8a7f293 | 四种模板经生产入口fixture完整运行与重启验证 |
 | R12 | 主持人与消息版本 | R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R13 | 摘要、usage、费用预算 | R05/R09/R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R14 | 结构化产物 | R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |

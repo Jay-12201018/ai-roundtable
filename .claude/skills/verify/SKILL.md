@@ -17,25 +17,19 @@ description: AI Roundtable 的标准本地检查（typecheck、Vitest 单元/集
 
 ## 步骤
 
-在目标目录内依次执行：
+在目标目录内依次执行（`package.json` 已经内置 Electron 运行方式）：
 
-```bash
-E=./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
-```
-
-1. SQLite 能否被 Electron 加载（不能加载就先修复，见下文）：
-   ```bash
-   ELECTRON_RUN_AS_NODE=1 $E -e 'const D=require("./node_modules/better-sqlite3");const d=new D(":memory:");d.exec("create table t(v)");d.close();console.log("SQLite OK ABI "+process.versions.modules)'
-   ```
-2. 类型检查：`./node_modules/.bin/tsc --noEmit --pretty false 2>&1 | tail -n 20`
-3. 测试：`ELECTRON_RUN_AS_NODE=1 $E node_modules/vitest/vitest.mjs run [过滤] --reporter=dot 2>&1 | tail -n 25`
+1. 类型检查：`pnpm run typecheck 2>&1 | tail -n 20`
+2. 测试：`pnpm test [过滤] --reporter=dot 2>&1 | tail -n 25`
+   - `pretest` 会运行 `scripts/ensure-native.cjs`：better-sqlite3 在 Electron 里加载不了时，才会重建 Electron ABI 版本。重建失败时如实报告错误原文，不要改用宿主 Node 跑测试来绕过。
    - 结果为 0 个测试文件，就算失败。
-   - 如果是 `listen EPERM`，说明测试根本没执行，不算通过；需要换到允许本地监听的环境重跑。
-4. 构建：`./node_modules/.bin/electron-vite build 2>&1 | tail -n 15`
+   - 出现 `listen EPERM`，说明测试根本没执行，不算通过。
+3. 构建：`pnpm run build 2>&1 | tail -n 15`
+4. 涉及 Main/Preload/Renderer 接线或 Provider 时，再跑隔离生产探针：先 `./node_modules/.bin/electron tests/probes/r10-r11-electron.cjs`，再用输出里的 manifest 执行 `--restart <manifest>`。结束后删掉它自己创建的 `roundtable-r10r11-production-*` 临时目录。
 
-## 第 1 步失败时（ABI 不匹配）
+## 构建报 Team ID / code signature 错误
 
-报错如果是 `NODE_MODULE_VERSION` 不匹配，执行 `./node_modules/.bin/electron-rebuild --force --which-module better-sqlite3`，然后重跑第 1 步。重建可能因 `~/.electron-gyp` 不可写或网络问题失败，这时如实报告错误原文，不要换用宿主 Node 去跑测试来绕过。
+这说明宿主 `node` 是带签名的应用内置 Node（交接时 `/opt/homebrew/bin/node` 指向 ChatGPT.app）。解决办法是改用正常的 Node：`PATH=/opt/homebrew/opt/node@24/bin:$PATH pnpm run build`；或者经用户同意后修正那个符号链接。不要再复制 Node 重新签名来绕过。
 
 ## 报告格式
 
