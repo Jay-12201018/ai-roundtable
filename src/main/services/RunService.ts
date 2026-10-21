@@ -14,7 +14,9 @@ import { roomMessagesSchema } from '../../shared/schemas/app';
 import { PROTOCOL_VERSION } from '../../shared/schemas/common';
 import { normalizedChunkSchema, streamChatInputSchema } from '../../shared/schemas/provider';
 import type { MemberSnapshot } from '../../shared/schemas/persistence';
-import type { Database, RunEventRecord, RunRecord, TurnRecord } from '../database/Database';
+import type { Database, RunEventRecord, RunRecord, TurnRecord, VersionInput } from '../database/Database';
+import { affectedVersions, basisBefore, effectiveInstructions } from '../host/versions';
+import type { HostCommandKind, HostState, MessageVersion } from '../../shared/schemas/host';
 import type { ProviderRegistry } from '../providers/ProviderRegistry';
 import type { ProviderAdapter, StreamChatInput } from '../providers/types';
 
@@ -35,6 +37,8 @@ type RunContext = {
   deadline?: ReturnType<typeof setTimeout>;
   executing: boolean;
   failureReason?: string;
+  // R12: a version regeneration runs outside the schedule and leaves the Run status unchanged.
+  job?: { requestId?: string };
 };
 
 export type RequestPreparation = {
@@ -42,9 +46,29 @@ export type RequestPreparation = {
   current: { turnId: string; requestId: string; messageId: string; agentId: string; turnIndex: number };
   workflowStep?: WorkflowStep;
   repeat?: { messages: StreamChatInput['messages']; sourceRequestId: string; kind: 'retry' | 'continue' };
+  /** R12: rebuild the existing Turn's input from current effective history before it and current host instructions. */
+  regenerate?: { sourceMessageId: string };
 };
 export type RunMessagesBuilder = (run: RunRecord, member: MemberSnapshot, turnIndex: number, preparation: RequestPreparation) => StreamChatInput['messages'];
-type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string; sourceRequestId: string; kind: 'retry' | 'continue' };
+type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string; sourceRequestId: string; kind: 'retry' | 'continue' }
+  | { turn: TurnRecord; modelId: string; sourceRequestId: string; kind: 'regenerate'; sourceMessageId: string; actionId: string; job: boolean };
+type Snapshot = ReturnType<Database['readRunSnapshot']>;
+const continuePrompt = 'Continue the previous response from where it stopped.';
+
+/** The message that currently represents a Turn: its slot's active version, else (legacy) its latest Attempt. */
+export function activeMessageOf(snapshot: Pick<Snapshot, 'versions' | 'attempts' | 'messages'>, turnId: string) {
+  const active = snapshot.versions.find(version => version.slotId === turnId && version.active);
+  const id = active?.messageId ?? snapshot.attempts.filter(attempt => attempt.turnId === turnId).at(-1)?.messageId;
+  return id === undefined ? undefined : snapshot.messages.find(message => message.id === id);
+}
+/** A Turn is settled when it completed and its effective version is complete (an edit, or a completed Attempt). */
+export function turnSettled(snapshot: Snapshot, turn: TurnRecord): boolean {
+  const message = activeMessageOf(snapshot, turn.id);
+  if (turn.status !== 'completed' || !message || (message.status ?? 'completed') !== 'completed') return false;
+  const attempt = snapshot.attempts.find(item => item.messageId === message.id);
+  return attempt ? attempt.status === 'completed' : snapshot.versions.find(version => version.messageId === message.id)?.origin === 'edit';
+}
+const planTurnsOf = (turns: readonly TurnRecord[]) => [...turns].sort((a, b) => a.turnIndex - b.turnIndex).filter(turn => turn.overrideActionId === undefined);
 
 // Compare persisted DTO identity by fields; JSON property insertion order is not identity.
 const memberIdentity = (member: MemberSnapshot) => JSON.stringify([member.agentId, member.displayName, member.roleTemplateId,
@@ -151,6 +175,7 @@ export class RunService {
   private snapshotFrom(data: ReturnType<Database['readRunSnapshot']>): RunSnapshot {
       const {run,turns,messages,attempts,sequence} = data;
       const {id,roomId,status,workflowSnapshot,lastError,...execution} = run;
+      const versions = this.versionView(data);
       return runSnapshotSchema.parse({
         runId: run.id,
         roomId: run.roomId,
@@ -161,15 +186,48 @@ export class RunService {
         currentTurnId: turns.find((turn) => turn.status === 'running')?.id,
         activeAgentId: turns.find((turn) => turn.status === 'running')?.agentId,
         turns: turns.map((turn) => {
-          const attempt = attempts.filter(a=>a.turnId===turn.id).at(-1);
+          const latest = attempts.filter(a=>a.turnId===turn.id).at(-1);
           const legacyMessages = messages.filter(m=>m.turnId===turn.id);
-          const message = attempt ? messages.find(m=>m.id===attempt.messageId) : legacyMessages.length===1?legacyMessages[0]:undefined;
-          return {turnId:turn.id,runId:turn.runId,agentId:turn.agentId,turnIndex:turn.turnIndex,status:turn.status,requestId:attempt?.requestId??turn.requestId,messageId:message?.id,outputText:message?.content??turn.partialContent};
+          const message = activeMessageOf(data, turn.id) ?? (legacyMessages.length===1?legacyMessages[0]:undefined);
+          const attempt = attempts.find(a=>a.messageId===message?.id) ?? latest;
+          return {turnId:turn.id,runId:turn.runId,agentId:turn.agentId,turnIndex:turn.turnIndex,status:turn.status,requestId:attempt?.requestId??turn.requestId,messageId:message?.id,outputText:message?.content??turn.partialContent,
+            ...(turn.overrideActionId?{overrideActionId:turn.overrideActionId}:{})};
         }),
         messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed' })),
         updatedAt: run.updatedAt,startedAt:run.startedAt??undefined,execution,
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
+        versions, host: this.hostView(data),
       });
+  }
+
+  private versionView(data: Snapshot): MessageVersion[] {
+    const affected = affectedVersions(data.messages, data.versions);
+    return data.versions.map(version => {
+      const message = data.messages.find(item => item.id === version.messageId)!;
+      const attempt = data.attempts.find(item => item.messageId === version.messageId);
+      return { messageId: version.messageId, slotId: version.slotId, author: message.senderType === 'agent' ? 'agent' as const : 'host' as const,
+        versionNumber: version.versionNumber, origin: version.origin, active: version.active, affectedBy: affected.get(version.messageId) ?? [],
+        ...(version.turnId ? { turnId: version.turnId } : {}), ...(version.parentMessageId ? { parentMessageId: version.parentMessageId } : {}),
+        ...(attempt ? { requestId: attempt.requestId } : {}), ...(version.actionId ? { actionId: version.actionId } : {}) };
+    });
+  }
+
+  private hostView(data: Snapshot): HostState {
+    const pending = data.hostActions.find(action => action.kind === 'setOverride' && action.status === 'pending');
+    const latest = new Map<string, Snapshot['instructions'][number]>();
+    for (const revision of data.instructions) latest.set(revision.instructionId, revision);
+    const job = this.contexts.get(data.run.id)?.job?.requestId;
+    const generation = job ? data.attempts.find(attempt => attempt.requestId === job) : undefined;
+    return {
+      ...(pending ? { override: { actionId: pending.id, agentId: pending.agentId!, status: 'pending' as const, createdAt: pending.createdAt } } : {}),
+      instructions: [...latest.values()].slice(-64).map(revision => ({ instructionId: revision.instructionId, revisionId: revision.id, revision: revision.revision,
+        content: revision.content ?? '', status: revision.content === null ? 'cleared' as const : 'active' as const, updatedAt: revision.createdAt })),
+      actions: data.hostActions.slice(-200).map(action => ({ actionId: action.id, kind: action.kind as HostCommandKind, status: action.status as HostState['actions'][number]['status'], createdAt: action.createdAt,
+        ...(action.agentId ? { agentId: action.agentId } : {}), ...(action.messageId ? { messageId: action.messageId } : {}),
+        ...(action.resultMessageId ? { resultMessageId: action.resultMessageId } : {}), ...(action.instructionId ? { instructionId: action.instructionId } : {}),
+        ...(action.turnId ? { turnId: action.turnId } : {}) })),
+      ...(generation ? { generation: { requestId: generation.requestId, messageId: generation.messageId, turnId: generation.turnId } } : {}),
+    };
   }
 
   private workflowProgress(data: ReturnType<Database['readRunSnapshot']>): RunSnapshot['workflow'] {
@@ -177,24 +235,29 @@ export class RunService {
     let plan: WorkflowSnapshot | undefined;
     try { plan = this.workflowPlan(run); } catch { return; }
     if (!plan) return;
+    void attempts;
     const ordered = [...turns].sort((a, b) => a.turnIndex - b.turnIndex);
-    if (run.nextTurnIndex !== ordered.length || ordered.some((turn, index) => turn.turnIndex !== index || turn.agentId !== plan!.steps[index]?.agentId)) return;
+    const planTurns = planTurnsOf(ordered);
+    if (run.nextTurnIndex !== ordered.length || ordered.some((turn, index) => turn.turnIndex !== index)
+      || planTurns.some((turn, index) => turn.agentId !== plan!.steps[index]?.agentId)) return;
+    // Host-directed Turns are inserted between steps: they never count as plan progress.
     let completedTurns = 0;
+    let settled = true;
     for (const turn of ordered) {
-      if (turn.status !== 'completed' || attempts.filter(attempt => attempt.turnId === turn.id).at(-1)?.status !== 'completed') break;
-      completedTurns++;
+      if (!turnSettled(data, turn)) { settled = false; break; }
+      if (turn.overrideActionId === undefined) completedTurns++;
     }
     const context = this.contexts.get(run.id);
     const elapsedMs = context?.executing ? this.elapsed(context) : run.elapsedExecutionMs ?? 0;
     const limitReason = completedTurns < plan.steps.length ? (elapsedMs >= Math.min(run.maxDurationMs, plan.config.limits.maxDurationMs) ? 'max_duration'
       : (run.nextTurnIndex ?? 0) >= Math.min(run.maxTurns, plan.config.limits.maxTurns) ? 'max_turns' : undefined) : undefined;
-    const nextStep = !limitReason && completedTurns === run.nextTurnIndex ? plan.steps[completedTurns] : undefined;
-    const currentStage = (ordered.length > completedTurns ? plan.steps[ordered.at(-1)!.turnIndex] : nextStep ?? plan.steps.at(-1))?.stageId;
+    const nextStep = !limitReason && settled && completedTurns === planTurns.length ? plan.steps[completedTurns] : undefined;
+    const currentStage = (planTurns.length > completedTurns ? plan.steps[planTurns.length - 1] : nextStep ?? plan.steps.at(-1))?.stageId;
     return { templateId: plan.config.templateId, completedTurns, totalTurns: plan.steps.length, elapsedMs, currentStage, nextStep, limitReason,
       stages: plan.config.stages.filter(stage => plan!.steps.some(step => step.stageId === stage.id)).map(stage => {
         const steps = plan!.steps.filter(step => step.stageId === stage.id);
         const completed = steps.filter(step => step.index < completedTurns).length;
-        const started = steps.some(step => step.index < ordered.length);
+        const started = steps.some(step => step.index < planTurns.length);
         const status = completed === steps.length ? 'completed' as const : started || stage.id === currentStage && (run.status === 'running' || run.status === 'pausing') ? 'running' as const : 'pending' as const;
         return { id: stage.id, kind: stage.kind, status, completedTurns: completed, totalTurns: steps.length };
       }),
@@ -231,7 +294,11 @@ export class RunService {
     this.shuttingDown = true;
     // Drain already queued output once; never wait for a Provider's pending I/O.
     const drained = [...this.contexts.values()].some(context => context.executing) ? drainReadyCallbacks() : Promise.resolve();
-    this.shutdownPromise = drained.then(() => Promise.all([...this.contexts.keys()].map(id => this.stop(id)))).then(() => {}).finally(() => {
+    this.shutdownPromise = drained.then(() => Promise.all([...this.contexts.values()].map(async context => {
+      if (context.job) await this.abortJob(context);
+      // A version job in a terminal Run leaves nothing to stop once aborted.
+      if (this.contexts.has(context.runId)) await this.stop(context.runId);
+    }))).then(() => {}).finally(() => {
       this.shuttingDown = false;
       this.shutdownPromise = undefined;
     });
@@ -250,6 +317,12 @@ export class RunService {
     const run = this.requireRun(runId);
     assertRunCommand('stop', run.status);
     if (run.status === 'cancelled') return;
+    const jobContext = this.contexts.get(runId);
+    if (jobContext?.job) {
+      // Stop first ends an in-flight version regeneration, then the paused Run itself.
+      await this.abortJob(jobContext);
+      return this.stop(runId);
+    }
     const context = this.contexts.get(runId);
     if (run.status === 'cancelling' && context?.executing) { await context.promise; return; }
     if (!context) {
@@ -304,7 +377,8 @@ export class RunService {
 
   private async repeatAttempt(runId: string, turnId: string, suffixOf?: string): Promise<void> {
     const run = this.requireRun(runId);
-    const context = this.contextFrom(run);
+    const context = this.contexts.get(runId) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
     assertRunCommand(suffixOf === undefined ? 'retryTurn' : 'continueMessage', run.status);
     const turn = this.database.listTurns(runId).at(-1);
     const requestId = this.database.getLatestAttemptRequestId(turnId);
@@ -315,11 +389,112 @@ export class RunService {
     const messages = suffixOf === undefined ? attempt.inputSnapshot.messages : [
       ...attempt.inputSnapshot.messages,
       { role: 'assistant' as const, content: suffixOf },
-      { role: 'user' as const, content: 'Continue the previous response from where it stopped.' },
+      { role: 'user' as const, content: continuePrompt },
     ];
     this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }),
       { turn, messages, modelId: attempt.inputSnapshot.modelId,sourceRequestId:attempt.requestId,kind:suffixOf===undefined?'retry':'continue' });
     await context.promise;
+  }
+
+  /** R12: validates a trusted host @Override target against the frozen roster, current config, limits and plan stage. */
+  assertOverrideAllowed(runId: string, agentId: string): void {
+    const run = this.requireRun(runId);
+    if (!['running', 'pausing', 'paused', 'error', 'cancelled', 'interrupted'].includes(run.status)) throw new ContractError('invalid_state');
+    if (!run.membersSnapshot?.some(member => member.agentId === agentId)) throw new ContractError('not_found');
+    const agent = this.database.getAgentConfiguration(agentId);
+    if (!agent || agent.roomId !== run.roomId || !agent.enabled || agent.archivedAt !== null) throw new ContractError('invalid_state');
+    const limits = this.contexts.get(runId) ?? this.contextFrom(run);
+    if (run.nextTurnIndex! >= limits.maxTurns || run.elapsedExecutionMs! >= limits.maxDurationMs) throw new ContractError('invalid_state');
+    const plan = this.workflowPlan(run);
+    if (!plan) return;
+    const stage = plan.steps[planTurnsOf(this.database.listTurns(runId)).length] ?? plan.steps.at(-1)!;
+    if (!plan.config.stages.find(item => item.id === stage.stageId)?.memberIds.includes(agentId)) throw new ContractError('invalid_state');
+  }
+
+  /** R12: a trusted host change and its run-level notification commit atomically. */
+  applyHostChange<T extends { actionId: string; kind: HostCommandKind }>(runId: string, work: () => T): T {
+    this.requireRun(runId);
+    return this.database.transaction(() => {
+      const result = work();
+      this.appendEvent(runId, 'host_updated', { actionId: result.actionId, kind: result.kind });
+      return result;
+    });
+  }
+
+  isRegenerating(runId: string): boolean {
+    return this.contexts.get(runId)?.job !== undefined;
+  }
+
+  /** True while a request of this Run (a Turn or a version regeneration) is in flight. */
+  isExecuting(runId: string): boolean {
+    return this.contexts.get(runId)?.executing ?? false;
+  }
+
+  /**
+   * R12: regenerate a message as a new version with a new requestId. A failed/aborted/interrupted last Turn
+   * reopens like a retry but with a freshly built input; a settled earlier Turn runs a version job that
+   * leaves the Run status unchanged and activates the new version only if it completes. Does not wait.
+   */
+  regenerateMessage(runId: string, messageId: string, actionId: string): void {
+    const run = this.requireRun(runId);
+    const snapshot = this.database.readRunSnapshot(runId);
+    const version = snapshot.versions.find(item => item.messageId === messageId);
+    const turn = snapshot.turns.find(item => item.id === version?.turnId);
+    const member = run.membersSnapshot?.find(item => item.agentId === turn?.agentId);
+    if (!version || !turn || !member || snapshot.messages.some(message => message.status === 'streaming')) throw new ContractError('invalid_state');
+    const context = this.contexts.get(runId) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
+    this.assertBudget(run);
+    const latest = snapshot.attempts.filter(attempt => attempt.turnId === turn.id).at(-1);
+    const base = { turn, modelId: member.modelId ?? 'mock', sourceRequestId: latest?.requestId ?? turn.requestId, kind: 'regenerate' as const, sourceMessageId: messageId, actionId };
+    if (turn.id === snapshot.turns.at(-1)!.id && canRetryTurn(turn.status as TurnStatus)) {
+      assertRunCommand('retryTurn', run.status);
+      if (!latest || !canRetryTurn(latest.status)) throw new ContractError('invalid_state');
+      this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }), { ...base, job: false });
+      return;
+    }
+    if (!turnSettled(snapshot, turn) || !['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(run.status)) throw new ContractError('invalid_state');
+    context.job = {};
+    const job = { ...base, job: true };
+    try {
+      this.schedule(context, () => {}, job, async () => {
+        try { await this.executeTurn(context, member, turn.turnIndex, job); }
+        catch { /* The failed or aborted version and its Attempt are already persisted as evidence. */ }
+        finally { this.endJob(context, actionId); }
+      });
+    } catch (error) { context.job = undefined; throw error; }
+  }
+
+  /** R12: abort an in-flight version regeneration; the Run status stays as it was. */
+  async abortGeneration(runId: string): Promise<void> {
+    const context = this.contexts.get(runId);
+    if (!context?.job) throw new ContractError('invalid_state');
+    await this.abortJob(context);
+  }
+
+  private async abortJob(context: RunContext): Promise<void> {
+    context.stopRequested = true;
+    context.abortController.abort(new ContractError('cancelled'));
+    await context.promise.catch(() => {});
+  }
+
+  private endJob(context: RunContext, actionId: string): void {
+    clearTimeout(context.deadline);
+    const elapsed = this.elapsed(context);
+    this.database.transaction(() => {
+      this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
+      const paused = this.requireRun(context.runId).status === 'paused';
+      this.database.afterCommit(() => {
+        context.elapsedBefore = elapsed;
+        context.segmentStartedAt = undefined;
+        context.executing = false;
+        context.job = undefined;
+        context.stopRequested = false;
+        if (!paused) { this.contexts.delete(context.runId); this.activeRooms.delete(context.roomId); }
+      });
+      // Clearing the in-flight marker is itself a visible host-state change.
+      this.appendEvent(context.runId, 'host_updated', { actionId, kind: 'regenerateMessage' });
+    });
   }
 
   async recoverInterruptedRun(runId: string, decision: InterruptedRunDecision): Promise<void> {
@@ -332,7 +507,8 @@ export class RunService {
       this.setRunState(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentTurnId: null, currentAgentId: null }, { status: 'cancelled', reason: 'discarded after interruption' });
       return;
     }
-    const context = this.contextFrom(run);
+    const context = this.contexts.get(runId) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
     if (decision === 'retry') {
       const turn = this.database.listTurns(runId).at(-1);
       if (!turn) throw new ContractError('invalid_state');
@@ -373,7 +549,8 @@ export class RunService {
     return plan;
   }
 
-  private assertRequestEvidence(context: RunContext, snapshot: ReturnType<Database['readRunSnapshot']>, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt): WorkflowStep | undefined {
+  private assertRequestEvidence(context: RunContext, snapshot: ReturnType<Database['readRunSnapshot']>, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, overrideId?: string): WorkflowStep | undefined {
+    if (repeat?.kind === 'regenerate' && repeat.job) return this.assertJobEvidence(context, snapshot, member, repeat);
     const { run, turns, attempts, messages } = snapshot;
     if (this.contexts.get(context.runId) !== context || !context.executing || !this.activeRooms.has(context.roomId)
       || run.id !== context.runId || run.roomId !== context.roomId || run.status !== 'running'
@@ -381,35 +558,61 @@ export class RunService {
       || !run.membersSnapshot?.some(frozen => memberIdentity(frozen) === memberIdentity(member))) throw new ContractError('invalid_state');
     const plan = this.workflowPlan(run);
     const ordered = [...turns].sort((a, b) => a.turnIndex - b.turnIndex);
-    if (run.nextTurnIndex !== ordered.length || ordered.some((turn, index) => {
+    const planTurns = planTurnsOf(ordered);
+    if (run.nextTurnIndex !== ordered.length || plan && planTurns.some((turn, index) => turn.agentId !== plan.steps[index]?.agentId) || ordered.some((turn, index) => {
       const latest = attempts.filter(attempt => attempt.turnId === turn.id).at(-1);
-      const message = latest ? messages.find(item => item.id === latest.messageId) : undefined;
-      return turn.runId !== run.id || turn.turnIndex !== index || plan && turn.agentId !== plan.steps[index]?.agentId
+      const message = repeat && index === ordered.length - 1 ? latest && messages.find(item => item.id === latest.messageId) : activeMessageOf(snapshot, turn.id);
+      return turn.runId !== run.id || turn.turnIndex !== index
         || !latest || latest.runId !== run.id || !message || message.runId !== run.id || message.roomId !== run.roomId || message.turnId !== turn.id
         || (repeat && index === ordered.length - 1 ? latest.requestId !== repeat.sourceRequestId || turn.id !== repeat.turn.id
-          || !canRetryTurn(turn.status as TurnStatus) || !canRetryTurn(latest.status) : turn.status !== 'completed' || latest.status !== 'completed' || (message.status ?? 'completed') !== 'completed');
+          || !canRetryTurn(turn.status as TurnStatus) || !canRetryTurn(latest.status) : !turnSettled(snapshot, turn));
     })) throw new ContractError('invalid_state');
+    const stageStep = (step: WorkflowStep | undefined) => step ?? plan?.steps.at(-1);
     if (repeat) {
       if (!ordered.length || repeat.turn.turnIndex !== turnIndex || repeat.turn.agentId !== member.agentId
         || turnIndex !== ordered.length - 1 || repeat.modelId !== member.modelId) throw new ContractError('invalid_state');
-      return plan?.steps[turnIndex];
+      return plan ? stageStep(plan.steps[planTurns.filter(turn => turn.turnIndex < turnIndex).length]) : undefined;
     }
     if (turnIndex !== run.nextTurnIndex) throw new ContractError('invalid_state');
+    if (overrideId !== undefined) {
+      // The pending Override is consumed in this transaction; its Turn takes no plan step.
+      const action = snapshot.hostActions.find(item => item.id === overrideId);
+      if (!action || action.kind !== 'setOverride' || action.status !== 'pending' || action.agentId !== member.agentId
+        || turnIndex >= context.maxTurns) throw new ContractError('invalid_state');
+      if (!plan) return;
+      const stage = stageStep(plan.steps[planTurns.length]);
+      if (!plan.config.stages.find(item => item.id === stage?.stageId)?.memberIds.includes(member.agentId)) throw new ContractError('invalid_state');
+      if (this.elapsed(context) >= context.maxDurationMs && this.deadlineReached(context)) throw new ContractError('timeout');
+      return stage;
+    }
     if (!plan) return;
     // The loop checked the deadline before this transaction; if it expired since, end as a timeout
     // rather than letting the plan's own `limit` decision surface as invalid_state.
     const elapsed = this.elapsed(context);
     if (elapsed >= context.maxDurationMs && this.deadlineReached(context)) throw new ContractError('timeout');
-    const decision = nextWorkflowStep(plan, { ...run, elapsedExecutionMs: elapsed }, turns);
-    if (decision.kind !== 'next' || decision.step.index !== turnIndex || decision.step.agentId !== member.agentId) throw new ContractError('invalid_state');
+    const decision = nextWorkflowStep(plan, { ...run, nextTurnIndex: planTurns.length, elapsedExecutionMs: elapsed },
+      planTurns.map((turn, index) => ({ ...turn, turnIndex: index })));
+    if (decision.kind !== 'next' || decision.step.index !== planTurns.length || decision.step.agentId !== member.agentId) throw new ContractError('invalid_state');
     return decision.step;
   }
 
+  /** A version regeneration targets an earlier settled Turn while no Turn of the Run is in flight. */
+  private assertJobEvidence(context: RunContext, snapshot: Snapshot, member: MemberSnapshot, job: Extract<RepeatAttempt, { kind: 'regenerate' }>): WorkflowStep | undefined {
+    const { run, turns } = snapshot;
+    if (this.contexts.get(context.runId) !== context || !context.executing || !context.job || !this.activeRooms.has(context.roomId)
+      || run.id !== context.runId || !['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(run.status)
+      || !sameMembers(run.membersSnapshot, context.members) || job.modelId !== member.modelId
+      || turns.some(turn => turn.status === 'running') || snapshot.messages.some(message => message.status === 'streaming')) throw new ContractError('invalid_state');
+    const turn = turns.find(item => item.id === job.turn.id);
+    if (!turn || !turnSettled(snapshot, turn) || turn.agentId !== member.agentId || turn.turnIndex !== job.turn.turnIndex
+      || snapshot.versions.find(version => version.messageId === job.sourceMessageId)?.slotId !== turn.id) throw new ContractError('invalid_state');
+    const plan = this.workflowPlan(run);
+    return plan ? plan.steps[planTurnsOf(turns).filter(item => item.turnIndex < turn.turnIndex).length] ?? plan.steps.at(-1) : undefined;
+  }
+
   private assertSettled(runId: string): void {
-    if (this.database.listTurns(runId).some(turn => {
-      const requestId = this.database.getLatestAttemptRequestId(turn.id);
-      return turn.status !== 'completed' || !requestId || this.database.getAttempt(requestId)?.status !== 'completed';
-    })) throw new ContractError('invalid_state');
+    const snapshot = this.database.readRunSnapshot(runId);
+    if (snapshot.turns.some(turn => !turnSettled(snapshot, turn))) throw new ContractError('invalid_state');
   }
 
   private assertBudget(run: RunRecord): void {
@@ -422,7 +625,7 @@ export class RunService {
     if (this.activeRooms.size && (!context || this.contexts.get(context.runId) !== context)) throw new Error('Another room already has an active run');
   }
 
-  private schedule(context: RunContext, change: () => void, repeat?: RepeatAttempt): void {
+  private schedule(context: RunContext, change: () => void, repeat?: RepeatAttempt, runner: () => Promise<void> = () => this.runLoop(context, repeat)): void {
     this.assertAvailable(context);
     // Revalidate frozen references before retries/recovery, without replacing historical members.
     for (const member of context.members) {
@@ -455,7 +658,7 @@ export class RunService {
       throw error;
     }
     this.armDeadline(context);
-    void this.runLoop(context, repeat).then(resolve, error => {
+    void runner().then(resolve, error => {
       clearTimeout(context.deadline);
       context.elapsedBefore = this.elapsed(context);
       context.segmentStartedAt = undefined;
@@ -486,19 +689,18 @@ export class RunService {
         if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
         if (this.deadlineReached(context)) throw new ContractError('timeout');
         const run = this.requireRun(context.runId);
-        const plan = this.workflowPlan(run);
-        if (!repeat && run.nextTurnIndex! >= Math.min(context.maxTurns, plan?.steps.length ?? Number.MAX_SAFE_INTEGER)) { this.finishRun(context, 'completed'); return; }
+        const next = repeat ? undefined : this.nextSpeaker(context, run);
+        if (next === 'complete') { this.finishRun(context, 'completed'); return; }
         if (run.status === 'pausing') { this.finishRun(context, 'paused'); return; }
         const turnIndex = repeat?.turn.turnIndex ?? run.nextTurnIndex!;
         const repeatedAgentId = repeat?.turn.agentId;
-        const plannedAgentId = plan?.steps[turnIndex]?.agentId;
-        const member = repeat ? context.members.find(a => a.agentId === repeatedAgentId) : plan ? context.members.find(a => a.agentId === plannedAgentId) : context.members[turnIndex % context.members.length];
+        const member = repeat ? context.members.find(a => a.agentId === repeatedAgentId) : next?.member;
         if (!member) throw new ContractError('invalid_state');
-        await this.executeTurn(context, member, turnIndex, repeat);
+        await this.executeTurn(context, member, turnIndex, repeat, next?.overrideId);
         repeat = undefined;
         if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
         if (this.deadlineReached(context)) throw new ContractError('timeout');
-        if (this.requireRun(context.runId).nextTurnIndex! >= Math.min(context.maxTurns, plan?.steps.length ?? Number.MAX_SAFE_INTEGER)) { this.finishRun(context, 'completed'); return; }
+        if (this.nextSpeaker(context, this.requireRun(context.runId)) === 'complete') { this.finishRun(context, 'completed'); return; }
         if (context.mode === 'step' || this.requireRun(context.runId).status === 'pausing') { this.finishRun(context, 'paused'); return; }
       }
     } catch (error) {
@@ -507,6 +709,21 @@ export class RunService {
         context.timedOut || code === 'timeout' ? 'Maximum run duration reached' : undefined,
         context.failureReason ?? toPublicError(error).message);
     }
+  }
+
+  /**
+   * The next speaker: a pending host Override first (an inserted Turn that takes no plan step), then the
+   * frozen workflow step or round-robin position counted over plan Turns only. maxTurns bounds all Turns.
+   */
+  private nextSpeaker(context: RunContext, run: RunRecord): 'complete' | { member: MemberSnapshot | undefined; overrideId?: string } {
+    if (run.nextTurnIndex! >= context.maxTurns) return 'complete';
+    const override = this.database.getPendingOverride(run.id);
+    if (override) return { member: context.members.find(member => member.agentId === override.agentId), overrideId: override.id };
+    const plan = this.workflowPlan(run);
+    const planIndex = planTurnsOf(this.database.listTurns(run.id)).length;
+    if (plan && planIndex >= plan.steps.length) return 'complete';
+    const agentId = plan?.steps[planIndex].agentId;
+    return { member: plan ? context.members.find(member => member.agentId === agentId) : context.members[planIndex % context.members.length] };
   }
 
   private elapsed(context: RunContext): number {
@@ -529,27 +746,36 @@ export class RunService {
     });
   }
 
-  private async executeTurn(context: RunContext, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt): Promise<void> {
+  private async executeTurn(context: RunContext, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, overrideId?: string): Promise<void> {
     const turnId = repeat?.turn.id ?? randomUUID();
     const messageId = randomUUID();
     const requestId = randomUUID();
+    const job = repeat?.kind === 'regenerate' && repeat.job;
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
-      const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat);
+      const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, overrideId);
       const preparation:RequestPreparation={snapshot,workflowStep,current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
-        repeat:repeat?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}:undefined};
+        repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}:undefined,
+        regenerate:repeat?.kind==='regenerate'?{sourceMessageId:repeat.sourceMessageId}:undefined};
+      // Retry/continue replay the frozen input, so they keep its basis; new and regenerated requests use current history.
+      const source = repeat && repeat.kind !== 'regenerate' ? snapshot.versions.find(v => v.messageId === snapshot.attempts.find(a => a.requestId === repeat.sourceRequestId)?.messageId) : undefined;
+      const version: VersionInput = !repeat ? { origin: 'original', basis: basisBefore(snapshot.messages, snapshot.versions) }
+        : repeat.kind === 'regenerate' ? { origin: 'regenerate', parentMessageId: repeat.sourceMessageId, actionId: repeat.actionId, activate: !job,
+          basis: basisBefore(snapshot.messages, snapshot.versions, turnId) }
+        : { origin: repeat.kind, ...(source ? { parentMessageId: source.messageId } : {}), ...(source?.basis ? { basis: source.basis } : {}) };
       const inputSnapshot=streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
         outputTokenLimit:context.outputTokenLimit,agentRole:member.roleTemplateId,turnIndex,
         messages:this.buildMessages(snapshot.run,member,turnIndex,preparation) });
       if (member.providerId && this.registry) this.registry.checkGeneration(member.providerId, inputSnapshot);
       if (this.deadlineReached(context)) throw new ContractError('timeout');
       if(context.abortController.signal.aborted)throw new ContractError('cancelled');
-      if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
-      else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex });
-      this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: '', status: 'streaming' });
+      if (job) context.job = { requestId };
+      else if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
+      else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex, ...(overrideId ? { overrideActionId: overrideId } : {}) });
+      this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: '', status: 'streaming' }, version);
       const attemptIndex = snapshot.attempts.filter(a => a.turnId === turnId).length;
       this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
-      this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: member.agentId });
+      if (!job) this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: member.agentId });
       this.appendEvent(context.runId, 'turn_started', { turnId, messageId, agentId: member.agentId, requestId });
       return {...inputSnapshot,signal:context.abortController.signal};
     });
@@ -566,8 +792,9 @@ export class RunService {
       const turn = dispatch.turns.find(value => value.id === turnId);
       this.workflowPlan(dispatch.run);
       if (this.contexts.get(context.runId) !== context || !context.executing || !this.activeRooms.has(context.roomId)
-        || dispatch.run.roomId !== context.roomId || !sameMembers(dispatch.run.membersSnapshot, context.members) || !['running', 'pausing'].includes(dispatch.run.status)
-        || !turn || turn.agentId !== member.agentId || turn.turnIndex !== turnIndex || turn.status !== 'running'
+        || dispatch.run.roomId !== context.roomId || !sameMembers(dispatch.run.membersSnapshot, context.members)
+        || (job ? context.job?.requestId !== requestId || ['running', 'pausing', 'cancelling'].includes(dispatch.run.status) : !['running', 'pausing'].includes(dispatch.run.status))
+        || !turn || turn.agentId !== member.agentId || turn.turnIndex !== turnIndex || turn.status !== (job ? 'completed' : 'running')
         || attempt?.requestId !== requestId || attempt.messageId !== messageId || !['pending', 'running'].includes(attempt.status)) throw new ContractError('invalid_state');
       const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId) : this.provider;
       iterator = provider.streamChat(input)[Symbol.asyncIterator]();
@@ -593,7 +820,7 @@ export class RunService {
             content += chunk.text;
             this.database.transaction(() => {
               this.database.updateMessage(messageId, content, 'streaming');
-              this.database.updateTurn(turnId, { partialContent: content });
+              if (!job) this.database.updateTurn(turnId, { partialContent: content });
               this.persistElapsed(context);
               this.appendEvent(context.runId, 'text_delta', { turnId, messageId, senderName: member.displayName, text: chunk.text });
             });
@@ -612,7 +839,9 @@ export class RunService {
       }
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, 'completed');
-        this.database.updateTurn(turnId, { status: transitionTurn('running', 'completed'), partialContent: content });
+        // A completed regeneration becomes its slot's effective version; the Turn's own state is unchanged.
+        if (job) this.database.activateVersion(messageId);
+        else this.database.updateTurn(turnId, { status: transitionTurn('running', 'completed'), partialContent: content });
         this.database.updateAttempt(requestId, { status: 'completed' });
         this.persistElapsed(context);
         this.appendEvent(context.runId, 'turn_completed', { turnId, messageId });
@@ -622,7 +851,7 @@ export class RunService {
       const aborted = context.stopRequested || context.timedOut || code === 'cancelled' || code === 'timeout';
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
-        this.database.updateTurn(turnId, { status: transitionTurn('running', aborted ? 'aborted' : 'failed'), partialContent: content });
+        if (!job) this.database.updateTurn(turnId, { status: transitionTurn('running', aborted ? 'aborted' : 'failed'), partialContent: content });
         this.database.updateAttempt(requestId, { status: aborted ? 'aborted' : 'failed' });
         this.persistElapsed(context);
         this.appendEvent(context.runId, aborted ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: toPublicError(error, aborted ? 'cancelled' : 'internal_error') });
@@ -656,6 +885,8 @@ export class RunService {
         }
       }
       this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
+      const pending = status === 'completed' ? this.database.getPendingOverride(context.runId) : undefined;
+      if (pending) this.database.settleHostAction(pending.id, 'expired');
       this.database.afterCommit(() => {
         context.elapsedBefore = elapsed;
         context.segmentStartedAt = undefined;

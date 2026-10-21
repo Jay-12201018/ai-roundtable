@@ -20,10 +20,16 @@ const attemptSchema = z.object({
   turnId: requestAttemptSchema.shape.turnId, messageId: requestAttemptSchema.shape.messageId,
   attemptIndex: requestAttemptSchema.shape.attemptIndex, status: requestAttemptSchema.shape.status,
 }).strict();
+// R12: when present, exactly one version per slot is effective; absent means the R05 latest-Attempt rule.
+const versionSchema = z.object({
+  messageId: idSchema, slotId: idSchema, versionNumber: z.number().int().min(1), active: z.boolean(),
+  origin: z.enum(['original', 'retry', 'continue', 'regenerate', 'edit']), affected: z.boolean(),
+}).strict();
 export const contextInputSchema = z.object({
   run: runSchema,
-  current: z.object({ agentId: idSchema, turnId: idSchema, requestId: idSchema, turnIndex: sequenceSchema }).strict(),
-  snapshot: z.object({ messages: z.array(messageSchema), turns: z.array(turnSchema), attempts: z.array(attemptSchema) }).strict(),
+  // `regenerate` rebuilds the input of an existing earlier Turn from history that preceded it.
+  current: z.object({ agentId: idSchema, turnId: idSchema, requestId: idSchema, turnIndex: sequenceSchema, mode: z.enum(['new', 'regenerate']).optional() }).strict(),
+  snapshot: z.object({ messages: z.array(messageSchema), turns: z.array(turnSchema), attempts: z.array(attemptSchema), versions: z.array(versionSchema).optional() }).strict(),
   visibleMessageIds: z.array(idSchema), applicationInstructions: z.array(instructionSchema),
   hostInstructions: z.array(instructionSchema.extend({ roomId: idSchema, runId: idSchema }).strict()),
   contextWindowTokens: sequenceSchema.refine(n => n > 0),
@@ -51,7 +57,7 @@ export interface ContextSource {
 }
 export type HistoryReason = 'selected' | 'duplicate' | 'other_room' | 'other_run' | 'not_visible'
   | 'current_or_future_turn' | 'non_public_sender' | 'message_not_completed' | 'missing_turn'
-  | 'turn_not_completed' | 'missing_attempt' | 'attempt_not_completed' | 'superseded_attempt' | 'input_budget' | 'context_rejected';
+  | 'turn_not_completed' | 'missing_attempt' | 'attempt_not_completed' | 'superseded_attempt' | 'inactive_version' | 'input_budget' | 'context_rejected';
 export interface HistoryDecision {
   messageId: string;
   snapshotIndex: number;

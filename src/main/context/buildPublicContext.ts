@@ -16,8 +16,12 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
     return { ok: false, reason: 'unknown_execution_metadata' };
   }
   const member = run.membersSnapshot.find(m => m.agentId === current.agentId);
-  if (!member || current.turnIndex !== run.nextTurnIndex
-    || input.snapshot.turns.some(t => t.id === current.turnId || t.requestId === current.requestId)
+  const existing = input.snapshot.turns.find(t => t.id === current.turnId);
+  const position = current.mode === 'regenerate'
+    ? !!existing && existing.agentId === current.agentId && existing.turnIndex === current.turnIndex && current.turnIndex < run.nextTurnIndex
+    : !existing && current.turnIndex === run.nextTurnIndex;
+  if (!member || !position
+    || input.snapshot.turns.some(t => t.requestId === current.requestId)
     || input.snapshot.attempts.some(a => a.requestId === current.requestId)
     || input.hostInstructions.some(i => i.roomId !== run.roomId || i.runId !== run.id)
     || new Set(input.applicationInstructions.map(i => i.id)).size !== input.applicationInstructions.length
