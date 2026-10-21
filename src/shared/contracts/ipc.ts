@@ -7,6 +7,7 @@ import { continueMessageInputSchema, recoveryInputSchema, retryTurnInputSchema, 
 import { ContractError } from './errors';
 import { roomManagementContracts, providerSettingsContracts } from './configuration';
 import { compareRunPositions } from '../schemas/configuration';
+import { hostCommandResultSchema, hostCommandSchema } from '../schemas/host';
 
 export function ipcResponseSchema<T extends z.ZodType>(data: T) {
   return z.discriminatedUnion('ok', [
@@ -28,6 +29,7 @@ export const ipcContracts = {
   'run.retryTurn': { input: retryTurnInputSchema, output: z.undefined() },
   'run.continueMessage': { input: continueMessageInputSchema, output: z.undefined() },
   'run.recoverInterruptedRun': { input: recoveryInputSchema, output: z.undefined() },
+  'host.command': { input: hostCommandSchema, output: hostCommandResultSchema },
   'rooms.createRoom': roomManagementContracts.createRoom,
   'rooms.updateRoom': roomManagementContracts.updateRoom,
   'rooms.getRoomConfiguration': roomManagementContracts.getRoomConfiguration,
@@ -80,6 +82,11 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
     matches = subscription.snapshot.runId === request.runId && (subscription.resyncRequired
       || request.cursor <= subscription.nextCursor && (request.cursor === subscription.nextCursor ? events.length === 0
         : events[0]?.sequence === request.cursor + 1 && events.at(-1)?.sequence === subscription.nextCursor));
+  }
+  if (channel === 'host.command') {
+    const result = data as IpcOutput<'host.command'>;
+    const request = input as IpcInput<'host.command'>;
+    matches = result.runId === request.runId && result.kind === request.kind;
   }
   if (channel.startsWith('rooms.') || channel.startsWith('settings.')) matches = configurationMatches(channel, input, data);
   if (!matches) throw new ContractError('invalid_response');

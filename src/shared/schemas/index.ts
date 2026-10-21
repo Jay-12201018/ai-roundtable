@@ -6,3 +6,4 @@ export * from './provider';
 export * from './persistence';
 export * from './configuration';
 export * from './workflow';
+export * from './host';

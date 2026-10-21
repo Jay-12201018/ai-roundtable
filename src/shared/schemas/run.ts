@@ -5,6 +5,7 @@ import { apiErrorSchema } from './error';
 import { executionMetadataSchema, attemptSnapshotSchema } from './persistence';
 
 import { workflowConfigSchema, workflowProgressSchema } from './workflow';
+import { hostStateSchema, hostUpdatedPayloadSchema, messageVersionSchema } from './host';
 
 export const startRunInputSchema = z.object({
   roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema.optional(), workflowConfig: workflowConfigSchema.optional(), workflowPreviewId: idSchema.optional(),
@@ -23,6 +24,8 @@ export const turnSnapshotSchema = z.object({
   turnId: idSchema, runId: idSchema, agentId: idSchema, turnIndex: sequenceSchema.optional(), status: z.enum(turnStatusValues),
   requestId: idSchema.optional(), messageId: idSchema.optional(), outputText: z.string().optional(),
   startedAt: timestampSchema.optional(), completedAt: timestampSchema.optional(),
+  // R12: present only for a host-directed (@Override) Turn, which does not consume a workflow step.
+  overrideActionId: idSchema.optional(),
 }).strict();
 export const messageSnapshotSchema = z.object({
   id: idSchema, senderName: z.string().trim().min(1), content: z.string(), status: z.enum(messageStatusValues),
@@ -33,6 +36,7 @@ export const runSnapshotSchema = z.object({
   turns: z.array(turnSnapshotSchema), messages: z.array(messageSnapshotSchema),
   startedAt: timestampSchema.optional(), updatedAt: timestampSchema,
   workflow: workflowProgressSchema.optional(), execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
+  versions: z.array(messageVersionSchema).optional(), host: hostStateSchema.optional(),
 }).strict().superRefine((snapshot, ctx) => {
   const current = snapshot.turns.find((turn) => turn.turnId === snapshot.currentTurnId);
   if (snapshot.turns.some((turn) => turn.runId !== snapshot.runId)
@@ -45,7 +49,24 @@ export const runSnapshotSchema = z.object({
     || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent snapshot identities' });
   }
+  if (snapshot.versions && !versionsConsistent(snapshot)) ctx.addIssue({ code: 'custom', message: 'Inconsistent message versions' });
 });
+
+function versionsConsistent(snapshot: { messages: { id: string }[]; turns: { turnId: string }[]; attempts?: { requestId: string; messageId: string }[];
+  versions?: z.infer<typeof messageVersionSchema>[]; host?: z.infer<typeof hostStateSchema> }): boolean {
+  const versions = snapshot.versions!;
+  const messages = new Set(snapshot.messages.map(message => message.id));
+  const ids = new Set(versions.map(version => version.messageId));
+  const slots = new Map<string, number>();
+  for (const version of versions) slots.set(version.slotId, (slots.get(version.slotId) ?? 0) + (version.active ? 1 : 0));
+  return ids.size === versions.length && versions.every(version => messages.has(version.messageId)
+    && (version.parentMessageId === undefined || ids.has(version.parentMessageId))
+    && (version.turnId === undefined || snapshot.turns.some(turn => turn.turnId === version.turnId))
+    && (version.requestId === undefined || snapshot.attempts?.some(a => a.requestId === version.requestId && a.messageId === version.messageId))
+    && version.affectedBy.every(id => ids.has(id)))
+    && [...slots.values()].every(count => count === 1)
+    && (!snapshot.host?.generation || versions.some(v => v.messageId === snapshot.host!.generation!.messageId && !v.active));
+}
 
 const base = { version: z.literal(PROTOCOL_VERSION), runId: idSchema, sequence: sequenceSchema.refine((value) => value > 0), timestamp: timestampSchema };
 const runIdentity = { turnId: z.never().optional(), requestId: z.never().optional() };
@@ -63,6 +84,7 @@ export const runEventSchema = z.discriminatedUnion('type', [
   z.object({ ...base, ...turnIdentity, type: z.literal('turn_completed'), payload: turnEndedPayload }).strict(),
   z.object({ ...base, ...turnIdentity, type: z.literal('turn_aborted'), payload: turnErrorPayload }).strict(),
   z.object({ ...base, ...turnIdentity, type: z.literal('turn_failed'), payload: turnErrorPayload }).strict(),
+  z.object({ ...base, ...runIdentity, type: z.literal('host_updated'), payload: hostUpdatedPayloadSchema }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('snapshot_required'), payload: z.object({ reason: z.enum(['invalid_event', 'incompatible_version', 'sequence_gap']) }).strict() }).strict(),
 ]).superRefine((event, ctx) => {
   if ('turnId' in event.payload && event.payload.turnId !== event.turnId
@@ -80,7 +102,7 @@ export const runSubscriptionSchema = z.object({
       || event.sequence > subscription.snapshot.sequence
       || index > 0 && event.sequence !== events[index - 1].sequence + 1)
     || subscription.events.some((event) => {
-      if (event.type === 'run_state_changed' || event.type === 'snapshot_required') return false;
+      if (event.type === 'run_state_changed' || event.type === 'snapshot_required' || event.type === 'host_updated') return false;
       const turn = subscription.snapshot.turns.find((turn) => turn.turnId === event.turnId);
       const attempt = subscription.snapshot.attempts?.find(a=>a.requestId===event.requestId);
       return !turn || (attempt ? attempt.turnId!==turn.turnId || attempt.runId!==event.runId : turn.requestId!==event.requestId)
