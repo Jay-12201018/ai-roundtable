@@ -147,6 +147,21 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
 
     const hash = createHash('sha256');
     const schema = db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type, name').raw().all();
+    if ((versions.at(-1) ?? 0) >= 6) {
+      for (const table of ['host_actions', 'host_instruction_revisions', 'message_versions', 'message_slots']) if (!tables.includes(table)) throw new Error('Recovery v6 schema is incomplete');
+      for (const name of ['host_action_identity_immutable', 'host_action_status_order', 'host_action_no_delete', 'host_instruction_immutable', 'message_version_immutable']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing host/version history protection');
+      }
+      assertNoRows(db, "SELECT 1 FROM messages m WHERE m.run_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM message_versions v WHERE v.message_id=m.id AND v.run_id=m.run_id) LIMIT 1", 'Message without version record');
+      assertNoRows(db, `SELECT 1 FROM message_versions v JOIN messages m ON m.id=v.message_id LEFT JOIN message_slots s ON s.slot_id=v.slot_id
+        WHERE s.slot_id IS NULL OR s.run_id<>v.run_id OR (s.turn_id IS NOT m.turn_id) OR (m.turn_id IS NOT NULL AND v.slot_id<>m.turn_id)
+          OR (m.parent_version_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM message_versions p WHERE p.message_id=m.parent_version_id AND p.slot_id=v.slot_id)) LIMIT 1`, 'Inconsistent message version chain');
+      assertNoRows(db, "SELECT 1 FROM message_slots s WHERE NOT EXISTS(SELECT 1 FROM message_versions v WHERE v.message_id=s.active_message_id AND v.slot_id=s.slot_id) LIMIT 1", 'Invalid active message version');
+      assertNoRows(db, `SELECT 1 FROM host_actions a WHERE (a.message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM messages m WHERE m.id=a.message_id AND m.run_id=a.run_id))
+        OR (a.turn_id IS NOT NULL AND (a.kind<>'setOverride' OR a.status<>'consumed' OR NOT EXISTS(SELECT 1 FROM turns t WHERE t.id=a.turn_id AND t.run_id=a.run_id AND t.override_action_id=a.id))) LIMIT 1`, 'Invalid host action identity');
+      assertNoRows(db, "SELECT 1 FROM turns t LEFT JOIN host_actions a ON a.id=t.override_action_id WHERE t.override_action_id IS NOT NULL AND (a.id IS NULL OR a.run_id<>t.run_id OR a.turn_id IS NOT t.id OR a.agent_id<>t.agent_id) LIMIT 1", 'Invalid override Turn');
+      assertNoRows(db, "SELECT 1 FROM host_instruction_revisions r JOIN host_actions a ON a.id=r.action_id WHERE a.run_id<>r.run_id OR a.kind NOT IN ('setInstruction','clearInstruction') LIMIT 1", 'Invalid instruction revision');
+    }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {
       hash.update(JSON.stringify(table));

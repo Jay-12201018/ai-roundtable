@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { migration3 } from './migrations/v3';
 import { migration4 } from './migrations/v4';
 import { migration5 } from './migrations/v5';
+import { migration6 } from './migrations/v6';
 import { reconciliationInputSchema, reconciliationAuditSchema, reconciliationEvidenceSummary, type ReconciliationInput, type TrialReconciliation } from '../providers/controlledTrial/reconciliation';
 import { trialRecordSchema, type TrialRecord } from '../providers/controlledTrial/record';
 import { ContractError } from '../../shared/contracts/errors';
@@ -50,7 +51,21 @@ export type TurnRecord = {
   requestId: string;
   turnIndex: number;
   partialContent: string;
+  overrideActionId?: string;
 };
+
+export type VersionOrigin = 'original' | 'retry' | 'continue' | 'regenerate' | 'edit';
+/** One version of a message slot (a Turn, or a host message); exactly one version per slot is active. */
+export type VersionRecord = {
+  messageId: string; runId: string; slotId: string; turnId?: string; versionNumber: number; origin: VersionOrigin;
+  parentMessageId?: string; actionId?: string; basis: string[] | null; active: boolean;
+};
+export type VersionInput = { origin?: VersionOrigin; slotId?: string; parentMessageId?: string; actionId?: string; basis?: string[]; activate?: boolean };
+export type HostActionRecord = {
+  id: string; runId: string; clientRequestId: string; kind: string; status: string; fingerprint: string;
+  agentId?: string; messageId?: string; resultMessageId?: string; instructionId?: string; turnId?: string; createdAt: string; updatedAt: string;
+};
+export type InstructionRevisionRecord = { id: string; runId: string; instructionId: string; revision: number; content: string | null; actionId: string; createdAt: string };
 
 export type RunEventRecord = {
   runId: string;
@@ -176,6 +191,7 @@ const migrations = [
   migration3,
   migration4,
   migration5,
+  migration6,
 ];
 
 export class Database {
@@ -379,19 +395,27 @@ export class Database {
         this.db.prepare("UPDATE messages SET status='aborted',updated_at=? WHERE run_id=? AND status='streaming'").run(timestamp, id);
         this.appendRunEvent({ runId: id, protocolVersion: 1, type: 'run_state_changed', payload: { status: 'interrupted' }, timestamp });
       }
+      // A version regeneration does not change Run status; any request still open at startup was interrupted.
+      this.db.prepare("UPDATE request_attempts SET status='interrupted',updated_at=?,finished_at=? WHERE status IN ('running','pending','queued')").run(timestamp, timestamp);
+      this.db.prepare("UPDATE messages SET status='aborted',updated_at=? WHERE status='streaming' AND run_id IS NOT NULL").run(timestamp);
       return ids.length;
     })();
     return result;
   }
 
-  insertTurn(turn: { id: string; runId: string; agentId: string; status: string; requestId: string; turnIndex: number }): void {
+  insertTurn(turn: { id: string; runId: string; agentId: string; status: string; requestId: string; turnIndex: number; overrideActionId?: string }): void {
     this.assertInitialized();
     const timestamp = now();
     this.db.transaction(() => {
       const run = this.getRun(turn.runId);
       const agent = this.db.prepare('SELECT room_id FROM agents WHERE id=?').get(turn.agentId) as { room_id: string } | undefined;
       if (!run || agent?.room_id !== run.roomId || run.nextTurnIndex !== null && run.nextTurnIndex !== turn.turnIndex) throw new Error('Invalid Turn allocation');
-      this.db.prepare('INSERT INTO turns(id, run_id, agent_id, status, request_id, turn_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(turn.id, turn.runId, turn.agentId, turn.status, turn.requestId, turn.turnIndex, timestamp, timestamp);
+      if (turn.overrideActionId !== undefined) {
+        const action = this.getHostAction(turn.overrideActionId);
+        if (!action || action.runId !== turn.runId || action.kind !== 'setOverride' || action.status !== 'pending' || action.agentId !== turn.agentId) throw new Error('Invalid Turn allocation');
+      }
+      this.db.prepare('INSERT INTO turns(id, run_id, agent_id, status, request_id, turn_index, created_at, updated_at, override_action_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(turn.id, turn.runId, turn.agentId, turn.status, turn.requestId, turn.turnIndex, timestamp, timestamp, turn.overrideActionId ?? null);
+      if (turn.overrideActionId !== undefined) this.db.prepare("UPDATE host_actions SET status='consumed',turn_id=?,updated_at=? WHERE id=?").run(turn.id, timestamp, turn.overrideActionId);
       if (run.nextTurnIndex !== null) this.db.prepare('UPDATE workflow_runs SET next_turn_index=next_turn_index+1,updated_at=? WHERE id=?').run(timestamp, turn.runId);
     }).immediate();
   }
@@ -409,25 +433,115 @@ export class Database {
 
   listTurns(runId: string): TurnRecord[] {
     this.assertInitialized();
-    const rows = this.db.prepare('SELECT id, run_id, agent_id, status, request_id, turn_index, partial_content FROM turns WHERE run_id = ? ORDER BY turn_index').all(runId) as Array<{ id: string; run_id: string; agent_id: string; status: string; request_id: string; turn_index: number; partial_content: string }>;
-    return rows.map((row) => ({ id: row.id, runId: row.run_id, agentId: row.agent_id, status: row.status, requestId: row.request_id, turnIndex: row.turn_index, partialContent: row.partial_content }));
+    const rows = this.db.prepare('SELECT id, run_id, agent_id, status, request_id, turn_index, partial_content, override_action_id FROM turns WHERE run_id = ? ORDER BY turn_index').all(runId) as RawTurn[];
+    return rows.map(turnFromRow);
   }
 
   getTurn(id: string): TurnRecord | undefined {
     this.assertInitialized();
-    const row = this.db.prepare('SELECT id, run_id, agent_id, status, request_id, turn_index, partial_content FROM turns WHERE id = ?').get(id) as { id: string; run_id: string; agent_id: string; status: string; request_id: string; turn_index: number; partial_content: string } | undefined;
-    return row ? { id: row.id, runId: row.run_id, agentId: row.agent_id, status: row.status, requestId: row.request_id, turnIndex: row.turn_index, partialContent: row.partial_content } : undefined;
+    const row = this.db.prepare('SELECT id, run_id, agent_id, status, request_id, turn_index, partial_content, override_action_id FROM turns WHERE id = ?').get(id) as RawTurn | undefined;
+    return row ? turnFromRow(row) : undefined;
   }
 
-  insertMessage(message: MessageRecord): void {
+  insertMessage(message: MessageRecord, version: VersionInput = {}): void {
     this.assertInitialized();
     const timestamp = now();
     this.db.transaction(() => {
       const run = this.getRun(message.runId);
       if (!run || run.roomId !== message.roomId || message.turnId && this.getTurn(message.turnId)?.runId !== message.runId) throw new Error('Invalid Message identity');
+      const slotId = message.turnId ?? version.slotId ?? message.id;
+      const slot = this.db.prepare('SELECT run_id AS runId,turn_id AS turnId,active_message_id AS activeMessageId FROM message_slots WHERE slot_id=?').get(slotId) as { runId: string; turnId: string | null; activeMessageId: string } | undefined;
+      if (version.slotId !== undefined && (message.turnId !== undefined && version.slotId !== message.turnId || !slot)) throw new Error('Invalid Message version');
+      if (slot && (slot.runId !== message.runId || (slot.turnId ?? undefined) !== message.turnId)) throw new Error('Invalid Message version');
+      const parent = slot ? version.parentMessageId ?? slot.activeMessageId : undefined;
+      if (version.parentMessageId !== undefined && (!slot || this.db.prepare('SELECT slot_id FROM message_versions WHERE message_id=?').pluck().get(version.parentMessageId) !== slotId)) throw new Error('Invalid Message version');
+      if (version.basis !== undefined) z.array(idSchema).max(4096).parse(version.basis);
       const key = this.db.prepare("UPDATE persistence_counters SET value=value+1 WHERE name='message' RETURNING value").pluck().get() as number;
-      this.db.prepare('INSERT INTO messages(id,room_id,run_id,turn_id,sender_type,sender_name,content,status,created_at,updated_at,sort_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(message.id,message.roomId,message.runId,message.turnId??null,message.senderType,message.senderName,message.content,message.status??'completed',timestamp,timestamp,key);
+      this.db.prepare('INSERT INTO messages(id,room_id,run_id,turn_id,sender_type,sender_name,content,status,created_at,updated_at,sort_key,parent_version_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(message.id,message.roomId,message.runId,message.turnId??null,message.senderType,message.senderName,message.content,message.status??'completed',timestamp,timestamp,key,parent??null);
+      const number = slot ? (this.db.prepare('SELECT MAX(version_number) FROM message_versions WHERE slot_id=?').pluck().get(slotId) as number) + 1 : 1;
+      this.db.prepare('INSERT INTO message_versions(message_id,run_id,slot_id,version_number,origin,action_id,basis_json) VALUES(?,?,?,?,?,?,?)')
+        .run(message.id, message.runId, slotId, number, version.origin ?? (slot ? 'retry' : 'original'), version.actionId ?? null, version.basis === undefined ? null : JSON.stringify(version.basis));
+      if (!slot) this.db.prepare('INSERT INTO message_slots(slot_id,run_id,turn_id,active_message_id,updated_at) VALUES(?,?,?,?,?)').run(slotId, message.runId, message.turnId ?? null, message.id, timestamp);
+      else if (version.activate !== false) this.db.prepare('UPDATE message_slots SET active_message_id=?,updated_at=? WHERE slot_id=?').run(message.id, timestamp, slotId);
     }).immediate();
+  }
+
+  /** Select one existing version as its slot's effective version; history rows are never rewritten. */
+  activateVersion(messageId: string): void {
+    this.assertInitialized(); idSchema.parse(messageId);
+    const result = this.db.prepare('UPDATE message_slots SET active_message_id=?,updated_at=? WHERE slot_id=(SELECT slot_id FROM message_versions WHERE message_id=?)').run(messageId, now(), messageId);
+    if (result.changes !== 1) throw new Error('Message version not found');
+  }
+
+  getVersion(messageId: string): VersionRecord | undefined {
+    this.assertInitialized(); idSchema.parse(messageId);
+    const row = this.db.prepare(`${versionSelect} WHERE v.message_id=?`).get(messageId) as RawVersion | undefined;
+    return row ? versionFromRow(row) : undefined;
+  }
+
+  listVersions(runId: string): VersionRecord[] {
+    this.requireRun(runId);
+    return (this.db.prepare(`${versionSelect} WHERE v.run_id=? ORDER BY m.sort_key`).all(runId) as RawVersion[]).map(versionFromRow);
+  }
+
+  getHostAction(id: string): HostActionRecord | undefined {
+    this.assertInitialized(); idSchema.parse(id);
+    const row = this.db.prepare(`${hostActionSelect} WHERE id=?`).get(id) as RawHostAction | undefined;
+    return row ? hostActionFromRow(row) : undefined;
+  }
+
+  findHostAction(runId: string, clientRequestId: string): HostActionRecord | undefined {
+    this.assertInitialized(); idSchema.parse(runId); idSchema.parse(clientRequestId);
+    const row = this.db.prepare(`${hostActionSelect} WHERE run_id=? AND client_request_id=?`).get(runId, clientRequestId) as RawHostAction | undefined;
+    return row ? hostActionFromRow(row) : undefined;
+  }
+
+  listHostActions(runId: string): HostActionRecord[] {
+    this.requireRun(runId);
+    return (this.db.prepare(`${hostActionSelect} WHERE run_id=? ORDER BY rowid`).all(runId) as RawHostAction[]).map(hostActionFromRow);
+  }
+
+  getPendingOverride(runId: string): HostActionRecord | undefined {
+    this.requireRun(runId);
+    const row = this.db.prepare(`${hostActionSelect} WHERE run_id=? AND kind='setOverride' AND status='pending'`).get(runId) as RawHostAction | undefined;
+    return row ? hostActionFromRow(row) : undefined;
+  }
+
+  insertHostAction(action: Omit<HostActionRecord, 'createdAt' | 'updatedAt' | 'turnId'>): HostActionRecord {
+    this.assertInitialized();
+    const timestamp = now();
+    return this.transaction(() => {
+      this.requireRun(action.runId);
+      this.db.prepare('INSERT INTO host_actions(id,run_id,client_request_id,kind,status,fingerprint,agent_id,message_id,result_message_id,instruction_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(action.id, action.runId, action.clientRequestId, action.kind, action.status, action.fingerprint, action.agentId ?? null, action.messageId ?? null,
+          action.resultMessageId ?? null, action.instructionId ?? null, timestamp, timestamp);
+      return this.getHostAction(action.id)!;
+    });
+  }
+
+  /** Only a pending Override changes status; every other host action is recorded once as applied. */
+  settleHostAction(id: string, status: 'superseded' | 'cancelled' | 'expired'): void {
+    this.assertInitialized();
+    const result = this.db.prepare("UPDATE host_actions SET status=?,updated_at=? WHERE id=? AND status='pending'").run(status, now(), id);
+    if (result.changes !== 1) throw new Error('Host action is not pending');
+  }
+
+  insertInstructionRevision(revision: Omit<InstructionRevisionRecord, 'createdAt' | 'revision'>): InstructionRevisionRecord {
+    this.assertInitialized();
+    return this.transaction(() => {
+      const owner = this.db.prepare('SELECT run_id FROM host_instruction_revisions WHERE instruction_id=? LIMIT 1').pluck().get(revision.instructionId) as string | undefined;
+      if (owner !== undefined && owner !== revision.runId) throw new ContractError('not_found');
+      const next = ((this.db.prepare('SELECT MAX(revision) FROM host_instruction_revisions WHERE instruction_id=?').pluck().get(revision.instructionId) as number | null) ?? 0) + 1;
+      const createdAt = now();
+      this.db.prepare('INSERT INTO host_instruction_revisions(id,run_id,instruction_id,revision,content,action_id,created_at) VALUES(?,?,?,?,?,?,?)')
+        .run(revision.id, revision.runId, revision.instructionId, next, revision.content, revision.actionId, createdAt);
+      return { ...revision, revision: next, createdAt };
+    });
+  }
+
+  listInstructionRevisions(runId: string): InstructionRevisionRecord[] {
+    this.requireRun(runId);
+    return (this.db.prepare('SELECT id,run_id AS runId,instruction_id AS instructionId,revision,content,action_id AS actionId,created_at AS createdAt FROM host_instruction_revisions WHERE run_id=? ORDER BY rowid').all(runId) as InstructionRevisionRecord[]);
   }
 
   updateMessage(id: string, content: string, status = 'streaming'): void {
@@ -512,7 +626,8 @@ export class Database {
       const run = this.getRun(runId);
       if (!run) throw new Error('Run not found');
       const ids = this.db.prepare('SELECT id FROM messages WHERE run_id=? ORDER BY sort_key').pluck().all(runId) as string[];
-      return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId)};
+      return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
+        versions:this.listVersions(runId),hostActions:this.listHostActions(runId),instructions:this.listInstructionRevisions(runId)};
     });
   }
 
@@ -951,6 +1066,28 @@ export class Database {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+type RawTurn = { id: string; run_id: string; agent_id: string; status: string; request_id: string; turn_index: number; partial_content: string; override_action_id: string | null };
+function turnFromRow(row: RawTurn): TurnRecord {
+  return { id: row.id, runId: row.run_id, agentId: row.agent_id, status: row.status, requestId: row.request_id, turnIndex: row.turn_index, partialContent: row.partial_content,
+    ...(row.override_action_id === null ? {} : { overrideActionId: row.override_action_id }) };
+}
+const versionSelect = `SELECT v.message_id AS messageId,v.run_id AS runId,v.slot_id AS slotId,s.turn_id AS turnId,v.version_number AS versionNumber,v.origin,
+  m.parent_version_id AS parentMessageId,v.action_id AS actionId,v.basis_json AS basis,(s.active_message_id=v.message_id) AS active
+  FROM message_versions v JOIN messages m ON m.id=v.message_id JOIN message_slots s ON s.slot_id=v.slot_id`;
+type RawVersion = { messageId: string; runId: string; slotId: string; turnId: string | null; versionNumber: number; origin: VersionOrigin; parentMessageId: string | null; actionId: string | null; basis: string | null; active: number };
+function versionFromRow(row: RawVersion): VersionRecord {
+  return { messageId: row.messageId, runId: row.runId, slotId: row.slotId, versionNumber: row.versionNumber, origin: row.origin, active: row.active === 1,
+    basis: row.basis === null ? null : z.array(idSchema).parse(JSON.parse(row.basis)),
+    ...(row.turnId === null ? {} : { turnId: row.turnId }), ...(row.parentMessageId === null ? {} : { parentMessageId: row.parentMessageId }),
+    ...(row.actionId === null ? {} : { actionId: row.actionId }) };
+}
+const hostActionSelect = `SELECT id,run_id AS runId,client_request_id AS clientRequestId,kind,status,fingerprint,agent_id AS agentId,message_id AS messageId,
+  result_message_id AS resultMessageId,instruction_id AS instructionId,turn_id AS turnId,created_at AS createdAt,updated_at AS updatedAt FROM host_actions`;
+type RawHostAction = { [K in keyof HostActionRecord]-?: HostActionRecord[K] extends string ? string : string | null };
+function hostActionFromRow(row: RawHostAction): HostActionRecord {
+  return Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null)) as HostActionRecord;
 }
 
 function configurationInput<T extends z.ZodType>(schema: T, value: unknown): z.output<T> {
