@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../../src/renderer/App';
 import { Database } from '../../../src/main/database/Database';
@@ -25,10 +25,9 @@ describe('R12 App with the real Main services', () => {
       await waitFor(() => expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(false));
       fireEvent.click(screen.getByRole('button', { name: '开始协作' }));
       await screen.findByText('开场观点 @Override 审查者');
-      await waitFor(() => expect(screen.getByLabelText('点名成员')).toBeTruthy());
-      fireEvent.change(screen.getByLabelText('点名成员'), { target: { value: within(screen.getByLabelText('点名成员')).getByText('综合者').getAttribute('value') } });
-      fireEvent.click(screen.getByRole('button', { name: '点名下一位' }));
-      await screen.findByText(/下一位：综合者（主持人点名/);
+      fireEvent.click(await screen.findByRole('button', { name: '点名 综合者' }));
+      await screen.findByText(/下一位：综合者（主持人点名，排在下一回合/);
+      expect(document.querySelector('.timeline .status')!.textContent).toContain('下一位：综合者（主持人点名）');
       await act(async () => { provider.release(0); });
       await screen.findByText('审查者按计划发言');
       await waitFor(() => expect(document.querySelector('.timeline .status')!.textContent).toContain('已完成'));

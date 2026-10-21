@@ -6,7 +6,7 @@ import { WorkflowFeature, type WorkflowDraft, type WorkflowPreviewResult } from 
 import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressForFeature, workflowTemplateLabels } from './features/workflows/productionAdapter';
 import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
 import { SettingsFeature } from './features/settings/SettingsFeature';
-import { HostPanel, HostTimeline, useHostCommands } from './features/host';
+import { HostPanel, HostTimeline, nextSpeaker, useHostCommands } from './features/host';
 import { statusLabels } from './locales/zhCN';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
 import { createRendererSession } from './subscriptions/rendererSession';
@@ -142,6 +142,7 @@ export function App() {
   const messages = snapshot?.messages ?? [];
   const synchronizeHost = useCallback(() => { void session.synchronize(); }, [session]);
   const hostCommands = useHostCommands(api.host, snapshot?.runId, synchronizeHost);
+  const upcoming = snapshot && ['running', 'pausing', 'paused'].includes(snapshot.status) ? nextSpeaker(snapshot) : undefined;
 
   return <div className="app-shell">
     <nav className="app-navigation" aria-label="应用导航">
@@ -156,21 +157,22 @@ export function App() {
       <section className="timeline" aria-label="讨论时间线">
         <header>
           <div><small>当前任务</small><h1>{title}</h1></div>
-          <div className="status" role="status">{statusLabels[snapshot?.status ?? 'idle']} {activeTurn ? `· 第 ${(snapshot?.turns.indexOf(activeTurn) ?? 0) + 1} 回合` : ''}</div>
+          <div className="status" role="status">{statusLabels[snapshot?.status ?? 'idle']} {activeTurn ? `· 第 ${(snapshot?.turns.indexOf(activeTurn) ?? 0) + 1} 回合` : ''}{upcoming ? ` · 下一位：${upcoming.name}${upcoming.source === 'override' ? '（主持人点名）' : ''}` : ''}</div>
           <button type="button" className="controls-toggle" aria-expanded={showControls} aria-controls="host-controls" onClick={() => setShowControls(value => !value)}>主持人控制</button>
         </header>
         <div className="messages">
           {messages.length === 0 && <div className="empty">{roomId ? '配置成员后，输入目标并开始协作。' : '请先在“房间与成员”中创建或选择房间。'}</div>}
           <HostTimeline snapshot={snapshot} commands={hostCommands} />
+          {/* Run feedback sits right after the last message it describes, not below the composer. */}
+          {snapshot?.status === 'interrupted' && <div className="sync-feedback run-feedback">执行已中断，部分输出已保留。请先检查历史记录。</div>}
+          {error && <div className="error run-feedback" role="alert">{error}</div>}
         </div>
-        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={startRun} disabled={!startEnabled || workflowInvalidated}>开始协作</button></div>
         {appliedWorkflow && <p role="status">下次开始将使用「{workflowTemplateLabels[appliedWorkflow.config.templateId]}」，此配置尚未启动。</p>}
         {workflowInvalidated && <p role="alert">房间成员已变化，请重新验证并应用工作流后再开始。</p>}
         {syncStatus === 'syncing' && <div role="status" className="sync-feedback">正在同步运行状态</div>}
         {pending && <div role="status" className="sync-feedback">操作已发送，等待确认</div>}
-        {snapshot?.status === 'interrupted' && <div className="sync-feedback">执行已中断，部分输出已保留。请先检查历史记录。</div>}
-        {error && <div className="error" role="alert">{error}</div>}
         {syncStatus === 'error' && <button className="retry-sync" onClick={() => void session.synchronize()}>重试同步</button>}
+        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={startRun} disabled={!startEnabled || workflowInvalidated}>开始协作</button></div>
       </section>
       <aside id="host-controls" className={`workbench${showControls ? ' is-open' : ''}`} aria-label="主持人控制">
         <h2>主持人控制</h2><p className="room-card">{roomId ? title : '还没有任务'}</p>

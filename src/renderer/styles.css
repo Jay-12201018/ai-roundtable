@@ -39,6 +39,7 @@ button:disabled { cursor: default; color: var(--secondary); background: var(--su
 .composer input { flex: 1 1 240px; min-width: 0; border: 1px solid var(--control); border-radius: 8px; background: var(--panel); color: var(--text); padding: 8px 12px; min-height: 40px; }
 .error, .sync-feedback { margin: 0 24px 16px; overflow-wrap: anywhere; }
 .error { color: var(--error); }
+.messages > .run-feedback { max-width: 760px; margin: 16px auto 0; }
 .retry-sync { align-self: flex-start; margin: 0 24px 16px; }
 .workbench { padding: 24px; background: var(--panel); border-left: 1px solid var(--border); }
 .workbench h2 { font-size: 16px; line-height: 24px; margin: 0; }
