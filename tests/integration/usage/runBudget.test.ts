@@ -6,7 +6,9 @@ import { ProviderRegistry, type ApprovedModelPolicy } from '../../../src/main/pr
 import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
-import { deepSeekModelPolicy } from '../../../src/main/providers/modelPolicies/deepseek';
+import { countDeepSeekInputUpperBound, deepSeekModelPolicy } from '../../../src/main/providers/modelPolicies/deepseek';
+import type { ProviderMessage } from '../../../src/main/providers/types';
+import { parseDiscussion } from '../../unit/context/discussion';
 import { DEFAULT_RUN_BUDGET_MICRO_CNY, requestChargeSchema } from '../../../src/shared/schemas/budget';
 import { runSnapshotSchema } from '../../../src/shared/schemas/run';
 
@@ -65,6 +67,26 @@ it('reserves each request before sending and settles it from provider usage at t
     remainingMicro: DEFAULT_RUN_BUDGET_MICRO_CNY - 1296, overrunMicro: 0 });
   expect(runSnapshotSchema.safeParse(snapshot).success).toBe(true);
   expect(f.bodies[0]).toMatchObject({ model: 'deepseek-flash', max_tokens: 256, thinking: { type: 'disabled' } });
+});
+
+it('reserves from the exact wire messages: D095 discussion format, bound counted on what DeepSeek receives', async () => {
+  const f = await fixture({ members: 3 });
+  const { runId } = await start(f, { maxTurns: 4 }); await f.run.waitForIdle(runId);
+  const snapshot = f.run.getSnapshot(runId);
+  expect(snapshot.status).toBe('completed'); expect(f.bodies).toHaveLength(4);
+  for (const body of f.bodies) {
+    const messages = body.messages as ProviderMessage[];
+    const sent = snapshot.charges!.filter(c => JSON.stringify(f.db.getAttempt(c.requestId)?.inputSnapshot?.messages) === JSON.stringify(messages));
+    expect(sent).toHaveLength(1);
+    const charge = sent[0];
+    expect(charge.inputTokenBound).toBe(countDeepSeekInputUpperBound(messages));
+    expect(charge.inputTokenBound).toBeGreaterThanOrEqual(messages.reduce((total, m) => total + Buffer.byteLength(m.content, 'utf8'), 0));
+  }
+  // Member 0 speaks again on the fourth Turn: only its own first reply is assistant; the others are quoted user text.
+  const fourth = f.bodies[3].messages as ProviderMessage[];
+  expect(fourth.filter(m => m.role !== 'system').map(m => m.role)).toEqual(['user', 'assistant', 'user']);
+  expect(parseDiscussion(fourth).entries.map(e => [e.role, e.speaker, e.publicText])).toEqual([
+    ['assistant', '成员0', '公开回复-1'], ['user', '成员1', '公开回复-2'], ['user', '成员2', '公开回复-3']]);
 });
 
 it('refuses to send when the next maximum cost exceeds the remaining budget, with a Chinese reason and zero requests', async () => {
