@@ -20,6 +20,7 @@ const messages: Record<ErrorCode, string> = {
   invalid_state: '当前状态不允许此操作；请先结束相关运行或检查引用。', internal_error: '操作失败，请重试。',
   transport_error: '连接中断，请重新加载后重试。', authentication_failed: '鉴权失败，请检查 Key。', rate_limited: '请求过于频繁，请稍后重试。',
   timeout: '请求超时，请稍后重试。', cancelled: '请求已取消。', network_error: '无法连接 Provider，请检查请求地址。',
+  budget_exceeded: '运行预算不足，未发送请求。',
 };
 function safeError(error: unknown): string {
   const parsed = apiErrorSchema.safeParse(error instanceof ContractError ? error.detail : error);

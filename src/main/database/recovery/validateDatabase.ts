@@ -7,6 +7,7 @@ import { providerModelSchema } from '../../../shared/schemas/provider';
 import { runEventSchema } from '../../../shared/schemas/run';
 import { trialRecordSchema } from '../../providers/controlledTrial/record';
 import { reconciliationAuditSchema } from '../../providers/controlledTrial/reconciliation';
+import { budgetBlockSchema, requestChargeSchema } from '../../../shared/schemas/budget';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
 
@@ -161,6 +162,25 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         OR (a.turn_id IS NOT NULL AND (a.kind<>'setOverride' OR a.status<>'consumed' OR NOT EXISTS(SELECT 1 FROM turns t WHERE t.id=a.turn_id AND t.run_id=a.run_id AND t.override_action_id=a.id))) LIMIT 1`, 'Invalid host action identity');
       assertNoRows(db, "SELECT 1 FROM turns t LEFT JOIN host_actions a ON a.id=t.override_action_id WHERE t.override_action_id IS NOT NULL AND (a.id IS NULL OR a.run_id<>t.run_id OR a.turn_id IS NOT t.id OR a.agent_id<>t.agent_id) LIMIT 1", 'Invalid override Turn');
       assertNoRows(db, "SELECT 1 FROM host_instruction_revisions r JOIN host_actions a ON a.id=r.action_id WHERE a.run_id<>r.run_id OR a.kind NOT IN ('setInstruction','clearInstruction') LIMIT 1", 'Invalid instruction revision');
+    }
+    if ((versions.at(-1) ?? 0) >= 7) {
+      for (const table of ['run_budgets', 'request_charges']) if (!tables.includes(table)) throw new Error('Recovery v7 schema is incomplete');
+      for (const name of ['run_budget_limit_immutable', 'run_budget_no_delete', 'request_charge_identity_insert', 'request_charge_identity_immutable',
+        'request_charge_settle_once', 'request_charge_result_once', 'request_charge_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing budget ledger protection');
+      }
+      assertNoRows(db, 'SELECT 1 FROM workflow_runs r WHERE NOT EXISTS(SELECT 1 FROM run_budgets b WHERE b.run_id=r.id) LIMIT 1', 'Run without budget');
+      assertNoRows(db, 'SELECT 1 FROM request_charges c LEFT JOIN request_attempts a ON a.request_id=c.request_id WHERE a.request_id IS NULL OR a.run_id<>c.run_id LIMIT 1', 'Invalid charge identity');
+      for (const row of db.prepare('SELECT blocked_json FROM run_budgets WHERE blocked_json IS NOT NULL').pluck().iterate() as Iterable<string>) {
+        if (!budgetBlockSchema.safeParse(JSON.parse(row)).success) throw new Error('Invalid budget block');
+      }
+      const charges = db.prepare(`SELECT request_id AS requestId,provider_id AS providerId,model_id AS modelId,currency,state,input_token_bound AS inputTokenBound,
+        output_token_limit AS outputTokenLimit,input_micro_per_token AS inputMicroPerToken,output_micro_per_token AS outputMicroPerToken,reserved_micro AS reservedMicro,
+        input_tokens AS inputTokens,output_tokens AS outputTokens,accounted_micro AS accountedMicro,price_reviewed_at AS priceReviewedAt,created_at AS createdAt,updated_at AS updatedAt FROM request_charges`).iterate() as Iterable<Record<string, unknown>>;
+      for (const row of charges) {
+        const chargedMicro = row.state === 'settled' ? row.accountedMicro : row.state === 'not_sent' ? 0 : row.reservedMicro;
+        if (!requestChargeSchema.safeParse({ ...row, chargedMicro }).success) throw new Error('Invalid charge evidence');
+      }
     }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {

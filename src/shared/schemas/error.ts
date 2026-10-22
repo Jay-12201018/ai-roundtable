@@ -15,12 +15,13 @@ export const errorMessages = {
   timeout: 'Provider request timed out',
   cancelled: 'Request cancelled',
   network_error: 'Provider connection failed',
+  budget_exceeded: 'Run budget is insufficient for the next request',
 } as const;
 export const errorCodeSchema = z.enum(Object.keys(errorMessages) as [keyof typeof errorMessages, ...(keyof typeof errorMessages)[]]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 const retryableCodes: readonly ErrorCode[] = ['transport_error', 'rate_limited', 'timeout', 'network_error'];
 const errorFieldSchema = z.enum(['arguments', 'roomId', 'runId', 'turnId', 'messageId', 'cursor', 'task', 'workflowSnapshot', 'mode', 'maxTurns', 'maxDurationMs', 'outputTokenLimit', 'decision',
-  'clientRequestId', 'kind', 'agentId', 'instructionId', 'content']);
+  'clientRequestId', 'kind', 'agentId', 'instructionId', 'content', 'budgetMicroCny']);
 export type ErrorField = z.infer<typeof errorFieldSchema>;
 
 export const apiErrorSchema = z.object({

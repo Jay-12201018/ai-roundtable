@@ -6,6 +6,7 @@ import { executionMetadataSchema, attemptSnapshotSchema } from './persistence';
 
 import { workflowConfigSchema, workflowProgressSchema } from './workflow';
 import { hostStateSchema, hostUpdatedPayloadSchema, messageVersionSchema } from './host';
+import { requestChargeSchema, runBudgetInputSchema, runBudgetSchema } from './budget';
 
 export const startRunInputSchema = z.object({
   roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema.optional(), workflowConfig: workflowConfigSchema.optional(), workflowPreviewId: idSchema.optional(),
@@ -13,6 +14,8 @@ export const startRunInputSchema = z.object({
   maxTurns: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   maxDurationMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   outputTokenLimit: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  // R13A: total spend cap for this Run in micro-CNY; Main defaults to ¥1.
+  budgetMicroCny: runBudgetInputSchema.optional(),
 }).strict();
 export const interruptedRunDecisionSchema = z.enum(['inspect', 'resume', 'retry', 'discard']);
 export const runCursorSchema = z.object({ runId: idSchema, cursor: sequenceSchema }).strict();
@@ -37,6 +40,7 @@ export const runSnapshotSchema = z.object({
   startedAt: timestampSchema.optional(), updatedAt: timestampSchema,
   workflow: workflowProgressSchema.optional(), execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
   versions: z.array(messageVersionSchema).optional(), host: hostStateSchema.optional(),
+  budget: runBudgetSchema.optional(), charges: z.array(requestChargeSchema).optional(),
 }).strict().superRefine((snapshot, ctx) => {
   const current = snapshot.turns.find((turn) => turn.turnId === snapshot.currentTurnId);
   if (snapshot.turns.some((turn) => turn.runId !== snapshot.runId)
@@ -46,7 +50,9 @@ export const runSnapshotSchema = z.object({
     || (snapshot.activeAgentId !== undefined && snapshot.activeAgentId !== current?.agentId)
     || snapshot.turns.some((turn) => turn.messageId !== undefined && !snapshot.messages.some((message) => message.id === turn.messageId))
     || new Set(snapshot.attempts?.map(a=>a.requestId)).size !== (snapshot.attempts?.length ?? 0)
-    || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))) {
+    || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))
+    || new Set(snapshot.charges?.map(c=>c.requestId)).size !== (snapshot.charges?.length ?? 0)
+    || snapshot.charges?.some(c=>!snapshot.attempts?.some(a=>a.requestId===c.requestId))) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent snapshot identities' });
   }
   if (snapshot.versions && !versionsConsistent(snapshot)) ctx.addIssue({ code: 'custom', message: 'Inconsistent message versions' });

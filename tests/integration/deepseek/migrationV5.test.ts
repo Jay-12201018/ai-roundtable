@@ -35,8 +35,8 @@ it('upgrades intact v4 once, preserves unknown bytes and reserve, and registers 
     await db.initialize(); await db.initialize();
     expect(db.listControlledTrials()).toEqual([row]); expect(db.hasUnresolvedControlledTrials()).toBe(true);
     let raw = new Sqlite(f.path, { readonly: true });
-    expect(validateDatabase(raw).schemaVersion).toBe(6);
-    expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(validateDatabase(raw).schemaVersion).toBe(7);
+    expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(raw.prepare('SELECT data_json FROM controlled_trials').pluck().get()).toBe(JSON.stringify(row));
     const backup = raw.prepare('SELECT id,version FROM schema_backups').get() as { id: number; version: number };
     expect(backup.version).toBe(4); raw.close();
@@ -64,7 +64,7 @@ it('retains audit and released marker across reopen, recovery, consistent backup
     await db.initialize(); const audit = db.reconcileControlledTrial(approval); db.close(); db = new Database(f.path); await db.initialize(); db.recoverControlledTrials();
     expect(db.listControlledTrials()).toEqual([row]); expect(db.listControlledTrialReconciliations(row.id)).toEqual([audit]); expect(db.hasUnresolvedControlledTrials()).toBe(false);
     const raw = new Sqlite(f.path); const backups = join(f.directory, 'owned-backups'); mkdirSync(backups, { mode: 0o700 });
-    const backup = await createVerifiedBackup(raw, backups); raw.close(); expect(backup.validation.schemaVersion).toBe(6);
+    const backup = await createVerifiedBackup(raw, backups); raw.close(); expect(backup.validation.schemaVersion).toBe(7);
     const restored = await prepareRestore(backup, backups); const candidate = new Database(restored.path);
     try { await candidate.initialize(); expect(candidate.listControlledTrials()).toEqual([row]); expect(candidate.listControlledTrialReconciliations()).toEqual([audit]); expect(candidate.hasUnresolvedControlledTrials()).toBe(false); } finally { candidate.close(); }
   } finally { db.close(); f.dispose(); }
