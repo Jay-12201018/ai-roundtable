@@ -110,6 +110,8 @@ describe('D097 the Key input says why it is unavailable and offers the fix next 
     await screen.findByText('Key 已保存。');
     expect(progress()).toContain('API Key：已配置');
     expect(progress()).toContain('下一步：确认本次会话目标。');
+    // Only one next step is shown: the Key-input reason does not compete with the session confirmation.
+    expect(document.getElementById('settings-key-blocked')).toBeNull();
     // The last step sits under the Key, names the target and needs one deliberate click.
     const last = screen.getByText(/最后一步：确认本次会话的请求目标 https:\/\/api\.deepseek\.com\//u);
     expect(last).toBeTruthy();
@@ -118,6 +120,9 @@ describe('D097 the Key input says why it is unavailable and offers the fix next 
     await waitFor(() => expect(progress()).toContain('本次会话目标：已确认'));
     expect(progress()).toContain('已就绪');
     expect(screen.queryByRole('button', { name: '目标无误，确认本次会话' })).toBeNull();
+    // Replacing the confirmed Key later still requires the same target check, now worded for replacement.
+    fireEvent.click(screen.getByLabelText('我已核对请求目标'));
+    expect(document.getElementById('settings-key-blocked')!.textContent).toContain('已保存的 Key 正在使用。要替换它，请先核对 Key 将发往的请求目标');
   });
 
   it('reads the session confirmation from Main instead of assuming it after a reload', async () => {

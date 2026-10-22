@@ -53,6 +53,9 @@ describe('D098 Stop is set apart from Pause and asks once', () => {
       expect(service.getSnapshot(runId).status).toBe('cancelled');
       expect(service.getSnapshot(runId).messages[0]).toMatchObject({ status: 'aborted', content: 'answer 0 @Override 成员 b @Stop' });
       expect(screen.queryByRole('group', { name: '确认停止运行' })).toBeNull();
+      // After stopping, the Pause/Stop explanation goes away and the repeat actions say they may bill again.
+      expect(document.getElementById('stop-help')).toBeNull();
+      await screen.findByText('重试和续写会重新发送请求，可能再次计费。');
     } finally {
       cleanup();
       await service.shutdown(); db.close();

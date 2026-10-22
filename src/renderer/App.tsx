@@ -206,12 +206,13 @@ export function App() {
               <button className="danger" autoFocus onClick={stopRun}>确认停止</button>
               <button onClick={() => setConfirmingStop(false)}>不停止</button>
             </div>
-            : <><button className="danger" onClick={() => setConfirmingStop(true)} disabled={!stopEnabled} aria-describedby="stop-help">停止</button>
-              <p id="stop-help" className="control-help">暂停：等当前回合说完再停下，可以继续。停止：立即结束本次运行。</p></>}
+            : <><button className="danger" onClick={() => setConfirmingStop(true)} disabled={!stopEnabled} aria-describedby={stopEnabled ? 'stop-help' : undefined}>停止</button>
+              {stopEnabled && <p id="stop-help" className="control-help">暂停：等当前回合说完再停下，可以继续。停止：立即结束本次运行。</p>}</>}
         </div>
         {(snapshot?.status === 'error' || snapshot?.status === 'cancelled' || snapshot?.status === 'interrupted') && <>
           <button onClick={() => void session.repeat('retryTurn')} disabled={!retryEnabled}>重试当前回合</button>
           <button onClick={() => void session.repeat('continueMessage')} disabled={!continueEnabled}>续写部分回复</button>
+          {(retryEnabled || continueEnabled) && <p className="control-help">重试和续写会重新发送请求，可能再次计费。</p>}
         </>}
         {snapshot?.status === 'interrupted' && <>
           <button onClick={() => void session.recover('inspect')} disabled={!inspectEnabled}>检查中断记录</button>

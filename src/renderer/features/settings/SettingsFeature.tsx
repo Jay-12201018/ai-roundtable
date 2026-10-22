@@ -28,9 +28,9 @@ const modelExamples: Record<ProviderKind, string> = { mock: 'mock', openai: 'gpt
 export const keyInModelFieldMessage = (keySectionVisible: boolean) => keySectionVisible
   ? '这看起来是 API Key，不是模型 ID。请把它填到下方的“API Key”输入框，这里只填模型 ID。'
   : '这看起来是 API Key，不是模型 ID。请先删掉它；保存配置后，在下方出现的“API Key”输入框里填写。';
-function ModelIdHelp({ id, value, kind, keySectionVisible }: { id: string; value: string; kind: ProviderKind; keySectionVisible: boolean }) {
+function ModelIdHelp({ id, value, kind, keySectionVisible, example = true }: { id: string; value: string; kind: ProviderKind; keySectionVisible: boolean; example?: boolean }) {
   return looksLikeApiKey(value) ? <p id={id} role="alert" className="settings-field-error">{keyInModelFieldMessage(keySectionVisible)}</p>
-    : <p id={id} className="settings-hint">例如 {modelExamples[kind]}</p>;
+    : example ? <p id={id} className="settings-hint">例如 {modelExamples[kind]}</p> : null;
 }
 function safeError(error: unknown): string {
   const parsed = apiErrorSchema.safeParse(error instanceof ContractError ? error.detail : error);
@@ -184,7 +184,8 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   const currentStorage = keyState?.storage ?? storage;
   const keyReady = keyState?.state === 'configured' || keyState?.state === 'session';
   // Why the Key input is unavailable, said next to it with the one action that resolves it (D097).
-  const keyBlocked = !saved || draft.kind === 'mock' || busy ? null : dirty ? 'dirty' : !targetReady ? 'target' : null;
+  // With a saved Key awaiting session confirmation, the only next step shown is that confirmation, not a Key re-entry.
+  const keyBlocked = !saved || draft.kind === 'mock' || busy ? null : dirty ? 'dirty' : targetReady || keyReady && !sessionConfirmed ? null : 'target';
   const nextStep = dirty ? '下一步：保存配置。' : !keyReady ? '下一步：在下方“API Key”一栏核对请求目标并填写 Key。'
     : !sessionConfirmed ? '下一步：确认本次会话目标。' : '已就绪：房间成员可以向此 Provider 发送真实请求（仍受模型审核和运行预算限制）。';
 
@@ -342,7 +343,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
               change('customModels', [...draft.customModels, model]); setNewModel({ id: '', name: '' });
             }}>添加自定义模型</button>
           </div>
-          <ModelIdHelp id="settings-new-model-help" value={newModel.id} kind={draft.kind} keySectionVisible={saved !== null} />
+          <ModelIdHelp id="settings-new-model-help" value={newModel.id} kind={draft.kind} keySectionVisible={saved !== null} example={false} />
         </div>}
         <div className="settings-actions"><button type="submit" className="settings-primary">保存配置</button>{saved && <button type="button" onClick={() => { clearSecret(); setDraft(toDraft(saved)); setTargetConfirmed(false); setSessionConfirmed(false); setError(''); setNotice(''); setDeleting(null); }}>取消更改</button>}{saved && <button type="button" onClick={() => { clearSecret(); setDeleting('provider'); }}>删除 Provider</button>}</div>
       </fieldset>
@@ -353,7 +354,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
         <p>{currentStorage?.mode === 'secure' ? '密钥将使用系统安全存储持久化。' : currentStorage?.mode === 'memory' ? '当前系统没有可靠的安全存储，密钥仅在本次会话有效。' : '安全存储状态未知；请重新加载。'}</p>
         <form onSubmit={saveKey}><label>API Key<input ref={bindSecret} type="password" autoComplete="off" spellCheck={false} onChange={event => setHasSecret(event.target.value.length > 0)} onBlur={clearSecret} disabled={!canUseSaved || !targetReady} aria-describedby={keyBlocked ? 'settings-key-blocked settings-key-help' : 'settings-key-help'} /></label>
           {keyBlocked === 'dirty' && <div className="settings-inline-fix" id="settings-key-blocked" role="note"><p>输入框暂不可用：配置有未保存的更改，保存后才能填写 Key。</p><button type="button" onClick={saveDraft}>先保存配置</button></div>}
-          {keyBlocked === 'target' && <div className="settings-inline-fix" id="settings-key-blocked" role="note"><p>输入框暂不可用：填写 Key 之前，请先核对 Key 将发往的请求目标：{effectiveTarget ?? '未配置'}</p>
+          {keyBlocked === 'target' && <div className="settings-inline-fix" id="settings-key-blocked" role="note"><p>{keyReady ? '已保存的 Key 正在使用。要替换它，' : '输入框暂不可用：填写 Key 之前，'}请先核对 Key 将发往的请求目标：{effectiveTarget ?? '未配置'}</p>
             <button type="button" disabled={!effectiveTarget} onClick={enableKeyInput}>目标无误，启用输入框</button></div>}
           <p id="settings-key-help">输入后按 Enter 保存或替换；离开输入框会清除输入。Key 不回显，保存后立即清除表单。</p>
           <div className="settings-actions"><button type="submit" disabled={!canUseSaved || !targetReady || !hasSecret} onMouseDown={event => event.preventDefault()}>保存或替换 Key</button><button type="button" onClick={clearSecret}>清除输入</button><button type="button" disabled={!canUseSaved || !keyState || keyState.state === 'missing'} onClick={() => { clearSecret(); setDeleting('key'); }}>删除 Key</button></div>
