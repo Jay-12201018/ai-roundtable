@@ -59,6 +59,9 @@ if (!hasLock) {
         await pending;
       }
       if (shutdownRequested) return;
+      // D096: a key pasted into a model field earlier is cleared before any window or IPC can read it.
+      const purged = database.purgeKeyLikeModelIds();
+      if (purged) console.info(`已清除 ${purged} 处疑似 API Key 的模型 ID`);
       database.markInFlightRunsInterrupted();
       database.recoverControlledTrials();
       const keyService = new KeyService(database, createElectronKeyBackend());

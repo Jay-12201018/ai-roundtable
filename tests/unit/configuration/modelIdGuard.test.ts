@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
 import { looksLikeApiKey, modelIdSchema } from '../../../src/shared/schemas/common';
@@ -76,5 +79,42 @@ describe('D096 stored legacy values are withheld on read and refused on use', ()
     expect(raw.prepare('SELECT default_model_id, custom_models_json FROM providers WHERE id=?').get('p')).toEqual({
       default_model_id: 'deepseek-flash', custom_models_json: JSON.stringify([{ id: 'deepseek-flash', name: 'flash' }]) });
     expect(db.getProviderConfiguration('p')).not.toHaveProperty('withheldModelIds');
+  });
+});
+
+describe('D096 stored key-like model IDs are cleared at startup', () => {
+  const directories: string[] = [];
+  afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
+  const fileBytes = (path: string) => Buffer.concat(['', '-wal', '-shm'].filter(suffix => existsSync(path + suffix)).map(suffix => readFileSync(path + suffix)));
+
+  it('clears every place in one transaction, keeps the configuration usable and leaves no plaintext in the file', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'roundtable-purge-')); directories.push(directory);
+    const path = join(directory, 'ai-roundtable.db');
+    const key = keyLike[0];
+    const db = new Database(path); await db.initialize();
+    db.createRoom({ id: 'r', name: 'Room' });
+    db.createProvider({ id: 'p', name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'flash' }] });
+    db.createAgent({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'Drafter', providerId: 'p', modelId: 'deepseek-flash' });
+    db.createAgent({ id: 'b', roomId: 'r', displayName: 'B', roleTemplateId: 'Critic', providerId: 'p', modelId: 'deepseek-flash' });
+    const raw = (db as unknown as { db: import('better-sqlite3').Database }).db;
+    raw.prepare('UPDATE providers SET default_model_id=?, custom_models_json=? WHERE id=?')
+      .run(key, JSON.stringify([{ id: 'deepseek-flash', name: 'flash' }, { id: key, name: 'oops' }]), 'p');
+    raw.prepare('UPDATE agents SET model_id=? WHERE id=?').run(key, 'a');
+    expect(fileBytes(path).includes(Buffer.from(key))).toBe(true);
+    db.close();
+
+    const reopened = new Database(path); await reopened.initialize();
+    expect(reopened.purgeKeyLikeModelIds()).toBe(3);
+    expect(reopened.purgeKeyLikeModelIds()).toBe(0);
+    const rows = (reopened as unknown as { db: import('better-sqlite3').Database }).db;
+    expect(rows.prepare('SELECT default_model_id, custom_models_json FROM providers').get()).toEqual({ default_model_id: null, custom_models_json: JSON.stringify([{ id: 'deepseek-flash', name: 'flash' }]) });
+    expect(rows.prepare('SELECT id, model_id FROM agents ORDER BY id').all()).toEqual([{ id: 'a', model_id: null }, { id: 'b', model_id: 'deepseek-flash' }]);
+    // The configuration stays readable: no withheld flag is needed any more, and the member just lacks a model.
+    expect(reopened.getProviderConfiguration('p')).not.toHaveProperty('withheldModelIds');
+    expect(reopened.getAgentConfiguration('a')).toMatchObject({ providerId: 'p', modelId: null });
+    expect(reopened.getAgentConfiguration('a')).not.toHaveProperty('withheldModelId');
+    expect(reopened.listProviderSummaries()[0]).toMatchObject({ configurationValid: true });
+    reopened.close();
+    expect(fileBytes(path).includes(Buffer.from(key))).toBe(false);
   });
 });

@@ -16,7 +16,7 @@ export function providerNotice(agent: Pick<AgentConfiguration, 'providerId' | 'm
   if (!provider.configurationValid || provider.kind === null) return 'Provider 配置失效';
   if (!provider.enabled) return 'Provider 已禁用';
   if (agent.withheldModelId) return '之前填写的 Model 看起来是 API Key，已隐藏且不会使用；请编辑成员，重新填写模型 ID';
-  if (!agent.modelId) return 'Model 未配置';
+  if (!agent.modelId) return 'Model 未配置：请编辑成员，填写模型 ID 后才能参与运行';
   if (provider.kind === 'mock') return agent.modelId === 'mock' ? '显式 Mock · 本地验证，不产生模型费用' : 'Mock 仅支持 mock 模型';
   return `真实 Provider · 生成能力尚未验证 · 密钥状态：${provider.hasStoredKey ? '存在存储记录，不代表可用' : '摘要未发现存储记录，会话密钥需在设置中确认'}`;
 }

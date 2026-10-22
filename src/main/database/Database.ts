@@ -449,6 +449,44 @@ export class Database {
     });
   }
 
+  /**
+   * D096: clears stored model IDs that look like an API key (a key pasted into a model field) and returns how many
+   * places were cleared. When anything changed, freed pages are zeroed (secure_delete + VACUUM) and the WAL is
+   * truncated, so the plaintext does not linger in the file. Never returns or logs the values themselves.
+   */
+  purgeKeyLikeModelIds(): number {
+    this.assertInitialized();
+    const cleared = this.db.transaction(() => {
+      let count = 0;
+      const providers = this.db.prepare('SELECT id,default_model_id,custom_models_json FROM providers').all() as Array<{ id: string; default_model_id: string | null; custom_models_json: string }>;
+      for (const row of providers) {
+        const clearDefault = row.default_model_id !== null && looksLikeApiKey(row.default_model_id);
+        let models: unknown;
+        try { models = JSON.parse(row.custom_models_json); } catch { models = undefined; }
+        const kept = Array.isArray(models) ? models.filter((model: { id?: unknown } | null) => !(typeof model?.id === 'string' && looksLikeApiKey(model.id))) : models;
+        const removed = Array.isArray(models) ? models.length - (kept as unknown[]).length : 0;
+        if (!clearDefault && !removed) continue;
+        count += Number(clearDefault) + removed;
+        this.db.prepare('UPDATE providers SET default_model_id=?,custom_models_json=? WHERE id=?')
+          .run(clearDefault ? null : row.default_model_id, removed ? JSON.stringify(kept) : row.custom_models_json, row.id);
+      }
+      const agents = this.db.prepare('SELECT id,model_id FROM agents WHERE model_id IS NOT NULL').all() as Array<{ id: string; model_id: string }>;
+      for (const row of agents.filter(agent => looksLikeApiKey(agent.model_id))) {
+        this.db.prepare('UPDATE agents SET model_id=NULL WHERE id=?').run(row.id);
+        count++;
+      }
+      return count;
+    })();
+    if (cleared && this.filename !== ':memory:') {
+      const previous = this.db.pragma('secure_delete', { simple: true });
+      this.db.pragma('secure_delete = ON');
+      this.db.exec('VACUUM');
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+      this.db.pragma(`secure_delete = ${Number(previous) ? 'ON' : 'OFF'}`);
+    }
+    return cleared;
+  }
+
   markInFlightRunsInterrupted(): number {
     this.assertInitialized();
     const timestamp = now();
