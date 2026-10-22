@@ -88,6 +88,13 @@ describe('D097 the Key input says why it is unavailable and offers the fix next 
     expect(document.getElementById('settings-key-blocked')).toBeNull();
   });
 
+  it('explains the target check once: not again in the checks and tests section', async () => {
+    const { api } = fixture();
+    await open(api);
+    expect(document.body.textContent!.match(/核对 Key 将发往的请求目标/gu)).toHaveLength(1);
+    expect(document.body.textContent).not.toContain('请先勾选“我已核对请求目标”');
+  });
+
   it('with unsaved changes, says so and saves from the same place', async () => {
     const { api } = fixture();
     await open(api);

@@ -366,7 +366,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     {saved && <section className="settings-section" aria-labelledby="settings-tests-title"><h3 id="settings-tests-title">分级检查与测试</h3>
       <p>配置检查仅校验本地设置。获取模型列表、鉴权与真实生成相互独立；未知目标能力、模型计数或预算会拒绝生成。</p>
       {dirty && <p className="settings-warning">先保存或取消配置更改，再操作 Key 或运行检查。</p>}
-      {!targetReady && <p className="settings-warning">请先勾选“我已核对请求目标”。</p>}
+      {/* D097: the target check is explained once, next to the Key input (or the last-step box); not repeated here. */}
       {!saved.enabled && <p className="settings-warning">当前 Provider 已禁用；配置检查会报告不可用。</p>}
       <div className="settings-actions"><button type="button" disabled={!canUseSaved} onClick={() => test('configuration')}>检查配置</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={listModels}>获取模型列表</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={() => test('authentication')}>测试鉴权</button></div>
       <label>生成测试模型 ID<input value={generationModel} placeholder={`例如 ${modelExamples[draft.kind]}`} autoComplete="off" spellCheck={false} aria-invalid={looksLikeApiKey(generationModel) || undefined} onChange={event => { setGenerationModel(event.target.value); setGenerationConfirmed(false); }} disabled={!canUseSaved} /></label>
