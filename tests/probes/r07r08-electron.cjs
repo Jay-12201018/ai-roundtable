@@ -162,7 +162,8 @@ async function main() {
         const actions = [];
         if (${width} === 800 && ${JSON.stringify(page)} === '讨论') {
           const toggle = document.querySelector('.controls-toggle'); await reach(toggle, 'host controls toggle'); toggle.click(); await new Promise(resolve => setTimeout(resolve, 30));
-          for (const name of ['暂停','下一步','继续','停止']) await reach(named(name, document.querySelector('#host-controls')), name);
+          // D098: run controls replace 开始协作 in the composer while a Run is live; idle, the composer offers 开始协作.
+          await reach(named('开始协作', document.querySelector('.composer')), '开始协作'); await reach(document.querySelector('#host-controls h2'), 'host panel');
           await reach(toggle, 'host controls collapse'); toggle.click(); actions.push('host controls expanded, reached, collapsed');
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '房间与成员') {

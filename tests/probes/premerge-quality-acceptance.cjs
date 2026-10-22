@@ -148,6 +148,13 @@ async function main() {
     await sleep(150);
   };
   const field = (name, options = {}) => click(name, { selector: 'textarea,input,select', ...options });
+  // Clicks at a fixed screen point, the way a host clicks again without moving the mouse.
+  const clickAt = async ({ x, y }) => {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    await sleep(150);
+  };
   const key = async (keyName, modifiers = 0) => {
     const map = { Enter: { code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' }, a: { code: 'KeyA', windowsVirtualKeyCode: 65 } }[keyName];
     // Like a real keyboard, Enter (with or without Shift) carries text; the Cmd+A shortcut carries an editing command.
@@ -246,35 +253,41 @@ async function main() {
   }
   await capture('members', '新建房间“校园跑腿讨论”，添加“起草者（Drafter）”“审查者（Critic）”“综合者（Synthesizer）”三个成员，Provider 均为“DeepSeek 直连”，Model 自动带出 deepseek-flash。', '.rooms-feature');
 
-  // Step 6: start; while the first reply is still streaming, press Pause — Stop is separate and untouched.
+  // Step 6: start, then pause without moving the pointer: 开始协作 turns into 暂停 at the same spot.
   await click('讨论');
   await field('任务目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
   await field('本次运行预算（元）'); await selectAll(); await type('0.05');
+  check(!(await js(`document.querySelector('.composer-step input').checked`)), 'Step-by-step is off by default');
   holdNext = true;
-  await click('开始协作');
+  // Where the host's pointer rests after clicking 开始协作; measured without scrolling, never re-aimed afterwards.
+  const startAt = await js(`(() => { const r = [...document.querySelectorAll('.composer-actions button')].find(b => b.textContent === '开始协作').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await clickAt(startAt);
   await until(`document.querySelector('.timeline .status').textContent.includes('运行中') && document.querySelectorAll('.message').length === 1`, 'first reply streaming');
   check(requests.length === 1 && held.length === 1, 'The first request is in flight');
-  check(await js(`[...document.querySelector('[aria-label=运行控制]').querySelectorAll('button')].map(b => b.textContent).join('|')`) === '暂停|下一步|继续', 'Pause, Step and Resume form one group without Stop');
-  check(await js(`!document.querySelector('[aria-label=运行控制]').contains([...document.querySelectorAll('button')].find(b => b.textContent === '停止'))`), 'Stop is outside that group');
-  await click('暂停');
+  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '暂停', 'Under the unmoved pointer, 开始协作 has become 暂停');
+  check(await js(`[...document.querySelector('[aria-label=运行控制]').querySelectorAll('button')].map(b => b.textContent).join('|')`) === '暂停|下一步|停止', 'The in-place bar is 暂停, 下一步, then 停止 at the end');
+  check(await js(`![...document.querySelectorAll('#host-controls button')].some(b => ['暂停', '继续', '下一步', '停止'].includes(b.textContent))`), 'The side panel has no second set of run buttons');
+  await clickAt(startAt);
   await until(`document.querySelector('.timeline .status').textContent.includes('正在暂停')`, 'pausing');
   check(!(await js(`Boolean(document.querySelector('[aria-label=确认停止运行]'))`)), 'Pause never opens the Stop confirmation');
-  await capture('pause-pressed', '开始协作后，第一位成员还在输出时点“暂停”：页头变为“正在暂停”，当前回合继续说完。右侧“主持人控制”里，暂停 / 下一步 / 继续是一组；“停止”在分隔线下方单独一行、红色描边，下面写着“暂停：等当前回合说完再停下，可以继续。停止：立即结束本次运行。”', '.app-navigation');
+  await capture('pause-in-place', '点“开始协作”后鼠标不动，第一位成员开始输出时在原位置再点一下：那里已经原地变成“暂停”，页头变为“正在暂停”，当前回合继续说完。控制条依次是 暂停、下一步、停止；停止在末尾、与前两个隔开、红色描边。右侧主持人面板不再有第二套运行按钮。', '.app-navigation');
   held.shift()();
   await until(`document.querySelector('.timeline .status').textContent.includes('已暂停')`, 'paused');
   const paused = await snapshot();
   check(paused.status === 'paused' && paused.charges.length === 1 && paused.charges[0].state === 'settled', 'Pause finished the turn and settled its request; nothing was stopped');
+  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '继续', 'Paused, the same spot offers 继续');
 
-  // Step 7: resume; while the reviewer is speaking, Stop asks first and explains what stopping means.
+  // Step 7: continue from the same spot; while the reviewer is speaking, Stop asks first without covering Pause.
   holdNext = true;
-  await click('继续');
+  await clickAt(startAt);
   await until(`document.querySelectorAll('.message').length === 2 && document.querySelector('.timeline .status').textContent.includes('运行中')`, 'second reply streaming');
   await click('停止');
   const confirmText = await js(`document.querySelector('[aria-label=确认停止运行]')?.textContent ?? ''`);
   check(confirmText.includes('已生成的部分文字会保留') && confirmText.includes('可能已经计费'), 'The confirmation explains partial output and possible charges');
   check((await snapshot()).status === 'running', 'The first click on Stop sends nothing');
-  check(await js(`document.activeElement?.textContent === '确认停止'`), 'Focus lands on the confirm button');
-  await capture('stop-confirm', '点“继续”后第二位成员（审查者）正在输出时点“停止”：先就地出现确认——“停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。”以及“确认停止”“不停止”。此时运行仍是“运行中”。', '.app-navigation');
+  check(await js(`document.activeElement?.textContent === '不停止'`), 'Focus rests on the safe choice');
+  check(await js(`!document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.disabled && document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent === '暂停'`), 'The confirmation does not cover or disable 暂停');
+  await capture('stop-confirm', '“继续”同样在原位置；审查者输出中点控制条末尾的“停止”：控制条下方出现轻量确认——“停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。”以及“确认停止”“不停止”（焦点在“不停止”）。“暂停”仍在原处可用，运行仍是“运行中”。', '.composer');
   await click('不停止');
   check(!(await js(`Boolean(document.querySelector('[aria-label=确认停止运行]'))`)) && (await status()).includes('运行中'), '不停止 keeps the Run going');
   await click('停止'); await click('确认停止');
@@ -283,10 +296,31 @@ async function main() {
   check((await text()).includes('重试和续写会重新发送请求，可能再次计费。'), 'Retry and continue warn that they may bill again');
   check(stopped.status === 'cancelled' && stopped.messages[1].status === 'aborted' && stopped.messages[1].content.length > 0, 'Stop kept the partial reply');
   check(stopped.charges.find(c => c.requestId === stopped.attempts.find(a => a.messageId === stopped.messages[1].id).requestId).state === 'unknown', 'The stopped request is recorded as an unknown charge, not zero');
-  await capture('stopped', '点“不停止”后运行继续；再点“停止”并“确认停止”：页头“已停止”，审查者已输出的部分文字保留并标为“已中止”，这次请求在预算栏按未知费用（预留上限）计入、不记为 0。右侧“停止”变为不可用，“重试当前回合”“续写部分回复”下方提示“重试和续写会重新发送请求，可能再次计费。”（实测中用户正是停止后点了重试才产生了未知费用，因此补上这句提醒。）', '.app-navigation');
+  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '开始协作', 'Settled, the slot is 开始协作 again');
+  await capture('stopped', '点“不停止”后运行继续；再点“停止”并“确认停止”：页头“已停止”，审查者已输出的部分文字保留并标为“已中止”，这次请求在预算栏按未知费用（预留上限）计入、不记为 0。输入区原位置变回“开始协作”；右侧“重试当前回合”“续写部分回复”下方提示“重试和续写会重新发送请求，可能再次计费。”', '.app-navigation');
+  const reviewer = requests[1].messages;
+
+  // Step 8: step-by-step from the start — pause after each turn, interject, then 下一步.
+  await click('每个回合结束后暂停，方便插话或点名', { selector: 'input[type=checkbox]' });
+  check(await js(`document.querySelector('.composer-step input').checked`), 'Step-by-step checked');
+  await field('任务目标'); await selectAll(); await ime('dingjia', '讨论跑腿平台的定价');
+  await capture('step-option', '开始前在输入区勾选“每个回合结束后暂停，方便插话或点名”（默认不勾选，勾选后会记住），任务改为“讨论跑腿平台的定价”（输入法输入）。', '.composer');
+  const before = requests.length;
+  await clickAt(startAt);
+  await until(`document.querySelector('.timeline .status').textContent.includes('已暂停') && document.querySelectorAll('.message').length === 1`, 'auto-paused after the first turn');
+  const stepRun = await snapshot();
+  check(requests.length === before + 1 && stepRun.status === 'paused' && stepRun.turns.length === 1, 'Exactly one turn ran, then the Run paused by itself');
+  await field('主持人插话'); await ime('qingzhongdian', '请重点比较按距离计价和固定价');
+  await click('发送插话');
+  await until(`document.querySelectorAll('.message').length === 2`, 'interjection shown');
+  await capture('step-paused-interject', '开始后第一位成员（起草者）说完，运行自动暂停（页头“已暂停”），没有和模型抢时间；在右侧“插话”里用输入法输入“请重点比较按距离计价和固定价”并发送，插话出现在时间线上。输入区提示：可以在“主持人控制”里插话或点名，然后点“下一步”让下一位发言，或点“继续”自动运行。', '.app-navigation');
+  await click('下一步');
+  await until(`document.querySelectorAll('.message').length === 3 && document.querySelector('.timeline .status').textContent.includes('已暂停')`, 'stepped once');
+  check(requests.length === before + 2, 'One step sends exactly one request');
+  check(requests.at(-1).messages.at(-1).content.includes('【主持人插话】\n> 请重点比较按距离计价和固定价'), 'The next speaker received the interjection as a host entry');
+  await capture('step-next', '点“下一步”：只让下一位（审查者）发言一次，说完再次自动暂停；它收到的上下文里包含刚才的主持人插话（脚本核对了请求体）。右侧显示"下一位：综合者（按计划）"，输入区仍是 继续 / 下一步 / 停止。', 2);
 
   // The reviewer saw the drafter's reply as quoted discussion on the user side, never as its own assistant turn.
-  const reviewer = requests[1].messages;
   check(reviewer.filter(m => m.role !== 'system').map(m => m.role).join(',') === 'user', 'The reviewer request has one user block and no assistant message');
   check(reviewer.at(-1).content.includes('【成员「起草者」· Drafter】\n> DeepSeek 夹具回复 1') && reviewer.at(-1).content.includes('现在由你（成员「审查者」· Critic）发言'), 'Labelled, quoted drafter reply and the turn cue');
   check(requests.every(r => r.keyMatches && r.model === 'deepseek-flash' && r.thinking?.type === 'disabled'), 'Requests carried the saved Key, the approved model and thinking disabled');

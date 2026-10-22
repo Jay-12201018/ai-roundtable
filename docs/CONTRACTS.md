@@ -358,7 +358,7 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 
 ## 合并前质量修复（2026-10-23，子会话候选，未合 main）
 
-分支 `codex/r13a-premerge-quality`（基线 `b3e3324`）。总控授权本子会话直接修改共享文件；共享与接线改动以 `contract:` / `wire:` 提交。决策见 [DECISIONS](DECISIONS.md) D095–D098。
+分支 `codex/r13a-premerge-quality`（基线 `b3e3324`）。总控授权本子会话直接修改共享文件；共享与接线改动以 `contract:` / `wire:` 提交。决策见 [DECISIONS](DECISIONS.md) D095–D099。
 
 | 层 | 变化 | 兼容性 |
 | --- | --- | --- |
@@ -369,6 +369,6 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Shared `schemas/provider.ts` | `streamChatInputSchema.modelId` 改用 `modelIdSchema` | 类密钥模型 ID 在发送前被拒 |
 | Database | 读取 Provider / 成员时隐藏类密钥模型 ID 并打标；`validateModelSelection` 用 `modelIdSchema` | 无 migration，不改存量数据 |
 | ProviderRegistry / ProviderSettingsService | `isTargetConfirmed(id)`；`getProviderKeyState` 在有注册表时附带 `sessionTargetConfirmed` | IPC 通道不变 |
-| Renderer | 设置页接入进度、Key 输入框就近原因与一键操作、模型 ID 示例与类密钥提示；成员编辑器同样提示；App 主持人控制把停止分开并就地确认，重试/续写提示可能再次计费 | — |
+| Renderer | 设置页接入进度、Key 输入框就近原因与一键操作、模型 ID 示例与类密钥提示；成员编辑器同样提示；App 输入区固定在窗口底部，运行时"开始协作"原地变为 暂停/继续 · 下一步 · 停止（停止在末尾并轻量确认），右侧面板去掉重复的运行按钮；开始前可选逐回合推进（`run.start` 已有的 `mode: 'step'`，未新增字段）；`rendererSession.startRun` 的 limits 增加可选 `mode` | — |
 
 安全影响：防注入边界从"JSON 字段 + 角色"变为"应用标签 + 全行引用"，可信指令仍只在 system 段；Key 不再可能以模型 ID 的形式进入请求、Renderer 或日志；会话目标确认机制与失效规则不变。

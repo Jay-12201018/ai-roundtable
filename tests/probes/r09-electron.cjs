@@ -132,7 +132,9 @@ async function main(){
   for(let i=0;i<3;i++){
    assert.ok(finished.attempts[i].requestId, 'Main request identity absent');
    assert.ok(JSON.stringify(runCalls[i].body.messages).includes('R09 system '+i));
-   for(let j=0;j<i;j++)assert.ok(runCalls[i].body.messages.some(m=>m.role==='assistant'&&m.content.includes(finished.messages[j].content)),'Prior public output missing');
+   // D095: other members' replies are quoted user-side discussion; with three different members none is assistant.
+   assert.ok(runCalls[i].body.messages.every(m=>m.role!=='assistant'),'Another member was sent as assistant');
+   for(let j=0;j<i;j++)assert.ok(runCalls[i].body.messages.some(m=>m.role==='user'&&m.content.includes('\n> '+finished.messages[j].content)),'Prior public output missing');
   }
   mode='hang';result.ui=await ui(contents,'stop',result.resumed.saved);await new Promise(r=>setTimeout(r,100));
   const stopped=requests.filter(r=>r.method==='POST'&&r.body.messages.some(m=>m.content.includes('R09 hanging HTTP output')));
