@@ -21,6 +21,7 @@ export function App() {
   const [bootReady, setBootReady] = useState(false);
   const [roomsReady, setRoomsReady] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [confirmingStop, setConfirmingStop] = useState(false);
   const [budgetText, setBudgetText] = useState('1');
   const budgetMicroCny = parseBudgetYuan(budgetText);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
@@ -149,6 +150,10 @@ export function App() {
   const upcoming = snapshot && ['running', 'pausing', 'paused'].includes(snapshot.status) ? nextSpeaker(snapshot) : undefined;
   // A budget stop is a deliberate guard, not a model failure; say so in the header.
   const budgetStopped = snapshot?.status === 'error' && snapshot.budget?.blocked !== undefined;
+  // Stop ends the Run and may abort a request already billed; it asks once, in place (D098).
+  const requestInFlight = snapshot?.status === 'running' || snapshot?.status === 'pausing' || snapshot?.status === 'cancelling' || Boolean(snapshot?.host?.generation);
+  useEffect(() => { if (!stopEnabled) setConfirmingStop(false); }, [stopEnabled]);
+  const stopRun = () => { setConfirmingStop(false); void session.control('stop'); };
 
   return <div className="app-shell">
     <nav className="app-navigation" aria-label="应用导航">
@@ -187,10 +192,23 @@ export function App() {
       </section>
       <aside id="host-controls" className={`workbench${showControls ? ' is-open' : ''}`} aria-label="主持人控制">
         <h2>主持人控制</h2><p className="room-card">{roomId ? title : '还没有任务'}</p>
-        <button onClick={() => void session.control('pause')} disabled={!pauseEnabled}>暂停</button>
-        <button onClick={() => void session.control('step')} disabled={!stepEnabled}>下一步</button>
-        <button onClick={() => void session.control('resumeRun')} disabled={!resumeEnabled}>继续</button>
-        <button onClick={() => void session.control('stop')} disabled={!stopEnabled}>停止</button>
+        <div className="run-controls" role="group" aria-label="运行控制">
+          <button onClick={() => void session.control('pause')} disabled={!pauseEnabled}>暂停</button>
+          <button onClick={() => void session.control('step')} disabled={!stepEnabled}>下一步</button>
+          <button onClick={() => void session.control('resumeRun')} disabled={!resumeEnabled}>继续</button>
+        </div>
+        <div className="run-stop">
+          {confirmingStop && stopEnabled
+            ? <div className="stop-confirm" role="group" aria-label="确认停止运行" onKeyDown={event => { if (event.key === 'Escape') setConfirmingStop(false); }}>
+              <p>{requestInFlight
+                ? '停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。'
+                : '停止会结束本次运行，后续回合不再执行。已有发言都会保留。'}</p>
+              <button className="danger" autoFocus onClick={stopRun}>确认停止</button>
+              <button onClick={() => setConfirmingStop(false)}>不停止</button>
+            </div>
+            : <><button className="danger" onClick={() => setConfirmingStop(true)} disabled={!stopEnabled} aria-describedby="stop-help">停止</button>
+              <p id="stop-help" className="control-help">暂停：等当前回合说完再停下，可以继续。停止：立即结束本次运行。</p></>}
+        </div>
         {(snapshot?.status === 'error' || snapshot?.status === 'cancelled' || snapshot?.status === 'interrupted') && <>
           <button onClick={() => void session.repeat('retryTurn')} disabled={!retryEnabled}>重试当前回合</button>
           <button onClick={() => void session.repeat('continueMessage')} disabled={!continueEnabled}>续写部分回复</button>

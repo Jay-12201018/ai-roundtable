@@ -65,3 +65,17 @@ button:disabled { cursor: default; color: var(--secondary); background: var(--su
   .composer { padding: 16px; }
   .theme-control { margin-left: 0; }
 }
+.run-stop { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.workbench button.danger { color: var(--error); border-color: var(--error); }
+.workbench button.danger:hover:enabled { background: var(--subtle); }
+.workbench button.danger:disabled { color: var(--secondary); border-color: var(--control); }
+.control-help { color: var(--secondary); margin: 4px 0 0; }
+.stop-confirm { padding: 12px; border: 1px solid var(--error); border-radius: 8px; }
+.stop-confirm p { margin: 0 0 8px; overflow-wrap: anywhere; }
+@media (max-width: 1279px) {
+  .run-controls, .run-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .run-stop { margin-left: 0; }
+  .run-controls button, .run-stop button { margin: 0; }
+  .stop-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .stop-confirm p { flex: 1 0 100%; }
+}
