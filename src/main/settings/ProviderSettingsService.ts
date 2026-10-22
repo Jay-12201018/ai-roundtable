@@ -73,8 +73,12 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
   }
 
   async getProviderKeyState(input: ProviderIdInput) {
-    return this.perform(async () => providerSettingsContracts.getProviderKeyState.output.parse(
-      await this.keys.getProviderKeyState(parseInput(schemas.providerIdInputSchema, input).providerId)));
+    return this.perform(async () => {
+      const { providerId } = parseInput(schemas.providerIdInputSchema, input);
+      const state = await this.keys.getProviderKeyState(providerId);
+      return providerSettingsContracts.getProviderKeyState.output.parse(
+        this.runtime ? { ...state, sessionTargetConfirmed: this.runtime.isTargetConfirmed(providerId) } : state);
+    });
   }
 
   async getKeyStorageStatus() {

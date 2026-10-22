@@ -22,7 +22,7 @@ import { validateDatabase } from './recovery/validateDatabase';
 import { classifyInterruptedRuns } from './recovery/classifyInterruptedRuns';
 import { executionMetadataSchema, storedRunSchema, createAttemptInputSchema, requestAttemptSchema, messagePageInputSchema, eventPageInputSchema } from '../../shared/schemas/persistence';
 import type { ExecutionMetadata,StoredRun, RequestAttempt, CreateAttemptInput, MessageCursor } from '../../shared/schemas/persistence';
-import { idSchema, sequenceSchema } from '../../shared/schemas/common';
+import { idSchema, looksLikeApiKey, modelIdSchema, sequenceSchema } from '../../shared/schemas/common';
 import { runEventSchema } from '../../shared/schemas/run';
 import { turnStatusValues } from '../../shared/types/run';
 
@@ -865,7 +865,10 @@ export class Database {
   getAgentConfiguration(id: string): AgentConfiguration | undefined {
     this.assertInitialized(); configurationInput(idSchema, id);
     const row = this.db.prepare('SELECT id,room_id AS roomId,display_name AS displayName,role_template_id AS roleTemplateId,provider_id AS providerId,model_id AS modelId,system_prompt AS systemPrompt,enabled,display_order AS displayOrder,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM agents WHERE id=?').get(id) as Record<string, unknown> | undefined;
-    return row ? configurationOutput(agentConfigurationSchema, { ...row, enabled: row.enabled === 1 }) : undefined;
+    if (!row) return;
+    // D096: a stored model ID that looks like an API key is withheld, never returned to the Renderer or used.
+    const withheld = typeof row.modelId === 'string' && looksLikeApiKey(row.modelId);
+    return configurationOutput(agentConfigurationSchema, { ...row, enabled: row.enabled === 1, ...(withheld ? { modelId: null, withheldModelId: true } : {}) });
   }
 
   listAgentConfigurations(roomId: string, includeArchived = false): AgentConfiguration[] {
@@ -946,7 +949,12 @@ export class Database {
     if (!row) return;
     let models: unknown;
     try { models = JSON.parse(row.customModels as string); } catch { throw new ContractError('invalid_state'); }
-    return configurationOutput(providerConfigurationSchema, { ...row, enabled: row.enabled === 1, isDefault: row.isDefault === 1, customModels: models, keyReference: row.keyReference === null ? null : { id: row.keyReference } });
+    // D096: model IDs that look like an API key stay in the row until the next save, but are never returned or used.
+    const withheldDefault = typeof row.defaultModelId === 'string' && looksLikeApiKey(row.defaultModelId);
+    const kept = Array.isArray(models) ? models.filter((model: { id?: unknown } | null) => !(typeof model?.id === 'string' && looksLikeApiKey(model.id))) : models;
+    const withheld = withheldDefault || Array.isArray(models) && (kept as unknown[]).length !== models.length;
+    return configurationOutput(providerConfigurationSchema, { ...row, enabled: row.enabled === 1, isDefault: row.isDefault === 1, customModels: kept, keyReference: row.keyReference === null ? null : { id: row.keyReference },
+      ...(withheldDefault ? { defaultModelId: null } : {}), ...(withheld ? { withheldModelIds: true } : {}) });
   }
 
   listProviderSummaries(): ProviderSummary[] {
@@ -962,7 +970,7 @@ export class Database {
   }
 
   validateModelSelection(providerId: string, modelId: string): ProviderConfiguration {
-    configurationInput(idSchema, providerId); configurationInput(idSchema, modelId);
+    configurationInput(idSchema, providerId); configurationInput(modelIdSchema, modelId);
     const provider = this.getProviderConfiguration(providerId);
     if (!provider) throw new ContractError('not_found');
     if (!provider.enabled) throw new ContractError('invalid_state');

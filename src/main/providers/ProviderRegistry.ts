@@ -93,6 +93,10 @@ export class ProviderRegistry {
     this.approvals.set(configuration.id, { kind: configuration.kind, baseUrl, revision: this.database.getProviderKeyRevision(configuration.id) });
     return { providerId: configuration.id };
   }
+  /** Whether a send would pass the session target check now: same kind, target and Key revision as confirmed. */
+  isTargetConfirmed(id: string): boolean {
+    try { this.trusted(id); return true; } catch { return false; }
+  }
   private trusted(id: string): Approval {
     const configuration = this.configuration(id);
     const approved = this.approvals.get(id);

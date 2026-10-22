@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { idSchema, sequenceSchema } from './common';
+import { idSchema, modelIdSchema, sequenceSchema } from './common';
 import { apiErrorSchema } from './error';
 
 export const providerMessageSchema = z.object({
@@ -16,7 +16,7 @@ export const connectionTestResultSchema = z.discriminatedUnion('ok', [
   z.object({ requestId: idSchema, level: connectionLevelSchema, ok: z.literal(false), error: apiErrorSchema }).strict(),
 ]);
 export const streamChatInputSchema = z.object({
-  requestId: idSchema, modelId: idSchema, messages: z.array(providerMessageSchema),
+  requestId: idSchema, modelId: modelIdSchema, messages: z.array(providerMessageSchema),
   outputTokenLimit: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   agentRole: z.string().optional(), turnIndex: sequenceSchema.optional(),
 }).strict();

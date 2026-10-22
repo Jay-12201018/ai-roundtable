@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { idSchema, sequenceSchema, timestampSchema } from './common';
+import { idSchema, modelIdSchema, sequenceSchema, timestampSchema } from './common';
 import { connectionLevelSchema, connectionTestResultSchema, providerModelSchema } from './provider';
 import { messageStatusValues, runStatusValues } from '../types/run';
 
@@ -27,11 +27,13 @@ export const providerBaseUrlSchema = z.string().trim().transform((value, ctx) =>
   return url.toString();
 });
 
+// D096: user-entered model IDs refuse API-key-like text; Provider-listed models keep the plain identity schema.
+const customModelSchema = providerModelSchema.extend({ id: modelIdSchema });
 const providerInputObject = z.object({
   id: idSchema, name: z.string().trim().min(1), kind: providerKindSchema,
   baseUrl: providerBaseUrlSchema.nullable().default(null), enabled: z.boolean().default(true),
-  isDefault: z.boolean().default(false), defaultModelId: idSchema.nullable().default(null),
-  customModels: z.array(providerModelSchema).default([]),
+  isDefault: z.boolean().default(false), defaultModelId: modelIdSchema.nullable().default(null),
+  customModels: z.array(customModelSchema).default([]),
 }).strict();
 const enabledDefault = (input: { enabled: boolean; isDefault: boolean }) => !input.isDefault || input.enabled;
 const uniqueModels = (input: { customModels: Array<{id:string}> }) => new Set(input.customModels.map(m => m.id)).size === input.customModels.length;
@@ -40,6 +42,8 @@ export const providerInputSchema = providerInputObject.refine(mockHasNoEndpoint,
 export const createProviderInputSchema = providerInputObject.omit({ id: true }).refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
 export const providerConfigurationSchema = providerInputObject.extend({
   keyReference: keyReferenceSchema.nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
+  // D096: Main withheld stored model IDs that look like an API key; they are never returned or used.
+  withheldModelIds: z.literal(true).optional(),
 }).refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
 export const providerSummarySchema = z.object({
   id: idSchema, name: z.string().trim().min(1), kind: providerKindSchema.nullable(), enabled: z.boolean(),
@@ -54,7 +58,7 @@ export const roomConfigurationSchema = roomInputSchema.extend({
 });
 const agentInputObject = z.object({
   id: idSchema, roomId: idSchema, displayName: z.string().trim().min(1), roleTemplateId: z.string().trim().min(1),
-  systemPrompt: z.string().default(''), providerId: idSchema.nullable().default(null), modelId: idSchema.nullable().default(null),
+  systemPrompt: z.string().default(''), providerId: idSchema.nullable().default(null), modelId: modelIdSchema.nullable().default(null),
   enabled: z.boolean().default(true), displayOrder: sequenceSchema.default(0),
 }).strict();
 const pairedModelSelection = (input: { providerId: string | null; modelId: string | null }) => (input.providerId === null) === (input.modelId === null);
@@ -62,6 +66,7 @@ export const agentInputSchema = agentInputObject.refine(pairedModelSelection, 'P
 export const createAgentInputSchema = agentInputObject.omit({ id: true }).refine(pairedModelSelection, 'Provider and model must be configured together');
 export const agentConfigurationSchema = agentInputObject.extend({
   archivedAt: timestampSchema.nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
+  withheldModelId: z.literal(true).optional(),
 });
 
 export const configurationIdInputSchema = z.object({ id: idSchema }).strict();
@@ -77,6 +82,8 @@ export const providerSummariesSchema = z.array(providerSummarySchema);
 export const providerKeyStateSchema = z.object({
   providerId: idSchema, keyReference: keyReferenceSchema.nullable(),
   state: z.enum(['missing', 'configured', 'session', 'unavailable']), storage: keyStorageStatusSchema,
+  // D097: Main's current session target confirmation for this Provider, so the settings page never guesses it.
+  sessionTargetConfirmed: z.boolean().optional(),
 }).strict().refine((input) => (input.state === 'missing') === (input.keyReference === null)
   && (input.state !== 'configured' || input.storage.mode === 'secure')
   && (input.state !== 'session' || input.storage.mode === 'memory'), 'Inconsistent key state');
@@ -85,7 +92,7 @@ export const confirmProviderTargetInputSchema = providerIdInputSchema.extend({ b
 export const setProviderKeyInputSchema = providerIdInputSchema.extend({ apiKey: z.string().min(1) });
 export const providerModelsInputSchema = providerIdInputSchema;
 export const providerModelsResultSchema = providerIdInputSchema.extend({ models: z.array(providerModelSchema) });
-export const providerConnectionTestInputSchema = providerIdInputSchema.extend({ level: connectionLevelSchema, modelId: idSchema.optional(), allowGeneration: z.literal(true).optional() })
+export const providerConnectionTestInputSchema = providerIdInputSchema.extend({ level: connectionLevelSchema, modelId: modelIdSchema.optional(), allowGeneration: z.literal(true).optional() })
   .refine((input) => input.level !== 'generation' || input.modelId !== undefined, 'Generation test requires a model');
 export const providerConnectionTestResultSchema = providerIdInputSchema.extend({ result: connectionTestResultSchema });
 
