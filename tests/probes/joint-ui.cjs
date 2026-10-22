@@ -17,7 +17,12 @@ async function page(stage) {
     await wait(() => button(name), b => b && !b.disabled, 'Button unavailable: ' + name);
     button(name).click();
   };
-  const text = () => [...document.querySelectorAll('.message p')].map(p => p.textContent);
+  const text = () => [...document.querySelectorAll('.message p:not([class])')].map(p => p.textContent);
+  // R12: one timeline entry per message slot, showing its effective version; earlier versions stay reachable.
+  const effective = s => { if (!s.versions) return s.messages.map(m => m.content);
+    const slots = new Map(); for (const m of s.messages) { const v = s.versions.find(item => item.messageId === m.id); if (!v) continue;
+      const group = slots.get(v.slotId) ?? []; group.push({ ...v, content: m.content }); slots.set(v.slotId, group); }
+    return [...slots.values()].map(group => { group.sort((a, b) => a.versionNumber - b.versionNumber); return (group.find(v => v.active) ?? group.at(-1)).content; }); };
   await wait(() => document.querySelector('.app-shell'), Boolean, 'App not rendered');
   const api = window.roundtable;
   const selectDemo = async () => {
@@ -33,7 +38,7 @@ async function page(stage) {
   let id;
   const read = () => api.run.getSnapshot(id);
   const settled = (status, turns) => wait(read, s => s.status === status && s.turns.length === turns
-    && JSON.stringify(text()) === JSON.stringify(s.messages.map(m => m.content)), 'DOM/snapshot did not settle: ' + status);
+    && JSON.stringify(text()) === JSON.stringify(effective(s)), 'DOM/snapshot did not settle: ' + status);
   if (stage === 'pause') {
     await selectDemo();
     await click('开始协作');
@@ -60,10 +65,16 @@ async function page(stage) {
   for (const name of ['重试当前回合', '续写部分回复']) {
     await click(name);
     await wait(read, s => s.messages.length === repeats.length + 2 && s.messages.at(-1).content.length > 0
-      && text().length === s.messages.length, 'Repeat message absent');
+      && JSON.stringify(text()) === JSON.stringify(effective(s)), 'Repeat message absent');
     await click('停止'); await click('确认停止');
     repeats.push(await settled('cancelled', 1));
   }
+  // The original partial and both repeats remain reachable as versions of the first slot.
+  const first = document.querySelectorAll('.message')[0];
+  check(first.textContent.includes('版本 3/3'), 'Repeat versions not reachable');
+  first.querySelector('button[aria-label="查看上一个版本"]').click(); await new Promise(resolve => setTimeout(resolve, 50));
+  first.querySelector('button[aria-label="查看上一个版本"]').click(); await new Promise(resolve => setTimeout(resolve, 50));
+  check(first.querySelector('p:not([class])').textContent === stopped.messages[0].content, 'Original partial not reachable');
   return { refreshed, stepped, completed, stopped, repeats, cspViolations: window.__r01ProbeViolations };
 }
 

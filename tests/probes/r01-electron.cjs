@@ -166,9 +166,12 @@ async function probe() {
     }
     check(typeof window.require === 'undefined' && typeof window.process === 'undefined', 'Node globals exposed');
     const api = window.roundtable;
-    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['room', 'rooms', 'run', 'settings']), 'Unexpected Bridge top-level API');
+    // R12 added the host group: exactly one typed method, no generic invoke/send.
+    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['host', 'room', 'rooms', 'run', 'settings']), 'Unexpected Bridge top-level API');
+    check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host API');
     check(JSON.stringify(Object.keys(api.room).sort()) === JSON.stringify(['createDemo', 'getMessages']), 'Unexpected room API');
-    const expected = ['continueMessage', 'getSnapshot', 'onEvent', 'pause', 'recoverInterruptedRun', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
+    // R11 added previewWorkflow (a bounded preview that neither reads a Key nor sends a request).
+    const expected = ['continueMessage', 'getSnapshot', 'onEvent', 'pause', 'previewWorkflow', 'recoverInterruptedRun', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
     check(JSON.stringify(Object.keys(api.run).sort()) === JSON.stringify(expected), 'Unexpected run API');
     const configurationKeys = {
       rooms: ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'],
@@ -198,7 +201,8 @@ async function probe() {
         const old=await api.run.getSnapshot('r03-'+status);
         check(old.status===(recovered?'interrupted':status),'Incorrect startup Run classification');
         check(old.turns[0].status===(recovered?'interrupted':'running'),'Terminal/idle child changed');
-        check(old.messages[0].content==='R03 preexisting partial' && old.messages[0].status===(recovered?'aborted':'streaming'),'Partial evidence changed');
+        // R12 (D088): any message still streaming at startup is aborted, whatever its Run status; the text is kept.
+        check(old.messages[0].content==='R03 preexisting partial' && old.messages[0].status==='aborted','Partial evidence changed');
         check(old.sequence===(recovered?1:0),'Recovery event is missing or duplicated');
         check(old.execution.task===null && old.execution.membersSnapshot===null && old.execution.elapsedExecutionMs===null,'Legacy inputs/time invented');
         check(old.attempts.length===1 && !('inputSnapshot' in old.attempts[0]),'Attempt projection unsafe');

@@ -12,8 +12,26 @@ async function page(stage, saved, endpoint) {
   const toggle=async(name,value)=>{const e=await wait(()=>field(name),e=>e&&!e.disabled,'Unavailable checkbox '+name);if(e.checked!==value)e.click();await sleep();};
   const api=window.roundtable;
   const noKey=value=>{check(!JSON.stringify(value).includes('r09-fake-key-'),'Plain Key leaked');return value;};
-  const text=()=>[...document.querySelectorAll('.message p')].map(e=>e.textContent);
-  const settle=(id,status)=>wait(()=>api.run.getSnapshot(id),s=>s.status===status&&JSON.stringify(text())===JSON.stringify(s.messages.map(m=>m.content)),'Run/DOM not settled '+status);
+  const text=()=>[...document.querySelectorAll('.message p:not([class])')].map(e=>e.textContent);
+  // R12: the timeline shows one entry per message slot (its effective version); other versions stay one click away.
+  const effective = snapshot => { if (!snapshot.versions) return snapshot.messages.map(message => message.content);
+    const slots = new Map(); for (const message of snapshot.messages) { const version = snapshot.versions.find(item => item.messageId === message.id); if (!version) continue;
+      const group = slots.get(version.slotId) ?? []; group.push({ ...version, content: message.content }); slots.set(version.slotId, group); }
+    return [...slots.values()].map(group => { group.sort((a, b) => a.versionNumber - b.versionNumber); return (group.find(version => version.active) ?? group.at(-1)).content; }); };
+  // Steps back through a slot's earlier versions in the real UI, checks each against Main, then returns to the effective one.
+  const history = async (snapshot, slotIndex) => {
+    const article = () => document.querySelectorAll('.message')[slotIndex]; const version = snapshot.versions.find(item => item.messageId === snapshot.messages[0].id);
+    const versions = snapshot.versions.filter(item => item.slotId === version.slotId).sort((a, b) => a.versionNumber - b.versionNumber);
+    const contentOf = id => snapshot.messages.find(message => message.id === id).content;
+    const shown = () => article().querySelector('p:not([class])').textContent; const step = label => article().querySelector('button[aria-label="' + label + '"]').click();
+    check(article().textContent.includes('版本 ' + versions.length + '/' + versions.length), 'Version count missing');
+    for (let index = versions.length - 2; index >= 0; index--) { step('查看上一个版本'); await sleep(); check(shown() === contentOf(versions[index].messageId), 'Earlier version not reachable'); }
+    for (let index = 1; index < versions.length; index++) { step('查看下一个版本'); await sleep(); }
+    check(shown() === contentOf(versions.at(-1).messageId), 'Did not return to the effective version');
+    return versions.length;
+  };
+
+  const settle=(id,status)=>wait(()=>api.run.getSnapshot(id),s=>s.status===status&&JSON.stringify(text())===JSON.stringify(effective(s)),'Run/DOM not settled '+status);
   await wait(()=>document.querySelector('.app-shell'),Boolean,'App absent');
   const snapshots={};
   if(stage==='first'){
@@ -55,6 +73,7 @@ async function page(stage, saved, endpoint) {
     for(const name of ['重试当前回合','续写部分回复']){
       const before=snapshots.repeated??snapshots.stopped;await click(name);await wait(()=>api.run.getSnapshot(saved.stopRunId),s=>s.messages.length===before.messages.length+1&&s.messages.at(-1).content.length>0,'Explicit repeat missing');await click('停止'); await click('确认停止');snapshots.repeated=await settle(saved.stopRunId,'cancelled');check(JSON.stringify(snapshots.repeated.messages[0])===JSON.stringify(snapshots.stopped.messages[0]),'Repeat overwrote original partial');
     }
+    check(await history(snapshots.repeated,0)===3,'Original, retry and continuation versions must all stay reachable');
     noKey(snapshots.repeated);return {saved,snapshots,assertions};
   }
   if(stage==='restart'){
