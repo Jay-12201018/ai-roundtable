@@ -78,3 +78,14 @@ it('does not dispatch generation if the settings session closes while target app
   await act(async () => release({ providerId: 'p' }));
   expect(api.testConnection).not.toHaveBeenCalled();
 });
+
+it('says the session target must be confirmed again after a Key is saved, until it is', async () => {
+  const api = fixture(); await open(api); tickTarget();
+  const reminder = /本次会话尚未确认请求目标/u;
+  const secret = screen.getByLabelText('API Key', { selector: 'input' }) as HTMLInputElement;
+  fireEvent.change(secret, { target: { value: 'fake-ui-key' } }); fireEvent.submit(secret.closest('form')!);
+  expect(await screen.findByText(reminder)).toBeTruthy();
+  tickTarget(); fireEvent.click(screen.getByRole('button', { name: '确认本次会话目标' }));
+  expect(await screen.findByText('本次会话请求目标已确认；更换 Key 或目标后需重新确认。')).toBeTruthy();
+  expect(screen.queryByText(reminder)).toBeNull();
+});

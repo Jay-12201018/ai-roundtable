@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRendererSession } from '../../../src/renderer/subscriptions/rendererSession';
 import type { RunSnapshot } from '../../../src/shared/types/run';
 import { bridge, deferred, marker, snapshot, subscription } from './fixtures';
+import { publicError } from '../../../src/shared/schemas/error';
 
 beforeEach(() => { localStorage.clear(); vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
@@ -158,6 +159,23 @@ describe('Renderer command ownership', () => {
     expect(state().snapshot?.execution?.task).toBe('持久任务');
     expect(api.run.start).not.toHaveBeenCalled();
     expect(api.run.recoverInterruptedRun).not.toHaveBeenCalled();
+    dispose();
+  });
+});
+
+describe('R13A start refusals', () => {
+  it.each([
+    ['forbidden', '启动失败：成员使用的 Provider 尚未在本次会话确认请求目标，或 Key 已更换。请到“模型设置”勾选“我已核对请求目标”并点“确认本次会话目标”。'],
+    ['unsupported', '启动失败：成员使用的模型没有已审核的计数与价格，不能发送真实请求。'],
+    ['internal_error', '启动协作失败，请检查当前任务状态。'],
+  ] as const)('explains a %s start refusal and passes the budget through', async (code, message) => {
+    const { api, session, state, dispose } = setup();
+    vi.mocked(api.room.createDemo).mockResolvedValue({ roomId: 'room' });
+    vi.mocked(api.run.start).mockRejectedValue(publicError(code));
+    state().setDraft('目标');
+    await session.startRun(undefined, { budgetMicroCny: 50_000 });
+    expect(api.run.start).toHaveBeenCalledWith(expect.objectContaining({ budgetMicroCny: 50_000 }));
+    expect(state().error).toBe(message);
     dispose();
   });
 });

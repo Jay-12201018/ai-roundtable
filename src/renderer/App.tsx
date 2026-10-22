@@ -147,6 +147,8 @@ export function App() {
   const synchronizeHost = useCallback(() => { void session.synchronize(); }, [session]);
   const hostCommands = useHostCommands(api.host, snapshot?.runId, synchronizeHost);
   const upcoming = snapshot && ['running', 'pausing', 'paused'].includes(snapshot.status) ? nextSpeaker(snapshot) : undefined;
+  // A budget stop is a deliberate guard, not a model failure; say so in the header.
+  const budgetStopped = snapshot?.status === 'error' && snapshot.budget?.blocked !== undefined;
 
   return <div className="app-shell">
     <nav className="app-navigation" aria-label="应用导航">
@@ -161,12 +163,12 @@ export function App() {
       <section className="timeline" aria-label="讨论时间线">
         <header>
           <div><small>当前任务</small><h1>{title}</h1></div>
-          <div className="status" role="status">{statusLabels[snapshot?.status ?? 'idle']} {activeTurn ? `· 第 ${(snapshot?.turns.indexOf(activeTurn) ?? 0) + 1} 回合` : ''}{upcoming ? ` · 下一位：${upcoming.name}${upcoming.source === 'override' ? '（主持人点名）' : ''}` : ''}</div>
+          <div className="status" role="status">{budgetStopped ? '已因预算停止' : statusLabels[snapshot?.status ?? 'idle']} {activeTurn ? `· 第 ${(snapshot?.turns.indexOf(activeTurn) ?? 0) + 1} 回合` : ''}{upcoming ? ` · 下一位：${upcoming.name}${upcoming.source === 'override' ? '（主持人点名）' : ''}` : ''}</div>
           <button type="button" className="controls-toggle" aria-expanded={showControls} aria-controls="host-controls" onClick={() => setShowControls(value => !value)}>主持人控制</button>
         </header>
         <RunBudgetBar snapshot={snapshot} />
         <div className="messages">
-          {messages.length === 0 && <div className="empty">{roomId ? '配置成员后，输入目标并开始协作。' : '请先在“房间与成员”中创建或选择房间。'}</div>}
+          {messages.length === 0 && !budgetStopped && <div className="empty">{roomId ? '配置成员后，输入目标并开始协作。' : '请先在“房间与成员”中创建或选择房间。'}</div>}
           <HostTimeline snapshot={snapshot} commands={hostCommands} />
           {/* Run feedback sits right after the last message it describes, not below the composer. */}
           {snapshot?.status === 'interrupted' && <div className="sync-feedback run-feedback">执行已中断，部分输出已保留。请先检查历史记录。</div>}

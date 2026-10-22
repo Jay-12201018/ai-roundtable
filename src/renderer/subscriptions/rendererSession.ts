@@ -5,6 +5,13 @@ import { runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../
 import type { RunEvent,InterruptedRunDecision } from '../../shared/types/run';
 import { createRendererStore,canRecover, type RendererCommand } from '../store/rendererStore';
 import { budgetBlockMessage } from '../../shared/schemas/budget';
+import { apiErrorSchema } from '../../shared/schemas/error';
+
+// Start refusals the host can act on get their own reason; anything else keeps the generic message.
+const startFailures: Partial<Record<string, string>> = {
+  forbidden: '启动失败：成员使用的 Provider 尚未在本次会话确认请求目标，或 Key 已更换。请到“模型设置”勾选“我已核对请求目标”并点“确认本次会话目标”。',
+  unsupported: '启动失败：成员使用的模型没有已审核的计数与价格，不能发送真实请求。',
+};
 
 type RunControl = 'pause' | 'stop' | 'step' | 'resumeRun';
 type IdentityStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -181,8 +188,9 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       store.getState().applySnapshot(parsed.data, store.getState().generation);
       saveIdentity(result.runId);
       await synchronize();
-    } catch {
-      if (ownsCommand(token, generation)) store.getState().setError('启动协作失败，请检查当前任务状态。', generation);
+    } catch (error) {
+      const code = apiErrorSchema.safeParse(error).data?.code;
+      if (ownsCommand(token, generation)) store.getState().setError((code && startFailures[code]) ?? '启动协作失败，请检查当前任务状态。', generation);
     } finally { store.getState().endCommand(token); }
   }
   async function perform(command:RendererCommand,invoke:(runId:string)=>Promise<void>){

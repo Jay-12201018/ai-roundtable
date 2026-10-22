@@ -109,6 +109,8 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [targetConfirmed, setTargetConfirmed] = useState(false);
+  // Main's confirmation lives only for this session and is voided by a new Key; the page tracks it to say so.
+  const [sessionConfirmed, setSessionConfirmed] = useState(false);
   const [generationConfirmed, setGenerationConfirmed] = useState(false);
   const [generationModel, setGenerationModel] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
@@ -168,7 +170,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
 
   function change<K extends keyof Draft>(field: K, value: Draft[K]) {
     clearSecret(); setNotice(''); setError(''); setDeleting(null);
-    if (field === 'kind' || field === 'baseUrl') { setTargetConfirmed(false); setGenerationConfirmed(false); }
+    if (field === 'kind' || field === 'baseUrl') { setTargetConfirmed(false); setSessionConfirmed(false); setGenerationConfirmed(false); }
     setDraft(previous => ({ ...previous, [field]: value }));
   }
 
@@ -181,7 +183,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     void perform(async () => {
       const value = saved ? await api.updateProvider({ ...parsed.data, id: saved.id }) : await api.createProvider(parsed.data);
       if (!alive.current) return;
-      setSaved(value); setDraft(toDraft(value)); setTargetConfirmed(false); setGenerationConfirmed(false); setResults({}); setListResult(''); setListedModels(null); setGenerationModel(value.defaultModelId ?? (value.kind === 'mock' ? 'mock' : ''));
+      setSaved(value); setDraft(toDraft(value)); setTargetConfirmed(false); setSessionConfirmed(false); setGenerationConfirmed(false); setResults({}); setListResult(''); setListedModels(null); setGenerationModel(value.defaultModelId ?? (value.kind === 'mock' ? 'mock' : ''));
       setNotice('配置已保存。'); onSaved(value);
       if (!alive.current) return;
       const state = await api.getProviderKeyState({ providerId: value.id });
@@ -197,7 +199,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     if (apiKey.trim() === '') { setError('请输入 API Key；离开输入框会清除输入。'); return; }
     void perform(async () => {
       const state = await api.setKey({ providerId: saved.id, apiKey });
-      if (alive.current) { setKeyState(state); setNotice('Key 已保存。'); setResults({}); setTargetConfirmed(false); setGenerationConfirmed(false); }
+      if (alive.current) { setKeyState(state); setNotice('Key 已保存。'); setResults({}); setTargetConfirmed(false); setSessionConfirmed(false); setGenerationConfirmed(false); }
     });
   }
 
@@ -211,7 +213,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
       } else if (operation === 'key') {
         await api.deleteKey({ providerId });
         const state = await api.getProviderKeyState({ providerId });
-        if (alive.current) { setKeyState(state); setDeleting(null); setNotice('Key 已删除。'); setResults({}); setTargetConfirmed(false); setGenerationConfirmed(false); }
+        if (alive.current) { setKeyState(state); setDeleting(null); setNotice('Key 已删除。'); setResults({}); setTargetConfirmed(false); setSessionConfirmed(false); setGenerationConfirmed(false); }
       }
     });
   }
@@ -231,7 +233,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     clearSecret();
     if (!canUseSaved || !targetReady) return;
     void perform(async () => {
-      if (await confirmSavedTarget()) setNotice('本次会话请求目标已确认；更换 Key 或目标后需重新确认。');
+      if (await confirmSavedTarget()) { setSessionConfirmed(true); setNotice('本次会话请求目标已确认；更换 Key 或目标后需重新确认。'); }
     });
   }
 
@@ -283,6 +285,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
           {draft.kind !== 'mock' && !endpointInvalid && <label className="settings-check"><input type="checkbox" checked={targetConfirmed} onChange={event => setTargetConfirmed(event.target.checked)} />我已核对请求目标</label>}
           {saved && draft.kind !== 'mock' && <button type="button" disabled={!canUseSaved || !targetReady || !effectiveTarget} onClick={confirmSessionTarget}>确认本次会话目标</button>}
           {saved && targetChanged && <p className="settings-warning">更换类型或请求目标会撤销旧 Key；保存后必须重新输入 Key。</p>}
+          {saved && draft.kind !== 'mock' && !targetChanged && !sessionConfirmed && (keyState?.state === 'configured' || keyState?.state === 'session') && <p className="settings-warning" role="note">本次会话尚未确认请求目标：勾选“我已核对请求目标”并点“确认本次会话目标”后，房间成员才能向此 Provider 发送真实请求。保存或更换 Key 后需重新确认。</p>}
         </div>
         <label className="settings-check"><input type="checkbox" checked={draft.enabled} onChange={event => { change('enabled', event.target.checked); if (!event.target.checked) setDraft(previous => ({ ...previous, isDefault: false })); }} />启用此 Provider</label>
         <label className="settings-check"><input type="checkbox" checked={draft.isDefault} onChange={event => { change('isDefault', event.target.checked); if (event.target.checked) setDraft(previous => ({ ...previous, enabled: true })); }} />设为默认 Provider</label>
@@ -302,7 +305,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
             }}>添加自定义模型</button>
           </div>
         </div>}
-        <div className="settings-actions"><button type="submit" className="settings-primary">保存配置</button>{saved && <button type="button" onClick={() => { clearSecret(); setDraft(toDraft(saved)); setTargetConfirmed(false); setError(''); setNotice(''); setDeleting(null); }}>取消更改</button>}{saved && <button type="button" onClick={() => { clearSecret(); setDeleting('provider'); }}>删除 Provider</button>}</div>
+        <div className="settings-actions"><button type="submit" className="settings-primary">保存配置</button>{saved && <button type="button" onClick={() => { clearSecret(); setDraft(toDraft(saved)); setTargetConfirmed(false); setSessionConfirmed(false); setError(''); setNotice(''); setDeleting(null); }}>取消更改</button>}{saved && <button type="button" onClick={() => { clearSecret(); setDeleting('provider'); }}>删除 Provider</button>}</div>
       </fieldset>
     </form>
     {saved && <section className="settings-section" aria-labelledby="settings-key-title"><h3 id="settings-key-title">API Key</h3>
