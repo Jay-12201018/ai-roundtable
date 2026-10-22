@@ -169,7 +169,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       if (ownsCommand(token, generation)) store.getState().setError('创建任务失败，请稍后重试。', generation);
     } finally { store.getState().endCommand(token); }
   }
-  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>, limits: Pick<StartRunInput, 'budgetMicroCny'> = {}) {
+  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>, limits: Pick<StartRunInput, 'budgetMicroCny' | 'mode'> = {}) {
     if (!mounted || options.requireRoom && !store.getState().roomId) return;
     const token = store.getState().beginCommand('start');
     if (token === undefined) return;
@@ -179,7 +179,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       const selectedRoom = roomId ?? (await api.room.createDemo(task)).roomId;
       if (!ownsCommand(token, generation)) return;
       const result = await api.run.start({ roomId: selectedRoom, task, ...(workflow?.workflowConfig ? workflow : { workflowSnapshot: { templateId: 'draft-review-finalize', version: 1 } }),
-        ...(limits.budgetMicroCny === undefined ? {} : { budgetMicroCny: limits.budgetMicroCny }) });
+        ...(limits.budgetMicroCny === undefined ? {} : { budgetMicroCny: limits.budgetMicroCny }), ...(limits.mode ? { mode: limits.mode } : {}) });
       if (!ownsCommand(token, generation)) return;
       const parsed = runSnapshotSchema.safeParse(result);
       if (!parsed.success || parsed.data.roomId !== selectedRoom) throw new Error('Invalid start response');

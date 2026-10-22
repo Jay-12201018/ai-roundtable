@@ -195,7 +195,10 @@ describe('Renderer task identity and command feedback', () => {
     render(<App />);
     await screen.findByText('必须保留的部分输出');
     expect(screen.getByText(status === 'interrupted' ? '已中断' : '运行失败')).toBeTruthy();
-    for (const name of ['暂停', '继续', '下一步', '停止']) expect((screen.getByText(name) as HTMLButtonElement).disabled).toBe(true);
+    // D098: run controls exist only while a Run is live; a settled Run shows 开始协作 in their place instead.
+    expect(screen.queryByRole('group', { name: '运行控制' })).toBeNull();
+    for (const name of ['暂停', '继续', '下一步', '停止']) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.getByRole('button', { name: '开始协作' })).toBeTruthy();
     expect(window.roundtable.run.recoverInterruptedRun).not.toHaveBeenCalled();
   });
 

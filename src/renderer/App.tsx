@@ -22,6 +22,8 @@ export function App() {
   const [roomsReady, setRoomsReady] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [confirmingStop, setConfirmingStop] = useState(false);
+  // D098: a remembered per-viewer preference; the Run's own mode stays authoritative in Main.
+  const [stepMode, setStepMode] = useState(() => { try { return localStorage.getItem('roundtable.stepMode') === 'true'; } catch { return false; } });
   const [budgetText, setBudgetText] = useState('1');
   const budgetMicroCny = parseBudgetYuan(budgetText);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
@@ -93,6 +95,7 @@ export function App() {
     return () => { unsubscribe(); dispose(); };
   }, [session]);
   useEffect(() => { alive.current = true; void reloadProviders(); return () => { alive.current = false; providerRequest.current++; }; }, [reloadProviders]);
+  useEffect(() => { try { localStorage.setItem('roundtable.stepMode', String(stepMode)); } catch { /* The choice still applies to this window. */ } }, [stepMode]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem('roundtable.theme', theme); } catch { /* Appearance still applies for this window. */ }
@@ -136,7 +139,7 @@ export function App() {
   const startRun = () => {
     if (workflowInvalidated || appliedWorkflow && (appliedWorkflow.roomId !== roomId || appliedWorkflow.scope !== workflowScope)) return;
     if (budgetMicroCny === undefined) return;
-    void session.startRun(appliedWorkflow ? { workflowConfig: appliedWorkflow.config, workflowPreviewId: appliedWorkflow.previewId } : undefined, { budgetMicroCny });
+    void session.startRun(appliedWorkflow ? { workflowConfig: appliedWorkflow.config, workflowPreviewId: appliedWorkflow.previewId } : undefined, { budgetMicroCny, mode: stepMode ? 'step' : 'automatic' });
   };
   const selectRoom = useCallback((id: string) => session.selectRoom(id), [session]);
   const clearRoom = useCallback(() => session.selectRoom(undefined), [session]);
@@ -150,8 +153,15 @@ export function App() {
   const upcoming = snapshot && ['running', 'pausing', 'paused'].includes(snapshot.status) ? nextSpeaker(snapshot) : undefined;
   // A budget stop is a deliberate guard, not a model failure; say so in the header.
   const budgetStopped = snapshot?.status === 'error' && snapshot.budget?.blocked !== undefined;
-  // Stop ends the Run and may abort a request already billed; it asks once, in place (D098).
-  const requestInFlight = snapshot?.status === 'running' || snapshot?.status === 'pausing' || snapshot?.status === 'cancelling' || Boolean(snapshot?.host?.generation);
+  // D098: while a Run is live, the start button turns into its controls in place, so the host never chases them.
+  const runStatus = snapshot?.status;
+  const runActive = runStatus === 'running' || runStatus === 'pausing' || runStatus === 'paused' || runStatus === 'cancelling' || stopEnabled;
+  // Stop ends the Run and may abort a request already billed; it asks once, without covering Pause.
+  const requestInFlight = runStatus === 'running' || runStatus === 'pausing' || runStatus === 'cancelling' || Boolean(snapshot?.host?.generation);
+  // The header carries the live status; this line only says what the host can do next.
+  const runHint = runStatus === 'paused' ? '可以在“主持人控制”里插话或点名，然后点“下一步”让下一位发言，或点“继续”自动运行。'
+    : runStatus === 'pausing' ? '当前回合说完后会停下。' : runStatus === 'cancelling' ? '等待当前请求中止，已生成的文字会保留。'
+    : '暂停会等当前回合说完再停下；停止会立即结束本次运行。';
   useEffect(() => { if (!stopEnabled) setConfirmingStop(false); }, [stopEnabled]);
   const stopRun = () => { setConfirmingStop(false); void session.control('stop'); };
 
@@ -185,30 +195,36 @@ export function App() {
         {pending && <div role="status" className="sync-feedback">操作已发送，等待确认</div>}
         {syncStatus === 'error' && <button className="retry-sync" onClick={() => void session.synchronize()}>重试同步</button>}
         <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} />
-          <label className="composer-budget">本次预算（元）<input aria-label="本次运行预算（元）" inputMode="decimal" value={budgetText} aria-invalid={budgetMicroCny === undefined} onChange={event => setBudgetText(event.target.value)} /></label>
-          <button onClick={startRun} disabled={!startEnabled || workflowInvalidated || budgetMicroCny === undefined}>开始协作</button>
-          {budgetMicroCny === undefined && <p className="composer-budget-error" role="alert">请输入 0.000001 到 1000 之间的金额，最多 6 位小数。</p>}
+          {/* Notices go above the action row, so 暂停 never moves when they appear (D098). */}
+          {!runActive && budgetMicroCny === undefined && <p className="composer-budget-error" role="alert">请输入 0.000001 到 1000 之间的金额，最多 6 位小数。</p>}
+          {confirmingStop && stopEnabled && <div id="stop-confirm" className="stop-confirm" role="group" aria-label="确认停止运行" onKeyDown={event => { if (event.key === 'Escape') setConfirmingStop(false); }}>
+            <p>{requestInFlight
+              ? '停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。'
+              : '停止会结束本次运行，后续回合不再执行。已有发言都会保留。'}</p>
+            <button className="danger" onClick={stopRun}>确认停止</button>
+            <button autoFocus onClick={() => setConfirmingStop(false)}>不停止</button>
+          </div>}
+          <div className="composer-actions">
+            {runActive
+              ? <div className="run-bar" role="group" aria-label="运行控制">
+                {runStatus === 'paused'
+                  ? <button className="composer-primary" onClick={() => void session.control('resumeRun')} disabled={!resumeEnabled}>继续</button>
+                  : <button className="composer-primary" onClick={() => void session.control('pause')} disabled={!pauseEnabled}>暂停</button>}
+                <button onClick={() => void session.control('step')} disabled={!stepEnabled}>下一步</button>
+                <button className="danger" onClick={() => setConfirmingStop(true)} disabled={!stopEnabled || confirmingStop} aria-expanded={confirmingStop} aria-controls="stop-confirm">{runStatus === 'cancelling' ? '正在停止…' : '停止'}</button>
+              </div>
+              : <button className="composer-primary" onClick={startRun} disabled={!startEnabled || workflowInvalidated || budgetMicroCny === undefined}>开始协作</button>}
+            {runActive
+              ? <p className="composer-hint">{runHint}</p>
+              : <div className="composer-options">
+                <label className="composer-step"><input type="checkbox" checked={stepMode} onChange={event => setStepMode(event.target.checked)} />每个回合结束后暂停，方便插话或点名</label>
+                <label className="composer-budget">本次预算（元）<input aria-label="本次运行预算（元）" inputMode="decimal" value={budgetText} aria-invalid={budgetMicroCny === undefined} onChange={event => setBudgetText(event.target.value)} /></label>
+              </div>}
+          </div>
         </div>
       </section>
       <aside id="host-controls" className={`workbench${showControls ? ' is-open' : ''}`} aria-label="主持人控制">
         <h2>主持人控制</h2><p className="room-card">{roomId ? title : '还没有任务'}</p>
-        <div className="run-controls" role="group" aria-label="运行控制">
-          <button onClick={() => void session.control('pause')} disabled={!pauseEnabled}>暂停</button>
-          <button onClick={() => void session.control('step')} disabled={!stepEnabled}>下一步</button>
-          <button onClick={() => void session.control('resumeRun')} disabled={!resumeEnabled}>继续</button>
-        </div>
-        <div className="run-stop">
-          {confirmingStop && stopEnabled
-            ? <div className="stop-confirm" role="group" aria-label="确认停止运行" onKeyDown={event => { if (event.key === 'Escape') setConfirmingStop(false); }}>
-              <p>{requestInFlight
-                ? '停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。'
-                : '停止会结束本次运行，后续回合不再执行。已有发言都会保留。'}</p>
-              <button className="danger" autoFocus onClick={stopRun}>确认停止</button>
-              <button onClick={() => setConfirmingStop(false)}>不停止</button>
-            </div>
-            : <><button className="danger" onClick={() => setConfirmingStop(true)} disabled={!stopEnabled} aria-describedby={stopEnabled ? 'stop-help' : undefined}>停止</button>
-              {stopEnabled && <p id="stop-help" className="control-help">暂停：等当前回合说完再停下，可以继续。停止：立即结束本次运行。</p>}</>}
-        </div>
         {(snapshot?.status === 'error' || snapshot?.status === 'cancelled' || snapshot?.status === 'interrupted') && <>
           <button onClick={() => void session.repeat('retryTurn')} disabled={!retryEnabled}>重试当前回合</button>
           <button onClick={() => void session.repeat('continueMessage')} disabled={!continueEnabled}>续写部分回复</button>

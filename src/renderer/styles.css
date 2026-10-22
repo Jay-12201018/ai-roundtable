@@ -35,8 +35,25 @@ button:disabled { cursor: default; color: var(--secondary); background: var(--su
 .message strong { font-size: 16px; line-height: 24px; }
 .message-identity { margin-top: 4px; }
 .message p { white-space: pre-wrap; font-size: 15px; line-height: 24px; }
-.composer { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--border); }
-.composer input { flex: 1 1 240px; min-width: 0; border: 1px solid var(--control); border-radius: 8px; background: var(--panel); color: var(--text); padding: 8px 12px; min-height: 40px; }
+/* Pinned to the bottom of the window: streaming output never pushes the run controls away from the pointer. */
+.composer { position: sticky; bottom: 0; z-index: 1; display: flex; flex-direction: column; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--border); background: var(--canvas); }
+.composer input:not([type=checkbox]) { min-width: 0; border: 1px solid var(--control); border-radius: 8px; background: var(--panel); color: var(--text); padding: 8px 12px; min-height: 40px; }
+.composer input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+/* D098: the first slot holds 开始协作 and, once running, 暂停/继续 at the same spot. */
+.composer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.composer-primary { min-width: 112px; text-align: center; }
+.composer button.composer-primary:enabled { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.composer button.composer-primary:hover:enabled { background: var(--accent); text-decoration: underline; }
+.run-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.run-bar button.danger { margin-left: 16px; }
+.composer button.danger { color: var(--error); border-color: var(--error); background: var(--panel); }
+.composer button.danger:disabled { color: var(--secondary); border-color: var(--control); background: var(--subtle); }
+.composer-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-left: auto; }
+.composer-step { display: flex; align-items: center; gap: 8px; color: var(--secondary); }
+.composer-hint { margin: 0; color: var(--secondary); flex: 1 1 240px; }
+.stop-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border: 1px solid var(--error); border-radius: 8px; background: var(--panel); }
+.stop-confirm p { margin: 0; flex: 1 1 320px; overflow-wrap: anywhere; }
+
 .error, .sync-feedback { margin: 0 24px 16px; overflow-wrap: anywhere; }
 .error { color: var(--error); }
 .messages > .run-feedback { max-width: 760px; margin: 16px auto 0; }
@@ -65,17 +82,4 @@ button:disabled { cursor: default; color: var(--secondary); background: var(--su
   .composer { padding: 16px; }
   .theme-control { margin-left: 0; }
 }
-.run-stop { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
-.workbench button.danger { color: var(--error); border-color: var(--error); }
-.workbench button.danger:hover:enabled { background: var(--subtle); }
-.workbench button.danger:disabled { color: var(--secondary); border-color: var(--control); }
-.control-help { color: var(--secondary); margin: 4px 0 0; }
-.stop-confirm { padding: 12px; border: 1px solid var(--error); border-radius: 8px; }
-.stop-confirm p { margin: 0 0 8px; overflow-wrap: anywhere; }
-@media (max-width: 1279px) {
-  .run-controls, .run-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .run-stop { margin-left: 0; }
-  .run-controls button, .run-stop button { margin: 0; }
-  .stop-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .stop-confirm p { flex: 1 0 100%; }
-}
+.workbench .control-help { color: var(--secondary); margin: 4px 0 0; }
