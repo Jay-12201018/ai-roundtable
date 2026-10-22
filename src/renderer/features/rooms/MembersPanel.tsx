@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { AgentConfiguration, AgentInput, CreateAgentInput, ProviderSummary, RoomConfiguration, RoomsFeatureProps } from '../../../shared/contracts/configuration';
 import { createAgentInputSchema } from '../../../shared/schemas/configuration';
+import { looksLikeApiKey } from '../../../shared/schemas/common';
 import { Dialog, errorText } from './ui';
 
 function agentInput(agent: AgentConfiguration): AgentInput {
-  const { archivedAt: _archived, createdAt: _created, updatedAt: _updated, ...input } = agent; return input;
+  const { archivedAt: _archived, createdAt: _created, updatedAt: _updated, withheldModelId: _withheld, ...input } = agent; return input;
 }
-export function providerNotice(agent: Pick<AgentConfiguration, 'providerId' | 'modelId'>, providers: readonly ProviderSummary[], state: RoomsFeatureProps['providerLoadState']): string {
+export function providerNotice(agent: Pick<AgentConfiguration, 'providerId' | 'modelId'> & { withheldModelId?: true }, providers: readonly ProviderSummary[], state: RoomsFeatureProps['providerLoadState']): string {
   if (agent.providerId === null && agent.modelId === null) return '尚未配置 Provider 与 Model';
   if (state === 'loading') return '正在加载 Provider 配置';
   if (state === 'error') return 'Provider 加载失败，配置可用性未知';
@@ -14,6 +15,7 @@ export function providerNotice(agent: Pick<AgentConfiguration, 'providerId' | 'm
   if (!provider) return 'Provider 不存在';
   if (!provider.configurationValid || provider.kind === null) return 'Provider 配置失效';
   if (!provider.enabled) return 'Provider 已禁用';
+  if (agent.withheldModelId) return '之前填写的 Model 看起来是 API Key，已隐藏且不会使用；请编辑成员，重新填写模型 ID';
   if (!agent.modelId) return 'Model 未配置';
   if (provider.kind === 'mock') return agent.modelId === 'mock' ? '显式 Mock · 本地验证，不产生模型费用' : 'Mock 仅支持 mock 模型';
   return `真实 Provider · 生成能力尚未验证 · 密钥状态：${provider.hasStoredKey ? '存在存储记录，不代表可用' : '摘要未发现存储记录，会话密钥需在设置中确认'}`;
@@ -82,6 +84,9 @@ export function MembersPanel({ api, room, providers, providerLoadState, onReload
     </Dialog>}
   </section>;
 }
+// D096: shown when a pasted API Key lands in the Model field; the Key belongs to the Provider in model settings.
+export const keyInMemberModelMessage = '这看起来是 API Key，不是模型 ID。Key 请到“模型设置”里对应 Provider 的“API Key”一栏填写；这里只填模型 ID。';
+const memberModelExamples: Record<string, string> = { mock: 'mock', openai: 'gpt-4o-mini', 'openai-compatible': 'deepseek-flash', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' };
 function MemberEditor({ agent, roomId, order, busy, serverError, providers, providerLoadState, onOpenSettings, onSave, onClose }: {
   agent?: AgentConfiguration; roomId: string; order: number; busy: boolean; serverError: string; providers: readonly ProviderSummary[]; providerLoadState: RoomsFeatureProps['providerLoadState']; onOpenSettings: () => void; onSave: (input: CreateAgentInput) => void; onClose: () => void;
 }) {
@@ -92,6 +97,7 @@ function MemberEditor({ agent, roomId, order, busy, serverError, providers, prov
   function submit(event: FormEvent) {
     event.preventDefault(); setError('');
     const value = { roomId, displayName: name, roleTemplateId: role, systemPrompt: prompt, providerId: providerId || null, modelId: modelId.trim() || null, enabled, displayOrder: agent?.displayOrder ?? order };
+    if (looksLikeApiKey(modelId)) { setError(keyInMemberModelMessage); return; }
     const parsed = createAgentInputSchema.safeParse(value);
     if (!parsed.success) { setError('请填写成员名称与角色；Provider 与 Model 必须同时配置或同时留空。'); return; }
     if (providerId && (providerLoadState !== 'ready' || !provider || !provider.configurationValid || provider.kind === null)) { setError('Provider 不可用，请刷新设置或重新选择。'); return; }
@@ -106,7 +112,10 @@ function MemberEditor({ agent, roomId, order, busy, serverError, providers, prov
       {providerId && !provider && <option value={providerId}>失效引用（需重新选择）</option>}
       {providers.map(p => <option key={p.id} value={p.id}>{p.name} · {p.kind === 'mock' ? 'Mock' : p.kind ?? '失效'}{!p.enabled ? ' · 已禁用' : ''}{!p.configurationValid ? ' · 配置失效' : ''}</option>)}
     </select></label>
-    <label>Model<input list={listId} value={modelId} disabled={busy || (!providerId && !modelId) || provider?.kind === 'mock'} onChange={event => setModelId(event.target.value)} placeholder="选择建议或输入模型 ID" /></label>
+    <label>Model<input list={listId} value={modelId} disabled={busy || (!providerId && !modelId) || provider?.kind === 'mock'} onChange={event => setModelId(event.target.value)} autoComplete="off" spellCheck={false}
+      placeholder={`选择建议或输入模型 ID，例如 ${memberModelExamples[provider?.kind ?? 'openai-compatible']}`} aria-invalid={looksLikeApiKey(modelId) || undefined} aria-describedby={`${listId}-help`} /></label>
+    {looksLikeApiKey(modelId) ? <p id={`${listId}-help`} role="alert" className="rooms-error">{keyInMemberModelMessage}</p>
+      : <p id={`${listId}-help`} className="rooms-secondary">例如 {memberModelExamples[provider?.kind ?? 'openai-compatible']}{agent?.withheldModelId && !modelId ? '。之前填写的内容看起来是 API Key，已隐藏且不会使用，请重新填写。' : ''}</p>}
     <datalist id={listId}>{provider?.customModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
     <p className="rooms-secondary">{providerNotice({ providerId: providerId || null, modelId: modelId || null }, providers, providerLoadState)}</p>
     <p className="rooms-secondary">模型 ID 可自定义。未配置、禁用或失效配置不能执行，不会自动改用 Mock。</p>

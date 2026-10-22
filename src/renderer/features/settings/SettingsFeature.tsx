@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type RefObjec
 import type { CreateProviderInput, KeyStorageStatus, ProviderConfiguration, ProviderKeyState, ProviderKind, ProviderSettingsApiContract, ProviderSummary, SettingsFeatureProps } from '../../../shared/contracts/configuration';
 import { ContractError } from '../../../shared/contracts/errors';
 import { createProviderInputSchema, providerBaseUrlSchema } from '../../../shared/schemas/configuration';
+import { looksLikeApiKey } from '../../../shared/schemas/common';
 import { apiErrorSchema, type ErrorCode } from '../../../shared/schemas/error';
 import type { z } from 'zod';
 import type { providerModelSchema, connectionLevelSchema } from '../../../shared/schemas/provider';
@@ -22,6 +23,15 @@ const messages: Record<ErrorCode, string> = {
   timeout: '请求超时，请稍后重试。', cancelled: '请求已取消。', network_error: '无法连接 Provider，请检查请求地址。',
   budget_exceeded: '运行预算不足，未发送请求。',
 };
+// D096: model ID fields show an example and stop a pasted API Key before it is saved as a model ID.
+const modelExamples: Record<ProviderKind, string> = { mock: 'mock', openai: 'gpt-4o-mini', 'openai-compatible': 'deepseek-flash', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' };
+export const keyInModelFieldMessage = (keySectionVisible: boolean) => keySectionVisible
+  ? '这看起来是 API Key，不是模型 ID。请把它填到下方的“API Key”输入框，这里只填模型 ID。'
+  : '这看起来是 API Key，不是模型 ID。请先删掉它；保存配置后，在下方出现的“API Key”输入框里填写。';
+function ModelIdHelp({ id, value, kind, keySectionVisible }: { id: string; value: string; kind: ProviderKind; keySectionVisible: boolean }) {
+  return looksLikeApiKey(value) ? <p id={id} role="alert" className="settings-field-error">{keyInModelFieldMessage(keySectionVisible)}</p>
+    : <p id={id} className="settings-hint">例如 {modelExamples[kind]}</p>;
+}
 function safeError(error: unknown): string {
   const parsed = apiErrorSchema.safeParse(error instanceof ContractError ? error.detail : error);
   return messages[parsed.success ? parsed.data.code : 'internal_error'];
@@ -123,6 +133,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   const pending = useRef(false);
   const loadVersion = useRef(0);
   const ownSecret = useRef<HTMLInputElement | null>(null);
+  const focusKey = useRef(false);
   const bindSecret = useCallback((input: HTMLInputElement | null) => {
     const previous = ownSecret.current;
     if (previous && previous !== input) previous.value = '';
@@ -138,10 +149,14 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     try {
       const [provider, state] = await Promise.all([api.getProviderConfiguration({ id }), api.getProviderKeyState({ providerId: id })]);
       if (!alive.current || version !== loadVersion.current) return;
-      setSaved(provider); setDraft(toDraft(provider)); setKeyState(state); setGenerationModel(provider.defaultModelId ?? (provider.kind === 'mock' ? 'mock' : ''));
+      setSaved(provider); setDraft(toDraft(provider)); setKeyState(state); setSessionConfirmed(state.sessionTargetConfirmed === true); setGenerationModel(provider.defaultModelId ?? (provider.kind === 'mock' ? 'mock' : ''));
     } catch (cause) { if (alive.current && version === loadVersion.current) { setError(safeError(cause)); setLoadFailed(true); } }
     finally { if (alive.current && version === loadVersion.current) setLoading(false); }
   }
+
+  useEffect(() => {
+    if (focusKey.current && ownSecret.current && !ownSecret.current.disabled) { focusKey.current = false; ownSecret.current.focus(); }
+  });
 
   useEffect(() => {
     alive.current = true; void load();
@@ -167,6 +182,11 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
   const canUseSaved = saved !== null && !dirty && !busy;
   const targetReady = draft.kind === 'mock' || targetConfirmed;
   const currentStorage = keyState?.storage ?? storage;
+  const keyReady = keyState?.state === 'configured' || keyState?.state === 'session';
+  // Why the Key input is unavailable, said next to it with the one action that resolves it (D097).
+  const keyBlocked = !saved || draft.kind === 'mock' || busy ? null : dirty ? 'dirty' : !targetReady ? 'target' : null;
+  const nextStep = dirty ? '下一步：保存配置。' : !keyReady ? '下一步：在下方“API Key”一栏核对请求目标并填写 Key。'
+    : !sessionConfirmed ? '下一步：确认本次会话目标。' : '已就绪：房间成员可以向此 Provider 发送真实请求（仍受模型审核和运行预算限制）。';
 
   function change<K extends keyof Draft>(field: K, value: Draft[K]) {
     clearSecret(); setNotice(''); setError(''); setDeleting(null);
@@ -174,8 +194,10 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     setDraft(previous => ({ ...previous, [field]: value }));
   }
 
-  function save(event: FormEvent) {
-    event.preventDefault(); clearSecret();
+  function save(event: FormEvent) { event.preventDefault(); saveDraft(); }
+  function saveDraft() {
+    clearSecret();
+    if ([draft.defaultModelId, ...draft.customModels.map(model => model.id)].some(looksLikeApiKey)) { setError(keyInModelFieldMessage(saved !== null)); return; }
     const input: CreateProviderInput = { ...draft, baseUrl: draft.kind === 'mock' || draft.baseUrl.trim() === '' ? null : draft.baseUrl, defaultModelId: draft.defaultModelId.trim() || null };
     const parsed = createProviderInputSchema.safeParse(input);
     if (!parsed.success) { setError(messages.invalid_input); return; }
@@ -187,7 +209,7 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
       setNotice('配置已保存。'); onSaved(value);
       if (!alive.current) return;
       const state = await api.getProviderKeyState({ providerId: value.id });
-      if (alive.current) setKeyState(state);
+      if (alive.current) { setKeyState(state); setSessionConfirmed(state.sessionTargetConfirmed === true); }
     });
   }
 
@@ -218,8 +240,8 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     });
   }
 
-  async function confirmSavedTarget(): Promise<boolean> {
-    if (!saved || dirty || !targetReady) throw new ContractError('invalid_state');
+  async function confirmSavedTarget(checkedNow = false): Promise<boolean> {
+    if (!saved || dirty || !(targetReady || checkedNow)) throw new ContractError('invalid_state');
     if (saved.kind === 'mock') return true;
     const baseUrl = saved.baseUrl ?? defaultTargets[saved.kind] ?? null;
     if (!baseUrl) throw new ContractError('invalid_input');
@@ -229,12 +251,17 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     return true;
   }
 
-  function confirmSessionTarget() {
+  // `checkedNow`: the inline button names the target and counts as ticking “我已核对请求目标” in the same click.
+  function confirmSessionTarget(checkedNow = false) {
     clearSecret();
-    if (!canUseSaved || !targetReady) return;
+    if (!canUseSaved || !(targetReady || checkedNow)) return;
+    if (checkedNow) setTargetConfirmed(true);
     void perform(async () => {
-      if (await confirmSavedTarget()) { setSessionConfirmed(true); setNotice('本次会话请求目标已确认；更换 Key 或目标后需重新确认。'); }
+      if (await confirmSavedTarget(checkedNow)) { setSessionConfirmed(true); setNotice('本次会话请求目标已确认；更换 Key 或目标后需重新确认。'); }
     });
+  }
+  function enableKeyInput() {
+    setTargetConfirmed(true); focusKey.current = true;
   }
 
   function test(level: TestLevel) {
@@ -271,6 +298,12 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
     <p>Mock 是离线演示。保存配置与 Key 不代表鉴权或生成成功；真实请求需要确认目标，生成还需已审核的模型能力与预算。</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status" className="settings-success">{notice}</p>}
     {busy && <p role="status">正在处理，请等待结果…</p>}
+    {saved?.withheldModelIds && <p className="settings-warning" role="note">之前保存的模型 ID 里有看起来像 API Key 的内容，已隐藏，不会显示也不会使用。请重新填写模型 ID 并保存配置，旧内容会被覆盖。这把 Key 曾以明文保存在本机数据库里，建议到服务商控制台更换。</p>}
+    {saved && draft.kind !== 'mock' && <section className="settings-progress" aria-label="接入进度"><ol>
+      <li data-done={!dirty}>配置：{dirty ? '有未保存的更改' : '已保存'}</li>
+      <li data-done={keyReady}>API Key：{keyState?.state === 'configured' ? '已配置' : keyState?.state === 'session' ? '本次会话有效' : keyState?.state === 'unavailable' ? '无法读取，请重新填写' : '未配置'}</li>
+      <li data-done={sessionConfirmed}>本次会话目标：{sessionConfirmed ? '已确认' : '未确认'}</li>
+    </ol><p>{nextStep}</p></section>}
     <form onSubmit={save} noValidate>
       <fieldset disabled={busy}><legend>Provider 配置</legend>
         <label>Provider 名称<input value={draft.name} onChange={event => change('name', event.target.value)} /></label>
@@ -283,27 +316,33 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
         <p id="settings-endpoint-help">仅允许 HTTPS 或明确的 localhost、127.0.0.1、[::1] HTTP；不得含凭据、查询参数或片段。留空使用厂商默认地址；兼容端点需填写才能通过配置检查。</p>
         <div className="settings-target"><strong>请求目标</strong><p>{endpointInvalid ? '地址无效，无法确认请求目标。' : target}</p>
           {draft.kind !== 'mock' && !endpointInvalid && <label className="settings-check"><input type="checkbox" checked={targetConfirmed} onChange={event => setTargetConfirmed(event.target.checked)} />我已核对请求目标</label>}
-          {saved && draft.kind !== 'mock' && <button type="button" disabled={!canUseSaved || !targetReady || !effectiveTarget} onClick={confirmSessionTarget}>确认本次会话目标</button>}
+          {saved && draft.kind !== 'mock' && <button type="button" disabled={!canUseSaved || !targetReady || !effectiveTarget} onClick={() => confirmSessionTarget()}>确认本次会话目标</button>}
           {saved && targetChanged && <p className="settings-warning">更换类型或请求目标会撤销旧 Key；保存后必须重新输入 Key。</p>}
           {saved && draft.kind !== 'mock' && !targetChanged && !sessionConfirmed && (keyState?.state === 'configured' || keyState?.state === 'session') && <p className="settings-warning" role="note">本次会话尚未确认请求目标：勾选“我已核对请求目标”并点“确认本次会话目标”后，房间成员才能向此 Provider 发送真实请求。保存或更换 Key 后需重新确认。</p>}
         </div>
         <label className="settings-check"><input type="checkbox" checked={draft.enabled} onChange={event => { change('enabled', event.target.checked); if (!event.target.checked) setDraft(previous => ({ ...previous, isDefault: false })); }} />启用此 Provider</label>
         <label className="settings-check"><input type="checkbox" checked={draft.isDefault} onChange={event => { change('isDefault', event.target.checked); if (event.target.checked) setDraft(previous => ({ ...previous, enabled: true })); }} />设为默认 Provider</label>
         <p>默认 Provider 必须启用；保存后会取消其他实例的默认标记，不会改动房间成员已保存的选择。</p>
-        <label>默认模型 ID<input value={draft.defaultModelId} disabled={draft.kind === 'mock'} onChange={event => change('defaultModelId', event.target.value)} /></label>
+        <label>默认模型 ID<input value={draft.defaultModelId} disabled={draft.kind === 'mock'} placeholder={`例如 ${modelExamples[draft.kind]}`} autoComplete="off" spellCheck={false}
+          aria-invalid={looksLikeApiKey(draft.defaultModelId) || undefined} aria-describedby="settings-default-model-help" onChange={event => change('defaultModelId', event.target.value)} /></label>
+        {draft.kind !== 'mock' && <ModelIdHelp id="settings-default-model-help" value={draft.defaultModelId} kind={draft.kind} keySectionVisible={saved !== null} />}
         {draft.kind !== 'mock' && <div className="settings-models"><h3>自定义模型</h3><p>模型 ID 属于当前实例；允许手动输入，不以模型列表作为白名单。</p>
           {draft.customModels.map((model, index) => <div className="settings-model-row" key={index}>
-            <label>模型 {index + 1} ID<input value={model.id} onChange={event => change('customModels', draft.customModels.map((value, i) => i === index ? { ...value, id: event.target.value } : value))} /></label>
+            <label>模型 {index + 1} ID<input value={model.id} autoComplete="off" spellCheck={false} aria-invalid={looksLikeApiKey(model.id) || undefined} onChange={event => change('customModels', draft.customModels.map((value, i) => i === index ? { ...value, id: event.target.value } : value))} /></label>
             <label>模型 {index + 1} 名称<input value={model.name} onChange={event => change('customModels', draft.customModels.map((value, i) => i === index ? { ...value, name: event.target.value } : value))} /></label>
             <button type="button" onClick={() => change('customModels', draft.customModels.filter((_, i) => i !== index))}>移除模型 {index + 1}</button>
           </div>)}
-          <div className="settings-model-row"><label>新增模型 ID<input value={newModel.id} onChange={event => setNewModel(previous => ({ ...previous, id: event.target.value }))} /></label><label>新增模型名称<input value={newModel.name} onChange={event => setNewModel(previous => ({ ...previous, name: event.target.value }))} /></label>
+          {draft.customModels.some(model => looksLikeApiKey(model.id)) && <p role="alert" className="settings-field-error">{keyInModelFieldMessage(saved !== null)}</p>}
+          <div className="settings-model-row"><label>新增模型 ID<input value={newModel.id} placeholder={`例如 ${modelExamples[draft.kind]}`} autoComplete="off" spellCheck={false}
+            aria-invalid={looksLikeApiKey(newModel.id) || undefined} aria-describedby="settings-new-model-help" onChange={event => setNewModel(previous => ({ ...previous, id: event.target.value }))} /></label><label>新增模型名称<input value={newModel.name} onChange={event => setNewModel(previous => ({ ...previous, name: event.target.value }))} /></label>
             <button type="button" onClick={() => {
               const model = { id: newModel.id.trim(), name: newModel.name.trim() };
+              if (looksLikeApiKey(model.id)) { setError(keyInModelFieldMessage(saved !== null)); return; }
               if (!model.id || !model.name || draft.customModels.some(value => value.id === model.id)) { setError('模型 ID 和名称不能为空，ID 不能重复。'); return; }
               change('customModels', [...draft.customModels, model]); setNewModel({ id: '', name: '' });
             }}>添加自定义模型</button>
           </div>
+          <ModelIdHelp id="settings-new-model-help" value={newModel.id} kind={draft.kind} keySectionVisible={saved !== null} />
         </div>}
         <div className="settings-actions"><button type="submit" className="settings-primary">保存配置</button>{saved && <button type="button" onClick={() => { clearSecret(); setDraft(toDraft(saved)); setTargetConfirmed(false); setSessionConfirmed(false); setError(''); setNotice(''); setDeleting(null); }}>取消更改</button>}{saved && <button type="button" onClick={() => { clearSecret(); setDeleting('provider'); }}>删除 Provider</button>}</div>
       </fieldset>
@@ -312,10 +351,15 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
       {draft.kind === 'mock' ? <p>Mock 不使用端点或 API Key。</p> : <>
         <p>{keyState?.state === 'configured' ? '已配置；系统安全存储。' : keyState?.state === 'session' ? '本次会话有效；退出后需重新输入 Key。' : keyState?.state === 'unavailable' ? '已保存的 Key 当前无法读取；请重新输入。' : keyState?.state === 'missing' ? '未配置 Key。' : 'Key 状态尚未加载。'}</p>
         <p>{currentStorage?.mode === 'secure' ? '密钥将使用系统安全存储持久化。' : currentStorage?.mode === 'memory' ? '当前系统没有可靠的安全存储，密钥仅在本次会话有效。' : '安全存储状态未知；请重新加载。'}</p>
-        <form onSubmit={saveKey}><label>API Key<input ref={bindSecret} type="password" autoComplete="off" spellCheck={false} onChange={event => setHasSecret(event.target.value.length > 0)} onBlur={clearSecret} disabled={!canUseSaved || !targetReady} aria-describedby="settings-key-help" /></label>
+        <form onSubmit={saveKey}><label>API Key<input ref={bindSecret} type="password" autoComplete="off" spellCheck={false} onChange={event => setHasSecret(event.target.value.length > 0)} onBlur={clearSecret} disabled={!canUseSaved || !targetReady} aria-describedby={keyBlocked ? 'settings-key-blocked settings-key-help' : 'settings-key-help'} /></label>
+          {keyBlocked === 'dirty' && <div className="settings-inline-fix" id="settings-key-blocked" role="note"><p>输入框暂不可用：配置有未保存的更改，保存后才能填写 Key。</p><button type="button" onClick={saveDraft}>先保存配置</button></div>}
+          {keyBlocked === 'target' && <div className="settings-inline-fix" id="settings-key-blocked" role="note"><p>输入框暂不可用：填写 Key 之前，请先核对 Key 将发往的请求目标：{effectiveTarget ?? '未配置'}</p>
+            <button type="button" disabled={!effectiveTarget} onClick={enableKeyInput}>目标无误，启用输入框</button></div>}
           <p id="settings-key-help">输入后按 Enter 保存或替换；离开输入框会清除输入。Key 不回显，保存后立即清除表单。</p>
           <div className="settings-actions"><button type="submit" disabled={!canUseSaved || !targetReady || !hasSecret} onMouseDown={event => event.preventDefault()}>保存或替换 Key</button><button type="button" onClick={clearSecret}>清除输入</button><button type="button" disabled={!canUseSaved || !keyState || keyState.state === 'missing'} onClick={() => { clearSecret(); setDeleting('key'); }}>删除 Key</button></div>
         </form>
+        {keyReady && !dirty && !sessionConfirmed && <div className="settings-inline-fix" role="note"><p>最后一步：确认本次会话的请求目标 {effectiveTarget}。确认后，房间成员才能用这把 Key 发送真实请求；退出应用、更换 Key 或目标后需要重新确认。</p>
+          <button type="button" className="settings-primary" disabled={!canUseSaved || !effectiveTarget} onClick={() => confirmSessionTarget(true)}>目标无误，确认本次会话</button></div>}
       </>}
     </section>}
     {saved && <section className="settings-section" aria-labelledby="settings-tests-title"><h3 id="settings-tests-title">分级检查与测试</h3>
@@ -324,9 +368,10 @@ function ProviderEditor({ id, api, storage, secret, onSaved, onDeleted }: {
       {!targetReady && <p className="settings-warning">请先勾选“我已核对请求目标”。</p>}
       {!saved.enabled && <p className="settings-warning">当前 Provider 已禁用；配置检查会报告不可用。</p>}
       <div className="settings-actions"><button type="button" disabled={!canUseSaved} onClick={() => test('configuration')}>检查配置</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={listModels}>获取模型列表</button><button type="button" disabled={!canUseSaved || !targetReady} onClick={() => test('authentication')}>测试鉴权</button></div>
-      <label>生成测试模型 ID<input value={generationModel} onChange={event => { setGenerationModel(event.target.value); setGenerationConfirmed(false); }} disabled={!canUseSaved} /></label>
+      <label>生成测试模型 ID<input value={generationModel} placeholder={`例如 ${modelExamples[draft.kind]}`} autoComplete="off" spellCheck={false} aria-invalid={looksLikeApiKey(generationModel) || undefined} onChange={event => { setGenerationModel(event.target.value); setGenerationConfirmed(false); }} disabled={!canUseSaved} /></label>
+      {looksLikeApiKey(generationModel) && <p role="alert" className="settings-field-error">{keyInModelFieldMessage(true)}</p>}
       <label className="settings-check"><input type="checkbox" checked={generationConfirmed} onChange={event => setGenerationConfirmed(event.target.checked)} disabled={!canUseSaved} />我确认本次生成测试可能产生费用</label>
-      <button type="button" disabled={!canUseSaved || !targetReady || !generationConfirmed || !generationModel.trim()} onClick={() => test('generation')}>发起生成测试</button>
+      <button type="button" disabled={!canUseSaved || !targetReady || !generationConfirmed || !generationModel.trim() || looksLikeApiKey(generationModel)} onClick={() => test('generation')}>发起生成测试</button>
       <div aria-live="polite">{results.configuration && <p>配置检查：{results.configuration}</p>}{listResult && <p>{listResult}</p>}{listedModels && <ul>{listedModels.map(model => <li key={model.id}>{model.name} · {model.id}</li>)}</ul>}{results.authentication && <p>鉴权测试：{results.authentication}</p>}{results.generation && <p>生成测试：{results.generation}</p>}</div>
     </section>}
     {deletionConfirmation}
