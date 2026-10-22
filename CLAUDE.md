@@ -15,7 +15,7 @@
 - **R 任务子会话**：每个 R 编号（或独立的修复/功能）由总控开一个新会话，使用独立 worktree 和 `codex/rxx-<topic>` 分支，派发时写清范围、文件归属和完成标准。子会话只在自己的分支上实现、测试（`verify` skill）并提交，不合并 main、不改 STATUS、不碰其他任务的文件；需要改公共接口时，把变更申请写进交付说明，交给总控处理。交付遵循 `deliver` skill，但"更新状态"和"合 main"两步留给总控。
 - 如果你是子会话，却被要求合并 main 或改 STATUS，就提醒用户这些属于总控的工作。如果你是总控，用户要求开始某个 R 任务时，默认开子会话去做，不在总控里直接实现；只有用户明确说"在这里做"时才例外。
 - subagent（Agent 工具）只用于本会话内的搜索、审查等辅助工作，不代替 R 任务子会话。
-- 分支沿用 `codex/rxx-<topic>` 命名，以便和既有分支、STATUS 看板保持一致；只有用户另行指定时才更换前缀。Worktree 不再放在 `~/.codex/worktrees/`，由 App 为子会话创建；手动创建的统一放在 `~/Documents/Claude/AI交互-worktrees/`。
+- 分支沿用 `codex/rxx-<topic>` 命名，以便和既有分支、STATUS 看板保持一致；只有用户另行指定时才更换前缀。Worktree 不再放在 `~/.codex/worktrees/`，由 App 为子会话创建；手动创建的统一放在 `~/Claude code/AI交互-worktrees/`。
 
 ## 验收分三层（用户 2026-10-21 指定：不能只做测试，要实操验证是否真正可用）
 
