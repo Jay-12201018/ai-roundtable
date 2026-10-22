@@ -1,0 +1,9 @@
+.message-usage { margin-top: 4px; color: var(--secondary); font-size: 13px; line-height: 20px; font-variant-numeric: tabular-nums; }
+.message-usage.is-unknown { color: var(--warning); }
+.run-budget { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--subtle); color: var(--secondary); font-size: 13px; line-height: 20px; font-variant-numeric: tabular-nums; }
+.run-budget-remaining { color: var(--text); font-weight: 600; }
+.run-budget-over { color: var(--error); font-weight: 600; }
+.composer-budget { display: flex; align-items: center; gap: 8px; color: var(--secondary); }
+.composer .composer-budget input { flex: 0 0 96px; width: 96px; }
+.composer-budget-error { flex-basis: 100%; margin: 0; color: var(--error); }
+@media (max-width: 1023px) { .run-budget { padding: 8px 16px; } }

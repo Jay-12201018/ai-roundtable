@@ -5,7 +5,7 @@ import { isIP, type LookupFunction } from 'node:net';
 import { z } from 'zod';
 import type { DiagnosticEvent, DiagnosticObserver } from './diagnostics';
 import { ContractError } from '../../shared/contracts/errors';
-import { assertProxyTarget, LoopbackProxyAgent, type LoopbackProxy } from './loopbackProxy';
+import { assertProxyTarget, LoopbackProxyAgent, proxyTargetHost, type LoopbackProxy, type ProxyTargetKind } from './loopbackProxy';
 
 const nativeText = z.object({ text: z.string() }).strict();
 const positiveTokens = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -83,7 +83,7 @@ function loopback(address: string): boolean {
 }
 
 /** Main-only transport: pin public DNS directly, or use the explicitly trusted, narrowly scoped proxy. */
-export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver, proxy?: LoopbackProxy): typeof fetch {
+export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver, proxy?: LoopbackProxy, proxyKind: ProxyTargetKind = 'deepseek'): typeof fetch {
   return async (input, init = {}) => {
     if (typeof input !== 'string' && !(input instanceof URL)) throw new TypeError('Unsupported request');
     const raw = String(input);
@@ -100,7 +100,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     const signal = init.signal;
     const abortReason = () => signal?.reason instanceof Error ? signal.reason : new DOMException('Request aborted', 'AbortError');
     signal?.throwIfAborted(); guard?.();
-    if (proxy) assertProxyTarget(url, method);
+    if (proxy) assertProxyTarget(url, method, proxyKind);
     observe?.({ stage: 'network_client', evidence: 'client_invoked' });
     signal?.throwIfAborted();
     let selected: { address: string; family: number } | undefined;
@@ -137,7 +137,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
       const agent = proxy ? new LoopbackProxyAgent(proxy, guard, signal, event => {
         if (event.stage === 'tcp' || event.stage === 'proxy' || event.stage === 'tls') phase = event.stage;
         observe?.(event);
-      }) : undefined;
+      }, proxyTargetHost(proxyKind)) : undefined;
       const diagnose = (error: unknown) => {
         const code = nativeCode(error);
         let category: DiagnosticEvent['category'];

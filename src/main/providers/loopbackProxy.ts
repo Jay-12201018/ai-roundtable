@@ -17,23 +17,44 @@ export function readLoopbackProxy(env: NodeJS.ProcessEnv): LoopbackProxy | undef
   return Object.freeze({ hostname: match[1] === '[::1]' ? '::1' : '127.0.0.1', port: Number(match[2]) });
 }
 
-export function assertProxyTarget(url: URL, method: string): void {
+export type ProxyTargetKind = 'deepseek' | 'anthropic' | 'gemini';
+// Each reviewed Provider kind has one fixed official host and the exact request shapes its adapter sends.
+const proxyTargets: Record<ProxyTargetKind, { host: string; allows: (url: URL, method: string) => boolean }> = {
+  deepseek: { host: 'api.deepseek.com', allows: (url, method) => method === 'POST' && url.pathname === '/chat/completions' && !url.search },
+  anthropic: { host: 'api.anthropic.com', allows: (url, method) => method === 'POST' ? url.pathname === '/v1/messages' && !url.search
+    : method === 'GET' && url.pathname === '/v1/models' && pagedQuery(url, 'limit', '1000', 'after_id') },
+  gemini: { host: 'generativelanguage.googleapis.com', allows: (url, method) => method === 'POST'
+    ? /^\/v1beta\/models\/[a-zA-Z0-9][a-zA-Z0-9._-]*:streamGenerateContent$/u.test(url.pathname) && url.search === '?alt=sse'
+    : method === 'GET' && url.pathname === '/v1beta/models' && pagedQuery(url, 'pageSize', '100', 'pageToken') },
+};
+function pagedQuery(url: URL, sizeName: string, size: string, tokenName: string): boolean {
+  const entries = [...url.searchParams];
+  return new Set(entries.map(([name]) => name)).size === entries.length && url.searchParams.get(sizeName) === size
+    && entries.every(([name, value]) => name === sizeName || name === tokenName && value.length > 0 && value.length <= 4096);
+}
+
+export function proxyTargetHost(kind: ProxyTargetKind): string { return proxyTargets[kind].host; }
+
+export function assertProxyTarget(url: URL, method: string, kind: ProxyTargetKind = 'deepseek'): void {
   // Remote DNS is delegated to the explicitly trusted local proxy, not proven public by this client.
   // A fixed reviewed origin plus authenticated TLS prevents arbitrary compatible-origin SSRF.
-  if (url.href !== 'https://api.deepseek.com/chat/completions' || method !== 'POST') throw new ContractError('forbidden');
+  const target = proxyTargets[kind];
+  if (!target || url.href !== `https://${target.host}${url.pathname}${url.search}` || !target.allows(url, method)) throw new ContractError('forbidden');
 }
 
 /** One CONNECT + one TLS socket, no pooling, proxy authentication, redirect, retry or direct fallback. */
 export class LoopbackProxyAgent extends Agent {
   constructor(private readonly proxy: LoopbackProxy, private readonly guard: (() => void) | undefined,
-    private readonly signal: AbortSignal | null | undefined, private readonly observe?: DiagnosticObserver) {
+    private readonly signal: AbortSignal | null | undefined, private readonly observe?: DiagnosticObserver,
+    private readonly host: string = proxyTargetHost('deepseek')) {
     super({ keepAlive: false, maxSockets: 1 });
     if (!['127.0.0.1', '::1'].includes(proxy.hostname) || !Number.isInteger(proxy.port) || proxy.port < 1 || proxy.port > 65535) throw new ContractError('invalid_input');
+    if (!Object.values(proxyTargets).some(target => target.host === host)) throw new ContractError('forbidden');
   }
 
   override createConnection(options: RequestOptions, callback: (error: Error | null, stream: Duplex) => void): undefined {
-    const { proxy, signal, observe, guard } = this;
-    if (options.host !== 'api.deepseek.com' || Number(options.port) !== 443 || options.servername !== 'api.deepseek.com'
+    const { proxy, signal, observe, guard, host } = this;
+    if (options.host !== host || Number(options.port) !== 443 || options.servername !== host
       || options.rejectUnauthorized !== true) throw new ContractError('forbidden');
     let tunnel: Socket | undefined; let secure: ReturnType<typeof tlsConnect> | undefined;
     let request: ReturnType<typeof httpRequest> | undefined;
@@ -53,8 +74,8 @@ export class LoopbackProxyAgent extends Agent {
     const timer = setTimeout(() => fail(connected ? 'proxy_failed' : 'tcp_timeout'), 10000);
     try {
       check(); observe?.({ stage: 'tcp' }); check();
-      request = httpRequest({ hostname: proxy.hostname, port: proxy.port, method: 'CONNECT', path: 'api.deepseek.com:443',
-        headers: { Host: 'api.deepseek.com:443' }, agent: false, maxHeaderSize: 8192 });
+      request = httpRequest({ hostname: proxy.hostname, port: proxy.port, method: 'CONNECT', path: `${host}:443`,
+        headers: { Host: `${host}:443` }, agent: false, maxHeaderSize: 8192 });
       request.once('error', () => fail(connected ? 'proxy_failed' : 'tcp_failed'));
       request.once('response', response => { response.destroy(); fail('proxy_rejected', 'proxy'); });
       request.once('connect', (response, socket, head) => {
@@ -63,7 +84,7 @@ export class LoopbackProxyAgent extends Agent {
         if (response.statusCode !== 200 || head.length !== 0) { fail('proxy_rejected', 'proxy'); return; }
         try {
           check(); observe?.({ stage: 'tls' }); check();
-          secure = tlsConnect({ socket, servername: 'api.deepseek.com', rejectUnauthorized: true });
+          secure = tlsConnect({ socket, servername: host, rejectUnauthorized: true });
           finished = true; clean();
           // ClientRequest gets the socket before secureConnect, and sends nothing until it succeeds.
           callback(null, secure);

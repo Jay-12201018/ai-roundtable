@@ -26,3 +26,32 @@ it('only permits the reviewed exact HTTPS origin/path for proxy transport', () =
   }
   expect(() => assertProxyTarget(new URL('https://api.deepseek.com/chat/completions'), 'GET')).toThrow();
 });
+it('checks each reviewed Provider kind against its own fixed host and request shapes', () => {
+  const allowed: Array<[string, string, 'deepseek' | 'anthropic' | 'gemini']> = [
+    ['https://api.anthropic.com/v1/messages', 'POST', 'anthropic'],
+    ['https://api.anthropic.com/v1/models?limit=1000', 'GET', 'anthropic'],
+    ['https://api.anthropic.com/v1/models?limit=1000&after_id=abc', 'GET', 'anthropic'],
+    ['https://generativelanguage.googleapis.com/v1beta/models/gemini-x:streamGenerateContent?alt=sse', 'POST', 'gemini'],
+    ['https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&pageToken=t', 'GET', 'gemini'],
+  ];
+  for (const [url, method, kind] of allowed) expect(() => assertProxyTarget(new URL(url), method, kind)).not.toThrow();
+  const refused: Array<[string, string, 'deepseek' | 'anthropic' | 'gemini']> = [
+    // The old DeepSeek-only check refused every native origin; the DeepSeek path is still not valid for them.
+    ['https://api.anthropic.com/chat/completions', 'POST', 'anthropic'],
+    ['https://api.deepseek.com/chat/completions', 'POST', 'anthropic'],
+    ['https://api.anthropic.com/v1/messages', 'POST', 'gemini'],
+    ['https://api.anthropic.com/v1/messages?x=1', 'POST', 'anthropic'],
+    ['https://api.anthropic.com/v1/messages#x', 'POST', 'anthropic'],
+    ['https://api.anthropic.com:444/v1/messages', 'POST', 'anthropic'],
+    ['https://api.anthropic.com/v1/models', 'GET', 'anthropic'],
+    ['https://api.anthropic.com/v1/models?limit=1000&limit=1000', 'GET', 'anthropic'],
+    ['https://api.anthropic.com/v1/messages', 'GET', 'anthropic'],
+    ['https://generativelanguage.googleapis.com/v1beta/models/gemini-x:streamGenerateContent', 'POST', 'gemini'],
+    ['https://generativelanguage.googleapis.com/v1beta/models/gemini-x:streamGenerateContent?alt=sse&key=k', 'POST', 'gemini'],
+    ['https://generativelanguage.googleapis.com/v1/models?pageSize=100', 'GET', 'gemini'],
+    ['http://generativelanguage.googleapis.com/v1beta/models?pageSize=100', 'GET', 'gemini'],
+    ['https://user@api.anthropic.com/v1/messages', 'POST', 'anthropic'],
+    ['https://api.deepseek.com/v1/messages', 'POST', 'deepseek'],
+  ];
+  for (const [url, method, kind] of refused) expect(() => assertProxyTarget(new URL(url), method, kind)).toThrow();
+});
