@@ -51,6 +51,33 @@ open "dist/mac-arm64/AI Roundtable.app"
 
 `pnpm dev` 和 `pnpm preview` 会先为 Electron 重编译 SQLite；`pnpm test` 会先为当前 Node.js 重编译。不要把普通 `pnpm rebuild better-sqlite3` 当作 Electron ABI 修复命令，需要单独重编译时运行 `pnpm native:electron`。
 
+## 隔离试用（真实 DeepSeek）
+
+想用自己的 DeepSeek Key 上手试用、又不碰正式数据时，运行：
+
+```bash
+pnpm trial
+```
+
+它会先构建，再用独立的数据目录启动应用：macOS 为 `~/Library/Application Support/ai-roundtable-trial`（Windows 为 `%APPDATA%\ai-roundtable-trial`，Linux 为 `~/.config/ai-roundtable-trial`）。正式数据目录 `…/ai-roundtable` 和其中的数据库不会被打开；试用目录如果是指向它的链接，启动会被拒绝。Key 用系统安全存储（safeStorage）加密保存在试用数据库里，和正常使用一样。
+
+第一次实测的步骤：
+
+1. "模型设置" → "新增 Provider"：类型选 OpenAI-Compatible，Base URL 填 `https://api.deepseek.com`，勾选"我已核对请求目标"，默认模型和自定义模型都填 `deepseek-flash`，保存。
+2. 勾选"我已核对请求目标"，输入 API Key 后按 Enter 保存；再勾选一次并点"确认本次会话目标"（每次启动、每次更换 Key 后都要重新确认）。
+3. "房间与成员"里新建房间并添加成员，Provider 选刚才的 DeepSeek，Model 为 `deepseek-flash`。
+4. 回到"讨论"，填写任务和"本次预算（元）"（默认 1 元），点"开始协作"。每条回复下方显示用量和花费，预算栏显示累计花费和剩余额度；剩余额度不够下一次请求的最高花费时会拒绝发送。
+
+当前只批准 `deepseek-flash`（价格按高峰、缓存未命中计，审核有效期到 2026-11-21）。显示的花费按核验费率估算，账单以 DeepSeek 控制台为准。如需经本机代理访问，启动前设置 `ROUNDTABLE_CONNECT_PROXY=http://127.0.0.1:端口` 和 `ROUNDTABLE_TRUST_PROXY_DNS=1`。
+
+清空试用数据：
+
+```bash
+pnpm trial:reset
+```
+
+不带参数只显示将删除的目录；确认删除运行 `pnpm trial:reset --yes`。它只删除带有 `trial-profile.json` 标记、由 `pnpm trial` 创建的目录。系统钥匙串里用于加密的条目由系统管理，不会被删除，也不包含你的 API Key 明文。
+
 ## 当前 M1 交付边界
 
 原型路径是：创建任务 → Mock Agent A 固定起草文案 → Mock Agent B 固定审查文案 → Mock Agent C 固定定稿文案 → Renderer 流式展示 → SQLite 持久化。Main Process 是运行状态权威。Preload API 受限且部分输入由 Zod 校验；响应/事件 Schema 尚未接入运行时。后续 Agent 尚不接收前序输出，因此这不是已完成的共享历史协作。
