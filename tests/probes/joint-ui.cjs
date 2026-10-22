@@ -54,14 +54,14 @@ async function page(stage) {
   await click('开始协作');
   id = await wait(() => localStorage.getItem('roundtable.runId'), value => value && value !== completed.runId, 'New Run not saved');
   await wait(() => text(), t => t[0]?.length > 0, 'Stop partial absent');
-  await click('停止');
+  await click('停止'); await click('确认停止');
   const stopped = await settled('cancelled', 1);
   const repeats = [];
   for (const name of ['重试当前回合', '续写部分回复']) {
     await click(name);
     await wait(read, s => s.messages.length === repeats.length + 2 && s.messages.at(-1).content.length > 0
       && text().length === s.messages.length, 'Repeat message absent');
-    await click('停止');
+    await click('停止'); await click('确认停止');
     repeats.push(await settled('cancelled', 1));
   }
   return { refreshed, stepped, completed, stopped, repeats, cspViolations: window.__r01ProbeViolations };

@@ -128,13 +128,13 @@ async function page(stage, saved) {
     check(snapshots.completed.attempts.length === 3 && new Set(snapshots.completed.attempts.map(attempt => attempt.requestId)).size === 3, 'Three request identities missing');
     await fill('任务目标', 'R78 cancellation and explicit repeat'); await click('开始协作');
     const repeatRunId = await wait(() => localStorage.getItem('roundtable.runId'), id => id && id !== saved.runId, 'Repeat scenario Run absent');
-    await wait(text, values => values[0]?.length > 0, 'Stop partial output absent'); await click('停止');
+    await wait(text, values => values[0]?.length > 0, 'Stop partial output absent'); await click('停止'); await click('确认停止');
     snapshots.stopped = await settle(repeatRunId, 'cancelled', 1); snapshots.repeats = [];
     for (const name of ['重试当前回合', '续写部分回复']) {
       const before = snapshots.repeats.at(-1) ?? snapshots.stopped;
       await click(name);
       await wait(() => api.run.getSnapshot(repeatRunId), snapshot => snapshot.messages.length === before.messages.length + 1 && snapshot.messages.at(-1).content.length > 0 && text().length === snapshot.messages.length, 'Explicit repeat output absent');
-      await click('停止'); const repeated = await settle(repeatRunId, 'cancelled', 1);
+      await click('停止'); await click('确认停止'); const repeated = await settle(repeatRunId, 'cancelled', 1);
       check(JSON.stringify(repeated.messages[0]) === JSON.stringify(snapshots.stopped.messages[0]), 'Repeat changed original partial');
       check(JSON.stringify(repeated.attempts[0]) === JSON.stringify(snapshots.stopped.attempts[0]), 'Repeat changed original request evidence');
       snapshots.repeats.push(repeated);

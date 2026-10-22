@@ -255,7 +255,7 @@ async function main() {
   // Path 5b: Stop keeps the partial text; an explicit retry then succeeds.
   await field('任务目标'); await selectAll(); await ime('tingzhi', '演示停止后重试'); await click('开始协作');
   await until(`document.querySelector('.host-slot p')?.textContent.length > 6`, 'streaming before stop');
-  await click('停止');
+  await click('停止'); await click('确认停止');
   await until(`document.querySelector('.timeline .status').textContent.includes('已停止')`, 'stopped');
   await capture('stopped-partial', '生成中点"停止"：状态"已停止"，已输出的部分文字保留并标为"已中止"。', '.host-slot');
   await click('重试当前回合');

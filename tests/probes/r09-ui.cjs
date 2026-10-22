@@ -51,9 +51,9 @@ async function page(stage, saved, endpoint) {
   }
   if(stage==='stop'){
     await fill('任务目标','R09 hanging HTTP output');await click('开始协作');saved.stopRunId=await wait(()=>localStorage.getItem('roundtable.runId'),id=>id&&id!==saved.runId,'Stop Run absent');
-    await wait(text,ts=>ts[0]?.length>0,'No partial before Stop');await click('停止');snapshots.stopped=await settle(saved.stopRunId,'cancelled');check(snapshots.stopped.messages[0].content.length>0,'Stop lost partial');check(snapshots.stopped.attempts[0].status==='aborted','Attempt not aborted');
+    await wait(text,ts=>ts[0]?.length>0,'No partial before Stop');await click('停止'); await click('确认停止');snapshots.stopped=await settle(saved.stopRunId,'cancelled');check(snapshots.stopped.messages[0].content.length>0,'Stop lost partial');check(snapshots.stopped.attempts[0].status==='aborted','Attempt not aborted');
     for(const name of ['重试当前回合','续写部分回复']){
-      const before=snapshots.repeated??snapshots.stopped;await click(name);await wait(()=>api.run.getSnapshot(saved.stopRunId),s=>s.messages.length===before.messages.length+1&&s.messages.at(-1).content.length>0,'Explicit repeat missing');await click('停止');snapshots.repeated=await settle(saved.stopRunId,'cancelled');check(JSON.stringify(snapshots.repeated.messages[0])===JSON.stringify(snapshots.stopped.messages[0]),'Repeat overwrote original partial');
+      const before=snapshots.repeated??snapshots.stopped;await click(name);await wait(()=>api.run.getSnapshot(saved.stopRunId),s=>s.messages.length===before.messages.length+1&&s.messages.at(-1).content.length>0,'Explicit repeat missing');await click('停止'); await click('确认停止');snapshots.repeated=await settle(saved.stopRunId,'cancelled');check(JSON.stringify(snapshots.repeated.messages[0])===JSON.stringify(snapshots.stopped.messages[0]),'Repeat overwrote original partial');
     }
     noKey(snapshots.repeated);return {saved,snapshots,assertions};
   }
