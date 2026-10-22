@@ -6,26 +6,35 @@ import { originLabels, runIdle, timelineSlots, type TimelineSlot } from './model
 import type { HostCommands } from './useHostCommands';
 import { MessageUsage, chargeOfMessage } from '../usage';
 
-type Props = { snapshot: RunSnapshot | undefined; commands: HostCommands };
+/** Provider names known to the Renderer now; a frozen member snapshot keeps only the stable Provider id. */
+export type ProviderNames = { state: 'loading' | 'ready' | 'error'; names: ReadonlyMap<string, string> };
+type Props = { snapshot: RunSnapshot | undefined; commands: HostCommands; providers?: ProviderNames };
 
-function identity(snapshot: RunSnapshot | undefined, agentId: string | undefined) {
+// Never shows a Provider UUID: a name, or a plain explanation when the name cannot be found.
+function providerLabel(providerId: string | null | undefined, modelId: string | null | undefined, providers: ProviderNames | undefined): string {
+  if (!providerId) return modelId === 'mock' ? 'Provider：内置 Mock' : 'Provider 未记录';
+  const name = providers?.names.get(providerId);
+  if (name) return `Provider：${name}`;
+  return providers?.state === 'ready' ? 'Provider 已删除' : providers?.state === 'error' ? 'Provider 名称暂时无法读取' : 'Provider 读取中';
+}
+function identity(snapshot: RunSnapshot | undefined, agentId: string | undefined, providers?: ProviderNames) {
   const member = snapshot?.execution?.membersSnapshot?.find(value => value.agentId === agentId);
-  return { member, line: `${member?.roleTemplateId ?? '角色未记录'} · Provider：${member?.providerId ?? '未记录'} · Model：${member?.modelId ?? '未记录'}` };
+  return { member, line: `${member?.roleTemplateId ?? '角色未记录'} · ${providerLabel(member?.providerId, member?.modelId, providers)} · Model：${member?.modelId ?? '未记录'}` };
 }
 
 /** The shared timeline: one entry per message slot, its effective version first, other versions on demand. */
-export function HostTimeline({ snapshot, commands }: Props) {
+export function HostTimeline({ snapshot, commands, providers }: Props) {
   const slots = timelineSlots(snapshot);
   if (!slots) {
     // Builds without version data keep the original flat rendering.
     return <>{(snapshot?.messages ?? []).map(message => {
       const attempt = snapshot?.attempts?.find(value => value.messageId === message.id);
       const turn = snapshot?.turns.find(value => attempt ? value.turnId === attempt.turnId : value.messageId === message.id);
-      const { member, line } = identity(snapshot, turn?.agentId);
+      const { member, line } = identity(snapshot, turn?.agentId, providers);
       return <article className="message" key={message.id}><strong>{member?.displayName ?? message.senderName}</strong><div className="message-identity">{line}</div><p>{message.content}</p><small>{statusLabels[message.status] ?? '未知状态'}</small><MessageUsage charge={chargeOfMessage(snapshot, message.id)} /></article>;
     })}</>;
   }
-  return <>{slots.map(slot => <SlotView key={slot.slotId} slot={slot} snapshot={snapshot!} commands={commands} />)}</>;
+  return <>{slots.map(slot => <SlotView key={slot.slotId} slot={slot} snapshot={snapshot!} commands={commands} providers={providers} />)}</>;
 }
 
 /** Names the upstream messages a version was based on, e.g. 「起草者」「主持人」的发言. */
@@ -39,13 +48,13 @@ function upstream(snapshot: RunSnapshot, messageIds: string[]): string {
   return [...new Set(names)].map(name => `「${name}」`).join('') + '的发言';
 }
 
-function SlotView({ slot, snapshot, commands }: { slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands }) {
+function SlotView({ slot, snapshot, commands, providers }: { slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames }) {
   const [viewing, setViewing] = useState<string>();
   const [draft, setDraft] = useState<string>();
   const index = Math.max(0, slot.versions.findIndex(version => version.messageId === (viewing ?? slot.active.messageId)));
   const shown = slot.versions[index] ?? slot.active;
   const turn = snapshot.turns.find(value => value.turnId === slot.turnId);
-  const { member, line } = identity(snapshot, turn?.agentId);
+  const { member, line } = identity(snapshot, turn?.agentId, providers);
   const generating = slot.versions.find(version => version.messageId === snapshot.host?.generation?.messageId);
   const streaming = slot.versions.some(version => version.message.status === 'streaming');
   const settled = slot.author === 'host' || turn?.status === 'completed';

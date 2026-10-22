@@ -6,7 +6,7 @@ import { WorkflowFeature, type WorkflowDraft, type WorkflowPreviewResult } from 
 import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressForFeature, workflowTemplateLabels } from './features/workflows/productionAdapter';
 import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
 import { SettingsFeature } from './features/settings/SettingsFeature';
-import { HostPanel, HostTimeline, nextSpeaker, useHostCommands } from './features/host';
+import { HostPanel, HostTimeline, nextSpeaker, useHostCommands, type ProviderNames } from './features/host';
 import { RunBudgetBar, parseBudgetYuan } from './features/usage';
 import { statusLabels } from './locales/zhCN';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
@@ -148,6 +148,7 @@ export function App() {
   const closeSettings = useCallback(() => setPage('discussion'), []);
   const activeTurn = snapshot?.turns.find(turn => turn.status === 'running');
   const messages = snapshot?.messages ?? [];
+  const providerNames = useMemo<ProviderNames>(() => ({ state: providerLoadState, names: new Map(providers.map(provider => [provider.id, provider.name])) }), [providers, providerLoadState]);
   const synchronizeHost = useCallback(() => { void session.synchronize(); }, [session]);
   const hostCommands = useHostCommands(api.host, snapshot?.runId, synchronizeHost);
   const upcoming = snapshot && ['running', 'pausing', 'paused'].includes(snapshot.status) ? nextSpeaker(snapshot) : undefined;
@@ -184,7 +185,7 @@ export function App() {
         <RunBudgetBar snapshot={snapshot} />
         <div className="messages">
           {messages.length === 0 && !budgetStopped && <div className="empty">{roomId ? '配置成员后，输入目标并开始协作。' : '请先在“房间与成员”中创建或选择房间。'}</div>}
-          <HostTimeline snapshot={snapshot} commands={hostCommands} />
+          <HostTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} />
           {/* Run feedback sits right after the last message it describes, not below the composer. */}
           {snapshot?.status === 'interrupted' && <div className="sync-feedback run-feedback">执行已中断，部分输出已保留。请先检查历史记录。</div>}
           {error && <div className="error run-feedback" role="alert">{error}</div>}

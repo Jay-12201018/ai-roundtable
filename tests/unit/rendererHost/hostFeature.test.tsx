@@ -176,3 +176,37 @@ describe('R12 host UI', () => {
     expect(screen.getByText('下一位：无（运行已完成）')).toBeTruthy();
   });
 });
+
+describe('Provider names in member identity lines', () => {
+  const providerId = '91f54a81-b95b-4fce-a9f7-7a5a4ecd21c3';
+  const withProvider = (id: string | null, modelId = 'deepseek-flash') => pausedSnapshot({
+    execution: { ...pausedSnapshot().execution!, membersSnapshot: pausedSnapshot().execution!.membersSnapshot!.map(m => ({ ...m, roleTemplateId: 'Drafter', providerId: id, modelId })) },
+  });
+  function TimelineOnly({ snapshot, providers }: { snapshot: RunSnapshot; providers?: import('../../../src/renderer/features/host').ProviderNames }) {
+    const commands = useHostCommands(hostApi(), snapshot.runId, () => {});
+    return <HostTimeline snapshot={snapshot} commands={commands} providers={providers} />;
+  }
+  const lines = () => [...document.querySelectorAll('.message-identity')].map(node => node.textContent);
+
+  it('shows the Provider name from the frozen snapshot id, never the UUID', () => {
+    render(<TimelineOnly snapshot={withProvider(providerId)} providers={{ state: 'ready', names: new Map([[providerId, 'DeepSeek 直连']]) }} />);
+    expect(lines().length).toBeGreaterThan(0);
+    for (const line of lines()) expect(line).toBe('Drafter · Provider：DeepSeek 直连 · Model：deepseek-flash');
+    expect(document.body.textContent).not.toContain(providerId);
+  });
+
+  it.each([
+    ['ready', 'Drafter · Provider 已删除 · Model：deepseek-flash'],
+    ['loading', 'Drafter · Provider 读取中 · Model：deepseek-flash'],
+    ['error', 'Drafter · Provider 名称暂时无法读取 · Model：deepseek-flash'],
+  ] as const)('explains a Provider it cannot name (%s) instead of showing its id', (state, expected) => {
+    render(<TimelineOnly snapshot={withProvider(providerId)} providers={{ state, names: new Map() }} />);
+    for (const line of lines()) expect(line).toBe(expected);
+    expect(document.body.textContent).not.toContain(providerId);
+  });
+
+  it('names the built-in Mock of legacy demo members', () => {
+    render(<TimelineOnly snapshot={withProvider(null, 'mock')} providers={{ state: 'ready', names: new Map() }} />);
+    for (const line of lines()) expect(line).toBe('Drafter · Provider：内置 Mock · Model：mock');
+  });
+});
