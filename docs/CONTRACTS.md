@@ -338,3 +338,20 @@ RunService 的缺省三参数 fixture builder 继续支持旧低层测试；实�
 | R05 context（Main 私有） | `contextInput.snapshot.versions?`（缺省仍按最新 Attempt）；`current.mode: 'regenerate'`；非有效版本 `inactive_version`；主持人修改版本以 `editedByHost:true`、受影响内容以 `basedOnRevisedHistory:true` 标注；后续版本保持其槽的原位置；有效持续指令作为 host 指令进入 system 段 | 新增可选输入 |
 
 安全影响：主持人权限只来自 `host.command` 可信通道；模型文本、引用和历史从不被解析为命令。命令不读取 Key、不新增网络能力；重新生成复用原成员冻结的 Provider/Model 与既有生成门禁和预算，只在显式命令后发送，不自动重发。
+
+## R13A 真实模型（DeepSeek）启用与运行预算（2026-10-22，子会话候选，未合 main）
+
+R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）经总控授权直接修改本节列出的共享文件；共享改动以 `contract:`/`wire:` 提交与模块提交分开，等待总控审查合并。决策依据见 [DECISIONS](DECISIONS.md) D089–D094。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Shared `schemas/budget.ts`（新） | `requestChargeSchema`（状态 reserved/settled/unknown/not_sent；superRefine：settled 的 accountedMicro 必须等于用量×冻结单价，chargedMicro 由状态决定，unknown 不能为 0）、`runBudgetSchema`（CNY 上限、已结算/未知/在途预留/剩余/超出）、`budgetBlockSchema`（insufficient/overrun）、`runBudgetInputSchema`（1–1,000,000,000 micro-CNY）、默认 ¥1、`formatYuan`、`budgetBlockMessage`（中文拒绝原因，Main 与 Renderer 共用） | 新文件 |
+| Shared `schemas/run.ts` | `startRunInput.budgetMicroCny?`；`runSnapshot.budget?`/`charges?`（superRefine：charge requestId 唯一且都对应快照内 Attempt） | 只增可选字段 |
+| Shared `schemas/error.ts` | 新错误码 `budget_exceeded`（不可重试）；`ErrorField` 增加 `budgetMicroCny` | 只增枚举值；Renderer 设置页补中文文案 |
+| IPC / Preload | 无新通道；`run.start` 输入与 `run.*` 快照随 Schema 自动带上新字段 | — |
+| Database / migration7 | `run_budgets`（每 run 一行，CNY，上限不可变、禁删；`blocked_json` 记录拦截原因；迁移时为已有 run 回填 ¥1）；`request_charges`（主键 request_id → request_attempts；插入只能是 reserved；单价/上界/预留/证据不可变；状态只能 reserved→settled/unknown/not_sent 一次；结算后用量与金额不可改；禁删；CHECK 保证 reserved = 输入上界×输入单价 + 输出上限×输出单价、settled 金额与用量一致、非 CNY 只允许零单价）。启动恢复把残留 reserved 改为 unknown。`validateDatabase` 对 v7 校验表、7 个触发器、每个 run 都有预算行、charge 身份与证据 | migration 1–6 原文未改；当前 schema 版本 6→7，相关测试断言同步 +1 |
+| ProviderRegistry（Main 私有） | `quoteRequest(providerId, input)`：先做 `checkGeneration`，返回本次最高花费（CNY 整数；非零 USD 价格 → unsupported，不做汇率换算）；`getAdapter(…, onDispatch?)`：真实 adapter 唯一的 fetch 出口在发出前回调，用于证明"未发出"；`createTransport(guard, diagnostics, proxyKind?)`；回环代理按 kind 选择固定目标（deepseek/anthropic/gemini），其他 Provider 在代理模式下 forbidden。默认构造仍不批准任何模型，生产 `main/index.ts` 注入 `deepSeekModelPolicy` | `transportFactory` 回调多一个可选参数 |
+| RunService（Main 私有） | 请求准备事务内：quote → 剩余额度检查（等于可发）→ 写 Attempt 后预留 charge；终态 usage → settled；已发出但无 usage/中断/停止 → unknown（全额预留）；从未到达网络 → not_sent；用量超出上界 → 记 overrun 并停止调度；预算不足 → 不建 Turn、run 以 error 结束、lastError 为中文原因 | 公开命令不变 |
+| Renderer | `features/usage/**`：每条消息的用量与花费、运行预算栏；输入框旁"本次预算（元）"；预算拦截的页头与错误文案；设置页"本次会话尚未确认请求目标"提醒；启动失败按 forbidden/unsupported 给出原因 | — |
+
+安全影响：真实生成只对精确 `openai-compatible` + `https://api.deepseek.com` + `deepseek-flash` 放行，且仍需本次会话确认目标、Key 和未过期的价格审核；花费上界在读取 Key 和发出请求前计算并预留，账本只能按证据结算，未知费用永不记 0。Key 处理、IPC 白名单和 Renderer 权限不变。
