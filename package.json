@@ -20,7 +20,9 @@
     "pack": "pnpm build && electron-builder",
     "dist": "pnpm build && electron-builder",
     "native:electron": "electron-rebuild --force --which-module better-sqlite3",
-    "native:check": "node scripts/ensure-native.cjs"
+    "native:check": "node scripts/ensure-native.cjs",
+    "trial": "pnpm build && node scripts/ensure-native.cjs && electron scripts/trial/main.cjs",
+    "trial:reset": "node scripts/trial/reset.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.62.0",
