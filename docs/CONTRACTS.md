@@ -355,3 +355,20 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Renderer | `features/usage/**`：每条消息的用量与花费、运行预算栏；输入框旁"本次预算（元）"；预算拦截的页头与错误文案；设置页"本次会话尚未确认请求目标"提醒；启动失败按 forbidden/unsupported 给出原因 | — |
 
 安全影响：真实生成只对精确 `openai-compatible` + `https://api.deepseek.com` + `deepseek-flash` 放行，且仍需本次会话确认目标、Key 和未过期的价格审核；花费上界在读取 Key 和发出请求前计算并预留，账本只能按证据结算，未知费用永不记 0。Key 处理、IPC 白名单和 Renderer 权限不变。
+
+## 合并前质量修复（2026-10-23，子会话候选，未合 main）
+
+分支 `codex/r13a-premerge-quality`（基线 `b3e3324`）。总控授权本子会话直接修改共享文件；共享与接线改动以 `contract:` / `wire:` 提交。决策见 [DECISIONS](DECISIONS.md) D095–D098。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Main `context/**` | 新增 `transcript.ts`；`buildPublicContext` 输出改为 D095 格式（system：边界、发言要求、阶段指引、持续指令、成员身份；随后 user/assistant 交替并以 user 结束）；`ContextSource` 新增 application 来源 `discussion-rules-v1`、`turn-cue-v1`，多个 history 来源可共用同一 `providerMessageIndex`；计数对最终消息进行，加入历史须严格增大计数 | Provider DTO（role/content）不变；已冻结的 `input_snapshot` 不改写，retry/continue 仍按冻结输入重放 |
+| Main `workflow/definition.ts` | 十个阶段指引改写为"本轮阶段：…"并写明本阶段应新增的内容 | 文案变化 |
+| Shared `schemas/common.ts` | 新增 `looksLikeApiKey`、`modelIdSchema` | 新导出 |
+| Shared `schemas/configuration.ts` | `defaultModelId`、`customModels[].id`、`agent.modelId`、连接测试 `modelId` 改用 `modelIdSchema`；`providerConfigurationSchema.withheldModelIds?: true`、`agentConfigurationSchema.withheldModelId?: true`；`providerKeyStateSchema.sessionTargetConfirmed?: boolean` | 只增可选字段；输入新增拒绝条件（类密钥值） |
+| Shared `schemas/provider.ts` | `streamChatInputSchema.modelId` 改用 `modelIdSchema` | 类密钥模型 ID 在发送前被拒 |
+| Database | 读取 Provider / 成员时隐藏类密钥模型 ID 并打标；`validateModelSelection` 用 `modelIdSchema` | 无 migration，不改存量数据 |
+| ProviderRegistry / ProviderSettingsService | `isTargetConfirmed(id)`；`getProviderKeyState` 在有注册表时附带 `sessionTargetConfirmed` | IPC 通道不变 |
+| Renderer | 设置页接入进度、Key 输入框就近原因与一键操作、模型 ID 示例与类密钥提示；成员编辑器同样提示；App 主持人控制把停止分开并就地确认，重试/续写提示可能再次计费 | — |
+
+安全影响：防注入边界从"JSON 字段 + 角色"变为"应用标签 + 全行引用"，可信指令仍只在 system 段；Key 不再可能以模型 ID 的形式进入请求、Renderer 或日志；会话目标确认机制与失效规则不变。

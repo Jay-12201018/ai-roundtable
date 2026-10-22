@@ -12,7 +12,7 @@
 
 设计：调用方从一致 R03 快照显式白名单投影 run/messages/turns/attempts，并传入可见消息 ID、可信应用及已生效持续指令。模块使用冻结成员身份，保留快照消息顺序；仅完成的公开消息及其完成 Turn/Attempt 可进入上下文，当前/未来回合、其他房间/Run、不可见及非公开类型排除并报告，冲突身份拒绝。相同 ID 的完全相同记录去重，冲突重复拒绝。
 
-Provider 仅接收 R02 role/content；可信 system 层依次为应用边界、应用指令、持续主持指令、当前 Agent 角色，任务是 user，公开历史按 sender 映射 assistant/user 并以 JSON 标明发言者。普通文本不会被解析为命令。来源/排除报告独立返回，不污染 Provider DTO。
+Provider 仅接收 R02 role/content；可信 system 层依次为应用边界、应用指令、持续主持指令、当前 Agent 角色，任务是 user，公开历史按 sender 映射 assistant/user 并以 JSON 标明发言者（2026-10-23 起由 DECISIONS D095 的标签 + 引用格式取代：只有当前成员自己的发言用 assistant）。普通文本不会被解析为命令。来源/排除报告独立返回，不污染 Provider DTO。
 
 预算先扣输出预留，必要指令及任务绝不裁剪；按最近连续历史后缀选择整条消息，不能容纳的旧前缀逐条报告 UTF-16 原文范围及原因。计数器必须由可信 Main 为指定模型提供 exact/upper_bound 的完整 messages 计数（含供应商封装）；不可靠、异常、非安全整数、非单调计数拒绝。未知计数器仅提供 UTF-8 字节估算并拒绝发送，不宣称真实 Token 或保证可发。最大回合、累计时长及上限仅作为 R04 执行输入返回。
 
