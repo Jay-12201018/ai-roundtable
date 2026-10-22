@@ -124,11 +124,22 @@ async function main() {
   };
   const selectAll = () => key('a', 4);
   // Chinese text arrives the way an IME delivers it: a composition (pinyin) that is then committed.
-  const ime = async (pinyin, committed) => {
-    await send('Input.imeSetComposition', { text: pinyin, selectionStart: pinyin.length, selectionEnd: pinyin.length });
-    await sleep(120);
+  // Each step waits for the state the page reports (composition events and the field value), never a fixed delay.
+  const trackIme = () => js(`(() => { const e = document.activeElement; if (!e || e.__imeTracked) return true; e.__imeTracked = true;
+    window.__ime = { start: 0, end: 0 }; e.addEventListener('compositionstart', () => window.__ime.start++); e.addEventListener('compositionend', () => window.__ime.end++); return true; })()`);
+  // The text around the selection the composition replaces, so the expected value is exact.
+  const around = () => js(`(() => { const e = document.activeElement; return { prefix: e.value.slice(0, e.selectionStart), suffix: e.value.slice(e.selectionEnd) }; })()`);
+  const composing = ({ prefix, suffix }, pinyin) => until(`window.__ime.start > window.__ime.end && document.activeElement.value === ${JSON.stringify(prefix + pinyin + suffix)}`, 'composition shown: ' + pinyin);
+  const commit = async ({ prefix, suffix }, committed) => {
+    const ends = await js('window.__ime.end');
     await send('Input.insertText', { text: committed });
-    await sleep(120);
+    await until(`window.__ime.end > ${ends} && document.activeElement.value === ${JSON.stringify(prefix + committed + suffix)}`, 'composition committed: ' + committed);
+  };
+  const ime = async (pinyin, committed) => {
+    await trackIme(); const context = await around();
+    await send('Input.imeSetComposition', { text: pinyin, selectionStart: pinyin.length, selectionEnd: pinyin.length });
+    await composing(context, pinyin);
+    await commit(context, committed);
   };
   let shot = 0;
   const capture = async (name, caption, focus) => {
@@ -167,16 +178,21 @@ async function main() {
   await capture('override-queued', '起草者生成过程中点名"综合者"（随后暂停）：起草者的回合正常完成未被打断；右侧"下一位发言"显示"综合者（主持人点名，排在下一回合…）"，页头状态显示"已暂停 · 下一位：综合者（主持人点名）"，"点名 综合者"按钮为选中态，可"取消点名"。', 'header');
 
   // Path 2: interjection with IME — Enter during composition must not send; Shift+Enter is a new line.
-  await field('主持人插话');
+  await field('主持人插话'); await trackIme();
+  const interjection = await around();
   await send('Input.imeSetComposition', { text: 'zhuchiren', selectionStart: 9, selectionEnd: 9 });
+  await composing(interjection, 'zhuchiren');
   // A real IME reports the confirming Enter as keyCode 229 (VK_PROCESSKEY) while the composition is open.
-  await sleep(150);
+  await js(`window.__keyDowns = 0; document.activeElement.addEventListener('keydown', () => window.__keyDowns++); true`);
   await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 });
-  await sleep(300);
+  await until('window.__keyDowns >= 1', 'the IME Enter reached the field');
   check(!(await snapshot()).messages.some(m => m.senderName === '主持人'), 'Enter during IME composition did not send the interjection');
-  await capture('ime-composing', '主持人插话框处于中文输入法组合状态（拼音 zhuchiren 未上屏）时按下回车：只确认输入、没有发送，时间线没有新增主持人消息。', '.host-compose');
-  await send('Input.insertText', { text: '请先评估成本风险' }); await sleep(120);
+  check(await js('window.__ime.start > window.__ime.end'), 'The composition is still open after the IME Enter');
+  // The screenshot does not scroll or move focus, so the open composition is left untouched.
+  await capture('ime-composing', '主持人插话框处于中文输入法组合状态（拼音 zhuchiren 未上屏）时按下回车：只确认输入、没有发送，时间线没有新增主持人消息。');
+  await composing(interjection, 'zhuchiren');
+  await commit(interjection, '请先评估成本风险');
   await key('Enter', 8); await ime('liechu', '再列出三个最关键的问题');
   const drafted = await js(`document.querySelector('[aria-label="主持人插话"]').value`);
   check(drafted === '请先评估成本风险\n再列出三个最关键的问题', 'Shift+Enter kept a line break and the IME text intact: ' + JSON.stringify(drafted));
@@ -253,9 +269,26 @@ async function main() {
   await capture('retry-failed-again', '手动"重试当前回合"：生成第 2 个版本，标为"生成失败 · 重试 · 当前版本（未完成）"，仍因同一输出上限失败；"‹ 版本 2/2"可切换查看两次失败的部分输出，均未被覆盖。', '.host-slot');
 
   // Path 5b: Stop keeps the partial text; an explicit retry then succeeds.
-  await field('任务目标'); await selectAll(); await ime('tingzhi', '演示停止后重试'); await click('开始协作');
-  await until(`document.querySelector('.host-slot p')?.textContent.length > 6`, 'streaming before stop');
-  await click('停止'); await click('确认停止');
+  // The production Mock finishes a 3-turn Run in about 1.5 s, so Stop (now two clicks, D098) can lose the race to the
+  // end of the Run. Each attempt waits for explicit state: the first turn streaming, then the confirmation, then a
+  // cancelled Run whose only turn is the first one. A lost race starts a fresh Run; the attempt count is recorded.
+  const stopState = `(async () => { const s = await window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'));
+    return s.status === 'cancelled' ? (s.turns.length === 1 ? 'first' : 'later') : s.status === 'completed' ? 'completed' : document.querySelector('[aria-label=确认停止运行]') ? 'confirm' : ''; })()`;
+  for (result.stopAttempts = 1; ; result.stopAttempts++) {
+    check(result.stopAttempts <= 3, 'Stop landed in the first turn within three Runs');
+    await field('任务目标'); await selectAll(); await ime('tingzhi', '演示停止后重试'); await click('开始协作');
+    await until(`document.querySelectorAll('.host-slot').length === 1 && document.querySelector('.host-slot p')?.textContent.length > 6 || document.querySelector('.timeline .status').textContent.includes('已完成')`, 'streaming before stop');
+    if ((await status()).includes('已完成')) continue;
+    await click('停止');
+    if (await until(stopState, 'stop confirmation or Run end') !== 'confirm') continue;
+    // Clicked where it is right now, without waiting for it: if the Run ended meanwhile, the confirmation is gone.
+    const confirmAt = await js(`(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent === '确认停止'); if (!b) return null;
+      const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    if (!confirmAt) continue;
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: confirmAt.x, y: confirmAt.y, button: 'left', clickCount: 1 });
+    const outcome = await until(stopState.replace("'confirm'", "''"), 'stopped');
+    if (outcome === 'first') break;
+  }
   await until(`document.querySelector('.timeline .status').textContent.includes('已停止')`, 'stopped');
   await capture('stopped-partial', '生成中点"停止"：状态"已停止"，已输出的部分文字保留并标为"已中止"。', '.host-slot');
   await click('重试当前回合');
