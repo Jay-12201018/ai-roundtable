@@ -4,6 +4,7 @@ import { idSchema } from '../../shared/schemas/common';
 import { runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../shared/schemas/run';
 import type { RunEvent,InterruptedRunDecision } from '../../shared/types/run';
 import { createRendererStore,canRecover, type RendererCommand } from '../store/rendererStore';
+import { budgetBlockMessage } from '../../shared/schemas/budget';
 
 type RunControl = 'pause' | 'stop' | 'step' | 'resumeRun';
 type IdentityStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -122,7 +123,9 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
             lastRunningSequence=Math.max(lastRunningSequence,parsed.data.snapshot.sequence);
             if(publicFailure&&publicFailure.sequence<=lastRunningSequence)publicFailure=undefined;
           }
-          if(parsed.data.snapshot.status==='error')store.getState().setError(publicFailure&&publicFailure.sequence<=parsed.data.snapshot.sequence?publicFailure.message:'运行失败，请检查输入预算、模型配置或响应限制。历史输出已保留。',generation);
+          const blocked=parsed.data.snapshot.budget?.blocked;
+          // A budget stop is a deliberate guard with its own reason, not a model failure.
+          if(parsed.data.snapshot.status==='error')store.getState().setError(blocked?budgetBlockMessage(blocked):publicFailure&&publicFailure.sequence<=parsed.data.snapshot.sequence?publicFailure.message:'运行失败，请检查输入预算、模型配置或响应限制。历史输出已保留。',generation);
           // The subscription snapshot already includes its replay events.
           if (applyBuffered()) {
             store.getState().setSyncStatus('ready', generation);
@@ -159,7 +162,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       if (ownsCommand(token, generation)) store.getState().setError('创建任务失败，请稍后重试。', generation);
     } finally { store.getState().endCommand(token); }
   }
-  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>) {
+  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>, limits: Pick<StartRunInput, 'budgetMicroCny'> = {}) {
     if (!mounted || options.requireRoom && !store.getState().roomId) return;
     const token = store.getState().beginCommand('start');
     if (token === undefined) return;
@@ -168,7 +171,8 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
     try {
       const selectedRoom = roomId ?? (await api.room.createDemo(task)).roomId;
       if (!ownsCommand(token, generation)) return;
-      const result = await api.run.start({ roomId: selectedRoom, task, ...(workflow?.workflowConfig ? workflow : { workflowSnapshot: { templateId: 'draft-review-finalize', version: 1 } }) });
+      const result = await api.run.start({ roomId: selectedRoom, task, ...(workflow?.workflowConfig ? workflow : { workflowSnapshot: { templateId: 'draft-review-finalize', version: 1 } }),
+        ...(limits.budgetMicroCny === undefined ? {} : { budgetMicroCny: limits.budgetMicroCny }) });
       if (!ownsCommand(token, generation)) return;
       const parsed = runSnapshotSchema.safeParse(result);
       if (!parsed.success || parsed.data.roomId !== selectedRoom) throw new Error('Invalid start response');

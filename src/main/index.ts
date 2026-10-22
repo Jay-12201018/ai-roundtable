@@ -5,6 +5,7 @@ import { createElectronKeyBackend } from './security/electronSafeStorage';
 import { KeyService } from './security/KeyService';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { readLoopbackProxy } from './providers/loopbackProxy';
+import { deepSeekModelPolicy } from './providers/modelPolicies/deepseek';
 export { ProviderRegistry };
 import { mockModelBudget } from './providers/mock/tokenBudget';
 import { MockProvider } from './providers/mock/MockProvider';
@@ -63,7 +64,8 @@ if (!hasLock) {
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
-      const providers = new ProviderRegistry(database, keyService, { proxy: readLoopbackProxy(process.env) });
+      // R13A: the reviewed DeepSeek direct policy is the only approved real-model policy (D089).
+      const providers = new ProviderRegistry(database, keyService, { proxy: readLoopbackProxy(process.env), policyResolver: deepSeekModelPolicy });
       settingsService = new ProviderSettingsService(database, keyService, providers);
       runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }), createPublicMessagesBuilder((modelId, member) =>
         member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined), providers,

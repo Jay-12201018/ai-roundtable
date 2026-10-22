@@ -7,6 +7,7 @@ import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressFor
 import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
 import { SettingsFeature } from './features/settings/SettingsFeature';
 import { HostPanel, HostTimeline, nextSpeaker, useHostCommands } from './features/host';
+import { RunBudgetBar, parseBudgetYuan } from './features/usage';
 import { statusLabels } from './locales/zhCN';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
 import { createRendererSession } from './subscriptions/rendererSession';
@@ -20,6 +21,8 @@ export function App() {
   const [bootReady, setBootReady] = useState(false);
   const [roomsReady, setRoomsReady] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [budgetText, setBudgetText] = useState('1');
+  const budgetMicroCny = parseBudgetYuan(budgetText);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [providerLoadState, setProviderLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const providerRequest = useRef(0); const alive = useRef(false);
@@ -131,7 +134,8 @@ export function App() {
   }, [roomId, workflowScope]);
   const startRun = () => {
     if (workflowInvalidated || appliedWorkflow && (appliedWorkflow.roomId !== roomId || appliedWorkflow.scope !== workflowScope)) return;
-    void session.startRun(appliedWorkflow ? { workflowConfig: appliedWorkflow.config, workflowPreviewId: appliedWorkflow.previewId } : undefined);
+    if (budgetMicroCny === undefined) return;
+    void session.startRun(appliedWorkflow ? { workflowConfig: appliedWorkflow.config, workflowPreviewId: appliedWorkflow.previewId } : undefined, { budgetMicroCny });
   };
   const selectRoom = useCallback((id: string) => session.selectRoom(id), [session]);
   const clearRoom = useCallback(() => session.selectRoom(undefined), [session]);
@@ -160,6 +164,7 @@ export function App() {
           <div className="status" role="status">{statusLabels[snapshot?.status ?? 'idle']} {activeTurn ? `· 第 ${(snapshot?.turns.indexOf(activeTurn) ?? 0) + 1} 回合` : ''}{upcoming ? ` · 下一位：${upcoming.name}${upcoming.source === 'override' ? '（主持人点名）' : ''}` : ''}</div>
           <button type="button" className="controls-toggle" aria-expanded={showControls} aria-controls="host-controls" onClick={() => setShowControls(value => !value)}>主持人控制</button>
         </header>
+        <RunBudgetBar snapshot={snapshot} />
         <div className="messages">
           {messages.length === 0 && <div className="empty">{roomId ? '配置成员后，输入目标并开始协作。' : '请先在“房间与成员”中创建或选择房间。'}</div>}
           <HostTimeline snapshot={snapshot} commands={hostCommands} />
@@ -172,7 +177,11 @@ export function App() {
         {syncStatus === 'syncing' && <div role="status" className="sync-feedback">正在同步运行状态</div>}
         {pending && <div role="status" className="sync-feedback">操作已发送，等待确认</div>}
         {syncStatus === 'error' && <button className="retry-sync" onClick={() => void session.synchronize()}>重试同步</button>}
-        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} /><button onClick={startRun} disabled={!startEnabled || workflowInvalidated}>开始协作</button></div>
+        <div className="composer"><input aria-label="任务目标" value={draft} onChange={event => session.store.getState().setDraft(event.target.value)} />
+          <label className="composer-budget">本次预算（元）<input aria-label="本次运行预算（元）" inputMode="decimal" value={budgetText} aria-invalid={budgetMicroCny === undefined} onChange={event => setBudgetText(event.target.value)} /></label>
+          <button onClick={startRun} disabled={!startEnabled || workflowInvalidated || budgetMicroCny === undefined}>开始协作</button>
+          {budgetMicroCny === undefined && <p className="composer-budget-error" role="alert">请输入 0.000001 到 1000 之间的金额，最多 6 位小数。</p>}
+        </div>
       </section>
       <aside id="host-controls" className={`workbench${showControls ? ' is-open' : ''}`} aria-label="主持人控制">
         <h2>主持人控制</h2><p className="room-card">{roomId ? title : '还没有任务'}</p>

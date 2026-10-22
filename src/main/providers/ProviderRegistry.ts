@@ -17,7 +17,7 @@ import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider
 import { createNativeSafeFetch, createSafeFetch } from './network';
 import type { DiagnosticObserver } from './diagnostics';
 import { deepSeekFlashCapabilities } from './modelPolicies/deepseekFlash';
-import { assertProxyTarget, type LoopbackProxy } from './loopbackProxy';
+import type { LoopbackProxy, ProxyTargetKind } from './loopbackProxy';
 
 export type ApprovedNativeInputCounter = {
   protocol: 'anthropic-messages-v1'; evidence: string;
@@ -44,7 +44,13 @@ type Options = {
   proxy?: LoopbackProxy;
   policyResolver?: (configuration: ProviderConfiguration, modelId: string) => ApprovedModelPolicy | undefined;
   capabilitiesResolver?: (configuration: ProviderConfiguration) => ChatCompletionCapabilities;
-  transportFactory?: (guard: () => void, diagnostics?: DiagnosticObserver) => typeof fetch;
+  transportFactory?: (guard: () => void, diagnostics?: DiagnosticObserver, proxyKind?: ProxyTargetKind) => typeof fetch;
+};
+/** The most a request can cost under its approved price, reserved against the Run budget before it is sent. */
+export type RequestQuote = {
+  currency: 'CNY' | 'USD'; inputTokenBound: number; outputTokenLimit: number;
+  inputMicroPerToken: number; outputMicroPerToken: number; reservedMicro: number;
+  priceEvidence: string; priceReviewedAt: string | null;
 };
 type Approval = { kind: string; baseUrl: string; revision: string };
 const officialCapabilities: ChatCompletionCapabilities = { outputTokenParameter: 'max_completion_tokens', streamUsage: true, listModels: true, authentication: 'models' };
@@ -95,7 +101,7 @@ export class ProviderRegistry {
     return approved;
   }
   resolveModelPolicy(configuration: ProviderConfiguration, modelId: string): ApprovedModelPolicy | undefined {
-    // shortcut: no real-model tokenizer/price profiles are approved yet; add sourced profiles under separate review.
+    // Production Main injects the reviewed DeepSeek policy (D089); a bare registry approves nothing.
     return this.options.policyResolver?.(configuration, modelId);
   }
   resolveCapabilities(configuration: ProviderConfiguration): RegistryCapabilities {
@@ -105,7 +111,16 @@ export class ProviderRegistry {
     };
     return configuration.kind === 'openai' ? officialCapabilities : this.options.capabilitiesResolver?.(configuration) ?? deepSeekFlashCapabilities(configuration) ?? unknownCapabilities;
   }
-  createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch { return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics, this.options.proxy); }
+  createTransport(guard: () => void, diagnostics?: DiagnosticObserver, proxyKind?: ProxyTargetKind): typeof fetch {
+    return this.options.transportFactory?.(guard, diagnostics, proxyKind) ?? createSafeFetch(guard, undefined, diagnostics, this.options.proxy, proxyKind);
+  }
+  /** The fixed proxy target for a reviewed origin; any other Provider is refused while a proxy is configured. */
+  private proxyKind(configuration: ProviderConfiguration, approval: Approval): ProxyTargetKind | undefined {
+    if (!this.options.proxy) return;
+    if (configuration.kind === 'anthropic' || configuration.kind === 'gemini') return configuration.kind;
+    if (configuration.kind === 'openai-compatible' && approval.baseUrl === 'https://api.deepseek.com') return 'deepseek';
+    throw new ContractError('forbidden');
+  }
 
   assertSelection(providerId: string, modelId: string): void {
     const configuration = this.database.validateModelSelection(providerId, modelId);
@@ -159,6 +174,26 @@ export class ProviderRegistry {
     }
   }
 
+  /** Validates the request like checkGeneration and returns its maximum cost; undefined for Mock members. */
+  quoteRequest(providerId: string, input: StreamChatInput): RequestQuote | undefined {
+    this.checkGeneration(providerId, input);
+    const configuration = this.configuration(providerId);
+    if (configuration.kind === 'mock') return;
+    const policy = this.resolveModelPolicy(configuration, input.modelId)!;
+    const inputTokenBound = countModelTokens(input.messages, input.modelId, this.inputCounter(configuration, policy))!;
+    const outputTokenLimit = input.outputTokenLimit!;
+    const price = policy.price;
+    if ('currency' in price) {
+      const reservedMicro = inputTokenBound * price.inputMicroCnyPerToken + outputTokenLimit * price.outputMicroCnyPerToken;
+      return { currency: 'CNY', inputTokenBound, outputTokenLimit, inputMicroPerToken: price.inputMicroCnyPerToken,
+        outputMicroPerToken: price.outputMicroCnyPerToken, reservedMicro, priceEvidence: price.evidence, priceReviewedAt: price.reviewedAt };
+    }
+    // The Run budget is CNY. A non-zero USD price is never converted by guessing an exchange rate.
+    if (price.inputUsdPerMillion !== 0 || price.outputUsdPerMillion !== 0) throw new ContractError('unsupported');
+    return { currency: 'USD', inputTokenBound, outputTokenLimit, inputMicroPerToken: 0, outputMicroPerToken: 0, reservedMicro: 0,
+      priceEvidence: price.evidence, priceReviewedAt: price.reviewedAt ?? null };
+  }
+
   controlledTrialTarget(providerId: string) {
     const configuration = this.database.validateModelSelection(providerId, 'deepseek-flash');
     const approval = this.trusted(providerId);
@@ -194,10 +229,11 @@ export class ProviderRegistry {
     } catch (error) { yield { type: 'error' as const, requestId: input.requestId, error: toPublicError(error) }; }
   }
 
-  private createRealAdapter(configuration: ProviderConfiguration, approval: Approval, guard: () => void, diagnostics?: DiagnosticObserver): ProviderAdapter {
-    if (this.options.proxy) assertProxyTarget(new URL(`${approval.baseUrl}/chat/completions`), 'POST');
+  private createRealAdapter(configuration: ProviderConfiguration, approval: Approval, guard: () => void, diagnostics?: DiagnosticObserver,
+    onDispatch?: () => void): ProviderAdapter {
+    const proxyKind = this.proxyKind(configuration, approval);
     const providerId = configuration.id;
-    const safeTransport = this.createTransport(guard, diagnostics);
+    const safeTransport = this.createTransport(guard, diagnostics, proxyKind);
     const transport = configuration.kind === 'anthropic' || configuration.kind === 'gemini'
       ? createNativeSafeFetch(configuration.kind, safeTransport, guard) : safeTransport;
     const options = { configuration, confirmedBaseUrl: approval.baseUrl, diagnostics,
@@ -208,7 +244,8 @@ export class ProviderRegistry {
         const key = state.keyReference ? await this.keys.resolveKey(id, state.keyReference) : undefined;
         guard(); return key;
       },
-      fetch: (async (url, init) => { guard(); return transport(url, init); }) as typeof fetch,
+      // The single path to the network: a request that never reached it provably cost nothing.
+      fetch: (async (url, init) => { guard(); onDispatch?.(); return transport(url, init); }) as typeof fetch,
     };
     if (configuration.kind === 'anthropic') return new AnthropicProvider(options);
     if (configuration.kind === 'gemini') return new GeminiProvider(options);
@@ -218,7 +255,7 @@ export class ProviderRegistry {
     return new OpenAICompatibleProvider({ ...options, capabilities: { ...capabilities, outputTokenParameter: capabilities.outputTokenParameter } });
   }
 
-  getAdapter(providerId: string, modelId?: string): ProviderAdapter {
+  getAdapter(providerId: string, modelId?: string, onDispatch?: () => void): ProviderAdapter {
     const configuration = this.configuration(providerId);
     if (configuration.kind === 'mock') {
       if (modelId !== undefined) this.database.validateModelSelection(providerId, modelId);
@@ -231,7 +268,7 @@ export class ProviderRegistry {
       if (current.kind !== approval.kind || current.baseUrl !== approval.baseUrl || current.revision !== approval.revision) throw new ContractError('forbidden');
       if (modelId !== undefined) this.assertSelection(providerId, modelId);
     };
-    const adapter = this.createRealAdapter(configuration, approval, guard);
+    const adapter = this.createRealAdapter(configuration, approval, guard, undefined, onDispatch);
     const stream = adapter.streamChat.bind(adapter);
     const registry = this;
     adapter.streamChat = async function* (input) {

@@ -17,7 +17,8 @@ import type { MemberSnapshot } from '../../shared/schemas/persistence';
 import type { Database, RunEventRecord, RunRecord, TurnRecord, VersionInput } from '../database/Database';
 import { affectedVersions, basisBefore, effectiveInstructions } from '../host/versions';
 import type { HostCommandKind, HostState, MessageVersion } from '../../shared/schemas/host';
-import type { ProviderRegistry } from '../providers/ProviderRegistry';
+import type { ProviderRegistry, RequestQuote } from '../providers/ProviderRegistry';
+import { budgetBlockMessage, type BudgetBlock, type RequestCharge } from '../../shared/schemas/budget';
 import type { ProviderAdapter, StreamChatInput } from '../providers/types';
 
 type RunContext = {
@@ -39,6 +40,8 @@ type RunContext = {
   failureReason?: string;
   // R12: a version regeneration runs outside the schedule and leaves the Run status unchanged.
   job?: { requestId?: string };
+  // R13A: why the budget stopped scheduling; persisted with the Run's terminal state.
+  budgetBlock?: BudgetBlock;
 };
 
 export type RequestPreparation = {
@@ -54,6 +57,7 @@ type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; 
   | { turn: TurnRecord; modelId: string; sourceRequestId: string; kind: 'regenerate'; sourceMessageId: string; actionId: string; job: boolean };
 type Snapshot = ReturnType<Database['readRunSnapshot']>;
 const continuePrompt = 'Continue the previous response from where it stopped.';
+
 
 /** The message that currently represents a Turn: its slot's active version, else (legacy) its latest Attempt. */
 export function activeMessageOf(snapshot: Pick<Snapshot, 'versions' | 'attempts' | 'messages'>, turnId: string) {
@@ -156,7 +160,7 @@ export class RunService {
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
     this.schedule(context, () => {
       this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: workflow ?? input.workflowSnapshot ?? {}, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
-        task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 });
+        task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0, budgetMicroCny: input.budgetMicroCny });
       this.setRunState(runId, { status: 'running', startedAt: new Date().toISOString() }, { status: 'running' });
     });
     if (input.workflowPreviewId) this.workflowPreviews.delete(input.workflowPreviewId);
@@ -196,7 +200,7 @@ export class RunService {
         messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed' })),
         updatedAt: run.updatedAt,startedAt:run.startedAt??undefined,execution,
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
-        versions, host: this.hostView(data),
+        versions, host: this.hostView(data), budget: data.budget, charges: data.charges,
       });
   }
 
@@ -483,6 +487,7 @@ export class RunService {
     const elapsed = this.elapsed(context);
     this.database.transaction(() => {
       this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
+      this.persistBudgetBlock(context);
       const paused = this.requireRun(context.runId).status === 'paused';
       this.database.afterCommit(() => {
         context.elapsedBefore = elapsed;
@@ -699,6 +704,7 @@ export class RunService {
         await this.executeTurn(context, member, turnIndex, repeat, next?.overrideId);
         repeat = undefined;
         if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
+        if (context.budgetBlock) { this.finishRun(context, 'error', undefined, context.failureReason); return; }
         if (this.deadlineReached(context)) throw new ContractError('timeout');
         if (this.nextSpeaker(context, this.requireRun(context.runId)) === 'complete') { this.finishRun(context, 'completed'); return; }
         if (context.mode === 'step' || this.requireRun(context.runId).status === 'pausing') { this.finishRun(context, 'paused'); return; }
@@ -751,6 +757,7 @@ export class RunService {
     const messageId = randomUUID();
     const requestId = randomUUID();
     const job = repeat?.kind === 'regenerate' && repeat.job;
+    let quote: RequestQuote | undefined;
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
       const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, overrideId);
@@ -766,7 +773,8 @@ export class RunService {
       const inputSnapshot=streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
         outputTokenLimit:context.outputTokenLimit,agentRole:member.roleTemplateId,turnIndex,
         messages:this.buildMessages(snapshot.run,member,turnIndex,preparation) });
-      if (member.providerId && this.registry) this.registry.checkGeneration(member.providerId, inputSnapshot);
+      quote = member.providerId && this.registry ? this.registry.quoteRequest(member.providerId, inputSnapshot) : undefined;
+      if (quote) this.assertBudgetFits(context, quote);
       if (this.deadlineReached(context)) throw new ContractError('timeout');
       if(context.abortController.signal.aborted)throw new ContractError('cancelled');
       if (job) context.job = { requestId };
@@ -775,6 +783,13 @@ export class RunService {
       this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: '', status: 'streaming' }, version);
       const attemptIndex = snapshot.attempts.filter(a => a.turnId === turnId).length;
       this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
+      if (quote) {
+        // The maximum cost is held before any byte is sent and released only by evidence (D090).
+        const { currency, inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt } = quote;
+        this.database.reserveCharge({ requestId, runId: context.runId, providerId: member.providerId!, modelId: inputSnapshot.modelId, currency,
+          inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt });
+        if (snapshot.budget.blocked) this.database.setRunBudgetBlock(context.runId, null);
+      }
       if (!job) this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: member.agentId });
       this.appendEvent(context.runId, 'turn_started', { turnId, messageId, agentId: member.agentId, requestId });
       return {...inputSnapshot,signal:context.abortController.signal};
@@ -783,9 +798,18 @@ export class RunService {
     let content = '';
     let iterator: AsyncIterator<unknown> | undefined;
     let drained = false;
+    let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
+    let usage: { inputTokens: number; outputTokens: number } | undefined;
+    let dispatched = false;
+    // Settles this request's reservation from evidence only: provider usage of a terminal stream, or proof it was never sent.
+    const settle = () => {
+      if (!quote) return;
+      const charge = this.database.settleCharge(requestId, usage && finishReason ? { state: 'settled', ...usage }
+        : dispatched ? { state: 'unknown', ...(usage ? { observed: usage } : {}) } : { state: 'not_sent' });
+      if (charge) this.checkOverrun(context, charge);
+    };
     try {
       let started = false;
-      let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
       if (this.deadlineReached(context) || signal?.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
       const dispatch = this.database.readRunSnapshot(context.runId);
       const attempt = dispatch.attempts.filter(value => value.turnId === turnId).at(-1);
@@ -796,7 +820,7 @@ export class RunService {
         || (job ? context.job?.requestId !== requestId || ['running', 'pausing', 'cancelling'].includes(dispatch.run.status) : !['running', 'pausing'].includes(dispatch.run.status))
         || !turn || turn.agentId !== member.agentId || turn.turnIndex !== turnIndex || turn.status !== (job ? 'completed' : 'running')
         || attempt?.requestId !== requestId || attempt.messageId !== messageId || !['pending', 'running'].includes(attempt.status)) throw new ContractError('invalid_state');
-      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId) : this.provider;
+      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId, () => { dispatched = true; }) : this.provider;
       iterator = provider.streamChat(input)[Symbol.asyncIterator]();
       await this.withAbort(context, async () => {
         while (true) {
@@ -827,6 +851,7 @@ export class RunService {
           } else if (chunk.type === 'reasoning_summary_delta') {
             this.appendAndNotify(context.runId, 'reasoning_summary_delta', { turnId, messageId, senderName: member.displayName, text: chunk.text });
           } else if (chunk.type === 'usage') {
+            usage = { inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens };
             this.appendAndNotify(context.runId, 'usage_updated', { turnId, inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens });
           }
         }
@@ -843,6 +868,7 @@ export class RunService {
         if (job) this.database.activateVersion(messageId);
         else this.database.updateTurn(turnId, { status: transitionTurn('running', 'completed'), partialContent: content });
         this.database.updateAttempt(requestId, { status: 'completed' });
+        settle();
         this.persistElapsed(context);
         this.appendEvent(context.runId, 'turn_completed', { turnId, messageId });
       });
@@ -853,6 +879,7 @@ export class RunService {
         this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
         if (!job) this.database.updateTurn(turnId, { status: transitionTurn('running', aborted ? 'aborted' : 'failed'), partialContent: content });
         this.database.updateAttempt(requestId, { status: aborted ? 'aborted' : 'failed' });
+        settle();
         this.persistElapsed(context);
         this.appendEvent(context.runId, aborted ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: toPublicError(error, aborted ? 'cancelled' : 'internal_error') });
       });
@@ -880,11 +907,14 @@ export class RunService {
           this.database.updateMessage(message.id, message.content, aborted ? 'aborted' : 'failed');
           this.database.updateTurn(turn.id, { status: transitionTurn('running', aborted ? 'aborted' : 'failed') });
           this.database.updateAttempt(attempt.requestId, { status: aborted ? 'aborted' : 'failed' });
+          // Without terminal usage an open reservation stays charged in full.
+          this.database.settleCharge(attempt.requestId, { state: 'unknown' });
           this.appendEvent(context.runId, aborted ? 'turn_aborted' : 'turn_failed', { turnId: turn.id, messageId: message.id,
             error: publicError(context.timedOut ? 'timeout' : aborted ? 'cancelled' : 'internal_error') });
         }
       }
       this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
+      this.persistBudgetBlock(context);
       const pending = status === 'completed' ? this.database.getPendingOverride(context.runId) : undefined;
       if (pending) this.database.settleHostAction(pending.id, 'expired');
       this.database.afterCommit(() => {
@@ -896,6 +926,34 @@ export class RunService {
       this.setRunState(context.runId, { status, finishedAt: status === 'paused' ? null : new Date().toISOString(),
         currentTurnId: null, currentAgentId: null, lastError: lastError ?? reason ?? null }, { status, reason });
     });
+  }
+
+  /** The next request's maximum cost must fit in what the Run has left; equal is allowed. */
+  private assertBudgetFits(context: RunContext, quote: RequestQuote): void {
+    if (quote.currency !== 'CNY') return; // Only an exactly zero non-CNY price is ever quoted.
+    const budget = this.database.getRunBudget(context.runId);
+    if (quote.reservedMicro <= budget.remainingMicro) return;
+    this.blockBudget(context, { reason: 'insufficient', requiredMicro: quote.reservedMicro, remainingMicro: budget.remainingMicro, at: new Date().toISOString() });
+    throw new ContractError('budget_exceeded');
+  }
+
+  /** Provider usage above the reserved bound disproves the bound for this Run: stop scheduling and report it. */
+  private checkOverrun(context: RunContext, charge: RequestCharge): void {
+    if (charge.state !== 'settled' || (charge.inputTokens! <= charge.inputTokenBound && charge.outputTokens! <= charge.outputTokenLimit
+      && charge.accountedMicro! <= charge.reservedMicro)) return;
+    this.blockBudget(context, { reason: 'overrun', requestId: charge.requestId, reservedMicro: charge.reservedMicro, accountedMicro: charge.accountedMicro!, at: new Date().toISOString() });
+  }
+
+  private blockBudget(context: RunContext, block: BudgetBlock): void {
+    context.budgetBlock = block;
+    context.failureReason = budgetBlockMessage(block);
+  }
+
+  private persistBudgetBlock(context: RunContext): void {
+    const block = context.budgetBlock;
+    if (!block) return;
+    this.database.setRunBudgetBlock(context.runId, block);
+    this.database.afterCommit(() => { if (context.budgetBlock === block) context.budgetBlock = undefined; });
   }
 
   private setRunState(runId: string, patch: Parameters<Database['updateRun']>[1], payload: unknown): void {

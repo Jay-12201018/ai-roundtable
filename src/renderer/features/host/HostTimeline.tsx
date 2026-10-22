@@ -4,6 +4,7 @@ import { statusLabels } from '../../locales/zhCN';
 import { HostTextArea } from './HostTextArea';
 import { originLabels, runIdle, timelineSlots, type TimelineSlot } from './model';
 import type { HostCommands } from './useHostCommands';
+import { MessageUsage, chargeOfMessage } from '../usage';
 
 type Props = { snapshot: RunSnapshot | undefined; commands: HostCommands };
 
@@ -21,7 +22,7 @@ export function HostTimeline({ snapshot, commands }: Props) {
       const attempt = snapshot?.attempts?.find(value => value.messageId === message.id);
       const turn = snapshot?.turns.find(value => attempt ? value.turnId === attempt.turnId : value.messageId === message.id);
       const { member, line } = identity(snapshot, turn?.agentId);
-      return <article className="message" key={message.id}><strong>{member?.displayName ?? message.senderName}</strong><div className="message-identity">{line}</div><p>{message.content}</p><small>{statusLabels[message.status] ?? '未知状态'}</small></article>;
+      return <article className="message" key={message.id}><strong>{member?.displayName ?? message.senderName}</strong><div className="message-identity">{line}</div><p>{message.content}</p><small>{statusLabels[message.status] ?? '未知状态'}</small><MessageUsage charge={chargeOfMessage(snapshot, message.id)} /></article>;
     })}</>;
   }
   return <>{slots.map(slot => <SlotView key={slot.slotId} slot={slot} snapshot={snapshot!} commands={commands} />)}</>;
@@ -67,6 +68,7 @@ function SlotView({ slot, snapshot, commands }: { slot: TimelineSlot; snapshot: 
     {slot.author === 'agent' && <div className="message-identity">{line}</div>}
     <p>{shown.message.content}</p>
     <small>{statusLabels[shown.message.status] ?? '未知状态'} · {originLabels[shown.origin]}{shown.active ? (slot.versions.length > 1 ? (shown.message.status === 'completed' ? ' · 当前有效' : ' · 当前版本（未完成）') : '') : ' · 未生效的历史版本'}</small>
+    {slot.author === 'agent' && <MessageUsage charge={chargeOfMessage(snapshot, shown.messageId)} />}
     {shown.affectedBy.length > 0 && <p className="host-affected" role="note">受影响：生成时依据的{upstream(snapshot, shown.affectedBy)}已被修改、重新生成或本身受影响，此内容仍基于旧版本，可点“重新生成”更新。</p>}
     {generating && <p className="host-generation" role="status">正在重新生成版本 {generating.versionNumber}：{generating.message.content || '等待输出…'}</p>}
     <div className="host-version-actions" role="group" aria-label={`${name} 的消息操作`}>

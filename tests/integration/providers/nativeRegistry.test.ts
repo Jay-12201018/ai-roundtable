@@ -19,6 +19,7 @@ async function fixture(d: Definition, options: { approved?: boolean; proxy?: boo
   db.createProvider({ id: 'native', name: 'Owned native fixture', kind: d.kind, baseUrl: null });
   const keys = new KeyService(db, createMemoryKeyBackend()); await keys.storeKey('native', 'owned-fake-native-secret');
   const requests: Request[] = [];
+  const proxyKinds: Array<string | undefined> = [];
   const count = vi.fn<(_wire: unknown) => number | undefined>(() => 10);
   const policy = {
     evidence: 'Owned fixture deterministic policy; never a real model approval', outputTokenParameter: d.outputTokenParameter,
@@ -37,11 +38,11 @@ async function fixture(d: Definition, options: { approved?: boolean; proxy?: boo
     return d.kind === 'anthropic' ? response(success('OK')) : sse({ ...chunk('OK', 'STOP'), usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2, thoughtsTokenCount: 3, totalTokenCount: 9 } });
   });
   const registry = new ProviderRegistry(db, keys, { policyResolver: () => options.approved ? policy : undefined,
-    transportFactory: guard => async (url, init) => { guard(); return transport(url, init); },
+    transportFactory: (guard, _diagnostics, proxyKind) => { proxyKinds.push(proxyKind); return async (url, init) => { guard(); return transport(url, init); }; },
     ...(options.proxy ? { proxy: { hostname: '127.0.0.1', port: 7890 } as const } : {}),
   });
   const confirm = () => registry.confirmTarget({ providerId: 'native', baseUrl: d.baseUrl, confirmed: true });
-  return { db, keys, registry, confirm, requests, policy, count, transport, settings: new ProviderSettingsService(db, keys, registry) };
+  return { db, keys, registry, confirm, requests, proxyKinds, policy, count, transport, settings: new ProviderSettingsService(db, keys, registry) };
 }
 
 describe.each(definitions)('$kind production Registry wiring', d => {
@@ -80,9 +81,20 @@ describe.each(definitions)('$kind production Registry wiring', d => {
     expect(() => f.registry.confirmTarget({ providerId: 'native', baseUrl: 'https://unreviewed.invalid', confirmed: true })).toThrow();
     expect(read).not.toHaveBeenCalled(); expect(f.requests).toHaveLength(0);
   });
-  it('does not reuse the DeepSeek-only CONNECT proxy for native origins', async () => {
-    const f = await fixture(d, { proxy: true }); f.confirm(); const read = vi.spyOn(f.keys, 'getProviderKeyState');
-    expect(() => f.registry.getAdapter('native')).toThrow();
+  it('routes a native origin through the CONNECT proxy with its own fixed target, not the DeepSeek path', async () => {
+    const f = await fixture(d, { proxy: true, approved: true }); f.confirm();
+    const result = await collect(f.registry.getAdapter('native', d.modelId).streamChat({ requestId: 'proxied', modelId: d.modelId,
+      messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8 }));
+    expect(result.at(-1)).toEqual({ type: 'finish', requestId: 'proxied', reason: 'stop' });
+    expect(f.proxyKinds).toEqual([d.kind]);
+    expect(new URL(f.requests[0].url).origin).toBe(new URL(d.baseUrl).origin);
+  });
+  it('still refuses a non-reviewed compatible origin while a proxy is configured', async () => {
+    const f = await fixture(d, { proxy: true });
+    f.db.createProvider({ id: 'other', name: 'Other compatible', kind: 'openai-compatible', baseUrl: 'https://other.example/v1' });
+    f.registry.confirmTarget({ providerId: 'other', baseUrl: 'https://other.example/v1', confirmed: true });
+    const read = vi.spyOn(f.keys, 'getProviderKeyState');
+    expect(() => f.registry.getAdapter('other')).toThrowError(expect.objectContaining({ code: 'forbidden' }));
     expect(read).not.toHaveBeenCalled(); expect(f.requests).toHaveLength(0);
   });
   it('passes a reviewed fixture through the real native factory with the native output field and usage semantics', async () => {
