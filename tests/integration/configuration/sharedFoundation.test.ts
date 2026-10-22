@@ -4,6 +4,7 @@ import { Database } from '../../../src/main/database/Database';
 import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
+import { parseDiscussion } from '../../unit/context/discussion';
 
 const databases: Database[] = [];
 afterEach(() => { databases.splice(0).forEach(db => db.close()); vi.useRealTimers(); });
@@ -81,7 +82,9 @@ describe('shared Room / Agent / Provider persistence', () => {
     const service = new RunService(db, provider, createPublicMessagesBuilder());
     const run = await service.start({ roomId: 'r', task: 'Shared task', workflowSnapshot: {}, maxTurns: 3 }); await service.waitForIdle(run.runId);
     expect(db.getRun(run.runId)?.status).toBe('completed'); expect(db.listAttempts(run.runId)).toHaveLength(3);
-    expect(stream.mock.calls[1][0].messages.some(m => m.role === 'assistant')).toBe(true);
+    // D095: the second member sees the first member's reply as quoted discussion, never as its own assistant turn.
+    expect(stream.mock.calls[1][0].messages.some(m => m.role === 'assistant')).toBe(false);
+    expect(parseDiscussion(stream.mock.calls[1][0].messages).entries).toEqual([expect.objectContaining({ role: 'user', own: false })]);
     expect(db.getRun(run.runId)?.membersSnapshot?.map(a => a.providerId)).toEqual(['p', 'p', 'p']);
   });
 });

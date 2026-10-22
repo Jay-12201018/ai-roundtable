@@ -8,6 +8,7 @@ import type { HostCommand } from '../../../src/shared/schemas/host';
 import { publicError } from '../../../src/shared/schemas/error';
 import { workflowConfigSchema } from '../../../src/main/workflow/definition';
 import { config, members, roomId } from '../../unit/workflows/fixtures';
+import { parseDiscussion } from '../../unit/context/discussion';
 
 export { roomId, members };
 export type Outcome = 'stop' | 'fail' | 'length';
@@ -79,6 +80,6 @@ export async function startWorkflow(f: ReturnType<typeof hostFixture>, template 
 
 /** Public history texts (speaker + text) visible in a recorded provider input, in order. */
 export function publicHistory(input: Omit<StreamChatInput, 'signal'>) {
-  return input.messages.filter(message => message.role !== 'system').slice(1).map(message => JSON.parse(message.content) as { speaker: string; publicText: string; editedByHost?: boolean; basedOnRevisedHistory?: boolean });
+  return parseDiscussion(input.messages).entries;
 }
 export const systemTexts = (input: Omit<StreamChatInput, 'signal'>) => input.messages.filter(message => message.role === 'system').map(message => message.content);

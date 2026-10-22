@@ -6,6 +6,7 @@ import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { RoomsFeature } from '../../../src/renderer/features/rooms';
+import { parseDiscussion } from '../../unit/context/discussion';
 const databases: Database[] = [];
 afterEach(() => { cleanup(); databases.splice(0).forEach(db => db.close()); });
 it('operates the actual rooms feature with RoomService, SQLite and three explicitly configured Mock members', async () => {
@@ -33,7 +34,8 @@ it('operates the actual rooms feature with RoomService, SQLite and three explici
   const saved = await api.listAgentConfigurations({ roomId }); expect(saved.map(a => a.roleTemplateId)).toEqual(['Drafter', 'Critic', 'Synthesizer']);
   const run = await runs.start({ roomId, task: '配置成员的协作任务', workflowSnapshot: {}, maxTurns: 3 }); await runs.waitForIdle(run.runId);
   expect(stream).toHaveBeenCalledTimes(3);
-  expect(stream.mock.calls[2][0].messages.filter(m => m.role === 'assistant')).toHaveLength(2);
+  expect(stream.mock.calls[2][0].messages.filter(m => m.role === 'assistant')).toHaveLength(0);
+  expect(parseDiscussion(stream.mock.calls[2][0].messages).entries.map(e => [e.role, e.speaker])).toEqual([['user', '配置成员 1'], ['user', '配置成员 2']]);
   await api.updateAgent({ id: saved[0].id, roomId, displayName: '当前新姓名', roleTemplateId: '新角色', providerId: 'explicit-mock', modelId: 'mock' });
   fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
   fireEvent.click(await screen.findByRole('button', { name: '配置成员的协作任务' }));

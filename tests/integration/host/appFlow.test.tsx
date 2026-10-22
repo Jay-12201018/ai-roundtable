@@ -5,7 +5,7 @@ import { Database } from '../../../src/main/database/Database';
 import { RunService } from '../../../src/main/services/RunService';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { appApiFor } from '../joint/fixtures';
-import { ScriptedProvider } from './fixtures';
+import { publicHistory, ScriptedProvider } from './fixtures';
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 
@@ -52,7 +52,7 @@ describe('R12 App with the real Main services', () => {
       await waitFor(() => expect(screen.getAllByRole('button', { name: '查看上一个版本' })).toHaveLength(2));
       expect(screen.getAllByRole('note')).toHaveLength(2);
       expect(service.getSnapshot(runId).status).toBe('completed');
-      const history = provider.inputs[3].messages.filter(message => message.role !== 'system').slice(1).map(message => JSON.parse(message.content).publicText);
+      const history = publicHistory(provider.inputs[3]).map(item => item.publicText);
       expect(history).toEqual(['主持人修订后的开场', '综合者被点名发言']);
       expect(provider.inputs).toHaveLength(4);
     } finally {

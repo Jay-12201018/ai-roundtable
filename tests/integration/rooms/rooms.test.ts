@@ -9,6 +9,7 @@ import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import type { AgentConfiguration } from '../../../src/shared/contracts/configuration';
+import { parseDiscussion } from '../../unit/context/discussion';
 
 const databases: Database[] = []; const directories: string[] = [];
 afterEach(() => { vi.useRealTimers(); databases.splice(0).forEach(db => db.close()); directories.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })); });
@@ -59,8 +60,9 @@ describe('R07 persistence and protected configuration', () => {
     expect(f.runs.getSnapshot(run.runId).status).toBe('completed'); expect(calls).toHaveBeenCalledTimes(3);
     const messages = (await f.rooms.listRoomMessages({ roomId: f.room.id })).items;
     expect(messages.map(m => m.senderName)).toEqual(f.agents.map(a => a.displayName));
-    expect(calls.mock.calls[1][0].messages.some(m => m.role === 'assistant' && m.content.includes(messages[0].content))).toBe(true);
-    expect(calls.mock.calls[2][0].messages.filter(m => m.role === 'assistant').map(m => m.content).join(' ')).toContain(messages[1].content);
+    // D095: earlier members' replies reach later members as attributed, quoted user-side discussion.
+    expect(parseDiscussion(calls.mock.calls[1][0].messages).entries.map(e => [e.role, e.speaker, e.publicText])).toEqual([['user', messages[0].senderName, messages[0].content]]);
+    expect(parseDiscussion(calls.mock.calls[2][0].messages).entries.map(e => [e.role, e.speaker, e.publicText])).toEqual(messages.slice(0, 2).map(m => ['user', m.senderName, m.content]));
     for (const [i, [request]] of calls.mock.calls.entries()) {
       expect(request.modelId).toBe('mock'); expect(request.agentRole).toBe(f.agents[i].roleTemplateId);
       const { signal: _signal, ...persisted } = request;

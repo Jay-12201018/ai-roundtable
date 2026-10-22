@@ -1,8 +1,8 @@
-import type { ProviderMessage } from '../providers/types';
 import type { ContextInput, ContextSource, HistoryDecision, HistoryReason } from './types';
+import type { TranscriptEntry } from './transcript';
 
 export interface HistoryCandidate {
-  message: ProviderMessage;
+  entry: TranscriptEntry;
   source: ContextSource;
   decision: HistoryDecision;
 }
@@ -94,12 +94,11 @@ export function selectHistory(input: ContextInput): { candidates: HistoryCandida
         Object.assign(source, { turnId: turn.id, requestId: attempt.requestId, agentId: turn.agentId });
       }
     }
+    // Only the current member's own words are its own; other members and the host are quoted discussion (D095).
+    const speaker = message.senderType === 'user' ? 'host' : source.agentId === current.agentId ? 'own' : 'member';
     candidates.push({
-      message: {
-        role: message.senderType === 'agent' ? 'assistant' : 'user',
-        content: JSON.stringify({ speaker: message.senderName, ...(source.agentId ? { agentId: source.agentId } : {}), publicText: message.content,
-          ...(version?.origin === 'edit' ? { editedByHost: true } : {}), ...(version?.affected ? { basedOnRevisedHistory: true } : {}) }),
-      },
+      entry: { speaker, ...(source.agentId ? { member: members.get(source.agentId)! } : {}), content: message.content,
+        editedByHost: version?.origin === 'edit', basedOnRevisedHistory: version?.affected ?? false },
       source, decision,
     });
   }
