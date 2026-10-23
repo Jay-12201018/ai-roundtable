@@ -69,7 +69,18 @@ describe('joint interrupted recovery and reload',()=>{
       session.selectRoom('different');await session.recover('retry');expect(f.provider.inputs).toEqual([]);expect(session.store.getState().snapshot).toBeUndefined();
     }finally{dispose();await f.close();}
   });
-  it.each(['timeout','length','content_filter'] as const)('projects %s as an error and preserves its actual partial response',async cause=>{
+  it('projects length as completed-but-truncated and lets the Run finish (D102)',async()=>{
+    const db=new Database(':memory:');db.initialize();const provider=new PublicProvider({finish:'length'});
+    const service=new RunService(db,provider,createPublicMessagesBuilder());const session=createRendererSession(apiFor(service));const dispose=session.mount();
+    try{
+      const run=await service.start({roomId:service.createDemoRoom('room'),task:'task',workflowSnapshot:{}});await session.selectRun(run.runId);
+      await waitFor(()=>expect(session.store.getState().snapshot?.status).toBe('completed'));
+      const snapshot=session.store.getState().snapshot!;
+      expect(snapshot.messages[0]).toMatchObject({content:'alpha',status:'completed'});expect(session.store.getState().error).toBeFalsy();
+      expect(snapshot.attempts!.every(attempt=>attempt.status==='completed'&&attempt.finishReason==='length')).toBe(true);expect(service.hasActiveRuns()).toBe(false);
+    }finally{dispose();provider.releaseAll();await service.shutdown();db.close();}
+  });
+  it.each(['timeout','content_filter'] as const)('projects %s as an error and preserves its actual partial response',async cause=>{
     const db=new Database(':memory:');db.initialize();const provider=new PublicProvider(cause==='timeout'?{gated:true}:{finish:cause});
     const service=new RunService(db,provider,createPublicMessagesBuilder());const session=createRendererSession(apiFor(service));const dispose=session.mount();
     try{

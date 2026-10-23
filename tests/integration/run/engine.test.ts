@@ -138,15 +138,30 @@ describe('R04 authoritative scheduling', () => {
     } finally { await f.service.shutdown(); f.db.close(); }
   });
 
-  it.each(['length', 'content_filter'] as const)('preserves Provider finish=%s as incomplete evidence', async reason => {
+  it('preserves Provider finish=content_filter as incomplete evidence', async () => {
     const f = fixture(new FixtureProvider(async function* ({ requestId }) {
       yield { type: 'start', requestId }; yield { type: 'text_delta', requestId, text: 'partial' };
-      yield { type: 'finish', requestId, reason };
+      yield { type: 'finish', requestId, reason: 'content_filter' };
     }));
     try {
       const run = await f.start({ maxTurns: 1 }); await f.service.waitForIdle(run.runId);
       expect(f.service.getSnapshot(run.runId)).toMatchObject({ status: 'error', messages: [{ content: 'partial', status: 'failed' }], attempts: [{ status: 'failed' }] });
-      expect(f.db.getRun(run.runId)?.lastError).toContain(reason);
+      expect(f.db.getRun(run.runId)?.lastError).toContain('content_filter');
+    } finally { await f.service.shutdown(); f.db.close(); }
+  });
+
+  it('settles Provider finish=length as a completed, truncated reply and keeps scheduling (D102)', async () => {
+    const f = fixture(new FixtureProvider(async function* ({ requestId }) {
+      yield { type: 'start', requestId }; yield { type: 'text_delta', requestId, text: 'partial' };
+      yield { type: 'finish', requestId, reason: 'length' };
+    }));
+    try {
+      const run = await f.start({ maxTurns: 2 }); await f.service.waitForIdle(run.runId);
+      const snapshot = f.service.getSnapshot(run.runId);
+      expect(snapshot).toMatchObject({ status: 'completed', messages: [{ content: 'partial', status: 'completed' }, { content: 'partial', status: 'completed' }] });
+      expect(snapshot.turns.map(turn => turn.status)).toEqual(['completed', 'completed']);
+      expect(snapshot.attempts!.map(attempt => [attempt.status, attempt.finishReason])).toEqual([['completed', 'length'], ['completed', 'length']]);
+      expect(f.db.getRun(run.runId)?.lastError).toBeNull();
     } finally { await f.service.shutdown(); f.db.close(); }
   });
 });

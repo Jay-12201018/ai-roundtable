@@ -68,9 +68,18 @@ it('aborts a hanging HTTP stream on Stop and preserves partial text/Attempt with
  expect(saved.run.status).toBe('cancelled');expect(saved.messages[0].content).toBe('public-1');expect(saved.attempts[0].status).toBe('aborted');
  expect(f.calls).toHaveLength(1);expect(f.run.hasActiveRuns()).toBe(false);
 });
-it.each(['broken','length'] as const)('retains partial/error evidence without retrying %s',async mode=>{
- const f=await fixture(mode);const start=await f.run.start(input);await f.run.waitForIdle(start.runId);
+it('retains partial/error evidence without retrying broken',async()=>{
+ const f=await fixture('broken');const start=await f.run.start(input);await f.run.waitForIdle(start.runId);
  const saved=f.db.readRunSnapshot(start.runId);expect(saved.run.status).toBe('error');expect(saved.messages[0].content).toBe('public-1');expect(saved.attempts[0].status).toBe('failed');expect(f.calls).toHaveLength(1);
+});
+it('keeps a reply cut off at the output limit as complete-but-truncated and goes on to the next member (D102)',async()=>{
+ const f=await fixture('length');const start=await f.run.start(input);await f.run.waitForIdle(start.runId);
+ const saved=f.db.readRunSnapshot(start.runId);expect(saved.run.status).toBe('completed');expect(f.calls).toHaveLength(3);
+ expect(saved.messages.map(m=>[m.content,m.status])).toEqual([['public-1','completed'],['public-2','completed'],['public-3','completed']]);
+ expect(saved.attempts.map(a=>[a.status,a.finishReason])).toEqual([['completed','length'],['completed','length'],['completed','length']]);
+ // Later members are told the earlier reply is unfinished; nothing was retried automatically.
+ const second=f.calls[1].body.messages.at(-1).content as string;
+ expect(second).toContain('> public-1');expect(second).toContain('（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）');
 });
 it('deadline aborts real transport and persisted partial output survives',async()=>{
  const f=await fixture('hang');const start=await f.run.start({...input,maxDurationMs:500});await f.run.waitForIdle(start.runId);

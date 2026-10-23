@@ -65,7 +65,23 @@ describe('Gemini native fixtures consumed by the existing RunService protocol', 
     } finally { await service.shutdown(); database.close(); }
   });
 
-  it.each(['MAX_TOKENS', 'SAFETY'])('retains partial as failed evidence on %s without scheduling a retry', async finishReason => {
+  it('keeps MAX_TOKENS as a completed, truncated reply and goes on to the next member (D102)', async () => {
+    const database = new Database(':memory:'); database.initialize();
+    const fetcher = vi.fn(async () => sse(candidate('retained partial'), candidate('', 'MAX_TOKENS')));
+    const service = new RunService(database, new GeminiProvider({ ...options, fetch: fetcher }));
+    try {
+      const run = await service.start({ roomId: service.createDemoRoom('fixture'), task: 'task', workflowSnapshot: {}, maxTurns: 2, outputTokenLimit: 25 });
+      await service.waitForIdle(run.runId);
+      const stored = database.readRunSnapshot(run.runId);
+      expect(stored.run.status).toBe('completed');
+      expect(stored.messages.map(message => [message.content, message.status])).toEqual([['retained partial', 'completed'], ['retained partial', 'completed']]);
+      expect(stored.attempts.map(attempt => [attempt.status, attempt.finishReason])).toEqual([['completed', 'length'], ['completed', 'length']]);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(database.listRunEvents(run.runId, 0).filter(event => event.type === 'turn_failed')).toHaveLength(0);
+    } finally { await service.shutdown(); database.close(); }
+  });
+
+  it.each(['SAFETY'])('retains partial as failed evidence on %s without scheduling a retry', async finishReason => {
     const database = new Database(':memory:'); database.initialize();
     const fetcher = vi.fn(async () => sse(candidate('retained partial'), candidate('', finishReason)));
     const service = new RunService(database, new GeminiProvider({ ...options, fetch: fetcher }));

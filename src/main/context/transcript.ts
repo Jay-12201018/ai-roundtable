@@ -70,11 +70,13 @@ export interface TranscriptEntry {
   content: string;
   editedByHost: boolean;
   basedOnRevisedHistory: boolean;
+  /** D102: the reply stopped at the output limit; later speakers are told it is unfinished. */
+  truncated?: boolean;
 }
 
 /** Own, unedited, non-empty replies stay `assistant`; everything else is a labelled quote on the `user` side. */
 export const isAssistantEntry = (entry: TranscriptEntry) =>
-  entry.speaker === 'own' && !entry.editedByHost && !entry.basedOnRevisedHistory && entry.content.trim().length > 0;
+  entry.speaker === 'own' && !entry.editedByHost && !entry.basedOnRevisedHistory && !entry.truncated && entry.content.trim().length > 0;
 
 export function renderEntry(entry: TranscriptEntry): string {
   const label = entry.speaker === 'host' ? '【主持人插话】'
@@ -82,6 +84,7 @@ export function renderEntry(entry: TranscriptEntry): string {
   const notes = [
     ...(entry.editedByHost ? ['（此发言已由主持人修改，以下是修改后的版本，请以此为准。）'] : []),
     ...(entry.basedOnRevisedHistory ? ['（注意：此发言写于主持人修改前序发言之前，其中依赖旧内容的结论可能已经失效，不要沿用。）'] : []),
+    ...(entry.truncated ? ['（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）'] : []),
   ];
   return [label, ...notes, quoteText(entry.content)].join('\n');
 }

@@ -6,7 +6,7 @@ import type { StartRunInput } from '../../shared/contracts/run';
 import type { InterruptedRunDecision } from '../../shared/types/run';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
 import { publicError } from '../../shared/schemas/error';
-import { interruptedRunDecisionSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
+import { DEFAULT_OUTPUT_TOKEN_LIMIT, interruptedRunDecisionSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
 import { compileWorkflow, nextWorkflowStep, readWorkflowSnapshot } from '../workflow';
 import type { WorkflowConfig, WorkflowSnapshot, WorkflowStep } from '../workflow';
 import { workflowPreviewInputSchema } from '../../shared/schemas/workflow';
@@ -54,7 +54,9 @@ export type RequestPreparation = {
 };
 export type RunMessagesBuilder = (run: RunRecord, member: MemberSnapshot, turnIndex: number, preparation: RequestPreparation) => StreamChatInput['messages'];
 type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string; sourceRequestId: string; kind: 'retry' | 'continue' }
-  | { turn: TurnRecord; modelId: string; sourceRequestId: string; kind: 'regenerate'; sourceMessageId: string; actionId: string; job: boolean };
+  | { turn: TurnRecord; modelId: string; sourceRequestId: string; kind: 'regenerate'; sourceMessageId: string; actionId: string; job: boolean;
+    /** D102: continue a reply cut off by the output limit; the new version starts with the old text. */
+    extend?: { messages: StreamChatInput['messages']; prefix: string } };
 type Snapshot = ReturnType<Database['readRunSnapshot']>;
 const continuePrompt = 'Continue the previous response from where it stopped.';
 
@@ -156,8 +158,14 @@ export class RunService {
     const context: RunContext = { runId, roomId: input.roomId, members,
       mode: input.mode ?? 'automatic', maxTurns: Math.min(input.maxTurns ?? workflow?.config.limits.maxTurns ?? 3, workflow?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
       maxDurationMs: Math.min(input.maxDurationMs ?? workflow?.config.limits.maxDurationMs ?? 300000, workflow?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
-      outputTokenLimit: Math.min(input.outputTokenLimit ?? workflow?.config.limits.outputTokenLimit ?? 1024, workflow?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
+      outputTokenLimit: Math.min(input.outputTokenLimit ?? workflow?.config.limits.outputTokenLimit ?? DEFAULT_OUTPUT_TOKEN_LIMIT, workflow?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
+    // D103: a limit above what a member's reviewed model allows is refused before any Run exists.
+    for (const member of members) {
+      if (!member.providerId || !member.modelId || !this.registry) continue;
+      const max = (this.registry.budget(member.providerId, member.modelId) as { maxOutputTokens?: number }).maxOutputTokens;
+      if (max !== undefined && context.outputTokenLimit > max) throw new ContractError('invalid_input', 'outputTokenLimit');
+    }
     this.schedule(context, () => {
       this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: workflow ?? input.workflowSnapshot ?? {}, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
         task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0, budgetMicroCny: input.budgetMicroCny });
@@ -439,7 +447,7 @@ export class RunService {
    * reopens like a retry but with a freshly built input; a settled earlier Turn runs a version job that
    * leaves the Run status unchanged and activates the new version only if it completes. Does not wait.
    */
-  regenerateMessage(runId: string, messageId: string, actionId: string): void {
+  regenerateMessage(runId: string, messageId: string, actionId: string, mode?: 'continue'): void {
     const run = this.requireRun(runId);
     const snapshot = this.database.readRunSnapshot(runId);
     const version = snapshot.versions.find(item => item.messageId === messageId);
@@ -451,7 +459,16 @@ export class RunService {
     this.assertBudget(run);
     const latest = snapshot.attempts.filter(attempt => attempt.turnId === turn.id).at(-1);
     const base = { turn, modelId: member.modelId ?? 'mock', sourceRequestId: latest?.requestId ?? turn.requestId, kind: 'regenerate' as const, sourceMessageId: messageId, actionId };
-    if (turn.id === snapshot.turns.at(-1)!.id && canRetryTurn(turn.status as TurnStatus)) {
+    let extend: { messages: StreamChatInput['messages']; prefix: string } | undefined;
+    if (mode === 'continue') {
+      // Only the effective version of a reply that hit the output limit, from its own latest request, can be continued.
+      const source = latest && this.database.getAttempt(latest.requestId);
+      const message = snapshot.messages.find(item => item.id === messageId);
+      if (!source || source.messageId !== messageId || source.status !== 'completed' || source.finishReason !== 'length' || !source.inputSnapshot
+        || !version.active || !message || message.status !== 'completed') throw new ContractError('invalid_state');
+      extend = { prefix: message.content, messages: [...source.inputSnapshot.messages, { role: 'assistant' as const, content: message.content }, { role: 'user' as const, content: continuePrompt }] };
+    }
+    if (!extend && turn.id === snapshot.turns.at(-1)!.id && canRetryTurn(turn.status as TurnStatus)) {
       assertRunCommand('retryTurn', run.status);
       if (!latest || !canRetryTurn(latest.status)) throw new ContractError('invalid_state');
       this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }), { ...base, job: false });
@@ -459,7 +476,7 @@ export class RunService {
     }
     if (!turnSettled(snapshot, turn) || !['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(run.status)) throw new ContractError('invalid_state');
     context.job = {};
-    const job = { ...base, job: true };
+    const job = { ...base, job: true, ...(extend ? { extend } : {}) };
     try {
       this.schedule(context, () => {}, job, async () => {
         try { await this.executeTurn(context, member, turn.turnIndex, job); }
@@ -757,16 +774,22 @@ export class RunService {
     const messageId = randomUUID();
     const requestId = randomUUID();
     const job = repeat?.kind === 'regenerate' && repeat.job;
+    const extend = repeat?.kind === 'regenerate' ? repeat.extend : undefined;
     let quote: RequestQuote | undefined;
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
       const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, overrideId);
       const preparation:RequestPreparation={snapshot,workflowStep,current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
-        repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}:undefined,
-        regenerate:repeat?.kind==='regenerate'?{sourceMessageId:repeat.sourceMessageId}:undefined};
+        repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}
+          :extend?{messages:extend.messages,sourceRequestId:repeat!.sourceRequestId,kind:'continue'}:undefined,
+        regenerate:repeat?.kind==='regenerate'&&!extend?{sourceMessageId:repeat.sourceMessageId}:undefined};
       // Retry/continue replay the frozen input, so they keep its basis; new and regenerated requests use current history.
       const source = repeat && repeat.kind !== 'regenerate' ? snapshot.versions.find(v => v.messageId === snapshot.attempts.find(a => a.requestId === repeat.sourceRequestId)?.messageId) : undefined;
+      const continued = extend ? snapshot.versions.find(v => v.messageId === (repeat as Extract<RepeatAttempt, { kind: 'regenerate' }>).sourceMessageId) : undefined;
       const version: VersionInput = !repeat ? { origin: 'original', basis: basisBefore(snapshot.messages, snapshot.versions) }
+        // A continuation extends the same reply, so it keeps that reply's basis.
+        : extend ? { origin: 'continue', parentMessageId: repeat.kind === 'regenerate' ? repeat.sourceMessageId : undefined, actionId: repeat.kind === 'regenerate' ? repeat.actionId : undefined,
+          activate: false, ...(continued?.basis ? { basis: continued.basis } : {}) }
         : repeat.kind === 'regenerate' ? { origin: 'regenerate', parentMessageId: repeat.sourceMessageId, actionId: repeat.actionId, activate: !job,
           basis: basisBefore(snapshot.messages, snapshot.versions, turnId) }
         : { origin: repeat.kind, ...(source ? { parentMessageId: source.messageId } : {}), ...(source?.basis ? { basis: source.basis } : {}) };
@@ -780,7 +803,7 @@ export class RunService {
       if (job) context.job = { requestId };
       else if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
       else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex, ...(overrideId ? { overrideActionId: overrideId } : {}) });
-      this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: '', status: 'streaming' }, version);
+      this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: extend?.prefix ?? '', status: 'streaming' }, version);
       const attemptIndex = snapshot.attempts.filter(a => a.turnId === turnId).length;
       this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
       if (quote) {
@@ -795,7 +818,7 @@ export class RunService {
       return {...inputSnapshot,signal:context.abortController.signal};
     });
     const {signal}=input;
-    let content = '';
+    let content = extend?.prefix ?? '';
     let iterator: AsyncIterator<unknown> | undefined;
     let drained = false;
     let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
@@ -857,17 +880,19 @@ export class RunService {
         }
       });
       if (!finishReason) throw new ContractError('invalid_response');
-      if (finishReason !== 'stop') {
-        // Incomplete output is retained as failed evidence; only an explicit user action may retry.
+      if (finishReason === 'content_filter') {
+        // A filtered reply is not resumable text: it stays failed evidence and only an explicit user action may retry (D102).
         context.failureReason = `Provider finish: ${finishReason}`;
         throw new ContractError('invalid_response');
       }
+      // D102: reaching the output limit is not a failure. The reply is complete-but-truncated and the Run goes on.
+      const completedReason = finishReason;
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, 'completed');
         // A completed regeneration becomes its slot's effective version; the Turn's own state is unchanged.
         if (job) this.database.activateVersion(messageId);
         else this.database.updateTurn(turnId, { status: transitionTurn('running', 'completed'), partialContent: content });
-        this.database.updateAttempt(requestId, { status: 'completed' });
+        this.database.updateAttempt(requestId, { status: 'completed', finishReason: completedReason });
         settle();
         this.persistElapsed(context);
         this.appendEvent(context.runId, 'turn_completed', { turnId, messageId });

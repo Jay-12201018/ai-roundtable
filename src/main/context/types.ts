@@ -19,6 +19,7 @@ const attemptSchema = z.object({
   requestId: requestAttemptSchema.shape.requestId, runId: requestAttemptSchema.shape.runId,
   turnId: requestAttemptSchema.shape.turnId, messageId: requestAttemptSchema.shape.messageId,
   attemptIndex: requestAttemptSchema.shape.attemptIndex, status: requestAttemptSchema.shape.status,
+  finishReason: z.enum(['stop', 'length']).nullable().optional(),
 }).strict();
 // R12: when present, exactly one version per slot is effective; absent means the R05 latest-Attempt rule.
 const versionSchema = z.object({

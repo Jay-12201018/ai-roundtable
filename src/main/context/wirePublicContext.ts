@@ -43,7 +43,7 @@ export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:
     const result=buildPublicContext({
       run:{id:run.id,roomId:run.roomId,task:run.task,membersSnapshot:run.membersSnapshot,nextTurnIndex:run.nextTurnIndex,elapsedExecutionMs:run.elapsedExecutionMs,maxTurns:run.maxTurns,maxDurationMs:run.maxDurationMs,outputTokenLimit:run.outputTokenLimit},
       current:{agentId:current.agentId,turnId:current.turnId,requestId:current.requestId,turnIndex,...(regenerate?{mode:'regenerate' as const}:{})},
-      snapshot:{messages:snapshot.messages,turns:snapshot.turns.map(t=>({id:t.id,runId:t.runId,agentId:t.agentId,status:t.status,requestId:t.requestId,turnIndex:t.turnIndex})),attempts:snapshot.attempts.map(a=>({requestId:a.requestId,runId:a.runId,turnId:a.turnId,messageId:a.messageId,attemptIndex:a.attemptIndex,status:a.status})),
+      snapshot:{messages:snapshot.messages,turns:snapshot.turns.map(t=>({id:t.id,runId:t.runId,agentId:t.agentId,status:t.status,requestId:t.requestId,turnIndex:t.turnIndex})),attempts:snapshot.attempts.map(a=>({requestId:a.requestId,runId:a.runId,turnId:a.turnId,messageId:a.messageId,attemptIndex:a.attemptIndex,status:a.status,...(a.finishReason?{finishReason:a.finishReason}:{})})),
         ...(versions.length?{versions:versions.map(v=>({messageId:v.messageId,slotId:v.slotId,versionNumber:v.versionNumber,active:v.active,origin:v.origin,affected:(affected.get(v.messageId)?.length??0)>0}))}:{})},
       visibleMessageIds:visible,applicationInstructions:workflowStep?[{id:`workflow-${workflowStep.stageId}`,content:workflowStageInstruction(workflowStep.kind)}]:[],hostInstructions,contextWindowTokens:budget.contextWindowTokens,
     },budget.counter);

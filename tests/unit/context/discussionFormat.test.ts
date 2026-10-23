@@ -210,3 +210,26 @@ describe('D095 token bound on the final messages', () => {
       .toMatchObject({ ok: false, reason: 'invalid_token_count' });
   });
 });
+
+describe('D102 replies cut off at the output limit', () => {
+  it('tells later speakers the reply is unfinished, and keeps the member\'s own truncated reply off the assistant side', () => {
+    const input = sequence(['a', 'b', 'c'], 'a');
+    input.snapshot.attempts[1].finishReason = 'length';
+    input.snapshot.attempts[0].finishReason = 'length';
+    input.snapshot.attempts[2].finishReason = 'stop';
+    const result = build(input);
+    const { entries } = parseDiscussion(result.messages);
+    expect(entries.map(e => [e.role, e.speaker, e.truncated])).toEqual([['user', 'A', true], ['user', 'B', true], ['user', 'C', false]]);
+    expect(chat(result.messages).some(m => m.role === 'assistant')).toBe(false);
+    expect(chat(result.messages)[0].content).toContain('【成员「B」· role-b】\n（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）\n> b-1');
+    expect(chat(result.messages)[0].content).toContain('【你此前的发言 · 成员「A」· role-a】\n（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）\n> a-0');
+  });
+
+  it('counts the note in the final messages like any other text', () => {
+    const plain = build(sequence(['b'], 'c'));
+    const input = sequence(['b'], 'c'); input.snapshot.attempts[0].finishReason = 'length';
+    const truncated = build(input);
+    expect(truncated.report.budget.inputTokens!).toBeGreaterThan(plain.report.budget.inputTokens!);
+    expect(truncated.report.budget.inputTokens).toBe(fixtureCounter.countMessages(truncated.messages));
+  });
+});

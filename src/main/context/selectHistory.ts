@@ -98,7 +98,8 @@ export function selectHistory(input: ContextInput): { candidates: HistoryCandida
     const speaker = message.senderType === 'user' ? 'host' : source.agentId === current.agentId ? 'own' : 'member';
     candidates.push({
       entry: { speaker, ...(source.agentId ? { member: members.get(source.agentId)! } : {}), content: message.content,
-        editedByHost: version?.origin === 'edit', basedOnRevisedHistory: version?.affected ?? false },
+        editedByHost: version?.origin === 'edit', basedOnRevisedHistory: version?.affected ?? false,
+        truncated: attempts.get(message.id)?.finishReason === 'length' },
       source, decision,
     });
   }

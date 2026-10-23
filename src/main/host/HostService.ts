@@ -105,7 +105,7 @@ export class HostService {
         // The action and the scheduled request share one decision: a refused regeneration records nothing.
         return this.database.transaction(() => {
           const action = record({ messageId: message.id });
-          this.runs.regenerateMessage(run.id, message.id, action.id);
+          this.runs.regenerateMessage(run.id, message.id, action.id, command.mode);
           return this.result(action);
         });
       }

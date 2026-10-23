@@ -8,6 +8,7 @@ export interface ParsedEntry {
   publicText: string;
   editedByHost: boolean;
   basedOnRevisedHistory: boolean;
+  truncated: boolean;
 }
 
 /**
@@ -22,7 +23,7 @@ export function parseDiscussion(messages: readonly ProviderMessage[]): { task: s
   const entries: ParsedEntry[] = [];
   for (const message of chat) {
     if (message.role === 'assistant') {
-      entries.push({ role: 'assistant', speaker: '', own: true, publicText: message.content, editedByHost: false, basedOnRevisedHistory: false });
+      entries.push({ role: 'assistant', speaker: '', own: true, publicText: message.content, editedByHost: false, basedOnRevisedHistory: false, truncated: false });
       continue;
     }
     for (const block of message.content.split('\n\n')) {
@@ -41,6 +42,7 @@ export function parseDiscussion(messages: readonly ProviderMessage[]): { task: s
         role: 'user', speaker: member ? member[2] : '主持人', own: !!member?.[1], publicText: text,
         editedByHost: notes.some(note => note.includes('已由主持人修改')),
         basedOnRevisedHistory: notes.some(note => note.includes('写于主持人修改前序发言之前')),
+        truncated: notes.some(note => note.includes('因单次输出上限被截断')),
       });
     }
   }

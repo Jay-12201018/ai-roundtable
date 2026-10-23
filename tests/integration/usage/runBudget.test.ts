@@ -4,6 +4,9 @@ import { Database } from '../../../src/main/database/Database';
 import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/KeyService';
 import { ProviderRegistry, type ApprovedModelPolicy } from '../../../src/main/providers/ProviderRegistry';
 import { RunService } from '../../../src/main/services/RunService';
+import { HostService } from '../../../src/main/host/HostService';
+import { validateDatabase } from '../../../src/main/database/recovery/validateDatabase';
+import { migration8 } from '../../../src/main/database/migrations/v8';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { countDeepSeekInputUpperBound, deepSeekModelPolicy } from '../../../src/main/providers/modelPolicies/deepseek';
@@ -145,11 +148,44 @@ it('charges a completed reply that carried no usage at its full reservation, nev
   expect(snapshot.budget).toMatchObject({ unknownMicro: first.reservedMicro, settledMicro: 648 });
 });
 
-it('settles usage of a terminal stream that ended for length, keeping the failed Turn as evidence', async () => {
+it('settles a reply that ended for length from usage, completes it as truncated and keeps scheduling (D102)', async () => {
   const f = await fixture({ modes: ['length'] });
   const { runId } = await start(f); await f.run.waitForIdle(runId);
   const snapshot = f.run.getSnapshot(runId);
-  expect(snapshot.turns[0].status).toBe('failed'); expect(snapshot.charges![0]).toMatchObject({ state: 'settled', accountedMicro: 648 });
+  expect(snapshot.status).toBe('completed'); expect(f.transport).toHaveBeenCalledTimes(2);
+  expect(snapshot.turns.map(turn => turn.status)).toEqual(['completed', 'completed']);
+  expect(snapshot.turns.map(turn => snapshot.attempts!.find(attempt => attempt.turnId === turn.turnId)!.finishReason)).toEqual(['length', 'stop']);
+  expect(snapshot.charges!.map(charge => [charge.state, charge.accountedMicro])).toEqual([['settled', 648], ['settled', 648]]);
+  // The second member's request carries the truncation note for the first reply.
+  const second = (f.bodies[1].messages as ProviderMessage[]).at(-1)!.content;
+  expect(second).toContain('【成员「成员0」· Drafter】\n（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）\n> 公开回复-1');
+});
+
+it('continues a truncated reply as a new effective version with its own request and settled charge (D102)', async () => {
+  const f = await fixture({ modes: ['length', 'ok', 'ok'] });
+  const { runId } = await start(f); await f.run.waitForIdle(runId);
+  const host = new HostService(f.db, f.run);
+  const before = f.run.getSnapshot(runId);
+  const truncated = before.turns[0].messageId!;
+  await host.command({ runId, clientRequestId: 'continue-1', kind: 'regenerateMessage', messageId: truncated, mode: 'continue' });
+  await vi.waitFor(() => expect(f.run.isExecuting(runId)).toBe(false));
+  const after = f.run.getSnapshot(runId);
+  expect(after.status).toBe('completed');
+  const slot = after.versions!.filter(version => version.slotId === before.turns[0].turnId);
+  expect(slot.map(version => [version.origin, version.active])).toEqual([['original', false], ['continue', true]]);
+  const continued = after.messages.find(message => message.id === slot[1].messageId)!;
+  expect(continued).toMatchObject({ status: 'completed', content: '公开回复-1公开回复-3' });
+  // The continuation replays the frozen input plus the partial reply and a continue request; it is reserved and settled on its own.
+  const original = f.db.getAttempt(after.attempts!.find(attempt => attempt.messageId === truncated)!.requestId)!.inputSnapshot!.messages;
+  expect(f.bodies[2].messages).toEqual([...original, { role: 'assistant', content: '公开回复-1' }, { role: 'user', content: 'Continue the previous response from where it stopped.' }]);
+  expect(after.charges).toHaveLength(3);
+  const continuation = after.attempts!.find(attempt => attempt.messageId === continued.id)!;
+  expect(continuation).toMatchObject({ status: 'completed', finishReason: 'stop' });
+  expect(after.charges!.find(charge => charge.requestId === continuation.requestId)).toMatchObject({ state: 'settled', accountedMicro: 648 });
+  expect(after.versions!.find(version => version.messageId === before.turns[1].messageId)!.affectedBy).toEqual([truncated]);
+  // A fully written reply has nothing to continue.
+  await expect(host.command({ runId, clientRequestId: 'continue-2', kind: 'regenerateMessage', messageId: before.turns[1].messageId!, mode: 'continue' }))
+    .rejects.toMatchObject({ code: 'invalid_state' });
 });
 
 it('keeps an aborted in-flight request charged as unknown after Stop, never zero', async () => {
@@ -230,4 +266,33 @@ it('keeps the ledger append-only and immutable once settled', async () => {
 it('rejects an out-of-range budget at the start boundary', async () => {
   const f = await fixture();
   for (const budgetMicroCny of [0, -1, 1.5, 1_000_000_001]) await expect(start(f, { budgetMicroCny })).rejects.toMatchObject({ code: 'invalid_input' });
+});
+
+it('validation rejects a finish reason on a request that did not complete, and the reason cannot be rewritten (D102)', async () => {
+  const f = await fixture({ modes: ['length'] });
+  const { runId } = await start(f, { maxTurns: 1 }); await f.run.waitForIdle(runId);
+  const raw = (f.db as unknown as { db: import('better-sqlite3').Database }).db;
+  expect(() => raw.prepare("UPDATE request_attempts SET finish_reason='stop'").run()).toThrow(/immutable/u);
+  // Outside the value domain is refused by the column CHECK (here on a request without a recorded reason).
+  raw.exec('DROP TRIGGER request_attempt_finish_once');
+  expect(() => raw.prepare("UPDATE request_attempts SET finish_reason='truncated'").run()).toThrow(/CHECK/u);
+  raw.exec(migration8.slice(migration8.indexOf('CREATE TRIGGER')));
+  expect(validateDatabase(raw).schemaVersion).toBe(8);
+  raw.prepare("UPDATE request_attempts SET status='failed'").run();
+  expect(() => validateDatabase(raw)).toThrow(/finish reason/u);
+});
+
+it('defaults to a 4096-token output limit, reserves for it, and refuses a limit above the model policy before any Run exists (D103)', async () => {
+  const f = await fixture({ members: 1 });
+  const { runId } = await f.run.start({ roomId: 'room', task: '设计一个校园跑腿平台', workflowSnapshot: {}, maxTurns: 1 }); await f.run.waitForIdle(runId);
+  const charge = f.run.getSnapshot(runId).charges![0];
+  expect(f.db.getRun(runId)!.outputTokenLimit).toBe(4096);
+  expect(f.bodies[0]).toMatchObject({ max_tokens: 4096 });
+  expect(charge).toMatchObject({ outputTokenLimit: 4096, reservedMicro: charge.inputTokenBound * 2 + 4096 * 8 });
+  expect(f.db.listRoomRuns({ roomId: 'room' }).items).toHaveLength(1);
+  await expect(f.run.start({ roomId: 'room', task: 'x', workflowSnapshot: {}, outputTokenLimit: 32769 })).rejects.toMatchObject({ detail: { code: 'invalid_input', field: 'outputTokenLimit' } });
+  expect(f.db.listRoomRuns({ roomId: 'room' }).items).toHaveLength(1);
+  const { runId: largest } = await f.run.start({ roomId: 'room', task: 'x', workflowSnapshot: {}, maxTurns: 1, outputTokenLimit: 32768 });
+  await f.run.waitForIdle(largest);
+  expect(f.bodies.at(-1)).toMatchObject({ max_tokens: 32768 });
 });
