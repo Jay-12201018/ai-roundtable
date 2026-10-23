@@ -25,6 +25,8 @@ const attemptRecordObject = z.object({
   status: z.enum(turnStatusValues), inputSnapshot: streamChatInputSchema.nullable(),
   providerRequestId: idSchema.nullable(), createdAt: timestampSchema.nullable(), startedAt: timestampSchema.nullable(),
   finishedAt: timestampSchema.nullable(), updatedAt: timestampSchema.nullable(),
+  // D102: why a completed request ended; `length` keeps the reply as complete but truncated. Absent before migration 8.
+  finishReason: z.enum(['stop', 'length']).nullable().optional(),
 }).strict();
 export const requestAttemptSchema = attemptRecordObject.refine(a => a.inputSnapshot === null || a.inputSnapshot.requestId === a.requestId, 'Inconsistent attempt identity');
 export const createAttemptInputSchema = z.object({

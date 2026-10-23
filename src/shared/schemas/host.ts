@@ -20,7 +20,8 @@ export const hostCommandSchema = z.discriminatedUnion('kind', [
   z.object({ ...command, kind: z.literal('setInstruction'), instructionId: idSchema.optional(), content: hostInstructionContentSchema }).strict(),
   z.object({ ...command, kind: z.literal('clearInstruction'), instructionId: idSchema }).strict(),
   z.object({ ...command, kind: z.literal('editMessage'), messageId: idSchema, content: hostMessageContentSchema }).strict(),
-  z.object({ ...command, kind: z.literal('regenerateMessage'), messageId: idSchema }).strict(),
+  // D102: `continue` extends a reply cut off by the output limit as a new version instead of starting over.
+  z.object({ ...command, kind: z.literal('regenerateMessage'), messageId: idSchema, mode: z.literal('continue').optional() }).strict(),
   z.object({ ...command, kind: z.literal('selectVersion'), messageId: idSchema }).strict(),
   z.object({ ...command, kind: z.literal('abortGeneration') }).strict(),
 ]);

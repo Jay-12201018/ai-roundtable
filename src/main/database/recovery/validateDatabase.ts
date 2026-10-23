@@ -163,6 +163,11 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       assertNoRows(db, "SELECT 1 FROM turns t LEFT JOIN host_actions a ON a.id=t.override_action_id WHERE t.override_action_id IS NOT NULL AND (a.id IS NULL OR a.run_id<>t.run_id OR a.turn_id IS NOT t.id OR a.agent_id<>t.agent_id) LIMIT 1", 'Invalid override Turn');
       assertNoRows(db, "SELECT 1 FROM host_instruction_revisions r JOIN host_actions a ON a.id=r.action_id WHERE a.run_id<>r.run_id OR a.kind NOT IN ('setInstruction','clearInstruction') LIMIT 1", 'Invalid instruction revision');
     }
+    if ((versions.at(-1) ?? 0) >= 8) {
+      const columns = db.prepare("SELECT name FROM pragma_table_info('request_attempts')").pluck().all() as string[];
+      if (!columns.includes('finish_reason') || !db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name='request_attempt_finish_once'").get()) throw new Error('Recovery v8 schema is incomplete');
+      assertNoRows(db, "SELECT 1 FROM request_attempts WHERE finish_reason IS NOT NULL AND (status<>'completed' OR finish_reason NOT IN ('stop','length')) LIMIT 1", 'Invalid attempt finish reason');
+    }
     if ((versions.at(-1) ?? 0) >= 7) {
       for (const table of ['run_budgets', 'request_charges']) if (!tables.includes(table)) throw new Error('Recovery v7 schema is incomplete');
       for (const name of ['run_budget_limit_immutable', 'run_budget_no_delete', 'request_charge_identity_insert', 'request_charge_identity_immutable',

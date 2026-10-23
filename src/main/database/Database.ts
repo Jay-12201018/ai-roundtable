@@ -9,6 +9,7 @@ import { migration4 } from './migrations/v4';
 import { migration5 } from './migrations/v5';
 import { migration6 } from './migrations/v6';
 import { migration7 } from './migrations/v7';
+import { migration8 } from './migrations/v8';
 import { budgetBlockSchema, requestChargeSchema, runBudgetInputSchema, DEFAULT_RUN_BUDGET_MICRO_CNY, type BudgetBlock, type RequestCharge, type RunBudget } from '../../shared/schemas/budget';
 import { reconciliationInputSchema, reconciliationAuditSchema, reconciliationEvidenceSummary, type ReconciliationInput, type TrialReconciliation } from '../providers/controlledTrial/reconciliation';
 import { trialRecordSchema, type TrialRecord } from '../providers/controlledTrial/record';
@@ -23,7 +24,7 @@ import { classifyInterruptedRuns } from './recovery/classifyInterruptedRuns';
 import { executionMetadataSchema, storedRunSchema, createAttemptInputSchema, requestAttemptSchema, messagePageInputSchema, eventPageInputSchema } from '../../shared/schemas/persistence';
 import type { ExecutionMetadata,StoredRun, RequestAttempt, CreateAttemptInput, MessageCursor } from '../../shared/schemas/persistence';
 import { idSchema, looksLikeApiKey, modelIdSchema, sequenceSchema } from '../../shared/schemas/common';
-import { runEventSchema } from '../../shared/schemas/run';
+import { DEFAULT_OUTPUT_TOKEN_LIMIT, runEventSchema } from '../../shared/schemas/run';
 import { turnStatusValues } from '../../shared/types/run';
 
 export type RoomRecord = {
@@ -195,6 +196,7 @@ const migrations = [
   migration5,
   migration6,
   migration7,
+  migration8,
 ];
 
 export class Database {
@@ -339,7 +341,7 @@ export class Database {
     const budget = runBudgetInputSchema.parse(run.budgetMicroCny ?? DEFAULT_RUN_BUDGET_MICRO_CNY);
     const value=storedRunSchema.parse({id:run.id,roomId:run.roomId,status:run.status,workflowSnapshot:run.workflowSnapshot,lastError:null,
       task:run.task??null,membersSnapshot:run.membersSnapshot??null,nextTurnIndex:run.nextTurnIndex??null,elapsedExecutionMs:run.elapsedExecutionMs??null,
-      mode:run.mode??'automatic',maxTurns:run.maxTurns??12,maxDurationMs:run.maxDurationMs??300000,outputTokenLimit:run.outputTokenLimit??1024,
+      mode:run.mode??'automatic',maxTurns:run.maxTurns??12,maxDurationMs:run.maxDurationMs??300000,outputTokenLimit:run.outputTokenLimit??DEFAULT_OUTPUT_TOKEN_LIMIT,
       currentTurnId:null,currentAgentId:null,startedAt:null,finishedAt:null,createdAt:timestamp,updatedAt:timestamp});
     this.db.prepare('INSERT INTO workflow_runs(id,room_id,status,mode,workflow_snapshot,max_turns,max_duration_ms,output_token_limit,created_at,updated_at,task,members_snapshot,next_turn_index,elapsed_execution_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(value.id,value.roomId,value.status,value.mode,JSON.stringify(value.workflowSnapshot),value.maxTurns,value.maxDurationMs,value.outputTokenLimit,timestamp,timestamp,value.task,value.membersSnapshot===null?null:JSON.stringify(value.membersSnapshot),value.nextTurnIndex,value.elapsedExecutionMs);
@@ -685,7 +687,7 @@ export class Database {
   getAttempt(requestId: string): RequestAttempt | undefined {
     this.assertInitialized(); idSchema.parse(requestId);
     const row = this.db.prepare(`SELECT request_id AS requestId,run_id AS runId,turn_id AS turnId,message_id AS messageId,attempt_index AS attemptIndex,status,input_snapshot AS inputSnapshot,
-      provider_request_id AS providerRequestId,created_at AS createdAt,started_at AS startedAt,finished_at AS finishedAt,updated_at AS updatedAt FROM request_attempts WHERE request_id=?`).get(requestId) as (Omit<RequestAttempt,'inputSnapshot'> & {inputSnapshot:string|null}) | undefined;
+      provider_request_id AS providerRequestId,created_at AS createdAt,started_at AS startedAt,finished_at AS finishedAt,updated_at AS updatedAt,finish_reason AS finishReason FROM request_attempts WHERE request_id=?`).get(requestId) as (Omit<RequestAttempt,'inputSnapshot'> & {inputSnapshot:string|null}) | undefined;
     return row ? requestAttemptSchema.parse({...row,inputSnapshot:row.inputSnapshot===null?null:JSON.parse(row.inputSnapshot)}) : undefined;
   }
 
@@ -700,8 +702,8 @@ export class Database {
     return this.db.prepare('SELECT request_id FROM request_attempts WHERE turn_id=? ORDER BY attempt_index DESC LIMIT 1').pluck().get(turnId) as string | undefined;
   }
 
-  updateAttempt(requestId: string, patch: {status?: RequestAttempt['status'];providerRequestId?:string}): void {
-    const parsed = z.object({status:z.enum(turnStatusValues).optional(),providerRequestId:idSchema.optional()}).strict().parse(patch);
+  updateAttempt(requestId: string, patch: {status?: RequestAttempt['status'];providerRequestId?:string;finishReason?:'stop'|'length'}): void {
+    const parsed = z.object({status:z.enum(turnStatusValues).optional(),providerRequestId:idSchema.optional(),finishReason:z.enum(['stop','length']).optional()}).strict().parse(patch);
     this.transaction(() => {
       const attempt = this.getAttempt(requestId);
       if (!attempt) throw new Error('Attempt not found');
@@ -712,8 +714,8 @@ export class Database {
       if (status!==attempt.status && !allowed[attempt.status]?.includes(status)) throw new Error('Invalid Attempt transition');
       if (attempt.providerRequestId!==null && parsed.providerRequestId!==undefined && parsed.providerRequestId!==attempt.providerRequestId) throw new Error('Provider request identity is immutable');
       const timestamp = now();
-      this.db.prepare('UPDATE request_attempts SET status=?,provider_request_id=?,started_at=?,finished_at=?,updated_at=? WHERE request_id=?')
-        .run(status,parsed.providerRequestId??attempt.providerRequestId,attempt.startedAt??(status==='running'?timestamp:null),attempt.finishedAt??(!['queued','pending','running'].includes(status)?timestamp:null),timestamp,requestId);
+      this.db.prepare('UPDATE request_attempts SET status=?,provider_request_id=?,started_at=?,finished_at=?,updated_at=?,finish_reason=? WHERE request_id=?')
+        .run(status,parsed.providerRequestId??attempt.providerRequestId,attempt.startedAt??(status==='running'?timestamp:null),attempt.finishedAt??(!['queued','pending','running'].includes(status)?timestamp:null),timestamp,parsed.finishReason??attempt.finishReason??null,requestId);
     });
   }
 

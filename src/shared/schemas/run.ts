@@ -8,6 +8,8 @@ import { workflowConfigSchema, workflowProgressSchema } from './workflow';
 import { hostStateSchema, hostUpdatedPayloadSchema, messageVersionSchema } from './host';
 import { requestChargeSchema, runBudgetInputSchema, runBudgetSchema } from './budget';
 
+/** D103: the default single-output limit; a detailed Chinese review easily exceeds the former 1024 tokens. */
+export const DEFAULT_OUTPUT_TOKEN_LIMIT = 4096;
 export const startRunInputSchema = z.object({
   roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema.optional(), workflowConfig: workflowConfigSchema.optional(), workflowPreviewId: idSchema.optional(),
   mode: z.enum(['automatic', 'step']).optional(),
