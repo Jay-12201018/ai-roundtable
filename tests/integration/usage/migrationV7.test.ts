@@ -37,13 +37,14 @@ it('upgrades v6 once with a verified v6 backup, giving every existing Run the ¥
   const path = v6File();
   const db = new Database(path); await db.initialize(); await db.initialize();
   try {
-    expect(db.getRunBudget('legacy')).toEqual({ currency: 'CNY', limitMicro: 1_000_000, settledMicro: 0, unknownMicro: 0, reservedMicro: 0, remainingMicro: 1_000_000, overrunMicro: 0 });
+    expect(db.getRunBudget('legacy')).toEqual({ currency: 'CNY', limitMicro: 1_000_000, settledMicro: 0, unknownMicro: 0, reservedMicro: 0, remainingMicro: 1_000_000, overrunMicro: 0,
+      initialLimitMicro: 1_000_000, topUps: [], writtenOffMicro: 0 });
     expect(db.listCharges('legacy')).toEqual([]);
   } finally { db.close(); }
   const raw = new Sqlite(path, { readonly: true });
   try {
-    expect(validateDatabase(raw).schemaVersion).toBe(8);
-    expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(validateDatabase(raw).schemaVersion).toBe(9);
+    expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(raw.prepare('SELECT version FROM schema_backups').pluck().all()).toEqual([6]);
   } finally { raw.close(); }
 });

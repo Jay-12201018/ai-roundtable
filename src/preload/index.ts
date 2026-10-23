@@ -39,6 +39,16 @@ const api: RoundtableApiContract = {
   host: {
     command: (input) => invoke('host.command', input),
   },
+  summary: {
+    preview: (input) => invoke('summary.preview', input),
+    generate: (input) => invoke('summary.generate', input),
+    confirm: (input) => invoke('summary.confirm', input),
+  },
+  usage: {
+    getReport: () => invoke('usage.getReport', {}),
+    writeOff: (input) => invoke('usage.writeOff', input),
+    exportCsv: () => invoke('usage.exportCsv', {}),
+  },
   rooms: {
     createRoom: (input) => invoke('rooms.createRoom', input),
     updateRoom: (input) => invoke('rooms.updateRoom', input),
@@ -82,6 +92,8 @@ const api: RoundtableApiContract = {
     retryTurn: (runId, turnId) => invoke('run.retryTurn', { runId, turnId }),
     continueMessage: (runId, messageId) => invoke('run.continueMessage', { runId, messageId }),
     recoverInterruptedRun: (runId, decision) => invoke('run.recoverInterruptedRun', { runId, decision }),
+    addBudget: (input) => invoke('run.addBudget', input),
+    resumeAfterBudget: (runId) => invoke('run.resumeAfterBudget', runId),
     onEvent: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, value: unknown) => {
         const parsed = runEventSchema.safeParse(value);

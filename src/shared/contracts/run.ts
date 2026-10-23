@@ -19,5 +19,9 @@ export interface RunApiContract {
   retryTurn(runId: string, turnId: string): Promise<void>;
   continueMessage(runId: string, messageId: string): Promise<void>;
   recoverInterruptedRun(runId: string, decision: InterruptedRunDecision): Promise<void>;
+  /** R13B (D104): add to the Run's budget; `resume` continues a Run the budget stopped. */
+  addBudget(input: import('../schemas/budget').AddRunBudgetInput): Promise<import('../schemas/budget').AddRunBudgetResult>;
+  /** R13B (D104): continue a Run the budget stopped, when what is left (e.g. after a write-off) now covers it. */
+  resumeAfterBudget(runId: string): Promise<void>;
   onEvent(listener: (event: RunEvent) => void): () => void;
 }

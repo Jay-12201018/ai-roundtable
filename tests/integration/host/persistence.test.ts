@@ -79,7 +79,7 @@ describe('R12 persistence', () => {
     expect(after.host?.instructions).toEqual(before.host?.instructions);
     expect(after.host?.override).toEqual(before.host?.override);
     expect(after.versions!.find(version => version.messageId === turns[1].messageId)!.affectedBy).toEqual([turns[0].messageId]);
-    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(8);
+    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(9);
     // Nothing resends automatically; resuming is an explicit host action that consumes the queued Override.
     await restarted.run.recoverInterruptedRun(runId, 'resume');
     const resumed = restarted.run.getSnapshot(runId);
@@ -129,7 +129,7 @@ describe('R12 persistence', () => {
     expect(snapshot.turns.map(turn => turn.messageId)).toEqual(['m2', 'm4']);
     const check = new Sqlite(path, { readonly: true });
     try {
-      expect(validateDatabase(check).schemaVersion).toBe(8);
+      expect(validateDatabase(check).schemaVersion).toBe(9);
       expect(check.prepare('SELECT id,content,status FROM messages ORDER BY sort_key').all()).toEqual(contents);
       expect(check.prepare('SELECT COUNT(*) FROM message_versions WHERE basis_json IS NOT NULL').pluck().get()).toBe(0);
     } finally { check.close(); }

@@ -187,6 +187,35 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (!requestChargeSchema.safeParse({ ...row, chargedMicro }).success) throw new Error('Invalid charge evidence');
       }
     }
+    if ((versions.at(-1) ?? 0) >= 9) {
+      for (const table of ['run_budget_topups', 'context_summaries', 'summary_requests', 'summary_confirmations', 'summary_charges', 'charge_pricing', 'charge_writeoffs']) {
+        if (!tables.includes(table)) throw new Error('Recovery v9 schema is incomplete');
+      }
+      for (const name of ['run_budget_topup_insert', 'run_budget_topup_immutable', 'run_budget_topup_no_delete', 'context_summary_immutable', 'context_summary_no_delete',
+        'summary_request_insert', 'summary_request_identity_immutable', 'summary_request_finish_once', 'summary_request_no_delete', 'summary_confirmation_insert',
+        'summary_confirmation_immutable', 'summary_confirmation_no_delete', 'summary_charge_identity_insert', 'summary_charge_identity_immutable', 'summary_charge_settle_once',
+        'summary_charge_result_once', 'summary_charge_no_delete', 'charge_pricing_insert', 'charge_pricing_immutable', 'charge_pricing_no_delete',
+        'charge_writeoff_insert', 'charge_writeoff_immutable', 'charge_writeoff_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing R13B ledger protection');
+      }
+      assertNoRows(db, `SELECT 1 FROM context_summaries s LEFT JOIN message_slots m ON m.slot_id=s.id
+        WHERE m.slot_id IS NULL OR m.run_id<>s.run_id OR m.turn_id IS NOT NULL LIMIT 1`, 'Summary without its timeline slot');
+      assertNoRows(db, `SELECT 1 FROM summary_requests r JOIN messages m ON m.id=r.message_id JOIN message_versions v ON v.message_id=m.id
+        WHERE m.sender_type<>'system' OR m.run_id<>r.run_id OR v.slot_id<>r.summary_id LIMIT 1`, 'Invalid summary request identity');
+      assertNoRows(db, "SELECT 1 FROM summary_charges c LEFT JOIN summary_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid summary charge identity');
+      assertNoRows(db, `SELECT 1 FROM charge_pricing p WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled')
+        AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled') LIMIT 1`, 'Pricing without a settled charge');
+      assertNoRows(db, `SELECT 1 FROM charge_writeoffs w WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro)
+        AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro) LIMIT 1`, 'Write-off without an unknown charge');
+      assertNoRows(db, `SELECT 1 FROM run_budgets b WHERE b.limit_micro + COALESCE((SELECT SUM(t.amount_micro) FROM run_budget_topups t WHERE t.run_id=b.run_id),0) > 1000000000 LIMIT 1`, 'Run budget above the limit');
+      const summaryCharges = db.prepare(`SELECT request_id AS requestId,provider_id AS providerId,model_id AS modelId,currency,state,input_token_bound AS inputTokenBound,
+        output_token_limit AS outputTokenLimit,input_micro_per_token AS inputMicroPerToken,output_micro_per_token AS outputMicroPerToken,reserved_micro AS reservedMicro,
+        input_tokens AS inputTokens,output_tokens AS outputTokens,accounted_micro AS accountedMicro,price_reviewed_at AS priceReviewedAt,created_at AS createdAt,updated_at AS updatedAt FROM summary_charges`).iterate() as Iterable<Record<string, unknown>>;
+      for (const row of summaryCharges) {
+        const chargedMicro = row.state === 'settled' ? row.accountedMicro : row.state === 'not_sent' ? 0 : row.reservedMicro;
+        if (!requestChargeSchema.safeParse({ ...row, chargedMicro, kind: 'summary' }).success) throw new Error('Invalid charge evidence');
+      }
+    }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {
       hash.update(JSON.stringify(table));

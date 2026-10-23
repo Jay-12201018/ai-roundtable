@@ -10,7 +10,10 @@ import { migration5 } from './migrations/v5';
 import { migration6 } from './migrations/v6';
 import { migration7 } from './migrations/v7';
 import { migration8 } from './migrations/v8';
-import { budgetBlockSchema, requestChargeSchema, runBudgetInputSchema, DEFAULT_RUN_BUDGET_MICRO_CNY, type BudgetBlock, type RequestCharge, type RunBudget } from '../../shared/schemas/budget';
+import { migration9 } from './migrations/v9';
+import { budgetBlockSchema, effectiveChargeMicro, requestChargeSchema, runBudgetInputSchema, settlementAmountMicro, writeOffBasisSchema, DEFAULT_RUN_BUDGET_MICRO_CNY, MAX_RUN_BUDGET_MICRO_CNY,
+  type BudgetBlock, type BudgetTopUp, type ChargeSettlement, type ChargeWriteOff, type PricePeriod, type RequestCharge, type RunBudget } from '../../shared/schemas/budget';
+import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
 import { reconciliationInputSchema, reconciliationAuditSchema, reconciliationEvidenceSummary, type ReconciliationInput, type TrialReconciliation } from '../providers/controlledTrial/reconciliation';
 import { trialRecordSchema, type TrialRecord } from '../providers/controlledTrial/record';
 import { ContractError } from '../../shared/contracts/errors';
@@ -25,6 +28,7 @@ import { executionMetadataSchema, storedRunSchema, createAttemptInputSchema, req
 import type { ExecutionMetadata,StoredRun, RequestAttempt, CreateAttemptInput, MessageCursor } from '../../shared/schemas/persistence';
 import { idSchema, looksLikeApiKey, modelIdSchema, sequenceSchema } from '../../shared/schemas/common';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT, runEventSchema } from '../../shared/schemas/run';
+import { streamChatInputSchema } from '../../shared/schemas/provider';
 import { turnStatusValues } from '../../shared/types/run';
 
 export type RoomRecord = {
@@ -69,6 +73,14 @@ export type HostActionRecord = {
   agentId?: string; messageId?: string; resultMessageId?: string; instructionId?: string; turnId?: string; createdAt: string; updatedAt: string;
 };
 export type InstructionRevisionRecord = { id: string; runId: string; instructionId: string; revision: number; content: string | null; actionId: string; createdAt: string };
+/** D106: the actual price of a settled request; Main computes it from the reviewed policy and the request times. */
+export type ChargePricingInput = { period: PricePeriod; startedAt: string; finishedAt: string; cacheHitTokens: number | null;
+  cacheHitMicroPerMillion: number; cacheMissMicroPerMillion: number; outputMicroPerMillion: number; evidence: string };
+export type LedgerRow = { runId: string; agentId: string; charge: RequestCharge };
+export type SummaryRequestRecord = { requestId: string; summaryId: string; runId: string; messageId: string; clientRequestId: string; agentId: string;
+  status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; inputSnapshot: StreamChatInputRecord; createdAt: string };
+export type SummaryRecord = { id: string; runId: string; clientRequestId: string; agentId: string; covered: string[]; basedOnSummaryId?: string; createdAt: string;
+  requests: SummaryRequestRecord[]; confirmedMessageIds: string[] };
 
 export type RunEventRecord = {
   runId: string;
@@ -197,6 +209,7 @@ const migrations = [
   migration6,
   migration7,
   migration8,
+  migration9,
 ];
 
 export class Database {
@@ -351,10 +364,10 @@ export class Database {
   /** R13A: reserve a request's maximum cost; the caller checks the remaining budget in the same transaction. */
   reserveCharge(input: { requestId: string; runId: string; providerId: string; modelId: string; currency: 'CNY' | 'USD';
     inputTokenBound: number; outputTokenLimit: number; inputMicroPerToken: number; outputMicroPerToken: number;
-    reservedMicro: number; priceEvidence: string; priceReviewedAt: string | null }): void {
+    reservedMicro: number; priceEvidence: string; priceReviewedAt: string | null; kind?: 'turn' | 'summary' }): void {
     this.assertInitialized();
     const timestamp = now();
-    this.db.prepare(`INSERT INTO request_charges(request_id,run_id,provider_id,model_id,currency,state,input_token_bound,output_token_limit,input_micro_per_token,output_micro_per_token,
+    this.db.prepare(`INSERT INTO ${chargeTable(input.kind)}(request_id,run_id,provider_id,model_id,currency,state,input_token_bound,output_token_limit,input_micro_per_token,output_micro_per_token,
       reserved_micro,input_tokens,output_tokens,accounted_micro,price_evidence,price_reviewed_at,created_at,updated_at) VALUES(?,?,?,?,?,'reserved',?,?,?,?,?,NULL,NULL,NULL,?,?,?,?)`)
       .run(input.requestId, input.runId, input.providerId, input.modelId, input.currency, input.inputTokenBound, input.outputTokenLimit,
         input.inputMicroPerToken, input.outputMicroPerToken, input.reservedMicro, input.priceEvidence, input.priceReviewedAt, timestamp, timestamp);
@@ -364,8 +377,9 @@ export class Database {
    * R13A: close an open reservation exactly once. `settled` needs provider usage from a terminal stream; `unknown`
    * keeps the full reservation (observed usage, if any, is kept as evidence only); `not_sent` releases it because
    * the request provably never reached the network. Returns the stored charge, or undefined when none was open.
+   * R13B (D106): a settled charge may record its actual period/cache pricing in the same transaction.
    */
-  settleCharge(requestId: string, outcome: { state: 'settled'; inputTokens: number; outputTokens: number }
+  settleCharge(requestId: string, outcome: { state: 'settled'; inputTokens: number; outputTokens: number; pricing?: ChargePricingInput }
     | { state: 'unknown'; observed?: { inputTokens: number; outputTokens: number } } | { state: 'not_sent' }): RequestCharge | undefined {
     return this.transaction(() => {
       const charge = this.getCharge(requestId);
@@ -373,21 +387,48 @@ export class Database {
       const usage = outcome.state === 'settled' ? outcome : outcome.state === 'unknown' ? outcome.observed : undefined;
       const accounted = outcome.state === 'settled' ? outcome.inputTokens * charge.inputMicroPerToken + outcome.outputTokens * charge.outputMicroPerToken : null;
       if (accounted !== null && !Number.isSafeInteger(accounted)) throw new Error('Charge accounting overflow');
-      this.db.prepare('UPDATE request_charges SET state=?,input_tokens=?,output_tokens=?,accounted_micro=?,updated_at=? WHERE request_id=?')
+      this.db.prepare(`UPDATE ${chargeTable(charge.kind)} SET state=?,input_tokens=?,output_tokens=?,accounted_micro=?,updated_at=? WHERE request_id=?`)
         .run(outcome.state, usage?.inputTokens ?? null, usage?.outputTokens ?? null, accounted, now(), requestId);
+      if (outcome.state === 'settled' && outcome.pricing) {
+        const pricing = outcome.pricing;
+        const amount = settlementAmountMicro({ inputTokens: outcome.inputTokens, outputTokens: outcome.outputTokens, cacheHitTokens: pricing.cacheHitTokens }, pricing);
+        this.db.prepare(`INSERT INTO charge_pricing(request_id,run_id,period,started_at,finished_at,cache_hit_tokens,cache_hit_micro_per_million,cache_miss_micro_per_million,
+          output_micro_per_million,amount_micro,evidence,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(requestId, this.chargeRunId(requestId), pricing.period, pricing.startedAt, pricing.finishedAt, pricing.cacheHitTokens, pricing.cacheHitMicroPerMillion,
+            pricing.cacheMissMicroPerMillion, pricing.outputMicroPerMillion, amount, pricing.evidence, now());
+      }
       return this.getCharge(requestId);
     });
   }
 
-  getCharge(requestId: string): RequestCharge | undefined {
-    this.assertInitialized(); idSchema.parse(requestId);
-    const row = this.db.prepare(`SELECT ${chargeColumns} FROM request_charges WHERE request_id=?`).get(requestId) as RawCharge | undefined;
-    return row ? chargeFrom(row) : undefined;
+  private chargeRunId(requestId: string): string {
+    return this.db.prepare('SELECT run_id FROM request_charges WHERE request_id=? UNION ALL SELECT run_id FROM summary_charges WHERE request_id=?').pluck().get(requestId, requestId) as string;
   }
 
+  getCharge(requestId: string): RequestCharge | undefined {
+    this.assertInitialized(); idSchema.parse(requestId);
+    const row = this.db.prepare(`SELECT ${chargeColumns},'turn' AS kind FROM request_charges WHERE request_id=? UNION ALL SELECT ${chargeColumns},'summary' AS kind FROM summary_charges WHERE request_id=?`)
+      .get(requestId, requestId) as RawCharge | undefined;
+    return row ? this.chargeFrom(row) : undefined;
+  }
+
+  /** Turn and summary requests of a Run, in reservation order. */
   listCharges(runId: string): RequestCharge[] {
     this.requireRun(runId);
-    return (this.db.prepare(`SELECT ${chargeColumns} FROM request_charges WHERE run_id=? ORDER BY created_at,rowid`).all(runId) as RawCharge[]).map(chargeFrom);
+    return (this.db.prepare(`SELECT * FROM (SELECT ${chargeColumns},'turn' AS kind,rowid AS position FROM request_charges WHERE run_id=?
+      UNION ALL SELECT ${chargeColumns},'summary' AS kind,rowid AS position FROM summary_charges WHERE run_id=?) ORDER BY createdAt,kind DESC,position`).all(runId, runId) as RawCharge[])
+      .map(row => this.chargeFrom(row));
+  }
+
+  private chargeFrom(row: RawCharge & { position?: number }): RequestCharge {
+    const { position: _position, kind, ...charge } = row;
+    const pricing = this.db.prepare(`SELECT period,started_at AS startedAt,finished_at AS finishedAt,cache_hit_tokens AS cacheHitTokens,cache_hit_micro_per_million AS cacheHitMicroPerMillion,
+      cache_miss_micro_per_million AS cacheMissMicroPerMillion,output_micro_per_million AS outputMicroPerMillion,amount_micro AS amountMicro,evidence FROM charge_pricing WHERE request_id=?`)
+      .get(charge.requestId) as ChargeSettlement | undefined;
+    const writeOffs = this.db.prepare('SELECT id AS writeOffId,amount_micro AS amountMicro,basis,created_at AS createdAt FROM charge_writeoffs WHERE request_id=? ORDER BY created_at,rowid')
+      .all(charge.requestId) as ChargeWriteOff[];
+    const detail = { ...charge, ...(kind === 'summary' ? { kind } : {}), ...(pricing ? { settlement: pricing } : {}), ...(writeOffs.length ? { writeOffs } : {}) };
+    return requestChargeSchema.parse({ ...detail, chargedMicro: effectiveChargeMicro(detail) });
   }
 
   /** Budget totals over CNY charges; a Run created before migration 7 was backfilled with the ¥1 default. */
@@ -395,19 +436,160 @@ export class Database {
     this.requireRun(runId);
     const row = this.db.prepare('SELECT limit_micro,blocked_json FROM run_budgets WHERE run_id=?').get(runId) as { limit_micro: number; blocked_json: string | null } | undefined;
     if (!row) throw new Error('Run budget missing');
+    const topUps = this.listBudgetTopUps(runId);
+    const limitMicro = row.limit_micro + topUps.reduce((total, topUp) => total + topUp.amountMicro, 0);
     const charges = this.listCharges(runId).filter(charge => charge.currency === 'CNY');
-    const sum = (state: RequestCharge['state']) => charges.filter(charge => charge.state === state).reduce((total, charge) => total + charge.chargedMicro, 0);
-    const settledMicro = sum('settled'); const unknownMicro = sum('unknown'); const reservedMicro = sum('reserved');
-    const committed = settledMicro + unknownMicro + reservedMicro;
+    const sum = (match: (charge: RequestCharge) => boolean) => charges.filter(match).reduce((total, charge) => total + charge.chargedMicro, 0);
+    const settledMicro = sum(charge => charge.state === 'settled');
+    const unknownMicro = sum(charge => charge.state === 'unknown' && !charge.writeOffs?.length);
+    const writtenOffMicro = sum(charge => charge.state === 'unknown' && Boolean(charge.writeOffs?.length));
+    const reservedMicro = sum(charge => charge.state === 'reserved');
+    const committed = settledMicro + unknownMicro + writtenOffMicro + reservedMicro;
     const blocked = row.blocked_json === null ? undefined : budgetBlockSchema.parse(JSON.parse(row.blocked_json));
-    return { currency: 'CNY', limitMicro: row.limit_micro, settledMicro, unknownMicro, reservedMicro,
-      remainingMicro: Math.max(0, row.limit_micro - committed), overrunMicro: Math.max(0, committed - row.limit_micro), ...(blocked ? { blocked } : {}) };
+    return { currency: 'CNY', limitMicro, settledMicro, unknownMicro, reservedMicro,
+      remainingMicro: Math.max(0, limitMicro - committed), overrunMicro: Math.max(0, committed - limitMicro), ...(blocked ? { blocked } : {}),
+      initialLimitMicro: row.limit_micro, topUps, writtenOffMicro };
   }
 
   setRunBudgetBlock(runId: string, blocked: BudgetBlock | null): void {
     this.requireRun(runId);
     const value = blocked === null ? null : JSON.stringify(budgetBlockSchema.parse(blocked));
     this.db.prepare('UPDATE run_budgets SET blocked_json=?,updated_at=? WHERE run_id=?').run(value, now(), runId);
+  }
+
+  listBudgetTopUps(runId: string): BudgetTopUp[] {
+    this.requireRun(runId);
+    return this.db.prepare('SELECT id AS topUpId,amount_micro AS amountMicro,created_at AS createdAt FROM run_budget_topups WHERE run_id=? ORDER BY created_at,rowid').all(runId) as BudgetTopUp[];
+  }
+
+  /**
+   * D104: append one top-up. The same clientRequestId with the same amount is the same top-up; with another amount
+   * it is refused. The Run's total limit never exceeds ¥1000.
+   */
+  addBudgetTopUp(input: { id: string; runId: string; clientRequestId: string; amountMicro: number }): { topUp: BudgetTopUp; duplicate: boolean } {
+    runBudgetInputSchema.parse(input.amountMicro);
+    return this.transaction(() => {
+      this.requireRun(input.runId);
+      const previous = this.db.prepare('SELECT id AS topUpId,amount_micro AS amountMicro,created_at AS createdAt FROM run_budget_topups WHERE run_id=? AND client_request_id=?')
+        .get(input.runId, input.clientRequestId) as BudgetTopUp | undefined;
+      if (previous) {
+        if (previous.amountMicro !== input.amountMicro) throw new ContractError('invalid_input', 'clientRequestId');
+        return { topUp: previous, duplicate: true };
+      }
+      if (this.getRunBudget(input.runId).limitMicro + input.amountMicro > MAX_RUN_BUDGET_MICRO_CNY) throw new ContractError('invalid_input', 'amountMicroCny');
+      const createdAt = now();
+      this.db.prepare('INSERT INTO run_budget_topups(id,run_id,client_request_id,amount_micro,created_at) VALUES(?,?,?,?,?)').run(input.id, input.runId, input.clientRequestId, input.amountMicro, createdAt);
+      return { topUp: { topUpId: input.id, amountMicro: input.amountMicro, createdAt }, duplicate: false };
+    });
+  }
+
+  /**
+   * D105: record the host's console amount for an unknown charge. The unknown row is never changed; a later
+   * write-off of the same request supersedes an earlier one and both stay visible.
+   */
+  writeOffCharge(input: { id: string; runId: string; requestId: string; clientRequestId: string; amountMicro: number; basis: string }): { writeOff: ChargeWriteOff; duplicate: boolean } {
+    const basis = writeOffBasisSchema.safeParse(input.basis);
+    if (!basis.success) throw new ContractError('invalid_input', 'basis');
+    return this.transaction(() => {
+      this.requireRun(input.runId);
+      const previous = this.db.prepare('SELECT id AS writeOffId,amount_micro AS amountMicro,basis,created_at AS createdAt FROM charge_writeoffs WHERE request_id=? AND client_request_id=?')
+        .get(input.requestId, input.clientRequestId) as ChargeWriteOff | undefined;
+      if (previous) {
+        if (previous.amountMicro !== input.amountMicro || previous.basis !== basis.data) throw new ContractError('invalid_input', 'clientRequestId');
+        return { writeOff: previous, duplicate: true };
+      }
+      const charge = this.getCharge(input.requestId);
+      if (!charge || this.chargeRunId(input.requestId) !== input.runId) throw new ContractError('not_found');
+      if (charge.state !== 'unknown' || charge.currency !== 'CNY') throw new ContractError('invalid_state');
+      if (input.amountMicro > charge.reservedMicro) throw new ContractError('invalid_input', 'amountMicroCny');
+      const createdAt = now();
+      this.db.prepare('INSERT INTO charge_writeoffs(id,request_id,run_id,client_request_id,amount_micro,basis,acknowledged_uncertainty,created_at) VALUES(?,?,?,?,?,?,1,?)')
+        .run(input.id, input.requestId, input.runId, input.clientRequestId, input.amountMicro, basis.data, createdAt);
+      return { writeOff: { writeOffId: input.id, amountMicro: input.amountMicro, basis: basis.data, createdAt }, duplicate: false };
+    });
+  }
+
+  /** D108: every ledger entry of every Run with what the usage report needs to group and name it. */
+  listLedger(): LedgerRow[] {
+    this.assertInitialized();
+    return this.transaction(() => {
+      const rows = this.db.prepare(`SELECT * FROM (
+        SELECT ${chargeColumnsOf('c.')},'turn' AS kind,c.rowid AS position,c.run_id AS runId,t.agent_id AS agentId FROM request_charges c
+          JOIN request_attempts a ON a.request_id=c.request_id JOIN turns t ON t.id=a.turn_id
+        UNION ALL SELECT ${chargeColumnsOf('c.')},'summary' AS kind,c.rowid AS position,c.run_id AS runId,r.agent_id AS agentId FROM summary_charges c
+          JOIN summary_requests r ON r.request_id=c.request_id) ORDER BY createdAt,kind DESC,position`).all() as Array<RawCharge & { position: number; runId: string; agentId: string }>;
+      return rows.map(({ runId, agentId, ...row }) => ({ runId, agentId, charge: this.chargeFrom(row) }));
+    });
+  }
+
+  /** The Runs, rooms and Provider names the usage report needs to label its rows. */
+  listLedgerLabels(): { runs: Array<{ runId: string; roomId: string; roomName: string; task: string; createdAt: string; members: Array<{ agentId: string; displayName: string }> }>; providers: Array<{ id: string; name: string }> } {
+    this.assertInitialized();
+    const runs = (this.db.prepare(`SELECT r.id AS runId,r.room_id AS roomId,m.name AS roomName,COALESCE(r.task,'') AS task,r.created_at AS createdAt,r.members_snapshot AS members
+      FROM workflow_runs r JOIN rooms m ON m.id=r.room_id WHERE EXISTS(SELECT 1 FROM request_charges c WHERE c.run_id=r.id) OR EXISTS(SELECT 1 FROM summary_charges c WHERE c.run_id=r.id)`).all() as Array<{ runId: string; roomId: string; roomName: string; task: string; createdAt: string; members: string | null }>)
+      .map(({ members, ...run }) => ({ ...run, members: members === null ? [] : (JSON.parse(members) as Array<{ agentId: string; displayName: string }>).map(({ agentId, displayName }) => ({ agentId, displayName })) }));
+    const providers = this.db.prepare('SELECT id,name FROM providers').all() as Array<{ id: string; name: string }>;
+    return { runs, providers };
+  }
+
+  // R13B (D107) conversation summaries. A summary's id is the slot id of its timeline message.
+  insertSummary(input: { id: string; runId: string; clientRequestId: string; agentId: string; covered: string[]; basedOnSummaryId?: string }): void {
+    this.assertInitialized();
+    z.array(idSchema).min(1).max(4096).parse(input.covered);
+    this.db.prepare('INSERT INTO context_summaries(id,run_id,client_request_id,agent_id,covered_json,based_on_summary_id,created_at) VALUES(?,?,?,?,?,?,?)')
+      .run(input.id, input.runId, input.clientRequestId, input.agentId, JSON.stringify(input.covered), input.basedOnSummaryId ?? null, now());
+  }
+
+  insertSummaryRequest(input: { requestId: string; summaryId: string; runId: string; messageId: string; clientRequestId: string; agentId: string; inputSnapshot: StreamChatInputRecord }): void {
+    this.assertInitialized();
+    const timestamp = now();
+    this.db.prepare(`INSERT INTO summary_requests(request_id,summary_id,run_id,message_id,client_request_id,agent_id,status,finish_reason,input_snapshot,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,'generating',NULL,?,?,?)`).run(input.requestId, input.summaryId, input.runId, input.messageId, input.clientRequestId, input.agentId,
+      JSON.stringify(input.inputSnapshot), timestamp, timestamp);
+  }
+
+  finishSummaryRequest(requestId: string, status: 'completed' | 'failed' | 'aborted', finishReason?: 'stop' | 'length'): void {
+    this.assertInitialized();
+    const result = this.db.prepare("UPDATE summary_requests SET status=?,finish_reason=?,updated_at=? WHERE request_id=? AND status='generating'").run(status, finishReason ?? null, now(), requestId);
+    if (result.changes !== 1) throw new Error('Summary request is not generating');
+  }
+
+  findSummaryRequestByClient(runId: string, clientRequestId: string): SummaryRequestRecord | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare(`${summaryRequestSelect} WHERE run_id=? AND client_request_id=?`).get(runId, clientRequestId) as RawSummaryRequest | undefined;
+    return row ? summaryRequestFrom(row) : undefined;
+  }
+
+  getSummaryRequest(requestId: string): SummaryRequestRecord | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare(`${summaryRequestSelect} WHERE request_id=?`).get(requestId) as RawSummaryRequest | undefined;
+    return row ? summaryRequestFrom(row) : undefined;
+  }
+
+  listSummaries(runId: string): SummaryRecord[] {
+    this.requireRun(runId);
+    const summaries = this.db.prepare('SELECT id,run_id AS runId,client_request_id AS clientRequestId,agent_id AS agentId,covered_json AS covered,based_on_summary_id AS basedOnSummaryId,created_at AS createdAt FROM context_summaries WHERE run_id=? ORDER BY created_at,rowid')
+      .all(runId) as Array<Omit<SummaryRecord, 'covered' | 'requests' | 'confirmedMessageIds' | 'basedOnSummaryId'> & { covered: string; basedOnSummaryId: string | null }>;
+    return summaries.map(({ covered, basedOnSummaryId, ...summary }) => ({ ...summary, covered: z.array(idSchema).parse(JSON.parse(covered)),
+      ...(basedOnSummaryId === null ? {} : { basedOnSummaryId }),
+      requests: (this.db.prepare(`${summaryRequestSelect} WHERE summary_id=? ORDER BY created_at,rowid`).all(summary.id) as RawSummaryRequest[]).map(summaryRequestFrom),
+      confirmedMessageIds: this.db.prepare('SELECT message_id FROM summary_confirmations WHERE summary_id=? ORDER BY created_at,rowid').pluck().all(summary.id) as string[] }));
+  }
+
+  /** A confirmation is per version and append-only; confirming the same version again is the same confirmation. */
+  confirmSummaryVersion(input: { messageId: string; summaryId: string; runId: string; clientRequestId?: string }): boolean {
+    this.assertInitialized();
+    return this.transaction(() => {
+      if (this.db.prepare('SELECT 1 FROM summary_confirmations WHERE message_id=?').get(input.messageId)) return false;
+      this.db.prepare('INSERT INTO summary_confirmations(message_id,summary_id,run_id,client_request_id,created_at) VALUES(?,?,?,?,?)')
+        .run(input.messageId, input.summaryId, input.runId, input.clientRequestId ?? null, now());
+      return true;
+    });
+  }
+
+  findSummaryConfirmationByClient(runId: string, clientRequestId: string): { messageId: string; summaryId: string } | undefined {
+    this.assertInitialized();
+    return this.db.prepare('SELECT message_id AS messageId,summary_id AS summaryId FROM summary_confirmations WHERE run_id=? AND client_request_id=?').get(runId, clientRequestId) as { messageId: string; summaryId: string } | undefined;
   }
 
   updateRun(id: string, patch: { status?: string;mode?:'automatic'|'step'; currentTurnId?: string | null; currentAgentId?: string | null; startedAt?: string | null; finishedAt?: string | null; lastError?: string | null }): void {
@@ -506,6 +688,9 @@ export class Database {
       this.db.prepare("UPDATE request_attempts SET status='interrupted',updated_at=?,finished_at=? WHERE status IN ('running','pending','queued')").run(timestamp, timestamp);
       // An interrupted request may have been billed: its full reservation stays charged as unknown, never zero.
       this.db.prepare("UPDATE request_charges SET state='unknown',updated_at=? WHERE state='reserved'").run(timestamp);
+      // R13B: a summary request open at startup was interrupted the same way; it is never resent automatically.
+      this.db.prepare("UPDATE summary_requests SET status='interrupted',updated_at=? WHERE status='generating'").run(timestamp);
+      this.db.prepare("UPDATE summary_charges SET state='unknown',updated_at=? WHERE state='reserved'").run(timestamp);
       this.db.prepare("UPDATE messages SET status='aborted',updated_at=? WHERE status='streaming' AND run_id IS NOT NULL").run(timestamp);
       return ids.length;
     })();
@@ -737,7 +922,7 @@ export class Database {
       const ids = this.db.prepare('SELECT id FROM messages WHERE run_id=? ORDER BY sort_key').pluck().all(runId) as string[];
       return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
         versions:this.listVersions(runId),hostActions:this.listHostActions(runId),instructions:this.listInstructionRevisions(runId),
-        charges:this.listCharges(runId),budget:this.getRunBudget(runId)};
+        charges:this.listCharges(runId),budget:this.getRunBudget(runId),summaries:this.listSummaries(runId)};
     });
   }
 
@@ -1222,11 +1407,17 @@ function compareHistoryPoint(a: { createdAt: string; id: string }, b: { createdA
   return compareRunPositions(a,b);
 }
 
-const chargeColumns = `request_id AS requestId,provider_id AS providerId,model_id AS modelId,currency,state,input_token_bound AS inputTokenBound,
-  output_token_limit AS outputTokenLimit,input_micro_per_token AS inputMicroPerToken,output_micro_per_token AS outputMicroPerToken,reserved_micro AS reservedMicro,
-  input_tokens AS inputTokens,output_tokens AS outputTokens,accounted_micro AS accountedMicro,price_reviewed_at AS priceReviewedAt,created_at AS createdAt,updated_at AS updatedAt`;
-type RawCharge = Omit<RequestCharge, 'chargedMicro'>;
-function chargeFrom(row: RawCharge): RequestCharge {
-  const chargedMicro = row.state === 'settled' ? row.accountedMicro! : row.state === 'not_sent' ? 0 : row.reservedMicro;
-  return requestChargeSchema.parse({ ...row, chargedMicro });
+const chargeColumnsOf = (alias: '' | 'c.') => `${alias}request_id AS requestId,${alias}provider_id AS providerId,${alias}model_id AS modelId,${alias}currency AS currency,${alias}state AS state,
+  ${alias}input_token_bound AS inputTokenBound,${alias}output_token_limit AS outputTokenLimit,${alias}input_micro_per_token AS inputMicroPerToken,${alias}output_micro_per_token AS outputMicroPerToken,
+  ${alias}reserved_micro AS reservedMicro,${alias}input_tokens AS inputTokens,${alias}output_tokens AS outputTokens,${alias}accounted_micro AS accountedMicro,
+  ${alias}price_reviewed_at AS priceReviewedAt,${alias}created_at AS createdAt,${alias}updated_at AS updatedAt`;
+const chargeColumns = chargeColumnsOf('');
+type RawCharge = Omit<RequestCharge, 'chargedMicro' | 'settlement' | 'writeOffs'>;
+const chargeTable = (kind: RequestCharge['kind']) => kind === 'summary' ? 'summary_charges' : 'request_charges';
+const summaryRequestSelect = `SELECT request_id AS requestId,summary_id AS summaryId,run_id AS runId,message_id AS messageId,client_request_id AS clientRequestId,agent_id AS agentId,
+  status,finish_reason AS finishReason,input_snapshot AS inputSnapshot,created_at AS createdAt FROM summary_requests`;
+type RawSummaryRequest = Omit<SummaryRequestRecord, 'inputSnapshot' | 'finishReason'> & { inputSnapshot: string; finishReason: 'stop' | 'length' | null };
+function summaryRequestFrom(row: RawSummaryRequest): SummaryRequestRecord {
+  const { finishReason, inputSnapshot, ...request } = row;
+  return { ...request, inputSnapshot: streamChatInputSchema.parse(JSON.parse(inputSnapshot)), ...(finishReason === null ? {} : { finishReason }) };
 }

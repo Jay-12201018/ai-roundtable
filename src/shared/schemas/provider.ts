@@ -25,7 +25,9 @@ export const normalizedChunkSchema = z.discriminatedUnion('type', [
   z.object({ ...identity, type: z.literal('start'), providerRequestId: idSchema.optional() }).strict(),
   z.object({ ...identity, type: z.literal('text_delta'), text: z.string() }).strict(),
   z.object({ ...identity, type: z.literal('reasoning_summary_delta'), text: z.string() }).strict(),
-  z.object({ ...identity, type: z.literal('usage'), inputTokens: sequenceSchema, outputTokens: sequenceSchema }).strict(),
+  // R13B (D106): `cacheHitInputTokens` is the provider-reported part of inputTokens served from its context cache.
+  z.object({ ...identity, type: z.literal('usage'), inputTokens: sequenceSchema, outputTokens: sequenceSchema, cacheHitInputTokens: sequenceSchema.optional() }).strict()
+    .refine(chunk => chunk.cacheHitInputTokens === undefined || chunk.cacheHitInputTokens <= chunk.inputTokens, 'Cache hits cannot exceed input tokens'),
   z.object({ ...identity, type: z.literal('finish'), reason: z.enum(['stop', 'length', 'content_filter']) }).strict(),
   z.object({ ...identity, type: z.literal('error'), error: apiErrorSchema }).strict(),
 ]);

@@ -18,8 +18,11 @@ const emit = (value: unknown) => { for (const handler of fixture.handlers) handl
 beforeEach(() => { fixture.invoke.mockReset(); fixture.handlers.clear(); });
 describe('restricted Preload contract', () => {
   it('exposes only typed feature methods and sends one explicit undefined argument for no-input requests', async () => {
-    expect(Object.keys(fixture.api!).sort()).toEqual(['host', 'room', 'rooms', 'run', 'settings']);
+    expect(Object.keys(fixture.api!).sort()).toEqual(['host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
     expect(Object.keys(fixture.api!.host)).toEqual(['command']);
+    // R13B: typed ledger and summary commands only; no file system, Key or generic invoke reaches the page.
+    expect(Object.keys(fixture.api!.summary)).toEqual(['preview', 'generate', 'confirm']);
+    expect(Object.keys(fixture.api!.usage)).toEqual(['getReport', 'writeOff', 'exportCsv']);
     expect(fixture.api!.settings).not.toHaveProperty('resolveKey');
     fixture.invoke.mockResolvedValue({ version: 1, ok: true, data: [] });
     await fixture.api!.settings.listProviderSummaries();

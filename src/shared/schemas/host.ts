@@ -31,7 +31,7 @@ export const hostCommandResultSchema = z.object({
 
 export const messageVersionOriginSchema = z.enum(['original', 'retry', 'continue', 'regenerate', 'edit']);
 export const messageVersionSchema = z.object({
-  messageId: idSchema, slotId: idSchema, turnId: idSchema.optional(), author: z.enum(['agent', 'host']),
+  messageId: idSchema, slotId: idSchema, turnId: idSchema.optional(), author: z.enum(['agent', 'host', 'summary']),
   parentMessageId: idSchema.optional(), versionNumber: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   origin: messageVersionOriginSchema, active: z.boolean(), requestId: idSchema.optional(), actionId: idSchema.optional(),
   // Basis entries that are no longer active, or are themselves affected; empty means not affected.

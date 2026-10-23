@@ -21,7 +21,8 @@ export const errorCodeSchema = z.enum(Object.keys(errorMessages) as [keyof typeo
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 const retryableCodes: readonly ErrorCode[] = ['transport_error', 'rate_limited', 'timeout', 'network_error'];
 const errorFieldSchema = z.enum(['arguments', 'roomId', 'runId', 'turnId', 'messageId', 'cursor', 'task', 'workflowSnapshot', 'mode', 'maxTurns', 'maxDurationMs', 'outputTokenLimit', 'decision',
-  'clientRequestId', 'kind', 'agentId', 'instructionId', 'content', 'budgetMicroCny']);
+  'clientRequestId', 'kind', 'agentId', 'instructionId', 'content', 'budgetMicroCny',
+  'amountMicroCny', 'basis', 'requestId', 'acknowledgedUncertainty', 'throughSlotId', 'summaryId']);
 export type ErrorField = z.infer<typeof errorFieldSchema>;
 
 export const apiErrorSchema = z.object({

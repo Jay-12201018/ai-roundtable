@@ -7,6 +7,7 @@ import { executionMetadataSchema, attemptSnapshotSchema } from './persistence';
 import { workflowConfigSchema, workflowProgressSchema } from './workflow';
 import { hostStateSchema, hostUpdatedPayloadSchema, messageVersionSchema } from './host';
 import { requestChargeSchema, runBudgetInputSchema, runBudgetSchema } from './budget';
+import { contextPressureSchema, contextSummarySchema, summaryRequestStatusValues } from './summary';
 
 /** D103: the default single-output limit; a detailed Chinese review easily exceeds the former 1024 tokens. */
 export const DEFAULT_OUTPUT_TOKEN_LIMIT = 4096;
@@ -43,7 +44,10 @@ export const runSnapshotSchema = z.object({
   workflow: workflowProgressSchema.optional(), execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
   versions: z.array(messageVersionSchema).optional(), host: hostStateSchema.optional(),
   budget: runBudgetSchema.optional(), charges: z.array(requestChargeSchema).optional(),
+  // R13B (D107): conversation summaries and how full the next request's context is.
+  summaries: z.array(contextSummarySchema).max(256).optional(), contextPressure: contextPressureSchema.optional(),
 }).strict().superRefine((snapshot, ctx) => {
+  const summaryRequests = new Map((snapshot.summaries ?? []).flatMap(summary => summary.requests.map(request => [request.requestId, request.messageId] as const)));
   const current = snapshot.turns.find((turn) => turn.turnId === snapshot.currentTurnId);
   if (snapshot.turns.some((turn) => turn.runId !== snapshot.runId)
     || new Set(snapshot.turns.map((turn) => turn.turnId)).size !== snapshot.turns.length
@@ -54,7 +58,8 @@ export const runSnapshotSchema = z.object({
     || new Set(snapshot.attempts?.map(a=>a.requestId)).size !== (snapshot.attempts?.length ?? 0)
     || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))
     || new Set(snapshot.charges?.map(c=>c.requestId)).size !== (snapshot.charges?.length ?? 0)
-    || snapshot.charges?.some(c=>!snapshot.attempts?.some(a=>a.requestId===c.requestId))) {
+    || snapshot.charges?.some(c=>c.kind==='summary' ? !summaryRequests.has(c.requestId) : !snapshot.attempts?.some(a=>a.requestId===c.requestId))
+    || [...summaryRequests.values()].some(messageId => !snapshot.messages.some(message => message.id === messageId))) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent snapshot identities' });
   }
   if (snapshot.versions && !versionsConsistent(snapshot)) ctx.addIssue({ code: 'custom', message: 'Inconsistent message versions' });
@@ -93,6 +98,11 @@ export const runEventSchema = z.discriminatedUnion('type', [
   z.object({ ...base, ...turnIdentity, type: z.literal('turn_aborted'), payload: turnErrorPayload }).strict(),
   z.object({ ...base, ...turnIdentity, type: z.literal('turn_failed'), payload: turnErrorPayload }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('host_updated'), payload: hostUpdatedPayloadSchema }).strict(),
+  // R13B: run-level ledger and summary notifications; a summary has no Turn, so its text streams as run-level deltas.
+  z.object({ ...base, ...runIdentity, type: z.literal('budget_updated'), payload: z.object({ reason: z.enum(['top_up', 'write_off']) }).strict() }).strict(),
+  z.object({ ...base, ...runIdentity, type: z.literal('summary_updated'), payload: z.object({ summaryId: idSchema, messageId: idSchema,
+    status: z.enum([...summaryRequestStatusValues, 'confirmed']) }).strict() }).strict(),
+  z.object({ ...base, ...runIdentity, type: z.literal('summary_delta'), payload: z.object({ summaryId: idSchema, messageId: idSchema, text: z.string() }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('snapshot_required'), payload: z.object({ reason: z.enum(['invalid_event', 'incompatible_version', 'sequence_gap']) }).strict() }).strict(),
 ]).superRefine((event, ctx) => {
   if ('turnId' in event.payload && event.payload.turnId !== event.turnId
@@ -110,7 +120,8 @@ export const runSubscriptionSchema = z.object({
       || event.sequence > subscription.snapshot.sequence
       || index > 0 && event.sequence !== events[index - 1].sequence + 1)
     || subscription.events.some((event) => {
-      if (event.type === 'run_state_changed' || event.type === 'snapshot_required' || event.type === 'host_updated') return false;
+      if (event.type === 'run_state_changed' || event.type === 'snapshot_required' || event.type === 'host_updated'
+        || event.type === 'budget_updated' || event.type === 'summary_updated' || event.type === 'summary_delta') return false;
       const turn = subscription.snapshot.turns.find((turn) => turn.turnId === event.turnId);
       const attempt = subscription.snapshot.attempts?.find(a=>a.requestId===event.requestId);
       return !turn || (attempt ? attempt.turnId!==turn.turnId || attempt.runId!==event.runId : turn.requestId!==event.requestId)
