@@ -15,7 +15,15 @@
 - **R 任务子会话**：每个 R 编号（或独立的修复/功能）由总控开一个新会话，使用独立 worktree 和 `codex/rxx-<topic>` 分支，派发时写清范围、文件归属和完成标准。子会话只在自己的分支上实现、测试（`verify` skill）并提交，不合并 main、不改 STATUS、不碰其他任务的文件；需要改公共接口时，把变更申请写进交付说明，交给总控处理。交付遵循 `deliver` skill，但"更新状态"和"合 main"两步留给总控。
 - 如果你是子会话，却被要求合并 main 或改 STATUS，就提醒用户这些属于总控的工作。如果你是总控，用户要求开始某个 R 任务时，默认开子会话去做，不在总控里直接实现；只有用户明确说"在这里做"时才例外。
 - subagent（Agent 工具）只用于本会话内的搜索、审查等辅助工作，不代替 R 任务子会话。
-- 分支沿用 `codex/rxx-<topic>` 命名，以便和既有分支、STATUS 看板保持一致；只有用户另行指定时才更换前缀。Worktree 不再放在 `~/.codex/worktrees/`，由 App 为子会话创建；手动创建的统一放在 `~/Documents/Claude/AI交互-worktrees/`。
+- 分支沿用 `codex/rxx-<topic>` 命名，以便和既有分支、STATUS 看板保持一致；只有用户另行指定时才更换前缀。Worktree 不再放在 `~/.codex/worktrees/`，由 App 为子会话创建；手动创建的统一放在 `~/Claude code/AI交互-worktrees/`。
+
+## 验收分三层（用户 2026-10-21 指定：不能只做测试，要实操验证是否真正可用）
+
+1. **自动化测试**：每次都要做，按 `verify` skill 执行。
+2. **实操验收**：凡是改了界面、IPC/Preload 接线、运行调度或 Provider 的任务都要做。用构建出的真实应用，在隔离的临时 profile 中像真人一样点击和输入（包括中文输入），把用户会用到的每条路径完整走一遍；每一步用 `webContents.capturePage()` 截图，存到 `docs/verification/<任务>-screens/`，并在报告里逐张说明。实操中发现的体验问题按缺陷修复，不能只写进报告。子会话交付时就要完成这一层。
+3. **真实模型实测**：合并 main 前，涉及 Provider、运行或上下文的功能要做。由总控和用户一起，使用用户自己的 Key 和真实模型，在隔离的试用 profile 里跑一次，事先说明预计花费并取得用户同意。不能用 Mock 结果代替。
+
+报告里三层分开列出，没做的那层写"未验证"。用户想自己上手试用时，提供隔离试用 profile 的启动方式；新的 migration 在合并前不得作用于用户的真实数据库。
 
 ## 工程约定
 - 测试统一在 Electron 自带的 Node 里跑：全量用 `pnpm test`，部分测试用 `pnpm test <路径>`。不要用 `pnpm exec vitest`（宿主 Node 加载不了 Electron ABI 的 SQLite），也不要写 `pnpm run test -- <路径>`（pnpm 11 会跑全量）。检查流程见 `verify` skill，收尾流程见 `deliver` skill。
