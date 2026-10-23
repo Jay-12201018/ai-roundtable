@@ -108,6 +108,8 @@ async function main() {
       return send(`http://127.0.0.1:${port}/deepseek${target.pathname}${target.search}`, init); };
   };
   await guarded; const window = await loaded; const contents = window.webContents;
+  // The probe window may be covered or behind other windows while it runs; keep its timers and rendering at full speed.
+  contents.setBackgroundThrottling(false);
   const preferences = contents.getLastWebPreferences();
   assert.equal(preferences.sandbox, true); assert.equal(preferences.contextIsolation, true); assert.equal(preferences.nodeIntegration, false);
   window.setContentSize(1440, 900);
@@ -235,7 +237,7 @@ async function main() {
   const page4 = await text();
   check((page4.match(/输入 300 \/ 输出 6 tokens · 花费 ¥0\.000648/gu) ?? []).length === 3, 'Every message shows its usage and cost');
   check(page4.includes('预算 ¥0.0500') && page4.includes('累计花费 ¥0.0019') && page4.includes('剩余额度 ¥0.0481'), 'Run budget bar totals');
-  check(requests.length === 3 && requests.every(r => r.keyMatches && r.thinking?.type === 'disabled' && r.maxTokens === 1024), 'Requests carried the saved Key, max_tokens and thinking disabled');
+  check(requests.length === 3 && requests.every(r => r.keyMatches && r.thinking?.type === 'disabled' && r.maxTokens === 4096), 'Requests carried the saved Key, max_tokens and thinking disabled');
   await capture('run-usage', '输入任务（输入法）并把"本次预算（元）"改为 0.05 后点"开始协作"：三条 DeepSeek 回复下方各显示"输入 300 / 输出 6 tokens · 花费 ¥0.000648"；页头下方的预算栏显示"预算 ¥0.0500 · 累计花费 ¥0.0019 · 剩余额度 ¥0.0481"。', '.run-budget');
 
   // Step 5: an invalid budget is explained and cannot start.

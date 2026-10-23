@@ -80,6 +80,8 @@ const check = (value, message) => { result.checks.push(message); if (!value) thr
 async function main() {
   await import(pathToFileURL(entry).href);
   await guarded; const window = await loaded; const contents = window.webContents;
+  // The probe window may be covered or behind other windows while it runs; keep its timers and rendering at full speed.
+  contents.setBackgroundThrottling(false);
   const preferences = contents.getLastWebPreferences();
   assert.equal(preferences.sandbox, true); assert.equal(preferences.contextIsolation, true); assert.equal(preferences.nodeIntegration, false);
   window.setContentSize(1440, 900);
@@ -250,23 +252,29 @@ async function main() {
   await until(`document.querySelectorAll('.host-slot')[2].innerText.includes('未生效的历史版本')`, 'old version shown');
   await capture('old-version', '点"‹"查看"综合者"的旧版本：标为"原始 · 未生效的历史版本"，原文完整保留，并提供"设为当前版本"。', 2);
 
-  // Path 5a: a real failure (output limit too small) and an explicit retry that fails again, keeping both attempts.
+  // Path 5a (D102): a tiny output limit no longer fails the Run. Each reply is kept and marked as truncated, the Run
+  // goes on to the next member, and once it has finished a truncated reply can be continued as a new version.
   await click('工作流');
   await field('单次输出上限（Token）'); await selectAll(); await send('Input.insertText', { text: '3' });
   await click('验证并预览'); await until(`document.body.innerText.includes('已验证的计划预览')`, 'workflow preview');
   await click('应用配置'); await click('讨论');
-  await field('任务目标'); await selectAll(); await ime('shibai', '演示失败与手动重试'); await click('开始协作');
-  await until(`document.querySelector('.timeline .status').textContent.includes('运行失败')`, 'run failed');
-  const failed = await snapshot();
-  check(failed.turns.length === 1 && failed.turns[0].status === 'failed', 'The first Turn failed (output limit reached)');
-  await capture('failed', '单次输出上限设为 3 后开始：首个回合因输出不完整失败，页头"运行失败"，消息标为"生成失败 · 原始"并保留已输出的部分文字，失败原因"模型未完整完成响应，部分输出已保留。"直接显示在该消息下方；右侧出现"重试当前回合""续写部分回复"。', 'header');
-  check(failed.attempts.length === 1, 'No automatic retry happened after the failure');
-  check((await text()).includes('生成失败 · 原始') && (await js(`document.querySelector('.host-slot p').textContent.length > 0`)), 'The failed message keeps its partial text and is labelled as failed');
-  await click('重试当前回合');
-  await until(`(async () => { const s = await window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId')); return s.attempts.length === 2 && s.status === 'error'; })()`, 'retry finished');
-  const retried = await snapshot();
-  check(new Set(retried.attempts.map(a => a.requestId)).size === 2, 'Retry used a new requestId');
-  await capture('retry-failed-again', '手动"重试当前回合"：生成第 2 个版本，标为"生成失败 · 重试 · 当前版本（未完成）"，仍因同一输出上限失败；"‹ 版本 2/2"可切换查看两次失败的部分输出，均未被覆盖。', '.host-slot');
+  await field('任务目标'); await selectAll(); await ime('jieduan', '演示截断与续写'); await click('开始协作');
+  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'run completed despite truncation');
+  const truncated = await snapshot();
+  check(truncated.turns.length > 1 && truncated.turns.every(t => t.status === 'completed'), 'Every Turn completed and the Run went on to the next member');
+  check(truncated.attempts.every(a => a.status === 'completed' && a.finishReason === 'length'), 'Each reply was kept as complete-but-truncated, none failed');
+  check((await text()).includes('已达单次输出上限，内容可能不完整。') && !(await text()).includes('运行失败'), 'The timeline marks truncation and never says the Run failed');
+  await capture('truncated', '单次输出上限设为 3 后开始：每条回复写到上限都被保留并标注"已达单次输出上限，内容可能不完整。"，运行没有失败，依次轮到下一位直到"已完成"；每条下方提供"续写"。', 0);
+  const truncatedSlot = truncated.turns[0].turnId;
+  await click('续写', { slot: 0 });
+  await until(`(async () => { const s = await window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'));
+    return !s.host?.generation && s.versions.filter(v => v.slotId === ${JSON.stringify(truncatedSlot)}).length === 2; })()`, 'continuation finished');
+  const continued = await snapshot();
+  const versions = continued.versions.filter(v => v.slotId === truncatedSlot);
+  const original = continued.messages.find(m => m.id === versions[0].messageId).content;
+  check(versions[1].origin === 'continue' && versions[1].active && !versions[0].active, 'The continuation is the new effective version; the original stays as version 1');
+  check(continued.messages.find(m => m.id === versions[1].messageId).content.startsWith(original) && continued.status === 'completed', 'The continuation starts from the kept text; the Run status is unchanged');
+  await capture('continued', '运行结束后点第一条的"续写"：生成"续写 · 当前有效 · 版本 2/2"，从原来的文字接着写（这里仍受上限 3 限制，所以再次标注截断，可以继续续写）；原版本保留为版本 1，后续发言被标为受影响。', 0);
 
   // Path 5b: Stop keeps the partial text; an explicit retry then succeeds.
   // The production Mock finishes a 3-turn Run in about 1.5 s, so Stop (now two clicks, D098) can lose the race to the

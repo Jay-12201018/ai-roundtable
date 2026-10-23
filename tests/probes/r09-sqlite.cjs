@@ -16,7 +16,7 @@ try{
  if(result.phase==='first'){
   const calls=result.requests.filter(r=>r.method==='POST'&&r.body.messages.some(m=>m.content.includes('R09 three Agent public context')));assert.equal(calls.length,3);
   for(let i=0;i<3;i++){
-   const input=JSON.parse(rows[i].input_snapshot);assert.deepEqual(calls[i].body.messages,input.messages);assert.equal(input.modelId,'fixture');assert.equal(input.outputTokenLimit,1024);
+   const input=JSON.parse(rows[i].input_snapshot);assert.deepEqual(calls[i].body.messages,input.messages);assert.equal(input.modelId,'fixture');assert.equal(input.outputTokenLimit,4096);
    check(input.messages.some(m=>m.role==='system'&&m.content.includes('R09 system '+i)),'Frozen member system missing');
    for(let j=0;j<i;j++)check(input.messages.some(m=>m.role==='assistant'&&m.content.includes(completed[j].content)),'Ordered public context missing');
   }

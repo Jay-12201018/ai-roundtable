@@ -57,7 +57,7 @@ const fakeKey = 'premerge-fake-deepseek-key';
 const pastedKey = 'sk-premerge0fake0key0for0probe0only';
 // The fixture's provider usage: inside the byte bound, so a settled request costs 300×2 + 6×8 = 648 micro-CNY.
 const usage = { prompt_tokens: 300, completion_tokens: 6 };
-const requests = []; let port; let holdNext = false; const held = [];
+const requests = []; let port; let holdNext = false; let lengthNext = false; const held = [];
 const fixture = http.createServer(async (req, res) => {
   try {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -67,9 +67,11 @@ const fixture = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const emit = value => res.write(`data: ${JSON.stringify(value)}\n\n`);
     emit({ id: 'owned-fixture', choices: [{ index: 0, delta: { content: `DeepSeek 夹具回复 ${requests.length}` }, finish_reason: null }] });
+    // `lengthNext` makes the next reply stop at the output limit, as DeepSeek reports with finish_reason=length.
+    const reason = lengthNext ? 'length' : 'stop'; lengthNext = false;
     const finish = () => {
       if (res.destroyed) return;
-      emit({ id: 'owned-fixture', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+      emit({ id: 'owned-fixture', choices: [{ index: 0, delta: {}, finish_reason: reason }] });
       emit({ id: 'owned-fixture', choices: [], usage });
       res.end('data: [DONE]\n\n');
     };
@@ -126,6 +128,8 @@ async function main() {
       return send(`http://127.0.0.1:${port}/deepseek${target.pathname}${target.search}`, init); };
   };
   await guarded; const window = await loaded; const contents = window.webContents;
+  // The probe window may be covered or behind other windows while it runs; keep its timers and rendering at full speed.
+  contents.setBackgroundThrottling(false);
   const preferences = contents.getLastWebPreferences();
   assert.equal(preferences.sandbox, true); assert.equal(preferences.contextIsolation, true); assert.equal(preferences.nodeIntegration, false);
   window.setContentSize(1440, 900);
@@ -360,6 +364,47 @@ async function main() {
   check(requests.length === before + 2, 'One step sends exactly one request');
   check(requests.at(-1).messages.at(-1).content.includes('【主持人插话】\n> 请重点比较按距离计价和固定价'), 'The next speaker received the interjection as a host entry');
   await capture('step-next', '点“下一步”：只让下一位（审查者）发言一次，说完再次自动暂停；它收到的上下文里包含刚才的主持人插话（脚本核对了请求体）。右侧显示"下一位：综合者（按计划）"，输入区仍是 继续 / 下一步 / 停止。', 2);
+
+  // Step 9 (D103): finish the step-by-step Run from the same in-place control, then set the output limit, which is
+  // folded under 更多设置 next to the budget; here it becomes 2048.
+  await click('继续');
+  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'step-by-step run finished');
+  await click('每个回合结束后暂停，方便插话或点名', { selector: 'input[type=checkbox]' });
+  check(!(await js(`document.querySelector('.composer-step input').checked`)), 'Back to automatic');
+  check(!(await js(`Boolean(document.querySelector('.composer-more'))`)), '更多设置 starts folded');
+  const startSpot = await js(`(() => { const r = [...document.querySelectorAll('.composer-actions button')].find(b => b.textContent === '开始协作').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await click('更多设置');
+  await field('单次输出上限（token）'); await selectAll(); await type('2048');
+  await field('任务目标'); await selectAll(); await ime('jieduan', '比较三种跑腿定价方案');
+  check(await js(`document.elementFromPoint(${startSpot.x}, ${startSpot.y})?.closest('button')?.textContent`) === '开始协作', 'Opening 更多设置 does not move 开始协作');
+  await capture('output-limit', '开始前点输入区的"更多设置"：在控制行上方展开"单次输出上限（token）"（默认 4096，这里改为 2048），"开始协作"位置不变；并说明"每次请求按这个上限预留费用，实际按用量结算；回复写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）"。平时收起，不占常用路径。', '.composer');
+
+  // Step 10 (D102): the first reply stops at the output limit; it is kept and marked, and the Run goes on.
+  const beforeTruncation = requests.length;
+  lengthNext = true;
+  await click('开始协作');
+  await until(`document.querySelector('.timeline .status').textContent.includes('已完成') && document.querySelectorAll('.message').length === 3`, 'run completed after a truncated reply');
+  const finished = await snapshot();
+  check(requests.length === beforeTruncation + 3 && requests.slice(beforeTruncation).every(r => r.maxTokens === 2048), 'Three requests, each with max_tokens 2048');
+  const firstTurn = finished.turns[0];
+  check(finished.turns.every(t => t.status === 'completed') && finished.attempts.find(a => a.messageId === firstTurn.messageId).finishReason === 'length', 'The truncated Turn completed and the Run went on');
+  check(finished.charges.length === 3 && finished.charges.every(c => c.state === 'settled'), 'Every request, the truncated one included, settled from usage');
+  check(requests[beforeTruncation + 1].messages.at(-1).content.includes('（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）'), 'The next member was told the reply is unfinished');
+  check((await js(`document.querySelectorAll('.message')[0].innerText`)).includes('已达单次输出上限，内容可能不完整。') && !(await text()).includes('运行失败'), 'The truncated reply is marked, never shown as a failure');
+  await capture('truncated', 'DeepSeek 夹具让起草者的回复以 finish_reason=length 结束：这条回复保留并标注"已达单次输出上限，内容可能不完整。"，下方有"续写"；运行没有失败，审查者和综合者照常发言，页头"已完成"。脚本核对了审查者收到的上下文里这条发言带有"（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）"，三次请求都按用量结算。', 0);
+
+  // Step 11 (D102): 续写 continues it as a new version with its own request and charge.
+  const original = finished.messages.find(m => m.id === firstTurn.messageId).content;
+  await click('续写', { slot: 0 });
+  await until(`(async () => { const s = await window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'));
+    return !s.host?.generation && s.versions.filter(v => v.slotId === ${JSON.stringify(firstTurn.turnId)}).length === 2; })()`, 'continuation finished');
+  const extended = await snapshot();
+  const slotVersions = extended.versions.filter(v => v.slotId === firstTurn.turnId);
+  const continuation = requests.at(-1).messages;
+  check(continuation.at(-2).role === 'assistant' && continuation.at(-2).content === original && continuation.at(-1).content === 'Continue the previous response from where it stopped.', 'The continuation sends the kept text and asks to continue');
+  check(slotVersions[1].origin === 'continue' && slotVersions[1].active && extended.messages.find(m => m.id === slotVersions[1].messageId).content.startsWith(original), 'The continuation is the new effective version and starts from the kept text');
+  check(extended.charges.length === 4 && extended.charges.every(c => c.state === 'settled'), 'The continuation was reserved and settled as its own request');
+  await capture('continued', '运行结束后点"续写"：发出新请求（携带原回复并请求接着写，单独预留和结算费用），生成"续写 · 当前有效 · 版本 2/2"，内容从原来的文字接着写、不再标注截断；原版本保留为版本 1，后面两条发言标为"受影响"，可按需重新生成。', 0);
 
   // The reviewer saw the drafter's reply as quoted discussion on the user side, never as its own assistant turn.
   check(reviewer.filter(m => m.role !== 'system').map(m => m.role).join(',') === 'user', 'The reviewer request has one user block and no assistant message');

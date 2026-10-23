@@ -145,8 +145,8 @@ async function main() {
     check(started.budget?.limitMicro === 1_000_000, 'Default Run budget is ¥1');
     await until(`window.roundtable.run.getSnapshot(${JSON.stringify(started.runId)}).then(s => s.status === 'completed')`, 'normal run completed');
     const settled = await api('run.getSnapshot', started.runId);
-    check(requests.length === 3 && requests.every(r => r.model === 'deepseek-flash' && r.maxTokens === 1024 && r.thinking?.type === 'disabled' && r.keyMatches), 'Three DeepSeek requests with max_tokens, thinking disabled and the saved Key');
-    check(settled.charges.length === 3 && settled.charges.every(c => c.state === 'settled' && c.inputTokens === 300 && c.outputTokens === 6 && c.accountedMicro === 648 && c.reservedMicro === c.inputTokenBound * 2 + 1024 * 8), 'Each request reserved its maximum and settled at ¥2/M input and ¥8/M output');
+    check(requests.length === 3 && requests.every(r => r.model === 'deepseek-flash' && r.maxTokens === 4096 && r.thinking?.type === 'disabled' && r.keyMatches), 'Three DeepSeek requests with max_tokens, thinking disabled and the saved Key');
+    check(settled.charges.length === 3 && settled.charges.every(c => c.state === 'settled' && c.inputTokens === 300 && c.outputTokens === 6 && c.accountedMicro === 648 && c.reservedMicro === c.inputTokenBound * 2 + 4096 * 8), 'Each request reserved its maximum and settled at ¥2/M input and ¥8/M output');
     check(settled.budget.settledMicro === 1944 && settled.budget.reservedMicro === 0 && settled.budget.remainingMicro === 1_000_000 - 1944, 'Run spend and remaining budget');
     await js(`localStorage.setItem('roundtable.runId', ${JSON.stringify(started.runId)}); location.reload(); true`);
     await until(`document.querySelectorAll('.message-usage').length === 3`, 'per-message usage rendered');
