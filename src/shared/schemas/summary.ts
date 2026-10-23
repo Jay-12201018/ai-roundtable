@@ -55,6 +55,8 @@ export const contextSummarySchema = z.object({
     finishReason: z.enum(['stop', 'length']).optional(), createdAt: timestampSchema,
   }).strict()).min(1).max(256),
   confirmedMessageIds: z.array(idSchema).max(512),
+  /** D109: covered messages edited or regenerated after the effective version was written; they are sent themselves. */
+  revisedSlotIds: z.array(idSchema).max(4096).optional(),
   createdAt: timestampSchema,
 }).strict();
 /** How full the next request's context is, so the host can decide when to summarize (never automatic). */
