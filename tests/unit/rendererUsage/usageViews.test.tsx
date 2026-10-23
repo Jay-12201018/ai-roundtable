@@ -16,7 +16,8 @@ const budget = (overrides: Partial<RunBudget> = {}): RunBudget => ({ currency: '
 
 it('shows provider usage and exact cost for a settled request', () => {
   render(<MessageUsage charge={charge()} />);
-  expect(screen.getByText('输入 300 / 输出 6 tokens · 花费 ¥0.000648')).toBeTruthy();
+  // R13B (D106): every settled amount says which price applied; rows without settlement detail were billed at peak.
+  expect(screen.getByText('输入 300 / 输出 6 tokens · 花费 ¥0.000648 · 按高峰价')).toBeTruthy();
 });
 
 it('shows unknown cost at the reserved cap, never as zero', () => {

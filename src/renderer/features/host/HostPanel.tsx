@@ -2,13 +2,13 @@ import { useState } from 'react';
 import './host.css';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { HostTextArea } from './HostTextArea';
-import { canDirectRun, nextSpeaker, overrideCandidates } from './model';
+import { canDirectRun, nextSpeaker, overrideCandidates, summaryWritable, timelineSlots, usedSummary } from './model';
 import type { HostCommands } from './useHostCommands';
 
-type Props = { snapshot: RunSnapshot | undefined; commands: HostCommands };
+type Props = { snapshot: RunSnapshot | undefined; commands: HostCommands; onSummarize?: () => void };
 
 /** Host controls for the selected Run: next speaker, interjection and standing instructions. */
-export function HostPanel({ snapshot, commands }: Props) {
+export function HostPanel({ snapshot, commands, onSummarize }: Props) {
   const [message, setMessage] = useState('');
   const [instruction, setInstruction] = useState('');
   const [editing, setEditing] = useState<{ instructionId: string; content: string; original: string }>();
@@ -76,6 +76,14 @@ export function HostPanel({ snapshot, commands }: Props) {
       <HostTextArea aria-label="新增持续指令" rows={2} value={instruction} placeholder="例如：所有回答使用中文并给出编号" disabled={!instructionsWritable} onChange={event => setInstruction(event.target.value)} onSubmit={() => void addInstruction()} />
       <button type="submit" disabled={disabled || !instructionsWritable || !instruction.trim()}>添加持续指令</button>
     </form>
+
+    {onSummarize && <>
+      <h3>讨论摘要</h3>
+      <p className="host-hint">{usedSummary(snapshot) ? `之后的发言正在用摘要代替第 1–${usedSummary(snapshot)!.lastNumber} 条原文。讨论再变长时，可以在此基础上续写摘要。`
+        : '讨论变长、快放不进上下文时，可以把较早的发言整理成摘要。生成是一次真实请求，会按预算预留和结算；不会自动生成。'}</p>
+      <button type="button" disabled={!summaryWritable(snapshot) || (timelineSlots(snapshot)?.filter(slot => slot.number !== undefined).length ?? 0) < 2} onClick={onSummarize}>生成讨论摘要…</button>
+      {!summaryWritable(snapshot) && <p className="host-hint">暂停运行或等当前请求结束后可以生成摘要。</p>}
+    </>}
 
     {generation && <button type="button" disabled={disabled} onClick={() => void commands.send('abort', { kind: 'abortGeneration' }, '已中止重新生成，部分输出已保留。')}>中止重新生成</button>}
     {commands.pending && <p role="status" className="sync-feedback">主持人操作已发送，等待主进程确认</p>}

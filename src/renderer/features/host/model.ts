@@ -9,7 +9,9 @@ export const originLabels: Record<MessageVersionOrigin, string> = {
 export type TimelineSlot = {
   slotId: string;
   turnId?: string;
-  author: 'agent' | 'host';
+  author: 'agent' | 'host' | 'summary';
+  /** R13B: the public message number shown in the timeline and in summary labels; summaries have none. */
+  number?: number;
   /** Versions in creation order; exactly one is active. */
   versions: Array<MessageVersion & { message: MessageSnapshot }>;
   active: MessageVersion & { message: MessageSnapshot };
@@ -27,12 +29,33 @@ export function timelineSlots(snapshot: RunSnapshot | undefined): TimelineSlot[]
     group.push({ ...version, message: messages.get(version.messageId)! });
     slots.set(version.slotId, group);
   }
+  let number = 0;
   return [...slots.entries()].map(([slotId, versions]) => {
     versions.sort((a, b) => a.versionNumber - b.versionNumber);
     const active = versions.find(version => version.active) ?? versions.at(-1)!;
-    return { slotId, turnId: active.turnId, author: active.author, versions, active };
+    return { slotId, turnId: active.turnId, author: active.author, versions, active, ...(active.author === 'summary' ? {} : { number: ++number }) };
   });
 }
+
+/**
+ * R13B (D107): the summary later requests use — the latest one whose effective version is complete and confirmed
+ * (a host edit confirms itself). Display only; Main makes the same choice when it builds a request.
+ */
+export function usedSummary(snapshot: RunSnapshot | undefined) {
+  const slots = timelineSlots(snapshot) ?? [];
+  for (const slot of [...slots].reverse()) {
+    if (slot.author !== 'summary') continue;
+    const summary = snapshot?.summaries?.find(item => item.slotId === slot.slotId);
+    const { active } = slot;
+    if (summary && active.message.status === 'completed' && active.message.content.trim()
+      && (active.origin === 'edit' || summary.confirmedMessageIds.includes(active.messageId))) return summary;
+  }
+  return undefined;
+}
+/** Run statuses in which Main accepts a summary request (nothing else in flight). */
+export const summaryWritable = (snapshot: RunSnapshot | undefined) => !!snapshot && runIdle(snapshot)
+  && ['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(snapshot.status)
+  && !snapshot.summaries?.some(summary => summary.requests.some(request => request.status === 'generating'));
 
 const frozenPlan = (snapshot: RunSnapshot) => {
   const parsed = compiledWorkflowSnapshotSchema.safeParse(snapshot.workflowSnapshot);
