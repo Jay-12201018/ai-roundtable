@@ -103,8 +103,19 @@ export function createRendererStore() {
         const parsed = runEventSchema.safeParse(input);
         if (!parsed.success) return false;
         const event = parsed.data;
-        if (event.runId !== state.runId || event.sequence !== snapshot.sequence + 1
-          || event.type !== 'text_delta' && event.type !== 'reasoning_summary_delta' && event.type !== 'usage_updated') return false;
+        if (event.runId !== state.runId || event.sequence !== snapshot.sequence + 1) return false;
+        if (event.type === 'summary_delta') {
+          // R13B: a summary streams into its own message; anything unexpected falls back to a full snapshot.
+          const index = snapshot.messages.findIndex(message => message.id === event.payload.messageId);
+          const summary = snapshot.summaries?.find(item => item.summaryId === event.payload.summaryId);
+          if (index < 0 || snapshot.messages[index].status !== 'streaming'
+            || !summary?.requests.some(request => request.messageId === event.payload.messageId && request.status === 'generating')) return false;
+          const messages = [...snapshot.messages];
+          messages[index] = { ...messages[index], content: messages[index].content + event.payload.text };
+          snapshot = { ...snapshot, messages, sequence: event.sequence, updatedAt: event.timestamp };
+          continue;
+        }
+        if (event.type !== 'text_delta' && event.type !== 'reasoning_summary_delta' && event.type !== 'usage_updated') return false;
         const turnIndex = snapshot.turns.findIndex((turn) => turn.turnId === event.turnId);
         const turn = snapshot.turns[turnIndex];
         const messageIndex = snapshot.messages.findIndex((message) => message.id === turn?.messageId);

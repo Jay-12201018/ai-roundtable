@@ -6,8 +6,8 @@ import { WorkflowFeature, type WorkflowDraft, type WorkflowPreviewResult } from 
 import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressForFeature, workflowTemplateLabels } from './features/workflows/productionAdapter';
 import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
 import { SettingsFeature } from './features/settings/SettingsFeature';
-import { HostPanel, HostTimeline, nextSpeaker, useHostCommands, type ProviderNames } from './features/host';
-import { RunBudgetBar, parseBudgetYuan } from './features/usage';
+import { ContextHint, HostPanel, HostTimeline, SummaryPanel, nextSpeaker, useHostCommands, useSummaryCommands, type ProviderNames } from './features/host';
+import { BudgetStopNotice, RunBudgetBar, UsagePage, parseBudgetYuan, useLedgerCommands } from './features/usage';
 import { statusLabels } from './locales/zhCN';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT } from '../shared/schemas/run';
 
@@ -24,7 +24,7 @@ type Theme = 'system' | 'light' | 'dark';
 export function App() {
   const [api] = useState(() => window.roundtable);
   const [session] = useState(() => createRendererSession(api, localStorage, { requireRoom: true }));
-  const [page, setPage] = useState<'discussion' | 'rooms' | 'settings' | 'workflow'>('discussion');
+  const [page, setPage] = useState<'discussion' | 'rooms' | 'settings' | 'workflow' | 'usage'>('discussion');
   const [bootReady, setBootReady] = useState(false);
   const [roomsReady, setRoomsReady] = useState(false);
   const [showControls, setShowControls] = useState(false);
@@ -162,6 +162,12 @@ export function App() {
   const providerNames = useMemo<ProviderNames>(() => ({ state: providerLoadState, names: new Map(providers.map(provider => [provider.id, provider.name])) }), [providers, providerLoadState]);
   const synchronizeHost = useCallback(() => { void session.synchronize(); }, [session]);
   const hostCommands = useHostCommands(api.host, snapshot?.runId, synchronizeHost);
+  // R13B: budget top-ups, write-offs and summaries of the selected Run (D104/D105/D107).
+  const ledger = useLedgerCommands(api, snapshot?.runId, synchronizeHost);
+  const summaryCommands = useSummaryCommands(api, snapshot?.runId, synchronizeHost);
+  const [summaryTarget, setSummaryTarget] = useState<{ summaryId?: string }>();
+  useEffect(() => setSummaryTarget(undefined), [snapshot?.runId]);
+  const openSummary = useCallback((summaryId?: string) => { setShowControls(false); setSummaryTarget(summaryId ? { summaryId } : {}); }, []);
   const upcoming = snapshot && ['running', 'pausing', 'paused'].includes(snapshot.status) ? nextSpeaker(snapshot) : undefined;
   // A budget stop is a deliberate guard, not a model failure; say so in the header.
   const budgetStopped = snapshot?.status === 'error' && snapshot.budget?.blocked !== undefined;
@@ -183,6 +189,7 @@ export function App() {
       <button type="button" aria-current={page === 'discussion' ? 'page' : undefined} onClick={() => setPage('discussion')}>讨论</button>
       <button type="button" aria-current={page === 'rooms' ? 'page' : undefined} disabled={!bootReady} onClick={() => { setRoomsReady(true); setPage('rooms'); }}>房间与成员</button>
       <button type="button" aria-current={page === 'workflow' ? 'page' : undefined} disabled={!roomId} onClick={() => setPage('workflow')}>工作流</button>
+      <button type="button" aria-current={page === 'usage' ? 'page' : undefined} onClick={() => setPage('usage')}>用量</button>
       {page !== 'rooms' && <button type="button" aria-current={page === 'settings' ? 'page' : undefined} onClick={openSettings}>模型设置</button>}
       <label className="theme-control">外观<select value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
     </nav>
@@ -193,13 +200,17 @@ export function App() {
           <div className="status" role="status">{budgetStopped ? '已因预算停止' : statusLabels[snapshot?.status ?? 'idle']} {activeTurn ? `· 第 ${(snapshot?.turns.indexOf(activeTurn) ?? 0) + 1} 回合` : ''}{upcoming ? ` · 下一位：${upcoming.name}${upcoming.source === 'override' ? '（主持人点名）' : ''}` : ''}</div>
           <button type="button" className="controls-toggle" aria-expanded={showControls} aria-controls="host-controls" onClick={() => setShowControls(value => !value)}>主持人控制</button>
         </header>
-        <RunBudgetBar snapshot={snapshot} />
+        <RunBudgetBar snapshot={snapshot} ledger={ledger} />
         <div className="messages">
           {messages.length === 0 && !budgetStopped && <div className="empty">{roomId ? '配置成员后，输入目标并开始协作。' : '请先在“房间与成员”中创建或选择房间。'}</div>}
-          <HostTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} />
+          <HostTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} ledger={ledger} summaries={summaryCommands} onRegenerateSummary={openSummary} />
           {/* Run feedback sits right after the last message it describes, not below the composer. */}
           {snapshot?.status === 'interrupted' && <div className="sync-feedback run-feedback">执行已中断，部分输出已保留。请先检查历史记录。</div>}
-          {error && <div className="error run-feedback" role="alert">{error}</div>}
+          {snapshot && !summaryTarget && <ContextHint snapshot={snapshot} onSummarize={() => openSummary()} />}
+          {snapshot && summaryTarget && <SummaryPanel key={summaryTarget.summaryId ?? 'new'} snapshot={snapshot} summaries={summaryCommands} ledger={ledger} summaryId={summaryTarget.summaryId} onClose={() => setSummaryTarget(undefined)} />}
+          {/* D104: a budget stop shows its reason and the way to continue in the same place. */}
+          {budgetStopped && <BudgetStopNotice snapshot={snapshot} ledger={ledger} />}
+          {error && !budgetStopped && <div className="error run-feedback" role="alert">{error}</div>}
         </div>
         {appliedWorkflow && <p role="status">下次开始将使用「{workflowTemplateLabels[appliedWorkflow.config.templateId]}」，此配置尚未启动。</p>}
         {workflowInvalidated && <p role="alert">房间成员已变化，请重新验证并应用工作流后再开始。</p>}
@@ -254,7 +265,7 @@ export function App() {
           <button onClick={() => void session.recover('resume')} disabled={!recoverEnabled}>恢复后续回合</button>
           <button onClick={() => void session.recover('discard')} disabled={!inspectEnabled}>放弃中断执行</button>
         </>}
-        <HostPanel snapshot={snapshot} commands={hostCommands} />
+        <HostPanel snapshot={snapshot} commands={hostCommands} onSummarize={() => openSummary()} />
         <dl><dt>事件序列</dt><dd>{snapshot?.sequence ?? 0}</dd><dt>回合</dt><dd>{snapshot?.turns.length ?? 0}</dd></dl>
       </aside>
     </div>
@@ -268,5 +279,6 @@ export function App() {
         : <p role="status">正在加载工作流成员…</p>}
     </main>}
     {page === 'settings' && <SettingsFeature api={settingsApi} onClose={closeSettings} />}
+    {page === 'usage' && <UsagePage api={api} onOpenRun={selectRun} />}
   </div>;
 }
