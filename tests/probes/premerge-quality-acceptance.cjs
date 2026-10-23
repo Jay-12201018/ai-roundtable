@@ -10,8 +10,9 @@ const { pathToFileURL } = require('node:url');
 const { app, session, safeStorage } = require('electron');
 
 const args = process.argv.slice(2);
-assert.ok(args.length === 0, 'Usage: electron premerge-quality-acceptance.cjs');
-const restarting = false;
+assert.ok(args.length === 0 || args.length === 2 && args[0] === '--restart', 'Usage: electron premerge-quality-acceptance.cjs [--restart private-manifest.json]');
+// --restart: the same profile again, after a key-like model ID was written into it the way older builds allowed (D096).
+const restarting = args.length === 2;
 assert.equal(app.isReady(), false, 'Isolation must precede readiness/Main');
 app.commandLine.appendSwitch('use-mock-keychain');
 assert.equal(app.commandLine.hasSwitch('use-mock-keychain'), true, 'Chromium Keychain isolation switch missing');
@@ -35,7 +36,8 @@ const build = process.env.ROUNDTABLE_PROBE_BUILD ? resolve(process.env.ROUNDTABL
 const entry = join(build, 'main/index.js'); const preload = join(build, 'preload/index.cjs'); const renderer = join(build, 'renderer/index.html');
 for (const file of [entry, preload, renderer]) assert.ok(fs.existsSync(file), 'Build missing: ' + file);
 const result = { status: 'RUNNING', phase: restarting ? 'restart' : 'first', directory, paths, runtime: { electron: process.versions.electron, node: process.versions.node, abi: process.versions.modules },
-  fakeSafeStorage: { replacedMethods: [], encrypt: 0, decrypt: 0 }, nodeNetworkAttempts: [], chromiumNetworkAttempts: [], consoleErrors: [], preloadErrors: [], checks: [] };
+  fakeSafeStorage: { replacedMethods: [], encrypt: 0, decrypt: 0 }, mainLog: [], nodeNetworkAttempts: [], chromiumNetworkAttempts: [], consoleErrors: [], preloadErrors: [], checks: [] };
+const dbBytes = () => Buffer.concat(['', '-wal', '-shm'].map(suffix => join(paths.userData, 'ai-roundtable.db' + suffix)).filter(file => fs.existsSync(file)).map(file => fs.readFileSync(file)));
 const resultPath = join(directory, restarting ? 'premerge-acceptance-restart.json' : 'premerge-acceptance.json');
 const save = () => fs.writeFileSync(resultPath, JSON.stringify(result, null, 2) + '\n', { mode: 0o600 });
 const fake = {
@@ -104,6 +106,17 @@ const screens = resolve(root, 'docs/verification/premerge-quality-screens');
 
 async function main() {
   await new Promise(done => fixture.listen(0, '127.0.0.1', done)); port = fixture.address().port;
+  if (restarting) {
+    assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).status, 'PASS', 'First phase must have passed');
+    // Simulate a database written before D096: the pasted key sits in all three model fields.
+    const Driver = require('better-sqlite3'); const seed = new Driver(join(paths.userData, 'ai-roundtable.db'));
+    seed.prepare('UPDATE providers SET default_model_id=?, custom_models_json=?').run(pastedKey, JSON.stringify([{ id: 'deepseek-flash', name: 'DeepSeek Flash' }, { id: pastedKey, name: 'oops' }]));
+    check(seed.prepare('UPDATE agents SET model_id=? WHERE display_name=?').run(pastedKey, '审查者').changes === 1, 'Seeded the reviewer');
+    seed.close();
+    check(dbBytes().includes(Buffer.from(pastedKey)), 'Before startup the plaintext is in the database file');
+    const info = console.info;
+    console.info = (...values) => { result.mainLog.push(values.join(' ')); info(...values); };
+  }
   const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
   const transport = Registry.prototype.createTransport;
   Registry.prototype.createTransport = function (guard, diagnostics, proxyKind) {
@@ -118,7 +131,7 @@ async function main() {
   window.setContentSize(1440, 900);
   failureShot = async () => { fs.writeFileSync(join(directory, 'failure.png'), (await contents.capturePage()).toPNG()); result.failureText = await contents.executeJavaScript('document.body.innerText'); };
   fs.mkdirSync(screens, { recursive: true });
-  for (const old of fs.readdirSync(screens)) if (/^\d\d-.*\.png$/u.test(old)) fs.rmSync(join(screens, old));
+  if (!restarting) for (const old of fs.readdirSync(screens)) if (/^\d\d-.*\.png$/u.test(old)) fs.rmSync(join(screens, old));
   const cdp = contents.debugger; cdp.attach('1.3');
   const send = (method, params = {}) => cdp.sendCommand(method, params);
   const js = code => contents.executeJavaScript(code);
@@ -171,7 +184,7 @@ async function main() {
     await send('Input.insertText', { text: committed });
     await sleep(120);
   };
-  let shot = 0;
+  let shot = restarting ? fs.readdirSync(screens).filter(file => /^\d\d-.*\.png$/u.test(file)).length : 0;
   const capture = async (name, caption, focus) => {
     if (typeof focus === 'number') await js(`document.querySelectorAll('.message')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
     else if (focus) await js(`document.querySelector(${JSON.stringify(focus)})?.scrollIntoView({ block: 'center' }); true`);
@@ -192,6 +205,34 @@ async function main() {
   const status = () => js(`document.querySelector('.timeline .status').textContent`);
   const keyField = `document.querySelector('input[type=password]')`;
 
+  const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/u;
+  if (restarting) {
+    // Step R1: startup cleared every stored copy and said so without the value.
+    check(result.mainLog.includes('已清除 3 处疑似 API Key 的模型 ID'), 'Main logged only the count of cleared places');
+    check(!dbBytes().includes(Buffer.from(pastedKey)), 'After startup the plaintext is gone from the database file, WAL and SHM');
+    await click('房间与成员');
+    await until(`document.body.innerText.includes('校园跑腿讨论') && document.body.innerText.includes('审查者')`, 'rooms loaded');
+    const roomText = await text();
+    check(roomText.includes('Model 未配置：请编辑成员，填写模型 ID 后才能参与运行'), 'The member left without a model is told to fill one in');
+    check(!roomText.includes(pastedKey), 'The key never reaches the page');
+    await capture('purged-member', '把一串合成的 sk- 假值直接写进数据库三处模型 ID（Provider 默认模型、自定义模型、审查者的 Model），模拟旧版本留下的数据后重启：启动时已全部清除，日志只记"已清除 3 处疑似 API Key 的模型 ID"，数据库文件（含 WAL/SHM）里再也找不到这串明文。"房间与成员"里审查者显示"Model 未配置：请编辑成员，填写模型 ID 后才能参与运行"，其他成员不受影响。', '.rooms-feature');
+    await click('编辑 审查者', { selector: 'button' });
+    await field('Model'); await type('deepseek-flash'); await click('保存成员');
+    await until(`!document.querySelector('dialog[open], .rooms-dialog') && !document.body.innerText.includes('Model 未配置')`, 'reviewer model filled in again');
+    await capture('purged-member-fixed', '点"编辑"给审查者重新填 deepseek-flash 并保存：提示消失，成员恢复可用。', '.rooms-feature');
+    await click('模型设置');
+    await until(`document.body.innerText.includes('编辑 Provider')`, 'provider editor');
+    check(await js(`document.querySelector('[aria-describedby=settings-default-model-help]').value`) === '', 'The default model is empty after the purge');
+    check(!(await text()).includes(pastedKey) && !(await text()).includes('已隐藏'), 'Nothing key-like is left to hide');
+    await capture('purged-provider', '"模型设置"里 DeepSeek 直连的默认模型 ID 已被清空（只剩示例"例如 deepseek-flash"），自定义模型里那条疑似 Key 的条目已删除，只剩 deepseek-flash；页面上没有任何密钥文本。', '#settings-default-model-help');
+    // Step R2: the earlier Run's members are named by their Provider, never by its UUID.
+    await click('返回讨论');
+    await until(`document.querySelectorAll('.message-identity').length > 0`, 'earlier run shown');
+    const lines = await js(`[...document.querySelectorAll('.message-identity')].map(node => node.textContent)`);
+    check(lines.length > 0 && lines.every(line => line.includes('Provider：DeepSeek 直连') && !uuidPattern.test(line)), 'Identity lines name the Provider, not its UUID');
+    check(!uuidPattern.test(await text()), 'No UUID anywhere on the discussion page');
+    await capture('provider-name', '重启后打开上一次运行（成员快照冻结的是 Provider ID）：每条消息的身份行显示"Drafter · Provider：DeepSeek 直连 · Model：deepseek-flash"，不再显示 UUID。Provider 找不到时显示"Provider 已删除"（单元测试覆盖）。', 0);
+  } else {
   // Step 1: a pasted API Key in the model ID field is flagged at once and cannot be saved.
   await click('模型设置'); await click('新增 Provider');
   await field('Provider 名称'); await ime('deepseek', 'DeepSeek 直连');
@@ -326,6 +367,10 @@ async function main() {
   check(requests.every(r => r.keyMatches && r.model === 'deepseek-flash' && r.thinking?.type === 'disabled'), 'Requests carried the saved Key, the approved model and thinking disabled');
   result.reviewerMessages = reviewer;
 
+  const identityLines = await js(`[...document.querySelectorAll('.message-identity')].map(node => node.textContent)`);
+  check(identityLines.length > 0 && identityLines.every(line => line.includes('Provider：DeepSeek 直连') && !uuidPattern.test(line)), 'Identity lines name the Provider, not its UUID');
+  fs.writeFileSync(manifestPath, JSON.stringify({ status: 'PASS' }) + '\n', { mode: 0o600 });
+  }
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);
   check(!JSON.stringify(result).includes(fakeKey) && !JSON.stringify(result).includes(pastedKey), 'Neither key appears in the result');
   cdp.detach();
