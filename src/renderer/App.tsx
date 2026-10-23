@@ -35,6 +35,8 @@ export function App() {
   const budgetMicroCny = parseBudgetYuan(budgetText);
   const [outputLimitText, setOutputLimitText] = useState(String(DEFAULT_OUTPUT_TOKEN_LIMIT));
   const outputTokenLimit = parseOutputLimit(outputLimitText);
+  const [showMore, setShowMore] = useState(false);
+  const moreOpen = showMore || outputTokenLimit === undefined;
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [providerLoadState, setProviderLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const providerRequest = useRef(0); const alive = useRef(false);
@@ -208,6 +210,11 @@ export function App() {
           {/* Notices go above the action row, so 暂停 never moves when they appear (D098). */}
           {!runActive && budgetMicroCny === undefined && <p className="composer-budget-error" role="alert">请输入 0.000001 到 1000 之间的金额，最多 6 位小数。</p>}
           {!runActive && outputTokenLimit === undefined && <p className="composer-budget-error" role="alert">单次输出上限请输入 1 到 65536 之间的整数。</p>}
+          {/* D103: rarely changed, so folded away; it opens above the action row so 开始协作 never moves, and by itself when invalid. */}
+          {!runActive && moreOpen && <div id="composer-more" className="composer-more" role="group" aria-label="更多设置">
+            <label className="composer-budget">单次输出上限（token）<input aria-label="单次输出上限（token）" inputMode="numeric" value={outputLimitText} aria-invalid={outputTokenLimit === undefined} aria-describedby="output-limit-help" onChange={event => setOutputLimitText(event.target.value)} /></label>
+            <p id="output-limit-help">每位成员每次发言最多生成这么多 token。每次请求按这个上限预留费用，实际按用量结算；回复写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）。</p>
+          </div>}
           {confirmingStop && stopEnabled && <div id="stop-confirm" className="stop-confirm" role="group" aria-label="确认停止运行" onKeyDown={event => { if (event.key === 'Escape') setConfirmingStop(false); }}>
             <p>{requestInFlight
               ? '停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。'
@@ -230,12 +237,7 @@ export function App() {
               : <div className="composer-options">
                 <label className="composer-step"><input type="checkbox" checked={stepMode} onChange={event => setStepMode(event.target.checked)} />每个回合结束后暂停，方便插话或点名</label>
                 <label className="composer-budget">本次预算（元）<input aria-label="本次运行预算（元）" inputMode="decimal" value={budgetText} aria-invalid={budgetMicroCny === undefined} onChange={event => setBudgetText(event.target.value)} /></label>
-                {/* D103: rarely changed, so folded away from the common path; opens by itself when its value is invalid. */}
-                <details className="composer-more" open={outputTokenLimit === undefined || undefined}>
-                  <summary>更多设置</summary>
-                  <label className="composer-budget">单次输出上限（token）<input aria-label="单次输出上限（token）" inputMode="numeric" value={outputLimitText} aria-invalid={outputTokenLimit === undefined} aria-describedby="output-limit-help" onChange={event => setOutputLimitText(event.target.value)} /></label>
-                  <p id="output-limit-help">每位成员每次发言最多生成这么多 token。每次请求按这个上限预留费用，实际按用量结算；回复写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）。</p>
-                </details>
+                <button type="button" className="composer-more-toggle" aria-expanded={moreOpen} aria-controls="composer-more" onClick={() => setShowMore(value => !value)}>更多设置</button>
               </div>}
           </div>
         </div>
