@@ -38,7 +38,9 @@ const completionChunk = z.object({
     refusal: z.string().nullable().optional(), tool_calls: z.unknown().optional(),
     function_call: z.unknown().optional(), audio: z.unknown().optional(),
   }), finish_reason: z.string().nullable().optional() })).max(1),
-  usage: z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount }).nullable().optional(),
+  // R13B (D106): DeepSeek also reports how much of the prompt hit its context cache (hit + miss = prompt_tokens).
+  usage: z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
+    prompt_cache_hit_tokens: tokenCount.optional(), prompt_cache_miss_tokens: tokenCount.optional() }).nullable().optional(),
 });
 const modelList = z.object({ data: z.array(z.object({ id: providerModelSchema.shape.id })).max(10000), has_more: z.boolean().optional() });
 const officialBaseUrl = 'https://api.openai.com/v1';
@@ -154,7 +156,10 @@ export class ChatCompletionProvider implements ProviderAdapter {
         if (chunk.usage != null) {
           if (used || finish === undefined) throw new ContractError('invalid_response');
           used = true;
-          yield { type: 'usage', requestId, inputTokens: chunk.usage.prompt_tokens, outputTokens: chunk.usage.completion_tokens };
+          const { prompt_tokens: inputTokens, prompt_cache_hit_tokens: hit, prompt_cache_miss_tokens: miss } = chunk.usage;
+          // A cache split is used only when it is complete and adds up; otherwise all input is priced as a miss.
+          const cacheHitInputTokens = hit !== undefined && miss !== undefined && hit + miss === inputTokens ? hit : undefined;
+          yield { type: 'usage', requestId, inputTokens, outputTokens: chunk.usage.completion_tokens, ...(cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens }) };
         }
       }
       throw new ContractError('invalid_response');

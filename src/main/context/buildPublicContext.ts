@@ -2,7 +2,7 @@ import { contextInputSchema } from './types';
 import type { ContextInput, ContextReport, ContextRejection, ContextResult, ContextSource, ModelTokenCounter } from './types';
 import type { ProviderMessage } from '../providers/types';
 import { selectHistory, type HistoryCandidate } from './selectHistory';
-import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText } from './transcript';
+import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText, type TranscriptEntry } from './transcript';
 
 /** Main-only: accepts explicit safe projections, never a Renderer draft, database handle or SDK object. */
 export function buildPublicContext(input: ContextInput, counter?: ModelTokenCounter): ContextResult {
@@ -41,9 +41,13 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   for (const instruction of input.applicationInstructions) append({ role: 'system', content: instruction.content }, 'application', instruction.id);
   for (const instruction of input.hostInstructions) append({ role: 'system', content: instruction.content }, 'host', instruction.id);
   append({ role: 'system', content: agentBriefText(member, run.membersSnapshot) }, 'agent', member.agentId);
+  // R13B: a confirmed summary is required context, right after the task, in place of the messages it covers.
+  const summary = input.summary;
+  const summaryEntries: TranscriptEntry[] = summary ? [{ speaker: 'summary', summary: { firstNumber: summary.firstNumber, lastNumber: summary.lastNumber },
+    content: summary.content, editedByHost: summary.editedByHost, basedOnRevisedHistory: summary.affected }] : [];
   // The task, quoted history and the turn cue are assembled into the exact final messages before every count.
   const assemble = (selected: readonly HistoryCandidate[]) => {
-    const discussion = assembleDiscussion(run.task!, selected.map(candidate => candidate.entry), member, prefix.length);
+    const discussion = assembleDiscussion(run.task!, [...summaryEntries, ...selected.map(candidate => candidate.entry)], member, prefix.length);
     return { ...discussion, messages: [...prefix.map(message => ({ ...message })), ...discussion.messages] };
   };
   const required = assemble([]);
@@ -97,8 +101,10 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
     selected.unshift(candidate);
     candidate.decision.reason = 'selected';
   }
-  const selectedHistory = selected.map((candidate, index) => ({ ...candidate.source, providerMessageIndex: final.indexes[index] }));
+  const offset = summaryEntries.length;
+  const selectedHistory = selected.map((candidate, index) => ({ ...candidate.source, providerMessageIndex: final.indexes[index + offset] }));
   sources.push({ kind: 'task', sourceId: run.id, runId: run.id, roomId: run.roomId, providerMessageIndex: final.taskIndex });
+  if (summary) sources.push({ kind: 'summary', sourceId: summary.messageId, messageId: summary.messageId, runId: run.id, roomId: run.roomId, providerMessageIndex: final.indexes[0] });
   report.sources = [...sources, ...selectedHistory,
     { kind: 'application', sourceId: 'turn-cue-v1', runId: run.id, roomId: run.roomId, providerMessageIndex: final.cueIndex }];
   report.budget.inputTokens = inputTokens;

@@ -9,6 +9,8 @@ export interface ParsedEntry {
   editedByHost: boolean;
   basedOnRevisedHistory: boolean;
   truncated: boolean;
+  /** R13B: a host-confirmed summary standing in for public messages first..last. */
+  summary?: { first: number; last: number };
 }
 
 /**
@@ -37,12 +39,14 @@ export function parseDiscussion(messages: readonly ProviderMessage[]): { task: s
       const text = body.map(line => line === '>' ? '' : line.replace(/^> /u, '')).join('\n');
       if (label === '【讨论任务 · 主持人设定】') { task = text; continue; }
       const member = /^【(你此前的发言 · )?成员「([^「」【】]+)」· [^【】]+】$/u.exec(label);
-      if (label !== '【主持人插话】' && !member) throw new Error(`unknown label ${label}`);
+      const summary = /^【讨论摘要 · 覆盖第 (\d+)–(\d+) 条，由主持人确认】$/u.exec(label);
+      if (label !== '【主持人插话】' && !member && !summary) throw new Error(`unknown label ${label}`);
       entries.push({
-        role: 'user', speaker: member ? member[2] : '主持人', own: !!member?.[1], publicText: text,
-        editedByHost: notes.some(note => note.includes('已由主持人修改')),
-        basedOnRevisedHistory: notes.some(note => note.includes('写于主持人修改前序发言之前')),
+        role: 'user', speaker: member ? member[2] : summary ? '讨论摘要' : '主持人', own: !!member?.[1], publicText: text,
+        editedByHost: notes.some(note => note.includes('已由主持人修改') || note.includes('由主持人修改后确认')),
+        basedOnRevisedHistory: notes.some(note => note.includes('写于主持人修改前序发言之前') || note.includes('摘要可能已经过时')),
         truncated: notes.some(note => note.includes('因单次输出上限被截断')),
+        ...(summary ? { summary: { first: Number(summary[1]), last: Number(summary[2]) } } : {}),
       });
     }
   }

@@ -56,7 +56,12 @@ it('quotes the maximum cost from the byte bound and the requested output limit',
   const bound = countDeepSeekInputUpperBound(input.messages)!;
   expect(f.registry.quoteRequest('deepseek', input)).toEqual({ currency: 'CNY', inputTokenBound: bound, outputTokenLimit: 1024,
     inputMicroPerToken: 2, outputMicroPerToken: 8, reservedMicro: bound * 2 + 1024 * 8,
-    priceEvidence: expect.stringContaining('DeepSeek-V4.1-Flash-1017'), priceReviewedAt: deepSeekModelReview.reviewedAt });
+    priceEvidence: expect.stringContaining('DeepSeek-V4.1-Flash-1017'), priceReviewedAt: deepSeekModelReview.reviewedAt,
+    // D106: settlement rates travel with the quote; reservation above stays at the peak cache-miss price.
+    periodPricing: { utcOffsetMinutes: 480, peakWeekdays: [1, 2, 3, 4, 5], peakWindows: [{ startMinute: 540, endMinute: 720 }, { startMinute: 840, endMinute: 1080 }],
+      peak: { cacheHitMicroPerMillion: 40_000, cacheMissMicroPerMillion: 2_000_000, outputMicroPerMillion: 8_000_000 },
+      offPeak: { cacheHitMicroPerMillion: 20_000, cacheMissMicroPerMillion: 1_000_000, outputMicroPerMillion: 4_000_000 },
+      evidence: expect.stringContaining('holidays treated as working days') } });
 });
 
 it('rejects requests beyond the app caps before any Key read or network call', async () => {

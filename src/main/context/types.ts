@@ -34,6 +34,11 @@ export const contextInputSchema = z.object({
   visibleMessageIds: z.array(idSchema), applicationInstructions: z.array(instructionSchema),
   hostInstructions: z.array(instructionSchema.extend({ roomId: idSchema, runId: idSchema }).strict()),
   contextWindowTokens: sequenceSchema.refine(n => n > 0),
+  // R13B (D107): a host-confirmed summary that stands in for every version of the slots it covers.
+  summary: z.object({
+    messageId: idSchema, content: z.string().min(1), firstNumber: z.number().int().min(1), lastNumber: z.number().int().min(1),
+    coveredMessageIds: z.array(idSchema).min(1).max(65536), editedByHost: z.boolean(), affected: z.boolean(),
+  }).strict().optional(),
 }).strict();
 export type ContextInput = z.infer<typeof contextInputSchema>;
 
@@ -45,7 +50,7 @@ export interface ModelTokenCounter {
   countMessages(messages: readonly Readonly<ProviderMessage>[]): number | undefined;
 }
 export interface ContextSource {
-  kind: 'boundary' | 'application' | 'host' | 'agent' | 'task' | 'history';
+  kind: 'boundary' | 'application' | 'host' | 'agent' | 'task' | 'history' | 'summary';
   runId: string;
   roomId: string;
   sourceId: string;
@@ -58,7 +63,8 @@ export interface ContextSource {
 }
 export type HistoryReason = 'selected' | 'duplicate' | 'other_room' | 'other_run' | 'not_visible'
   | 'current_or_future_turn' | 'non_public_sender' | 'message_not_completed' | 'missing_turn'
-  | 'turn_not_completed' | 'missing_attempt' | 'attempt_not_completed' | 'superseded_attempt' | 'inactive_version' | 'input_budget' | 'context_rejected';
+  | 'turn_not_completed' | 'missing_attempt' | 'attempt_not_completed' | 'superseded_attempt' | 'inactive_version' | 'input_budget' | 'context_rejected'
+  | 'summarized';
 export interface HistoryDecision {
   messageId: string;
   snapshotIndex: number;

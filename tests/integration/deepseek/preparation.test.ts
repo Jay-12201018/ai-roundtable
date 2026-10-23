@@ -101,7 +101,7 @@ async function localHttp(mode:'ok'|'no-usage'|'hang'|'broken'|400|401|429='ok') 
 it('sends max_tokens and thinking.disabled through the real SDK/local HTTP body, preserving terminal usage',async()=>{
  const f=await localHttp();const events=await collect(f.registry.getAdapter('deepseek',modelId).streamChat(request));
  expect(f.calls).toHaveLength(1);expect(f.calls[0]).toEqual({url:'/chat/completions',body:{model:modelId,messages:request.messages,stream:true,max_tokens:128,stream_options:{include_usage:true},thinking:{type:'disabled'}}});
- expect(events).toContainEqual({type:'usage',requestId:'request',inputTokens:100,outputTokens:8});expect(events.at(-1)).toMatchObject({type:'finish',reason:'stop'});
+ expect(events).toContainEqual({type:'usage',requestId:'request',inputTokens:100,outputTokens:8,cacheHitInputTokens:0});expect(events.at(-1)).toMatchObject({type:'finish',reason:'stop'});
 });
 it.each(['ok','no-usage','broken',400,401,429] as const)('persists a single Agent attempt for %s without auto retry or invented usage',async mode=>{
  const f=await localHttp(mode);f.db.createRoom({id:'room',name:'One Agent'});f.db.createAgent({id:'one',roomId:'room',displayName:'One',roleTemplateId:'assistant',providerId:'deepseek',modelId});

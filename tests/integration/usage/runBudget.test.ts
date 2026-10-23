@@ -14,6 +14,7 @@ import type { ProviderMessage } from '../../../src/main/providers/types';
 import { parseDiscussion } from '../../unit/context/discussion';
 import { DEFAULT_RUN_BUDGET_MICRO_CNY, requestChargeSchema } from '../../../src/shared/schemas/budget';
 import { runSnapshotSchema } from '../../../src/shared/schemas/run';
+import { settlementClock } from '../../../src/main/usage/pricing';
 
 type Mode = 'ok' | 'no-usage' | 'broken' | 'overrun' | 'hang' | 'length';
 const cleanup: Array<() => unknown> = [];
@@ -23,6 +24,8 @@ function sse(events: unknown[], done = true) {
   return new Response(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join('') + (done ? 'data: [DONE]\n\n' : ''), { headers: { 'content-type': 'text/event-stream' } });
 }
 async function fixture(options: { modes?: Mode[]; key?: boolean; members?: number; policy?: typeof deepSeekModelPolicy } = {}) {
+  // Settlement is priced by the time of day (D106); these R13A cases pin a Friday 10:00 Beijing peak clock.
+  vi.spyOn(settlementClock, 'now').mockImplementation(() => new Date('2026-10-23T02:00:00.000Z'));
   const db = new Database(':memory:'); db.initialize(); cleanup.push(() => db.close());
   db.createRoom({ id: 'room', name: 'Room' });
   db.createProvider({ id: 'deepseek', name: 'DeepSeek direct', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: 'deepseek-flash', name: 'deepseek-flash' }] });
@@ -67,7 +70,7 @@ it('reserves each request before sending and settles it from provider usage at t
     expect(snapshot.attempts!.find(attempt => attempt.requestId === charge.requestId)?.status).toBe('completed');
   }
   expect(snapshot.budget).toEqual({ currency: 'CNY', limitMicro: DEFAULT_RUN_BUDGET_MICRO_CNY, settledMicro: 1296, unknownMicro: 0, reservedMicro: 0,
-    remainingMicro: DEFAULT_RUN_BUDGET_MICRO_CNY - 1296, overrunMicro: 0 });
+    remainingMicro: DEFAULT_RUN_BUDGET_MICRO_CNY - 1296, overrunMicro: 0, initialLimitMicro: DEFAULT_RUN_BUDGET_MICRO_CNY, topUps: [], writtenOffMicro: 0 });
   expect(runSnapshotSchema.safeParse(snapshot).success).toBe(true);
   expect(f.bodies[0]).toMatchObject({ model: 'deepseek-flash', max_tokens: 256, thinking: { type: 'disabled' } });
 });
@@ -277,7 +280,7 @@ it('validation rejects a finish reason on a request that did not complete, and t
   raw.exec('DROP TRIGGER request_attempt_finish_once');
   expect(() => raw.prepare("UPDATE request_attempts SET finish_reason='truncated'").run()).toThrow(/CHECK/u);
   raw.exec(migration8.slice(migration8.indexOf('CREATE TRIGGER')));
-  expect(validateDatabase(raw).schemaVersion).toBe(8);
+  expect(validateDatabase(raw).schemaVersion).toBe(9);
   raw.prepare("UPDATE request_attempts SET status='failed'").run();
   expect(() => validateDatabase(raw)).toThrow(/finish reason/u);
 });

@@ -38,6 +38,7 @@ export function bridge() {
       start: vi.fn(async (input) => ({ ...snapshot('new'), roomId: input.roomId })),
       onEvent: vi.fn((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }),
       pause: vi.fn(async () => {}), stop: vi.fn(async () => {}), step: vi.fn(async () => {}), resumeRun: vi.fn(async () => {}),
+      addBudget: vi.fn(async () => { throw new Error('Budget top-up not configured in fixture'); }), resumeAfterBudget: vi.fn(async () => {}),
       retryTurn: vi.fn(async () => {}), continueMessage: vi.fn(async () => {}), recoverInterruptedRun: vi.fn(async () => {}),
     },
   };

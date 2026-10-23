@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { UsageService } from '../../../src/main/usage/UsageService';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
 import type { RoundtableApiContract } from '../../../src/shared/contracts/app';
@@ -200,4 +201,4 @@ describe('production configuration IPC and Preload with actual services', () => 
   });
 });
 
-function withHost(run: RunService) { return { run, host: new HostService(database, run) }; }
+function withHost(run: RunService) { const usage = new UsageService(database); return { run, host: new HostService(database, run), usage: { getReport: () => usage.getReport(), exportCsv: async () => ({ saved: false, rows: 0 }) } }; }

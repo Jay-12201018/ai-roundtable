@@ -45,6 +45,7 @@ export function selectHistory(input: ContextInput): { candidates: HistoryCandida
   };
   const ordered = [...snapshot.messages.entries()].sort(([a, left], [b, right]) => position(left, a) - position(right, b) || a - b);
   const visible = new Set(input.visibleMessageIds);
+  const summarized = new Set(input.summary?.coveredMessageIds ?? []);
   const seen = new Map<string, string>();
   const candidates: HistoryCandidate[] = [];
   const decisions: HistoryDecision[] = [];
@@ -66,6 +67,7 @@ export function selectHistory(input: ContextInput): { candidates: HistoryCandida
     if (message.roomId !== run.roomId) excluded = 'other_room';
     else if (message.runId !== run.id) excluded = 'other_run';
     else if (!visible.has(message.id)) excluded = 'not_visible';
+    else if (summarized.has(message.id)) excluded = 'summarized';
     else if (!['agent', 'user'].includes(message.senderType)) excluded = 'non_public_sender';
     else if (version && !version.active) excluded = 'inactive_version';
     else if (message.status !== 'completed') excluded = 'message_not_completed';

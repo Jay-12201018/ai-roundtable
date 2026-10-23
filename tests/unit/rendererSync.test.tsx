@@ -20,7 +20,7 @@ function delta(runId: string, sequence: number, text: string): RunEvent {
 function configurationApis() {
   const rooms = roomProps().api;
   vi.mocked(rooms.listRooms).mockResolvedValue([room('room', '现有房间')]);
-  return { rooms, host: { command: vi.fn() }, settings: { confirmTarget: vi.fn(),
+  return { rooms, host: { command: vi.fn() }, summary: { preview: vi.fn(), generate: vi.fn(), confirm: vi.fn() }, usage: { getReport: vi.fn(), writeOff: vi.fn(), exportCsv: vi.fn() }, settings: { confirmTarget: vi.fn(),
     createProvider: vi.fn(), updateProvider: vi.fn(), getProviderConfiguration: vi.fn(),
     listProviderSummaries: vi.fn().mockResolvedValue([]), deleteProvider: vi.fn(), setKey: vi.fn(), deleteKey: vi.fn(),
     getProviderKeyState: vi.fn(), getKeyStorageStatus: vi.fn(), listModels: vi.fn(), testConnection: vi.fn(),
@@ -44,6 +44,7 @@ describe('Renderer run synchronization', () => {
       run: { previewWorkflow: vi.fn(async () => { throw new Error('Workflow preview not configured in fixture'); }), subscribe, start, getSnapshot: vi.fn().mockImplementation(async (id) => snapshot(id)),
         onEvent: vi.fn((handler) => { listener = handler; return unsubscribe; }),
         pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn(),
+        addBudget: vi.fn(), resumeAfterBudget: vi.fn(),
       },
     };
   });
@@ -149,7 +150,7 @@ describe('Renderer task identity and command feedback', () => {
     window.roundtable = {
       ...configurationApis(),
       room: { createDemo: vi.fn(), getMessages: vi.fn() },
-      run: { previewWorkflow: vi.fn(async () => { throw new Error('Workflow preview not configured in fixture'); }), subscribe, getSnapshot: vi.fn(), start: vi.fn(), onEvent: vi.fn(handler => { events.add(handler); return () => { events.delete(handler); }; }), pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn() },
+      run: { previewWorkflow: vi.fn(async () => { throw new Error('Workflow preview not configured in fixture'); }), subscribe, getSnapshot: vi.fn(), start: vi.fn(), onEvent: vi.fn(handler => { events.add(handler); return () => { events.delete(handler); }; }), pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn(), addBudget: vi.fn(), resumeAfterBudget: vi.fn() },
     };
     return { subscribe, events };
   }

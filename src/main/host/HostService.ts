@@ -3,6 +3,7 @@ import { ContractError } from '../../shared/contracts/errors';
 import { hostCommandSchema, type HostCommand, type HostCommandResult } from '../../shared/schemas/host';
 import type { Database, HostActionRecord } from '../database/Database';
 import { turnSettled, type RunService } from '../services/RunService';
+import { summaryBasis } from '../context/summary';
 
 const hostSenderName = '主持人';
 const writableStatuses = ['running', 'pausing', 'paused', 'error', 'cancelled', 'interrupted', 'completed'];
@@ -92,8 +93,11 @@ export class HostService {
           if (message.status === 'streaming') throw new ContractError('invalid_state');
           const editedId = randomUUID();
           const action = record({ messageId: message.id, resultMessageId: editedId });
+          // R13B (D107): a summary edit records the covered versions it now stands for and is confirmed by its author.
+          const summary = snapshot.summaries.find(item => item.id === version.slotId);
           this.database.insertMessage({ id: editedId, roomId: run.roomId, runId: run.id, turnId: message.turnId, senderType: message.senderType, senderName: message.senderName, content: command.content, status: 'completed' },
-            { origin: 'edit', slotId: version.slotId, parentMessageId: message.id, actionId: action.id });
+            { origin: 'edit', slotId: version.slotId, parentMessageId: message.id, actionId: action.id, ...(summary ? { basis: summaryBasis(snapshot, summary) } : {}) });
+          if (summary) this.database.confirmSummaryVersion({ messageId: editedId, summaryId: summary.id, runId: run.id });
           return this.result(action);
         });
       }

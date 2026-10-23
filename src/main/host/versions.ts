@@ -45,13 +45,25 @@ function legacyBasis(messages: readonly MessageRecord[], versions: readonly Vers
 /**
  * A generated version is affected when its basis contains a version that is no longer active or is itself
  * affected. Host-authored versions (edits and host messages) have no generated basis and are never affected.
+ * R13B: every version of a summary (a `system` message) records the covered versions it stands for, including a
+ * host edit, so a summary is affected when any covered original is later edited or regenerated (D087/D107).
  */
 export function affectedVersions(messages: readonly MessageRecord[], versions: readonly VersionRecord[]): Map<string, string[]> {
   const positions = slotPositions(messages, versions);
   const byId = new Map(versions.map(version => [version.messageId, version]));
+  const summaries = new Set(messages.filter(message => message.senderType === 'system').map(message => message.id));
   const result = new Map<string, string[]>();
   const ordered = [...versions].sort((a, b) => positions.get(a.slotId)! - positions.get(b.slotId)! || a.versionNumber - b.versionNumber);
   for (const version of ordered) {
+    if (summaries.has(version.messageId)) {
+      // Coverage is a prefix, so every upstream of a covered original is covered too: a change shows up as an inactive
+      // covered version. Only an earlier summary it builds on passes its own affected state on.
+      result.set(version.messageId, (version.basis ?? []).filter(id => {
+        const entry = byId.get(id);
+        return entry !== undefined && (!entry.active || summaries.has(id) && (result.get(id)?.length ?? 0) > 0);
+      }));
+      continue;
+    }
     if (version.origin === 'edit' || version.turnId === undefined) { result.set(version.messageId, []); continue; }
     const basis = version.basis ?? legacyBasis(messages, versions, version, positions);
     result.set(version.messageId, basis.filter(id => {

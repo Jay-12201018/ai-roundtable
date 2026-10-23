@@ -20,6 +20,14 @@ import type { HostCommandKind, HostState, MessageVersion } from '../../shared/sc
 import type { ProviderRegistry, RequestQuote } from '../providers/ProviderRegistry';
 import { budgetBlockMessage, type BudgetBlock, type RequestCharge } from '../../shared/schemas/budget';
 import type { ProviderAdapter, StreamChatInput } from '../providers/types';
+import { addRunBudgetInputSchema, writeOffChargeInputSchema, type AddRunBudgetInput, type AddRunBudgetResult, type WriteOffChargeInput, type WriteOffChargeResult } from '../../shared/schemas/budget';
+import { summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, type ContextPressure, type ContextSummary,
+  type SummaryCommandResult, type SummaryConfirmInput, type SummaryGenerateInput, type SummaryPreview, type SummaryPreviewInput } from '../../shared/schemas/summary';
+import { settlementClock, settlementPricing } from '../usage/pricing';
+import { activeSummary, buildSummaryMessages, publicSlots, summaryBasis, summaryRange, type ActiveSummary, type PublicSlot } from '../context/summary';
+import { measureContext, type ModelBudget } from '../context/wirePublicContext';
+import { countModelTokens } from '../context/buildPublicContext';
+import { mockModelBudget } from '../providers/mock/tokenBudget';
 
 type RunContext = {
   runId: string;
@@ -59,6 +67,10 @@ type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; 
     extend?: { messages: StreamChatInput['messages']; prefix: string } };
 type Snapshot = ReturnType<Database['readRunSnapshot']>;
 const continuePrompt = 'Continue the previous response from where it stopped.';
+const summarySenderName = '讨论摘要';
+// A member whose role reads as a synthesizer writes summaries by default (same vocabulary as the built-in role guide).
+const summarizerPattern = /综合|总结|汇总|整合|归纳|synth|summar|integrat/iu;
+const excerpt = (text: string) => { const flat = text.replace(/\s+/gu, ' ').trim(); return flat.length > 60 ? `${flat.slice(0, 60)}…` : flat; };
 
 
 /** The message that currently represents a Turn: its slot's active version, else (legacy) its latest Attempt. */
@@ -101,7 +113,10 @@ export class RunService {
   constructor(private readonly database: Database, private readonly provider: ProviderAdapter,
     private readonly buildMessages: RunMessagesBuilder = (run,_member,_index,preparation) => preparation.repeat?.messages ?? [{ role: 'user', content: run.task! }],
     private readonly registry?: ProviderRegistry,
-    private readonly assertGenerationAllowed: () => void = () => {}) {}
+    private readonly assertGenerationAllowed: () => void = () => {},
+    /** R13B: a member's context window and token counter, for summary requests and the context-pressure hint. */
+    private readonly modelBudget: (member: MemberSnapshot) => ModelBudget | undefined = member => member.modelId === 'mock' ? mockModelBudget : undefined) {}
+  private readonly pressureCache = new Map<string, { key: string; value?: ContextPressure }>();
 
   createDemoRoom(objective: string): string {
     const roomId = randomUUID();
@@ -209,6 +224,8 @@ export class RunService {
         updatedAt: run.updatedAt,startedAt:run.startedAt??undefined,execution,
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
         versions, host: this.hostView(data), budget: data.budget, charges: data.charges,
+        ...(data.summaries.length ? { summaries: this.summaryView(data) } : {}),
+        ...this.pressureView(data),
       });
   }
 
@@ -217,11 +234,51 @@ export class RunService {
     return data.versions.map(version => {
       const message = data.messages.find(item => item.id === version.messageId)!;
       const attempt = data.attempts.find(item => item.messageId === version.messageId);
-      return { messageId: version.messageId, slotId: version.slotId, author: message.senderType === 'agent' ? 'agent' as const : 'host' as const,
+      const author = message.senderType === 'agent' ? 'agent' as const : message.senderType === 'system' ? 'summary' as const : 'host' as const;
+      return { messageId: version.messageId, slotId: version.slotId, author,
         versionNumber: version.versionNumber, origin: version.origin, active: version.active, affectedBy: affected.get(version.messageId) ?? [],
         ...(version.turnId ? { turnId: version.turnId } : {}), ...(version.parentMessageId ? { parentMessageId: version.parentMessageId } : {}),
         ...(attempt ? { requestId: attempt.requestId } : {}), ...(version.actionId ? { actionId: version.actionId } : {}) };
     });
+  }
+
+  /** R13B: summaries with the numbers they cover, as the timeline shows them. */
+  private summaryView(data: Snapshot): ContextSummary[] {
+    const slots = publicSlots(data);
+    return data.summaries.map(record => {
+      const range = summaryRange(record, slots) ?? { firstNumber: 1, lastNumber: record.covered.length };
+      return { summaryId: record.id, slotId: record.id, agentId: record.agentId, coveredSlotIds: record.covered, ...range,
+        ...(record.basedOnSummaryId ? { basedOnSummaryId: record.basedOnSummaryId } : {}),
+        requests: record.requests.map(request => ({ requestId: request.requestId, messageId: request.messageId, status: request.status,
+          ...(request.finishReason ? { finishReason: request.finishReason } : {}), createdAt: request.createdAt })),
+        confirmedMessageIds: record.confirmedMessageIds, createdAt: record.createdAt };
+    });
+  }
+
+  /**
+   * R13B: how full the next request would be, for the fullest member. Recomputed only when the effective history,
+   * the confirmed summaries or the next position change, never per streamed token.
+   */
+  private pressureView(data: Snapshot): { contextPressure?: ContextPressure } {
+    const { run } = data;
+    const members = run.membersSnapshot;
+    if (!members?.length || run.nextTurnIndex === null || run.task === null) return {};
+    const key = JSON.stringify([data.versions.filter(version => version.active).map(version => version.messageId),
+      data.messages.filter(message => message.status === 'completed').length, data.summaries.map(summary => summary.confirmedMessageIds),
+      data.instructions.length, run.nextTurnIndex, run.outputTokenLimit]);
+    const cached = this.pressureCache.get(run.id);
+    if (cached?.key === key) return cached.value ? { contextPressure: cached.value } : {};
+    let fullest: ContextPressure | undefined;
+    const ratio = (pressure: ContextPressure) => pressure.level === 'over' ? Number.POSITIVE_INFINITY : pressure.usedTokens / Math.max(1, pressure.inputBudgetTokens);
+    for (const member of members) {
+      try {
+        const pressure = measureContext(run, member, data, this.modelBudget(member));
+        if (pressure && (!fullest || ratio(pressure) > ratio(fullest))) fullest = pressure;
+      } catch { /* A member whose model cannot be measured now gives no hint. */ }
+    }
+    if (this.pressureCache.size > 64) this.pressureCache.delete(this.pressureCache.keys().next().value!);
+    this.pressureCache.set(run.id, { key, value: fullest });
+    return fullest ? { contextPressure: fullest } : {};
   }
 
   private hostView(data: Snapshot): HostState {
@@ -408,6 +465,298 @@ export class RunService {
     await context.promise;
   }
 
+  /**
+   * D104: add to a Run's budget as an append-only top-up. With `resume`, a Run the budget stopped (status error,
+   * block `insufficient`) continues from where it stopped once the top-up is recorded. A refused resume never undoes
+   * the recorded top-up; its reason is returned instead.
+   */
+  addBudget(input: AddRunBudgetInput): AddRunBudgetResult {
+    const parsed = addRunBudgetInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input', parsed.error.issues[0]?.path[0] === 'amountMicroCny' ? 'amountMicroCny' : undefined);
+    input = parsed.data;
+    this.requireRun(input.runId);
+    const { topUp, duplicate } = this.database.transaction(() => {
+      const result = this.database.addBudgetTopUp({ id: randomUUID(), runId: input.runId, clientRequestId: input.clientRequestId, amountMicro: input.amountMicroCny });
+      if (!result.duplicate) this.appendEvent(input.runId, 'budget_updated', { reason: 'top_up' });
+      return result;
+    });
+    const base = { runId: input.runId, topUpId: topUp.topUpId, duplicate };
+    if (!input.resume || duplicate) return { ...base, resumed: false };
+    try { this.resumeAfterBudget(input.runId); return { ...base, resumed: true }; }
+    catch (error) { return { ...base, resumed: false, resumeError: toPublicError(error).code }; }
+  }
+
+  /**
+   * D105: the host records what the provider console shows for an unknown charge. The unknown row stays as it is;
+   * the write-off is a separate, append-only entry and the budget counts its amount from now on.
+   */
+  writeOffCharge(input: WriteOffChargeInput): WriteOffChargeResult {
+    const parsed = writeOffChargeInputSchema.safeParse(input);
+    if (!parsed.success) {
+      const field = parsed.error.issues[0]?.path[0];
+      throw new ContractError('invalid_input', field === 'basis' || field === 'amountMicroCny' || field === 'acknowledgedUncertainty' ? field : undefined);
+    }
+    input = parsed.data;
+    this.requireRun(input.runId);
+    return this.database.transaction(() => {
+      const { writeOff, duplicate } = this.database.writeOffCharge({ id: randomUUID(), runId: input.runId, requestId: input.requestId,
+        clientRequestId: input.clientRequestId, amountMicro: input.amountMicroCny, basis: input.basis });
+      if (!duplicate) this.appendEvent(input.runId, 'budget_updated', { reason: 'write_off' });
+      return { runId: input.runId, requestId: input.requestId, writeOffId: writeOff.writeOffId, duplicate };
+    });
+  }
+
+  /** D104: continue a Run that stopped because its next request did not fit in the budget. Does not wait. */
+  resumeAfterBudget(runId: string): void {
+    const run = this.requireRun(runId);
+    if (run.status !== 'error' || this.database.getRunBudget(runId).blocked?.reason !== 'insufficient') throw new ContractError('invalid_state');
+    this.workflowPlan(run);
+    const context = this.contexts.get(runId) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
+    this.assertSettled(runId);
+    this.assertBudget(run);
+    this.schedule(context, () => {
+      // The stop reason was answered by the host; the top-up rows keep the history.
+      this.database.setRunBudgetBlock(runId, null);
+      this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' });
+    });
+  }
+
+  /** D107: what a summary would cover, who would write it and its maximum cost. Sends and records nothing. */
+  previewSummary(input: SummaryPreviewInput): SummaryPreview {
+    const parsed = summaryPreviewInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    const plan = this.planSummary(parsed.data);
+    const { snapshot, slots } = plan;
+    const agents = (snapshot.run.membersSnapshot ?? []).map(member => ({ agentId: member.agentId, name: member.displayName, providerId: member.providerId, modelId: member.modelId }));
+    return {
+      runId: snapshot.run.id, available: plan.reason === undefined, ...(plan.reason ? { reason: plan.reason } : {}),
+      candidates: slots.map(slot => ({ slotId: slot.slotId, number: slot.number,
+        speaker: slot.author === 'host' ? '主持人' : snapshot.run.membersSnapshot?.find(member => member.agentId === slot.agentId)?.displayName ?? slot.message.senderName,
+        excerpt: excerpt(slot.message.content) })),
+      ...(plan.through ? { throughSlotId: plan.through.slotId, firstNumber: 1, lastNumber: plan.through.number } : {}),
+      agents, ...(plan.member ? { agentId: plan.member.agentId } : {}),
+      ...(plan.basedOn ? { basedOn: { summaryId: plan.basedOn.record.id, lastNumber: plan.basedOn.lastNumber } } : {}),
+      cost: plan.cost,
+      ...(plan.inputTokens !== undefined ? { inputTokens: plan.inputTokens } : {}), ...(plan.inputBudgetTokens !== undefined ? { inputBudgetTokens: plan.inputBudgetTokens } : {}),
+    };
+  }
+
+  /**
+   * D107: generate a summary as an explicit, budgeted request of one frozen member. A new summary becomes a timeline
+   * slot; regenerating an existing one adds a version that becomes effective only when it completes. Does not wait.
+   */
+  generateSummary(input: SummaryGenerateInput): SummaryCommandResult {
+    const parsed = summaryGenerateInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    input = parsed.data;
+    const run = this.requireRun(input.runId);
+    const previous = this.database.findSummaryRequestByClient(run.id, input.clientRequestId);
+    if (previous) {
+      if (previous.agentId !== input.agentId || input.summaryId !== undefined && previous.summaryId !== input.summaryId) throw new ContractError('invalid_input', 'clientRequestId');
+      return { runId: run.id, summaryId: previous.summaryId, requestId: previous.requestId, messageId: previous.messageId, duplicate: true };
+    }
+    const plan = this.planSummary(input);
+    if (plan.reason === 'busy') throw new ContractError('invalid_state');
+    if (plan.reason === 'budget_insufficient') throw new ContractError('budget_exceeded');
+    if (plan.reason === 'unsupported') throw new ContractError('unsupported');
+    if (plan.reason || !plan.member || !plan.through || !plan.messages) throw new ContractError('invalid_input', 'throughSlotId');
+    if (plan.through.slotId !== input.throughSlotId) throw new ContractError('invalid_input', 'throughSlotId');
+    const { member, through, existing, basedOn, slots, snapshot } = plan;
+    const context = this.contexts.get(run.id) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
+    const requestId = randomUUID(); const messageId = randomUUID();
+    const summaryId = existing?.id ?? messageId;
+    const covered = slots.filter(slot => slot.number <= through.number).map(slot => slot.slotId);
+    const record = { covered, ...(existing?.basedOnSummaryId ?? basedOn?.record.id ? { basedOnSummaryId: existing?.basedOnSummaryId ?? basedOn!.record.id } : {}) };
+    const basis = summaryBasis(snapshot, record);
+    const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: plan.messages, outputTokenLimit: context.outputTokenLimit, agentRole: 'summary' });
+    let quote: RequestQuote | undefined;
+    context.job = {};
+    try {
+      this.schedule(context, () => {
+        // The reservation is checked against what is left in the same transaction that records the request.
+        quote = member.providerId && this.registry ? this.registry.quoteRequest(member.providerId, inputSnapshot) : undefined;
+        if (quote && quote.currency === 'CNY' && quote.reservedMicro > this.database.getRunBudget(run.id).remainingMicro) throw new ContractError('budget_exceeded');
+        const active = existing ? snapshot.versions.find(version => version.slotId === existing.id && version.active) : undefined;
+        this.database.insertMessage({ id: messageId, roomId: run.roomId, runId: run.id, senderType: 'system', senderName: summarySenderName, content: '', status: 'streaming' },
+          existing ? { slotId: existing.id, origin: 'regenerate', parentMessageId: active?.messageId, activate: false, basis } : { origin: 'original', basis });
+        if (!existing) this.database.insertSummary({ id: summaryId, runId: run.id, clientRequestId: input.clientRequestId, agentId: member.agentId, covered, ...(record.basedOnSummaryId ? { basedOnSummaryId: record.basedOnSummaryId } : {}) });
+        this.database.insertSummaryRequest({ requestId, summaryId, runId: run.id, messageId, clientRequestId: input.clientRequestId, agentId: member.agentId, inputSnapshot });
+        if (quote) {
+          const { currency, inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt } = quote;
+          this.database.reserveCharge({ requestId, runId: run.id, providerId: member.providerId!, modelId: inputSnapshot.modelId, currency, kind: 'summary',
+            inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt });
+        }
+        context.job = { requestId };
+        this.appendEvent(run.id, 'summary_updated', { summaryId, messageId, status: 'generating' });
+      }, undefined, async () => {
+        try { await this.executeSummary(context, member, { requestId, messageId, summaryId, regenerate: existing !== undefined, input: inputSnapshot, quote }); }
+        catch { /* The failed or aborted summary version, its request and its charge are already persisted as evidence. */ }
+        finally { this.endJob(context); }
+      });
+    } catch (error) { context.job = undefined; throw error; }
+    return { runId: run.id, summaryId, requestId, messageId, duplicate: false };
+  }
+
+  /** D107: the host confirms the effective version of a summary; only then do later requests use it. */
+  confirmSummary(input: SummaryConfirmInput): SummaryCommandResult {
+    const parsed = summaryConfirmInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    input = parsed.data;
+    const run = this.requireRun(input.runId);
+    const previous = this.database.findSummaryConfirmationByClient(run.id, input.clientRequestId);
+    if (previous) {
+      if (previous.messageId !== input.messageId) throw new ContractError('invalid_input', 'clientRequestId');
+      return { runId: run.id, summaryId: previous.summaryId, messageId: previous.messageId, duplicate: true };
+    }
+    return this.database.transaction(() => {
+      const snapshot = this.database.readRunSnapshot(run.id);
+      const version = snapshot.versions.find(item => item.messageId === input.messageId);
+      const summary = snapshot.summaries.find(item => item.id === version?.slotId);
+      const message = snapshot.messages.find(item => item.id === input.messageId);
+      if (!version || !summary || !message) throw new ContractError('not_found');
+      if (!version.active || message.status !== 'completed' || !message.content.trim()) throw new ContractError('invalid_state');
+      const created = this.database.confirmSummaryVersion({ messageId: message.id, summaryId: summary.id, runId: run.id, clientRequestId: input.clientRequestId });
+      if (created) this.appendEvent(run.id, 'summary_updated', { summaryId: summary.id, messageId: message.id, status: 'confirmed' });
+      return { runId: run.id, summaryId: summary.id, messageId: message.id, duplicate: !created };
+    });
+  }
+
+  /**
+   * The summary plan both the preview and the generation use: public messages 1..N (N defaults to all but the last
+   * two), the confirmed summary it builds on, the writing member (a synthesizer by role, else the first member),
+   * the exact request and its maximum cost.
+   */
+  private planSummary(input: { runId: string; agentId?: string; throughSlotId?: string; summaryId?: string }) {
+    const run = this.requireRun(input.runId);
+    const snapshot = this.database.readRunSnapshot(run.id);
+    const slots = publicSlots(snapshot);
+    const members = [...(run.membersSnapshot ?? [])].sort((a, b) => a.displayOrder - b.displayOrder);
+    const existing = input.summaryId === undefined ? undefined : snapshot.summaries.find(summary => summary.id === input.summaryId);
+    if (input.summaryId !== undefined && !existing) throw new ContractError('not_found');
+    type Plan = { snapshot: Snapshot; slots: PublicSlot[]; existing?: typeof existing; basedOn?: ActiveSummary; through?: PublicSlot; member?: MemberSnapshot;
+      messages?: StreamChatInput['messages']; inputTokens?: number; inputBudgetTokens?: number; cost: SummaryPreview['cost'];
+      reason?: NonNullable<SummaryPreview['reason']> };
+    const plan: Plan = { snapshot, slots, existing, cost: { kind: 'unavailable' } };
+    if (run.task === null || !members.length) return { ...plan, reason: 'unsupported' as const };
+    const basedOn = existing
+      ? existing.basedOnSummaryId ? activeSummary({ ...snapshot, summaries: snapshot.summaries.filter(summary => summary.id === existing.basedOnSummaryId) }) : undefined
+      : activeSummary(snapshot);
+    if (basedOn) plan.basedOn = basedOn;
+    const coveredBefore = basedOn?.lastNumber ?? 0;
+    const lastCovered = existing ? Math.max(...existing.covered.map(slotId => slots.find(slot => slot.slotId === slotId)?.number ?? 0)) : undefined;
+    // By default the latest two complete messages stay verbatim, so the next speaker still sees the live exchange.
+    const complete = slots.filter(slot => slot.message.status === 'completed');
+    const fallback = complete.length >= 4 ? complete[complete.length - 3] : complete.at(-1);
+    const through = existing ? slots.find(slot => slot.number === lastCovered)
+      : input.throughSlotId !== undefined ? slots.find(slot => slot.slotId === input.throughSlotId) : fallback;
+    if (through) plan.through = through;
+    plan.member = members.find(member => member.agentId === input.agentId)
+      ?? (input.agentId === undefined ? members.find(member => summarizerPattern.test(`${member.roleTemplateId} ${member.displayName}`)) ?? members[0] : undefined);
+    if (!plan.member) throw new ContractError('not_found');
+    const busy = this.isExecuting(run.id) || !['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(run.status)
+      || snapshot.messages.some(message => message.status === 'streaming');
+    if (busy) return { ...plan, reason: 'busy' as const };
+    if (!through || through.message.status !== 'completed') return { ...plan, reason: complete.length - coveredBefore < 2 ? 'too_few' as const : 'covered' as const };
+    if (!existing && through.number <= coveredBefore) return { ...plan, reason: 'covered' as const };
+    if (!existing && through.number - coveredBefore < 2) return { ...plan, reason: 'too_few' as const };
+    const messages = buildSummaryMessages({ task: run.task, members, snapshot, slots, ...(basedOn ? { basedOn } : {}), firstNumber: 1, lastNumber: through.number });
+    plan.messages = messages;
+    const budget = this.modelBudget(plan.member);
+    const outputTokenLimit = (this.contexts.get(run.id) ?? this.contextFrom(run)).outputTokenLimit;
+    const count = budget ? countModelTokens(messages, plan.member.modelId, budget.counter) : undefined;
+    if (!budget || count === undefined) return { ...plan, reason: 'unsupported' as const };
+    plan.inputTokens = count; plan.inputBudgetTokens = Math.max(0, budget.contextWindowTokens - outputTokenLimit);
+    if (count > plan.inputBudgetTokens) return { ...plan, reason: 'context_exceeds' as const };
+    if (!plan.member.providerId || !this.registry) { plan.cost = { kind: 'free' }; return plan; }
+    let quote: RequestQuote | undefined;
+    try { quote = this.registry.quoteRequest(plan.member.providerId, { requestId: randomUUID(), modelId: plan.member.modelId ?? 'mock', messages, outputTokenLimit, agentRole: 'summary' }); }
+    catch { return { ...plan, reason: 'unsupported' as const }; }
+    if (!quote || quote.currency !== 'CNY') { plan.cost = { kind: 'free' }; return plan; }
+    const remainingMicro = this.database.getRunBudget(run.id).remainingMicro;
+    plan.cost = { kind: 'priced', maxMicro: quote.reservedMicro, remainingMicro };
+    return quote.reservedMicro > remainingMicro ? { ...plan, reason: 'budget_insufficient' as const } : plan;
+  }
+
+  /** Streams one summary request into its own message and settles its charge from evidence, like a Turn request. */
+  private async executeSummary(context: RunContext, member: MemberSnapshot,
+    request: { requestId: string; messageId: string; summaryId: string; regenerate: boolean; input: StreamChatInput; quote?: RequestQuote }): Promise<void> {
+    const { requestId, messageId, summaryId, quote } = request;
+    const signal = context.abortController.signal;
+    let content = '';
+    let iterator: AsyncIterator<unknown> | undefined;
+    let drained = false;
+    let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
+    let usage: { inputTokens: number; outputTokens: number } | undefined;
+    let cacheHitInputTokens: number | undefined;
+    let dispatched = false;
+    let dispatchedAt: Date | undefined;
+    const settle = () => {
+      if (!quote) return;
+      const charge = this.database.settleCharge(requestId, usage && finishReason ? { state: 'settled', ...usage, pricing: this.pricingFor(quote, dispatchedAt, usage, cacheHitInputTokens) }
+        : dispatched ? { state: 'unknown', ...(usage ? { observed: usage } : {}) } : { state: 'not_sent' });
+      if (charge) this.checkOverrun(context, charge);
+    };
+    try {
+      if (this.deadlineReached(context) || signal.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
+      if (this.contexts.get(context.runId) !== context || context.job?.requestId !== requestId) throw new ContractError('invalid_state');
+      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, request.input.modelId, () => { dispatched = true; dispatchedAt = settlementClock.now(); }) : this.provider;
+      iterator = provider.streamChat({ ...request.input, signal })[Symbol.asyncIterator]();
+      let started = false;
+      await this.withAbort(context, async () => {
+        while (true) {
+          const next = await iterator!.next();
+          this.deadlineReached(context);
+          if (signal.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
+          if (next.done) { drained = true; break; }
+          const parsed = normalizedChunkSchema.safeParse(next.value);
+          if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
+          const chunk = parsed.data;
+          if (chunk.type === 'error') throw new ContractError(chunk.error.code);
+          if (chunk.type === 'start') { if (started) throw new ContractError('invalid_response'); started = true; continue; }
+          if (!started) throw new ContractError('invalid_response');
+          if (chunk.type === 'finish') { finishReason = chunk.reason; continue; }
+          if (chunk.type === 'text_delta') {
+            content += chunk.text;
+            this.database.transaction(() => {
+              this.database.updateMessage(messageId, content, 'streaming');
+              this.persistElapsed(context);
+              this.appendEvent(context.runId, 'summary_delta', { summaryId, messageId, text: chunk.text });
+            });
+          } else if (chunk.type === 'usage') {
+            usage = { inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens };
+            cacheHitInputTokens = chunk.cacheHitInputTokens;
+          }
+        }
+      });
+      if (!finishReason || finishReason === 'content_filter') throw new ContractError('invalid_response');
+      const completedReason = finishReason;
+      this.database.transaction(() => {
+        this.database.updateMessage(messageId, content, 'completed');
+        this.database.finishSummaryRequest(requestId, 'completed', completedReason);
+        // A regenerated summary replaces the effective version only once it is complete; it still needs confirmation.
+        if (request.regenerate) this.database.activateVersion(messageId);
+        settle();
+        this.persistElapsed(context);
+        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: 'completed' });
+      });
+    } catch (error) {
+      const code = toPublicError(error).code;
+      const aborted = context.stopRequested || context.timedOut || code === 'cancelled' || code === 'timeout';
+      this.database.transaction(() => {
+        this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
+        this.database.finishSummaryRequest(requestId, aborted ? 'aborted' : 'failed');
+        settle();
+        this.persistElapsed(context);
+        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: aborted ? 'aborted' : 'failed' });
+      });
+      throw error;
+    } finally {
+      if (!drained && iterator?.return) void Promise.resolve().then(() => iterator!.return!()).catch(() => {});
+    }
+  }
+
   /** R12: validates a trusted host @Override target against the frozen roster, current config, limits and plan stage. */
   assertOverrideAllowed(runId: string, agentId: string): void {
     const run = this.requireRun(runId);
@@ -499,7 +848,7 @@ export class RunService {
     await context.promise.catch(() => {});
   }
 
-  private endJob(context: RunContext, actionId: string): void {
+  private endJob(context: RunContext, actionId?: string): void {
     clearTimeout(context.deadline);
     const elapsed = this.elapsed(context);
     this.database.transaction(() => {
@@ -515,7 +864,7 @@ export class RunService {
         if (!paused) { this.contexts.delete(context.runId); this.activeRooms.delete(context.roomId); }
       });
       // Clearing the in-flight marker is itself a visible host-state change.
-      this.appendEvent(context.runId, 'host_updated', { actionId, kind: 'regenerateMessage' });
+      if (actionId) this.appendEvent(context.runId, 'host_updated', { actionId, kind: 'regenerateMessage' });
     });
   }
 
@@ -824,10 +1173,12 @@ export class RunService {
     let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
     let usage: { inputTokens: number; outputTokens: number } | undefined;
     let dispatched = false;
+    let dispatchedAt: Date | undefined;
+    let cacheHitInputTokens: number | undefined;
     // Settles this request's reservation from evidence only: provider usage of a terminal stream, or proof it was never sent.
     const settle = () => {
       if (!quote) return;
-      const charge = this.database.settleCharge(requestId, usage && finishReason ? { state: 'settled', ...usage }
+      const charge = this.database.settleCharge(requestId, usage && finishReason ? { state: 'settled', ...usage, pricing: this.pricingFor(quote, dispatchedAt, usage, cacheHitInputTokens) }
         : dispatched ? { state: 'unknown', ...(usage ? { observed: usage } : {}) } : { state: 'not_sent' });
       if (charge) this.checkOverrun(context, charge);
     };
@@ -843,7 +1194,7 @@ export class RunService {
         || (job ? context.job?.requestId !== requestId || ['running', 'pausing', 'cancelling'].includes(dispatch.run.status) : !['running', 'pausing'].includes(dispatch.run.status))
         || !turn || turn.agentId !== member.agentId || turn.turnIndex !== turnIndex || turn.status !== (job ? 'completed' : 'running')
         || attempt?.requestId !== requestId || attempt.messageId !== messageId || !['pending', 'running'].includes(attempt.status)) throw new ContractError('invalid_state');
-      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId, () => { dispatched = true; }) : this.provider;
+      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId, () => { dispatched = true; dispatchedAt = settlementClock.now(); }) : this.provider;
       iterator = provider.streamChat(input)[Symbol.asyncIterator]();
       await this.withAbort(context, async () => {
         while (true) {
@@ -875,6 +1226,7 @@ export class RunService {
             this.appendAndNotify(context.runId, 'reasoning_summary_delta', { turnId, messageId, senderName: member.displayName, text: chunk.text });
           } else if (chunk.type === 'usage') {
             usage = { inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens };
+            cacheHitInputTokens = chunk.cacheHitInputTokens;
             this.appendAndNotify(context.runId, 'usage_updated', { turnId, inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens });
           }
         }
@@ -951,6 +1303,16 @@ export class RunService {
       this.setRunState(context.runId, { status, finishedAt: status === 'paused' ? null : new Date().toISOString(),
         currentTurnId: null, currentAgentId: null, lastError: lastError ?? reason ?? null }, { status, reason });
     });
+  }
+
+  /**
+   * D106: the actual price of a settled request: its period from the time it was sent until it settled, and the
+   * provider's cache split. Without reviewed period pricing the frozen peak cache-miss amount stands.
+   */
+  private pricingFor(quote: RequestQuote, startedAt: Date | undefined, usage: { inputTokens: number }, cacheHitInputTokens: number | undefined) {
+    if (!quote.periodPricing || quote.currency !== 'CNY') return;
+    const finishedAt = settlementClock.now();
+    return settlementPricing(quote.periodPricing, { startedAt: startedAt ?? finishedAt, finishedAt }, { inputTokens: usage.inputTokens, cacheHitInputTokens });
   }
 
   /** The next request's maximum cost must fit in what the Run has left; equal is allowed. */

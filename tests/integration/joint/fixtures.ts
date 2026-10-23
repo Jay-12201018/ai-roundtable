@@ -1,3 +1,4 @@
+import { UsageService } from '../../../src/main/usage/UsageService';
 import type { Database } from '../../../src/main/database/Database';
 import { RoomService } from '../../../src/main/room/RoomService';
 import { ProviderSettingsService } from '../../../src/main/settings/ProviderSettingsService';
@@ -32,9 +33,13 @@ export function apiFor(service:RunService):RunSessionApiContract {
   return {room:{createDemo:async objective=>({roomId:service.createDemoRoom(objective)}),getMessages:async id=>service.getMessages(id)},run:{
     previewWorkflow: async input => service.previewWorkflow(input), start:input=>service.start(input),getSnapshot:async id=>service.getSnapshot(id),subscribe:async(id,cursor)=>service.subscribe(id,cursor),onEvent:listener=>service.onEvent(listener),
     pause:async id=>service.pause(id),stop:id=>service.stop(id),step:id=>service.step(id),resumeRun:id=>service.resumeRun(id),retryTurn:(id,turn)=>service.retryTurn(id,turn),continueMessage:(id,message)=>service.continueMessage(id,message),recoverInterruptedRun:(id,decision)=>service.recoverInterruptedRun(id,decision),
+    addBudget:async input=>service.addBudget(input),resumeAfterBudget:async id=>service.resumeAfterBudget(id),
   }};
 }
 
 export function appApiFor(service: RunService, database: Database): RoundtableApiContract {
-  return { ...apiFor(service), host: new HostService(database, service), rooms: new RoomService(database), settings: new ProviderSettingsService(database, new KeyService(database, createMemoryKeyBackend())) };
+  const usage = new UsageService(database);
+  return { ...apiFor(service), host: new HostService(database, service), rooms: new RoomService(database), settings: new ProviderSettingsService(database, new KeyService(database, createMemoryKeyBackend())),
+    summary: { preview: async input => service.previewSummary(input), generate: async input => service.generateSummary(input), confirm: async input => service.confirmSummary(input) },
+    usage: { getReport: async () => usage.getReport(), writeOff: async input => service.writeOffCharge(input), exportCsv: async () => ({ saved: false, rows: usage.csv().rows }) } };
 }

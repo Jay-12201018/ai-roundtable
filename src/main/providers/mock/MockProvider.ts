@@ -57,6 +57,8 @@ export class MockProvider implements ProviderAdapter {
 }
 
 function responseFor(role: string, turnIndex: number): string {
+  // R13B: a summary request (agentRole 'summary') gets a fixed toy summary, never a real model's output.
+  if (role === 'summary') return 'Mock 摘要：起草者提出了初步方案，审查者要求补充证据，综合者整合了双方意见；待解决：验证标准的具体数值。';
   if (/critic|审查/i.test(role)) return `Mock 审查：第 ${turnIndex + 1} 轮发现需要补充证据，并建议由起草者修订。`;
   if (/synth|定稿|综合/i.test(role)) return `Mock 定稿：已整合起草和审查意见，形成可执行的最终方案。`;
   return `Mock 起草：这是第 ${turnIndex + 1} 轮的初步方案，包含目标、步骤和验证标准。`;

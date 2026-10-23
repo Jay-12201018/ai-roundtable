@@ -15,6 +15,7 @@ import { AnthropicProvider, buildAnthropicMessages } from './anthropic/Anthropic
 import { GeminiProvider, buildGeminiContents } from './gemini/GeminiProvider';
 import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider';
 import { createNativeSafeFetch, createSafeFetch } from './network';
+import type { PeriodPricing } from '../usage/pricing';
 import type { DiagnosticObserver } from './diagnostics';
 import { deepSeekFlashCapabilities } from './modelPolicies/deepseekFlash';
 import type { LoopbackProxy, ProxyTargetKind } from './loopbackProxy';
@@ -38,6 +39,8 @@ export interface ApprovedModelPolicy {
     reviewedAt?: string; expiresAt?: string } | {
     currency: 'CNY'; inputMicroCnyPerToken: number; outputMicroCnyPerToken: number; maxRequestMicroCny: number;
     reviewedAt: string; expiresAt: string; evidence: string;
+    /** R13B (D106): reviewed period and cache-hit rates used only to settle; reservation stays at the rates above. */
+    periodPricing?: PeriodPricing;
   };
 }
 type Options = {
@@ -51,6 +54,8 @@ export type RequestQuote = {
   currency: 'CNY' | 'USD'; inputTokenBound: number; outputTokenLimit: number;
   inputMicroPerToken: number; outputMicroPerToken: number; reservedMicro: number;
   priceEvidence: string; priceReviewedAt: string | null;
+  /** D106: how a settled request is actually priced; absent means the reserved peak cache-miss rates apply. */
+  periodPricing?: PeriodPricing;
 };
 type Approval = { kind: string; baseUrl: string; revision: string };
 const officialCapabilities: ChatCompletionCapabilities = { outputTokenParameter: 'max_completion_tokens', streamUsage: true, listModels: true, authentication: 'models' };
@@ -190,7 +195,8 @@ export class ProviderRegistry {
     if ('currency' in price) {
       const reservedMicro = inputTokenBound * price.inputMicroCnyPerToken + outputTokenLimit * price.outputMicroCnyPerToken;
       return { currency: 'CNY', inputTokenBound, outputTokenLimit, inputMicroPerToken: price.inputMicroCnyPerToken,
-        outputMicroPerToken: price.outputMicroCnyPerToken, reservedMicro, priceEvidence: price.evidence, priceReviewedAt: price.reviewedAt };
+        outputMicroPerToken: price.outputMicroCnyPerToken, reservedMicro, priceEvidence: price.evidence, priceReviewedAt: price.reviewedAt,
+        ...(price.periodPricing ? { periodPricing: price.periodPricing } : {}) };
     }
     // The Run budget is CNY. A non-zero USD price is never converted by guessing an exchange rate.
     if (price.inputUsdPerMillion !== 0 || price.outputUsdPerMillion !== 0) throw new ContractError('unsupported');
@@ -302,13 +308,25 @@ function validReviewWindow(price: ApprovedModelPolicy['price']): boolean {
   return Number.isFinite(reviewed) && Number.isFinite(expires) && reviewed <= now && now < expires && expires > reviewed;
 }
 
+/** D106: settlement rates may only lower the reserved peak cache-miss price, never raise it. */
+function validPeriodPricing(pricing: PeriodPricing, inputMicroPerToken: number, outputMicroPerToken: number): boolean {
+  const rates = [pricing.peak, pricing.offPeak];
+  return pricing.evidence.trim().length > 0 && Number.isInteger(pricing.utcOffsetMinutes) && Math.abs(pricing.utcOffsetMinutes) <= 14 * 60
+    && pricing.peakWeekdays.every(day => Number.isInteger(day) && day >= 0 && day <= 6)
+    && pricing.peakWindows.every(window => Number.isInteger(window.startMinute) && Number.isInteger(window.endMinute) && window.startMinute >= 0 && window.startMinute < window.endMinute && window.endMinute <= 1440)
+    && rates.every(rate => [rate.cacheHitMicroPerMillion, rate.cacheMissMicroPerMillion, rate.outputMicroPerMillion].every(n => Number.isSafeInteger(n) && n >= 0)
+      && rate.cacheHitMicroPerMillion <= rate.cacheMissMicroPerMillion
+      && rate.cacheMissMicroPerMillion <= inputMicroPerToken * 1_000_000 && rate.outputMicroPerMillion <= outputMicroPerToken * 1_000_000);
+}
+
 function validPrice(price: ApprovedModelPolicy['price']): boolean {
   if (!price.evidence.trim()) return false;
   if ('currency' in price) {
     const reviewed = Date.parse(price.reviewedAt); const expires = Date.parse(price.expiresAt); const now = Date.now();
     return price.currency === 'CNY' && Number.isFinite(reviewed) && Number.isFinite(expires)
       && reviewed <= now && now < expires && expires > reviewed
-      && [price.inputMicroCnyPerToken, price.outputMicroCnyPerToken, price.maxRequestMicroCny].every(n => Number.isSafeInteger(n) && n >= 0);
+      && [price.inputMicroCnyPerToken, price.outputMicroCnyPerToken, price.maxRequestMicroCny].every(n => Number.isSafeInteger(n) && n >= 0)
+      && (price.periodPricing === undefined || validPeriodPricing(price.periodPricing, price.inputMicroCnyPerToken, price.outputMicroCnyPerToken));
   }
   return [price.inputUsdPerMillion, price.outputUsdPerMillion, price.maxRequestUsd].every(n => Number.isFinite(n) && n >= 0);
 }

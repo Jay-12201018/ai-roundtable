@@ -1,5 +1,6 @@
 import type { ProviderMessage } from '../providers/types';
 import type { MemberSnapshot } from '../../shared/schemas/persistence';
+import { summaryLabel } from '../../shared/schemas/summary';
 
 /**
  * Model-facing discussion format (D095). Only the current member's own unedited replies are `assistant`; everyone
@@ -65,7 +66,9 @@ export function agentBriefText(member: MemberSnapshot, members: readonly MemberS
 }
 
 export interface TranscriptEntry {
-  speaker: 'own' | 'member' | 'host';
+  speaker: 'own' | 'member' | 'host' | 'summary';
+  /** R13B (D107): which public messages a summary stands in for, numbered as in the timeline. */
+  summary?: { firstNumber: number; lastNumber: number };
   member?: MemberSnapshot;
   content: string;
   editedByHost: boolean;
@@ -79,6 +82,13 @@ export const isAssistantEntry = (entry: TranscriptEntry) =>
   entry.speaker === 'own' && !entry.editedByHost && !entry.basedOnRevisedHistory && !entry.truncated && entry.content.trim().length > 0;
 
 export function renderEntry(entry: TranscriptEntry): string {
+  if (entry.speaker === 'summary') {
+    const notes = [
+      ...(entry.editedByHost ? ['（此摘要由主持人修改后确认。）'] : []),
+      ...(entry.basedOnRevisedHistory ? ['（注意：此摘要生成后，它覆盖的部分原文被主持人修改或重新生成，摘要可能已经过时：与后续发言冲突时，以后续发言为准。）'] : []),
+    ];
+    return [summaryLabel(entry.summary!.firstNumber, entry.summary!.lastNumber), ...notes, quoteText(entry.content)].join('\n');
+  }
   const label = entry.speaker === 'host' ? '【主持人插话】'
     : entry.speaker === 'own' ? `【你此前的发言 · ${memberLabel(entry.member!)}】` : `【${memberLabel(entry.member!)}】`;
   const notes = [
