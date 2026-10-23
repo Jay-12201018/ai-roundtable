@@ -178,4 +178,15 @@ describe('R13A start refusals', () => {
     expect(state().error).toBe(message);
     dispose();
   });
+
+  it('says which setting to change when the output limit is above the model limit, and passes the limit and mode through (D103)', async () => {
+    const { api, session, state, dispose } = setup();
+    vi.mocked(api.room.createDemo).mockResolvedValue({ roomId: 'room' });
+    vi.mocked(api.run.start).mockRejectedValue(publicError('invalid_input', 'outputTokenLimit'));
+    state().setDraft('目标');
+    await session.startRun(undefined, { budgetMicroCny: 50_000, outputTokenLimit: 40_000, mode: 'step' });
+    expect(api.run.start).toHaveBeenCalledWith(expect.objectContaining({ outputTokenLimit: 40_000, mode: 'step' }));
+    expect(state().error).toBe('启动失败：单次输出上限超过了成员所用模型允许的最大值，请在“更多设置”里调小后再开始。');
+    dispose();
+  });
 });

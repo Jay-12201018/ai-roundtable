@@ -83,3 +83,7 @@ button:disabled { cursor: default; color: var(--secondary); background: var(--su
   .theme-control { margin-left: 0; }
 }
 .workbench .control-help { color: var(--secondary); margin: 4px 0 0; }
+.composer-more { color: var(--secondary); }
+.composer-more summary { cursor: pointer; padding: 8px 0; }
+.composer-more[open] { flex-basis: 100%; }
+.composer-more[open] p { margin: 4px 0 0; max-width: 640px; }

@@ -133,3 +133,27 @@ describe('D099 step-by-step from the start', () => {
     } finally { await f.close(); }
   });
 });
+
+describe('D103 output limit before starting', () => {
+  it('keeps the limit folded under 更多设置 with the 4096 default, validates it and starts with the chosen value', async () => {
+    const f = setup('输出上限');
+    try {
+      render(<App />);
+      await waitFor(() => expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(false));
+      const more = screen.getByText('更多设置').closest('details')!;
+      expect(more.open).toBe(false);
+      const field = screen.getByLabelText('单次输出上限（token）') as HTMLInputElement;
+      expect(field.value).toBe('4096');
+      expect(document.getElementById('output-limit-help')!.textContent).toContain('每次请求按这个上限预留费用');
+      fireEvent.change(field, { target: { value: '0' } });
+      expect(screen.getByText('单次输出上限请输入 1 到 65536 之间的整数。')).toBeTruthy();
+      expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(more.open).toBe(true);
+      fireEvent.change(field, { target: { value: '6000' } });
+      fireEvent.click(screen.getByRole('button', { name: '开始协作' }));
+      await waitFor(() => expect(f.provider.inputs.length).toBeGreaterThan(0));
+      expect(f.provider.inputs[0].outputTokenLimit).toBe(6000);
+      expect(f.db.getRun(f.runId())!.outputTokenLimit).toBe(6000);
+    } finally { await f.close(); }
+  });
+});

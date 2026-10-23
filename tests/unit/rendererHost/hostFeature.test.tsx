@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HostPanel, HostTimeline, useHostCommands } from '../../../src/renderer/features/host';
 import { HostTextArea } from '../../../src/renderer/features/host/HostTextArea';
@@ -208,5 +208,34 @@ describe('Provider names in member identity lines', () => {
   it('names the built-in Mock of legacy demo members', () => {
     render(<TimelineOnly snapshot={withProvider(null, 'mock')} providers={{ state: 'ready', names: new Map() }} />);
     for (const line of lines()) expect(line).toBe('Drafter · Provider：内置 Mock · Model：mock');
+  });
+});
+
+describe('D102 truncated replies in the timeline', () => {
+  const truncatedSnapshot = (status: RunSnapshot['status'] = 'paused') => {
+    const snapshot = pausedSnapshot({ status });
+    snapshot.attempts = snapshot.attempts!.map(attempt => attempt.messageId === 'm2' ? { ...attempt, finishReason: 'length' as const } : { ...attempt, finishReason: 'stop' as const });
+    return snapshot;
+  };
+  const slotOf = (content: string) => screen.getByText(content).closest('article')!;
+
+  it('marks the reply and continues it as a new version while the Run is idle', async () => {
+    const api = hostApi();
+    render(<Harness snapshot={truncatedSnapshot()} api={api} />);
+    const slot = slotOf('回应');
+    expect(slot.querySelector('.host-truncated[role=note]')!.textContent).toBe('已达单次输出上限，内容可能不完整。');
+    const button = within(slot).getByRole('button', { name: '续写' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    await waitFor(() => expect(api.command).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run', kind: 'regenerateMessage', messageId: 'm2', mode: 'continue' })));
+    expect(within(slotOf('新开场')).queryByRole('button', { name: '续写' })).toBeNull();
+    expect(slotOf('新开场').querySelector('.host-truncated')).toBeNull();
+  });
+
+  it('never preempts a running Run: the button waits and says why', () => {
+    render(<Harness snapshot={truncatedSnapshot('running')} api={hostApi()} />);
+    const slot = slotOf('回应');
+    expect(slot.querySelector('.host-truncated[role=note]')!.textContent).toBe('已达单次输出上限，内容可能不完整。运行暂停或结束后可以续写。');
+    expect((within(slot).getByRole('button', { name: '续写' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

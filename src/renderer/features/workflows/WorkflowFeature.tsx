@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import './workflows.css';
+import { DEFAULT_OUTPUT_TOKEN_LIMIT } from '../../../shared/schemas/run';
 
 // Presentation models only. The parent must adapt them to the approved Shared API.
 export type WorkflowTemplate = 'free-chat' | 'two-model-dialogue' | 'review-revision' | 'deep-debate';
@@ -39,7 +40,7 @@ export function createWorkflowDraft(template: WorkflowTemplate, members: readonl
   ] : template === 'deep-debate' ? [one('opening', '陈述', [...ids]), one('rebuttal', '交锋', [...ids], '2'), one('closing', '总结', [...ids])]
     : template === 'two-model-dialogue' ? [one('dialogue', '对话', [ids[0] ?? '', ids[1] ?? ''])]
       : [one('discussion', '讨论', ids.length ? [...ids] : [''])];
-  return { template, phases, turnLimit: '12', durationMs: '300000', outputTokens: '1024', finishAt: '' };
+  return { template, phases, turnLimit: '12', durationMs: '300000', outputTokens: String(DEFAULT_OUTPUT_TOKEN_LIMIT), finishAt: '' };
 }
 
 export function WorkflowFeature(props: WorkflowFeatureProps) {

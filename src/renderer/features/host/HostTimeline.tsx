@@ -64,6 +64,9 @@ function SlotView({ slot, snapshot, commands, providers }: { slot: TimelineSlot;
     : lastTurn && ['failed', 'aborted', 'interrupted'].includes(turn?.status ?? '') && ['error', 'cancelled', 'interrupted'].includes(snapshot.status));
   const canEdit = settled && !streaming && shown.message.status !== 'streaming';
   const canSelect = !shown.active && shown.message.status === 'completed' && settled && !streaming;
+  // D102: a reply that hit the output limit is complete but unfinished; it can be continued as a new version.
+  const truncated = shown.message.status === 'completed' && snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.finishReason === 'length';
+  const canContinue = truncated && shown.active && slot.author === 'agent' && settled && idle && ['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(snapshot.status);
   const disabled = !commands.available || commands.pending !== undefined;
   const name = slot.author === 'host' ? '主持人' : member?.displayName ?? shown.message.senderName;
   const save = async () => {
@@ -78,6 +81,7 @@ function SlotView({ slot, snapshot, commands, providers }: { slot: TimelineSlot;
     <p>{shown.message.content}</p>
     <small>{statusLabels[shown.message.status] ?? '未知状态'} · {originLabels[shown.origin]}{shown.active ? (slot.versions.length > 1 ? (shown.message.status === 'completed' ? ' · 当前有效' : ' · 当前版本（未完成）') : '') : ' · 未生效的历史版本'}</small>
     {slot.author === 'agent' && <MessageUsage charge={chargeOfMessage(snapshot, shown.messageId)} />}
+    {truncated && <p className="host-truncated" role="note">已达单次输出上限，内容可能不完整。{shown.active && !canContinue ? '运行暂停或结束后可以续写。' : ''}</p>}
     {shown.affectedBy.length > 0 && <p className="host-affected" role="note">受影响：生成时依据的{upstream(snapshot, shown.affectedBy)}已被修改、重新生成或本身受影响，此内容仍基于旧版本，可点“重新生成”更新。</p>}
     {generating && <p className="host-generation" role="status">正在重新生成版本 {generating.versionNumber}：{generating.message.content || '等待输出…'}</p>}
     <div className="host-version-actions" role="group" aria-label={`${name} 的消息操作`}>
@@ -88,6 +92,8 @@ function SlotView({ slot, snapshot, commands, providers }: { slot: TimelineSlot;
       </>}
       {canSelect && <button type="button" disabled={disabled} onClick={() => void commands.send(`select:${slot.slotId}`, { kind: 'selectVersion', messageId: shown.messageId }, '已切换当前有效版本。').then(ok => { if (ok) setViewing(undefined); })}>设为当前版本</button>}
       {canEdit && draft === undefined && <button type="button" disabled={disabled} onClick={() => setDraft(shown.message.content)}>修改</button>}
+      {truncated && shown.active && slot.author === 'agent' && <button type="button" disabled={disabled || !canContinue}
+        onClick={() => void commands.send(`continue:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId, mode: 'continue' }, '已发送续写请求：会生成一个新版本，并按新请求预留和结算费用。')}>续写</button>}
       {canRegenerate && <button type="button" disabled={disabled} onClick={() => void commands.send(`regenerate:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId }, '已发送重新生成请求。')}>重新生成</button>}
     </div>
     {draft !== undefined && <form className="host-edit" onSubmit={event => { event.preventDefault(); void save(); }}>
