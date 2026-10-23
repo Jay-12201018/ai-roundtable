@@ -251,13 +251,13 @@ async function main() {
   await field('任务目标'); await selectAll(); await ime('zaitao', '再讨论一次定价');
   const before = requests.length;
   await click('开始协作');
-  await until(`document.body.innerText.includes('运行预算不足：下一次请求最高可能花费')`, 'budget refusal shown');
+  await until(`document.body.innerText.includes('预算不足，已暂停发送。下一次请求最高可能花费')`, 'budget refusal shown');
   const blocked = await snapshot();
   check(requests.length === before && blocked.turns.length === 0 && blocked.status === 'error', 'Zero requests and no Turn when the budget is insufficient');
-  check((await text()).includes('剩余额度 ¥0.0010，已拒绝发送。') && (await text()).includes('已因预算不足停止发送'), 'Chinese refusal and the bar marker');
+  check((await text()).includes('剩余额度 ¥0.0010。追加预算后从这里继续') && (await text()).includes('已因预算不足停止发送'), 'Chinese refusal and the bar marker');
   check((await js(`document.querySelector('.timeline .status').textContent`)).includes('已因预算停止') && !(await text()).includes('配置成员后，输入目标并开始协作'), 'Header says the budget stopped it, with no misleading empty-state hint');
   const required = `¥${(blocked.budget.blocked.requiredMicro / 1e6).toFixed(4)}`;
-  await capture('budget-blocked', `预算改为 0.001 元再开始：在发送前拒绝（夹具未收到任何请求、没有新回合），页头状态"已因预算停止"，提示"运行预算不足：下一次请求最高可能花费 ${required}，剩余额度 ¥0.0010，已拒绝发送。"，预算栏标出"已因预算不足停止发送"。实操中发现原来页头写"运行失败"、空时间线还提示"配置成员后…开始协作"，已改正。`, '.run-budget');
+  await capture('budget-blocked', `预算改为 0.001 元再开始：在发送前拒绝（夹具未收到任何请求、没有新回合），页头状态"已因预算停止"，提示"预算不足，已暂停发送。下一次请求最高可能花费 ${required}，剩余额度 ¥0.0010。追加预算后从这里继续……"（R13B 起提示旁就是"追加并继续"），预算栏标出"已因预算不足停止发送"。实操中发现原来页头写"运行失败"、空时间线还提示"配置成员后…开始协作"，已改正。`, '.run-budget');
 
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);
   check(!JSON.stringify(result).includes(fakeKey), 'Key absent from the result');

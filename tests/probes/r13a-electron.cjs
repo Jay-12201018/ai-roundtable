@@ -160,8 +160,8 @@ async function main() {
     check(requests.length === sent && blockedSnapshot.turns.length === 0 && blockedSnapshot.charges.length === 0, 'Insufficient budget sent zero requests and created no Turn');
     check(blockedSnapshot.budget.blocked?.reason === 'insufficient' && blockedSnapshot.budget.blocked.remainingMicro === 1000 && blockedSnapshot.budget.blocked.requiredMicro > 1000, 'Block records required vs remaining');
     await js(`localStorage.setItem('roundtable.runId', ${JSON.stringify(blocked.runId)}); location.reload(); true`);
-    await until(`document.body.innerText.includes('运行预算不足：下一次请求最高可能花费')`, 'Chinese budget message');
-    check((await text()).includes('剩余额度 ¥0.0010，已拒绝发送。'), 'UI explains the refusal in Chinese');
+    await until(`document.body.innerText.includes('预算不足，已暂停发送。下一次请求最高可能花费')`, 'Chinese budget message');
+    check((await text()).includes('剩余额度 ¥0.0010。追加预算后从这里继续'), 'UI explains the refusal in Chinese');
 
     // Crash with one request in flight: the reservation must survive as unknown, never be released as zero.
     mode = 'hang';
