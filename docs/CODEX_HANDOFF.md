@@ -52,6 +52,8 @@
 
 ### 仓库位置（2026-10-21 迁移）
 
+- **2026-10-22 起的当前位置：`~/Claude code/AI roundtable`**（先改名为 `AI roundtable`，再整体移出 iCloud 同步的"文稿"文件夹）；手动 Worktree 在同级 `~/Claude code/AI交互-worktrees/`。下面几条是当时的迁移记录。
+
 - 主仓库从 `~/Documents/ChatGPT/AI交互` 整体移到 **`~/Documents/Claude/AI交互`**；Worktree 目录移到 **`~/Documents/Claude/AI交互-worktrees/`**（当前只有 `integrate-r10a-r10b-r11`），已执行 `git worktree repair`，两处 `tsc --noEmit` exit 0、`node_modules` 无断链。
 - 新的 Worktree 统一放在 `~/Documents/Claude/AI交互-worktrees/`，不再依赖 `~/.codex`。
 - `docs/verification/` 历史记录中的 `Documents/ChatGPT/AI交互` 是当时证据，保持原样不改。

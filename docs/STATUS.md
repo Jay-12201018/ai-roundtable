@@ -1,11 +1,13 @@
 # R00–R18 状态与授权看板
 
-## 当前状态（2026-10-21，Claude Code 接手后）
+## 当前状态（2026-10-23）
 
-- **R10A Anthropic / R10B Gemini / R11 声明式工作流：review，待用户批准合 main。** 分支 `codex/integrate-r10a-r10b-r11`，生产接线提交 `8a7f293`。验证：Electron ABI139 下 109 文件 / 1732 测试、typecheck、build、隔离生产探针（首次 53 断言 / 26 次 fixture 请求，重启 17 断言 / 0 请求，liveApi=false）。真实 Claude/Gemini API、价格策略、桌面 E2E 未验证。
-- **环境根治**（`bf3a6d9`）：测试在 Electron 自带 Node 中运行，better-sqlite3 只保留 Electron ABI；`ensure-native` 按需重建。已查明 Codex 时期 Team ID 报错的根因是 `/opt/homebrew/bin/node` 指向 ChatGPT.app 内置的带签名 Node，现已改为 Homebrew `node@24`，`pnpm run build` 无需任何绕法即可通过。
-- **缺陷修复**（`3378436`）：数据库父目录含符号链接时，迁移备份必定失败（Codex 时期靠改 TMPDIR 绕过），已修复并补回归测试。
-- 已知后续：开启回环代理时，原生 Claude/Gemini 会被拒绝（代理目标检查写死了 `/chat/completions`）；每次运行工作流后都需要重新预览和应用。
+- **R12 主持人与消息版本、R13A 真实模型（DeepSeek）与运行预算、合并前质量修复：merged / verified。** 集成分支 `codex/integrate-r12-r13a`（R12 `codex/r12-host-message-versions` → R13A `codex/r13a-real-model-enable` → 质量修复 `codex/r13a-premerge-quality`，再合入 main 上的文档提交），以 ff-only 方式合入 main。合并结果上总控复跑：typecheck、126 文件 / 1903 测试、build；隔离生产探针 R01（默认、`--joint-ui`、`--r03-recovery`）、R07/R08、R09、R12、R13A 的首次运行和 `--restart`（重启后 0 次请求）、R10/R11；实操探针 premerge（首次 56 项 + 重启 11 项）、R13A、R12（25 项，截图已按最终代码重新生成）。全部通过，liveApi=false。
+- **真实模型实测（用户本人的 DeepSeek Key，`deepseek-flash`，经本机代理）**：请求次数、token 与 DeepSeek 控制台逐项一致；花费按高峰价记账，空闲时段实际扣费约为显示值的一半（D090 的保守取向，按时段结算列入 R13B）。主持人点名、插话、持续指令、修改与重新生成、版本切换在真实模型上生效；修复上下文格式（D095）后，审查者给出带出处的具体意见、不再照抄，综合者能整合并做取舍，主持人修改后的条件会被采用；写到输出上限时保留并标注截断，运行继续（D102，默认上限 4096，D103）。
+- **数据库**：migration 6（主持人操作与消息版本）、7（运行预算与费用账本）、8（请求结束原因）。启动时清除误填进模型 ID 栏、看起来像 API Key 的值，不留明文（D096/D100）。
+- **R10A/R10B/R11**：2026-10-21 合入 main（`66017c0`）。原生 Claude/Gemini 仍没有获审的价格策略，真实生成会被拒绝；代理模式下的目标核对已按 Provider 类型修正（R13A）。
+- **环境**：测试在 Electron 自带的 Node 中运行；宿主 Node 为 Homebrew `node@24`。仓库位于 `~/Claude code/AI roundtable`（已移出 iCloud）。
+- **下一步路线**：R13B（运行中追加预算、核销未知费用、按时段结算价格、对话摘要、用量统计）→ R14 结构化产物（可以和 R13B 并行）→ R15 代码导出 / R16 按 Claude 风格重做界面（汇总已记录的体验问题：设置页文案过于技术化、工作流运行后要重新应用、右侧面板过长等）→ R17 E2E 与发布。产品标准：按 Claude 配套产品的标准与审美把关，验收分三层（自动化、真实界面实操、真实模型）。
 
 以下为 Codex 时期的历史记录，保留作证据。
 
@@ -60,12 +62,12 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 | R07 | 房间、成员、历史 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d991178；引入f718f829；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
 | R08 | Key 与 Provider 设置 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d2aed6c；引入5f01e978；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
 | R09 | OpenAI 与兼容端点 | R07/R08已合main verified；Mock联合验收 | 原模块交付；总控独占联合接线 | verified（fixture） | 用户批准最终合main及主线独立验收；真实付费测试未授权 | 已合main；codex/integrate-r09与原分支/WT保留 | 原2d97af571debf106aadad708a2c0418f299c6eef；唯一引入f5baaf07e1603a7c356fb0c9cedeb131977307ba；接线da512e7a64a6ec4a596b0f7fda820b3d62b04e42；ff入站f3a8fee38f5b7d75b5144c2997d72373fda6ddd6 | [本轮main报告](verification/2026-10-17-r09-main.md)/[台账](verification/2026-10-17-r09-main-commands.md)：Node/Electron各1073、R09专项227、strict/build、双ABI/SQLite、真实生产fixture12请求/重启HTTP0及退出审计；旧探针白名单一行修复，原失败保留 |
-| R10A | Anthropic | R09 fixture已合main verified | 总控（Claude Code） | review | 用户授权继续；合main待批准；真实调用未授权 | codex/r10a-anthropic-provider → codex/integrate-r10a-r10b-r11 | 原7d14b11；接线8a7f293 | 见顶部“当前状态”：1732测试、build、生产探针fixture通过 |
-| R10B | Gemini | R09 fixture已合main verified | 总控（Claude Code） | review | 用户授权继续；合main待批准；真实调用未授权 | codex/r10b-gemini-provider → codex/integrate-r10a-r10b-r11 | 原17b7b62；接线8a7f293 | 见顶部“当前状态”：1732测试、build、生产探针fixture通过 |
-| R11 | 声明式工作流 | R07/R04–R06 | 总控（Claude Code） | review | 用户授权继续；合main待批准；真实调用未授权 | codex/r11-declarative-workflows → codex/integrate-r10a-r10b-r11 | 原9341a33；接线8a7f293 | 四种模板经生产入口fixture完整运行与重启验证 |
-| R12 | 主持人与消息版本 | R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
-| R13 | 摘要、usage、费用预算 | R05/R09/R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
-| R14 | 结构化产物 | R11 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
+| R10A | Anthropic | R09 fixture已合main verified | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main；真实调用需获审价格策略 | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 1732测试、build、生产探针fixture通过 |
+| R10B | Gemini | R09 fixture已合main verified | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main；真实调用需获审价格策略 | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 1732测试、build、生产探针fixture通过 |
+| R11 | 声明式工作流 | R07/R04–R06 | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 四种模板经生产入口fixture完整运行与重启验证；真实模型工作流待测 |
+| R12 | 主持人与消息版本 | R11 | R12子会话；总控集成 | merged / verified | 用户批准合main | codex/r12-host-message-versions → codex/integrate-r12-r13a | 15e2e30；合并见顶部 | 自动化、实操、DeepSeek真实模型三层通过 |
+| R13 | 摘要、usage、费用预算 | R05/R09/R11 | R13A子会话；总控集成 | R13A merged / verified；R13B not_started | R13A获批；R13B待派发 | codex/r13a-real-model-enable、codex/r13a-premerge-quality → codex/integrate-r12-r13a | b3e3324、0ccb49c | DeepSeek预算与账本经真实账单核对；R13B见顶部路线 |
+| R14 | 结构化产物 | R11 | 未分派 | ready | 待派发 | 未创建 | 无 | 未运行 |
 | R15 | 安全代码导出 | R14 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R16 | 聊天 UI 与可用性 | R06；主要交互稳定 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R17 | Electron E2E 与发布 | 骨架 R02；最终 R07–R16，含 R10A/R10B | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |

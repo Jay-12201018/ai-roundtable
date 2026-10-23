@@ -7,6 +7,8 @@
 复跑命令：`pnpm run build`，然后 `./node_modules/.bin/electron tests/probes/r12-acceptance.cjs`（截图会覆盖写入本目录的 `r12-screens/`）。
 本次结果：PASS，22 项检查，14 张截图；网络尝试 0 次，控制台错误 0 条。
 
+**2026-10-23 总控在合并结果（`codex/integrate-r12-r13a`）上复跑**：PASS，25 项检查，14 张截图，网络尝试 0 次、控制台错误 0 条。本目录截图已全部替换为这次复跑生成的版本。D102 之后，输出上限不再导致回合失败，所以截图 11、12 由原来的"失败 / 重试仍失败"改为"截断 / 续写"；检查项也相应更新。
+
 ## 截图
 
 | 截图 | 展示内容 |
@@ -21,8 +23,8 @@
 | [08-edited-affected.png](r12-screens/08-edited-affected.png) | 修改第一条已完成消息：显示新内容、"主持人修改 · 当前有效"和"版本 2/2"；后面两条 Agent 回复出现"受影响"说明（它们基于旧版本生成）。 |
 | [09-regenerated.png](r12-screens/09-regenerated.png) | 对"综合者"的回复点"重新生成"：生成新的版本 2/2（重新生成），依据修订后的开场；第一条修改后的版本仍保留"主持人修改"标记。 |
 | [10-old-version.png](r12-screens/10-old-version.png) | 点"‹"查看"综合者"的旧版本：标为"原始 · 未生效的历史版本"，原文完整保留，并提供"设为当前版本"。 |
-| [11-failed.png](r12-screens/11-failed.png) | 单次输出上限设为 3 后开始：首个回合因输出不完整失败，页头"运行失败"，消息标为"生成失败 · 原始"并保留已输出的部分文字，失败原因"模型未完整完成响应，部分输出已保留。"直接显示在该消息下方；右侧出现"重试当前回合""续写部分回复"。 |
-| [12-retry-failed-again.png](r12-screens/12-retry-failed-again.png) | 手动"重试当前回合"：生成第 2 个版本，标为"生成失败 · 重试 · 当前版本（未完成）"，仍因同一输出上限失败；"‹ 版本 2/2"可切换查看两次失败的部分输出，均未被覆盖。 |
+| [11-truncated.png](r12-screens/11-truncated.png) | 单次输出上限设为 3 后开始：每条回复写到上限都被保留，并标注"已达单次输出上限，内容可能不完整。"；运行没有失败，依次轮到下一位，直到页头显示"已完成"。每条下方提供"续写"。（D102） |
+| [12-continued.png](r12-screens/12-continued.png) | 运行结束后点第一条的"续写"：生成"续写 · 当前有效 · 版本 2/2"，从原来的文字接着写（这里仍受上限 3 限制，所以再次标注截断）；原版本保留为版本 1，后续发言被标为受影响。 |
 | [13-stopped-partial.png](r12-screens/13-stopped-partial.png) | 生成中点"停止"：状态"已停止"，已输出的部分文字保留并标为"已中止"。 |
 | [14-retry-succeeded.png](r12-screens/14-retry-succeeded.png) | "重试当前回合"后新请求成功并继续完成运行；第一条显示"重试 · 当前有效 · 版本 2/2"，被停止的部分输出作为版本 1 保留。 |
 
@@ -32,6 +34,7 @@
 - The streaming Turn finished normally; the named member has not started yet
 - The header status names the next speaker and that the host chose them
 - Enter during IME composition did not send the interjection
+- The composition is still open after the IME Enter
 - Shift+Enter kept a line break and the IME text intact: "请先评估成本风险\n再列出三个最关键的问题"
 - Clicking 修改 moves keyboard focus into the instruction editor
 - Saving an unchanged instruction is not offered
@@ -44,10 +47,12 @@
 - Clicking 修改 moves keyboard focus into the message editor
 - Regeneration added a version without changing the completed Run
 - Regeneration used the revised opening and the earlier interjection, but not the later 审查者 message
-- The first Turn failed (output limit reached)
-- No automatic retry happened after the failure
-- The failed message keeps its partial text and is labelled as failed
-- Retry used a new requestId
+- Every Turn completed and the Run went on to the next member
+- Each reply was kept as complete-but-truncated, none failed
+- The timeline marks truncation and never says the Run failed
+- The continuation is the new effective version; the original stays as version 1
+- The continuation starts from the kept text; the Run status is unchanged
+- Stop landed in the first turn within three Runs
 - The stopped attempt stays as version 1; the retry is the effective version 2
 - Partial text of the stopped attempt kept as aborted
 
@@ -64,5 +69,5 @@
 
 ## 未覆盖
 
-- 真实模型实测：未验证（按总控安排，合并前由总控和用户一起完成）。
+- 真实模型实测：2026-10-22/23 由总控和用户用 DeepSeek（`deepseek-flash`）完成，覆盖点名、插话、持续指令、修改与重新生成；记录见 STATUS 顶部"当前状态"。
 - 只在 macOS arm64、1440×900 窗口验证；窄窗口布局属于 R16。
