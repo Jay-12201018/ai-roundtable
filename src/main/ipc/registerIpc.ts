@@ -8,13 +8,17 @@ import { runEventSchema } from '../../shared/schemas/run';
 import type { RoomManagementApiContract, ProviderSettingsApiContract } from '../../shared/contracts/configuration';
 import type { RunService } from '../services/RunService';
 import type { HostApiContract } from '../../shared/contracts/app';
+import type { UsageExportResult, UsageReport } from '../../shared/schemas/usage';
+
+/** R13B: the usage report and the CSV export; the export writes only the file the user picks in Main's dialog. */
+export type UsageIpcService = { getReport(): UsageReport; exportCsv(window: BrowserWindow): Promise<UsageExportResult> };
 import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
 
 export type IpcDisposer = (() => void) & { drain(): Promise<void> };
 let currentDisposer: IpcDisposer | undefined;
 
-export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract }): IpcDisposer {
-  const { run: service, rooms, settings, host } = services;
+export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract; usage: UsageIpcService }): IpcDisposer {
+  const { run: service, rooms, settings, host, usage } = services;
   currentDisposer?.();
   let disposed = false;
   let unsubscribe: (() => void) | undefined;
@@ -48,6 +52,14 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'run.continueMessage': ({ runId, messageId }) => service.continueMessage(runId, messageId),
     'run.recoverInterruptedRun': ({ runId, decision }) => service.recoverInterruptedRun(runId, decision),
     'host.command': (input) => host.command(input),
+    'run.addBudget': (input) => service.addBudget(input),
+    'run.resumeAfterBudget': (runId) => service.resumeAfterBudget(runId),
+    'usage.getReport': () => usage.getReport(),
+    'usage.writeOff': (input) => service.writeOffCharge(input),
+    'usage.exportCsv': () => usage.exportCsv(window),
+    'summary.preview': (input) => service.previewSummary(input),
+    'summary.generate': (input) => service.generateSummary(input),
+    'summary.confirm': (input) => service.confirmSummary(input),
     'rooms.createRoom': (input) => rooms.createRoom(input),
     'rooms.updateRoom': (input) => rooms.updateRoom(input),
     'rooms.getRoomConfiguration': (input) => rooms.getRoomConfiguration(input),
@@ -94,7 +106,8 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         ensureSender(event);
         return response;
       })();
-      if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command') {
+      if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.addBudget'
+        || channel === 'usage.writeOff' || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
       }

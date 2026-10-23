@@ -130,7 +130,8 @@ describe('application lifecycle', () => {
     expect(ControlledTrialService).toHaveBeenCalledExactlyOnceWith(fixture.database, registry, fixture.confirmTrial, expect.any(Function));
     expect(fixture.database.recoverControlledTrials).toHaveBeenCalledOnce();
     expect(fixture.installTrialMenu).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.trial, expect.any(Function));
-    expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host });
+    expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) } });
   });
 
   it('clears key-like model IDs after initialization and before any window or IPC, logging only the count', async () => {
@@ -247,7 +248,8 @@ describe('application lifecycle', () => {
     emit('activate');
 
     expect(fixture.unregister[0]).toHaveBeenCalledTimes(1);
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host });
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) } });
     expect(fixture.windows[1]?.destroyed).toBe(false);
   });
 
@@ -551,7 +553,8 @@ describe('application lifecycle', () => {
     fixture.windows[0]!.close();
     emit('second-instance');
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host });
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) } });
     expect(fixture.windows.filter((window) => !window.destroyed)).toHaveLength(1);
   });
 });

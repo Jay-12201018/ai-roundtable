@@ -21,6 +21,9 @@ export { ControlledTrialService };
 export { deepSeekTrialReview } from './providers/controlledTrial/estimate';
 import { confirmTrial, installTrialMenu } from './providers/controlledTrial/menu';
 import { ContractError } from '../shared/contracts/errors';
+import { UsageService } from './usage/UsageService';
+// D106: replaceable only by a probe that names itself as a fixture clock before Main starts.
+export { settlementClock } from './usage/pricing';
 
 let database: Database | undefined;
 let window: BrowserWindow | undefined;
@@ -30,6 +33,7 @@ let roomService: RoomService | undefined;
 let settingsService: ProviderSettingsService | undefined;
 let runService: RunService | undefined;
 let hostService: HostService | undefined;
+let usageService: UsageService | undefined;
 let controlledTrial: ControlledTrialService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
@@ -70,9 +74,12 @@ if (!hasLock) {
       // R13A: the reviewed DeepSeek direct policy is the only approved real-model policy (D089).
       const providers = new ProviderRegistry(database, keyService, { proxy: readLoopbackProxy(process.env), policyResolver: deepSeekModelPolicy });
       settingsService = new ProviderSettingsService(database, keyService, providers);
-      runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }), createPublicMessagesBuilder((modelId, member) =>
-        member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined), providers,
-      () => { if (controlledTrial?.isBusy()) throw new ContractError('invalid_state'); });
+      const modelBudget = (modelId: string | null, member: { providerId: string | null }) =>
+        member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined;
+      runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }), createPublicMessagesBuilder(modelBudget), providers,
+        () => { if (controlledTrial?.isBusy()) throw new ContractError('invalid_state'); },
+        member => { try { return modelBudget(member.modelId, member); } catch { return undefined; } });
+      usageService = new UsageService(database);
       hostService = new HostService(database, runService);
       controlledTrial = new ControlledTrialService(database, providers, confirmTrial, () => runService?.hasActiveRuns() ?? true);
       installTrialMenu(database, controlledTrial, () => runService?.hasActiveRuns() ?? true);
@@ -94,11 +101,18 @@ if (!hasLock) {
 function createAppWindow(): void {
   if (shutdownRequested) return;
   try {
-    if (!runService || !roomService || !settingsService || !hostService) throw new Error('Run service is not initialized');
+    if (!runService || !roomService || !settingsService || !hostService || !usageService) throw new Error('Run service is not initialized');
+    const usage = usageService;
     disposeCurrentIpc();
     const createdWindow = createMainWindow();
     window = createdWindow;
-    const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService, host: hostService });
+    const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService, host: hostService, usage: {
+      getReport: () => usage.getReport(),
+      exportCsv: owner => usage.exportCsv(async defaultName => {
+        const result = await dialog.showSaveDialog(owner, { title: '导出用量明细', defaultPath: join(app.getPath('documents'), defaultName), filters: [{ name: 'CSV', extensions: ['csv'] }] });
+        return result.canceled || !result.filePath ? undefined : result.filePath;
+      }),
+    } });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
       if (shutdownRequested || (!runService?.hasActiveRuns() && !controlledTrial?.isBusy())) return;
