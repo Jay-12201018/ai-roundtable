@@ -35,6 +35,8 @@ export function useLedgerCommands(api: Pick<RoundtableApiContract, 'run' | 'usag
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { setError(undefined); setNotice(undefined); }, [runId]);
+  // A confirmation is read once; it should not linger beside the budget long after the action.
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => { if (alive.current) setNotice(undefined); }, 8000); return () => clearTimeout(timer); }, [notice]);
   const run = useCallback(async <T,>(key: string, work: (clientRequestId: string) => Promise<T>, success: (result: T) => string): Promise<T | undefined> => {
     if (!api || inFlight.current) return;
     inFlight.current = true; setPending(key); setError(undefined); setNotice(undefined);

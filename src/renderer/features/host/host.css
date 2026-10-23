@@ -25,8 +25,8 @@
 /* R13B (D107): numbering, summaries and the summary panel. */
 .slot-number { display: inline-block; min-width: 32px; margin-right: 8px; color: var(--secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
 .host-slot.is-summarized > p { color: var(--secondary); }
-.summary-slot { position: relative; padding-left: 16px; border-left: 3px solid var(--control); }
-.summary-slot.is-used { border-left-color: var(--accent); }
+.message.summary-slot { position: relative; padding-left: 16px; border-left: 3px solid var(--control); }
+.message.summary-slot.is-used { border-left-color: var(--accent); }
 .summary-slot > strong { color: var(--accent); }
 .summary-state.is-used { border-color: var(--accent); color: var(--accent); }
 .summary-state.is-pending { border-color: var(--warning); color: var(--warning); }

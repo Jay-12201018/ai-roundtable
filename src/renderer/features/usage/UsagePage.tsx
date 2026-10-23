@@ -15,7 +15,7 @@ function BucketCells({ bucket }: { bucket: UsageBucket }) {
     <td>{bucket.requests}</td>
     <td>{bucket.settled.inputTokens.toLocaleString('zh-CN')}{bucket.settled.cacheHitTokens ? <small>（缓存命中 {bucket.settled.cacheHitTokens.toLocaleString('zh-CN')}）</small> : null}</td>
     <td>{bucket.settled.outputTokens.toLocaleString('zh-CN')}</td>
-    <td>{formatYuan(bucket.settled.amountMicro)}{bucket.settled.offPeakCount ? <small>（空闲价 {bucket.settled.offPeakCount} 次）</small> : null}</td>
+    <td>{bucket.settled.count ? <>{formatYuan(bucket.settled.amountMicro)}{bucket.settled.offPeakCount ? <small>（空闲价 {bucket.settled.offPeakCount} 次）</small> : null}</> : '—'}</td>
     <td className={bucket.unknown.count ? 'is-unknown' : undefined}>{bucket.unknown.count ? `${formatYuan(bucket.unknown.amountMicro)}（${bucket.unknown.count} 次）` : '—'}</td>
     <td>{bucket.writtenOff.count ? `${formatYuan(bucket.writtenOff.amountMicro)}（${bucket.writtenOff.count} 次）` : '—'}</td>
     <td className="usage-total">{formatYuan(bucket.totalMicro)}</td>
@@ -92,7 +92,7 @@ export function UsagePage({ api, onOpenRun }: { api: Pick<RoundtableApiContract,
       <section className="usage-unknown" aria-label="未知费用">
         <h2>未知费用</h2>
         {report.unknownCharges.length === 0 ? <p className="usage-note">没有未知费用。</p> : <>
-          <p className="usage-note">这些请求已经发出，但没有拿到服务商的用量（例如中途停止或断网），所以按预留上限计入。到服务商控制台核对后，可以录入实际金额。</p>
+          <p className="usage-note">这些请求已经发出，但没有拿到服务商的用量（例如中途停止或断网），所以按预留上限计入。到服务商控制台核对后，可以录入实际金额；已核销的也留在这里，方便更正。</p>
           <ul>{report.unknownCharges.map(row => {
             const writeOff = row.writeOffs.at(-1);
             return <li key={row.requestId}>

@@ -71,10 +71,10 @@ export function WriteOffForm({ charge, runId, ledger, onDone }: { charge: Reques
   return <form className="writeoff-form" aria-label="核销这笔未知费用" onSubmit={event => { event.preventDefault(); void save(); }}>
     <p>到服务商控制台的用量明细里找到这次请求，把实际扣费填在这里。原来的“未知”记录会保留，之后也可以再次更正。</p>
     <label htmlFor={`${id}-amount`}>实际金额（元）</label>
-    <input id={`${id}-amount`} inputMode="decimal" value={amount} placeholder="例如 0.0012，没有扣费填 0" aria-invalid={amountError} onChange={event => setAmount(event.target.value)} />
+    <input id={`${id}-amount`} aria-label="实际金额（元）" inputMode="decimal" value={amount} placeholder="例如 0.0012，没有扣费填 0" aria-invalid={amountError} onChange={event => setAmount(event.target.value)} />
     {amountError && <p className="writeoff-error" role="alert">请输入 0 到 {formatYuan(charge.reservedMicro, 6).slice(1)} 之间的金额（不能超过这次请求的预留上限），最多 6 位小数。</p>}
     <label htmlFor={`${id}-basis`}>依据说明</label>
-    <input id={`${id}-basis`} value={basis} maxLength={200} placeholder="例如：DeepSeek 控制台 10/23 用量明细" aria-invalid={basisError} onChange={event => setBasis(event.target.value)} />
+    <input id={`${id}-basis`} aria-label="依据说明" value={basis} maxLength={200} placeholder="例如：DeepSeek 控制台 10/23 用量明细" aria-invalid={basisError} onChange={event => setBasis(event.target.value)} />
     {basisError && <p className="writeoff-error" role="alert">依据说明最多 200 字；看起来像 API Key 的内容不会被保存，请删掉。</p>}
     <label className="writeoff-check"><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} />我已在服务商控制台核对过这次请求的实际扣费</label>
     <div className="writeoff-actions">
