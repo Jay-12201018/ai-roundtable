@@ -96,7 +96,10 @@ const sleep = ms => new Promise(done => setTimeout(done, ms));
 
 async function main() {
   await new Promise(done => fixture.listen(0, '127.0.0.1', done)); port = fixture.address().port;
-  const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
+  const { ProviderRegistry: Registry, settlementClock } = await import(pathToFileURL(entry).href);
+  // R13B settles by the time of day (D106); these R13A checks are about the peak cache-miss price, so the fixture
+  // clock is pinned to a Beijing weekday peak instant (Friday 2026-10-23 10:00).
+  settlementClock.now = () => new Date('2026-10-23T02:00:00.000Z');
   assert.equal(typeof Registry, 'function');
   // Policy, quoting, reservation and settlement stay production code; only the official DeepSeek target is redirected.
   const transport = Registry.prototype.createTransport;
