@@ -377,3 +377,22 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Renderer（D102/D103） | 时间线截断标注与「续写」；输入区"更多设置"中的单次输出上限；启动被拒时按字段给出中文原因 | — |
 
 安全影响：防注入边界从"JSON 字段 + 角色"变为"应用标签 + 全行引用"，可信指令仍只在 system 段；Key 不再可能以模型 ID 的形式进入请求、Renderer 或日志；会话目标确认机制与失效规则不变。
+
+## R13B 追加预算、核销、按时段结算、摘要与用量（2026-10-23，子会话候选，未合 main）
+
+分支 `codex/r13b-usage-summary`（基线 `03de217`）。决策见 [DECISIONS](DECISIONS.md) D104–D108。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Database / migration 9 | 新表（全部只追加、禁改禁删）：`run_budget_topups`（插入触发器保证总上限 ≤ ¥1000）、`charge_writeoffs`（只能针对 CNY unknown 账本，金额 ≤ 预留）、`charge_pricing`（只能针对 settled 账本，金额须等于"命中×命中价 + 未命中×未命中价 + 输出×输出价"向上取整，且 ≤ `accounted_micro`）、`context_summaries`、`summary_requests`（只能 generating → completed/failed/aborted/interrupted 一次）、`summary_confirmations`、`summary_charges`（逐条照搬 `request_charges` 约束）。`validateDatabase` 对 v9 校验表、23 个触发器与身份一致性；启动恢复把 generating 摘要请求改 interrupted、`summary_charges` 的 reserved 改 unknown | migration 1–8 未改；当前 schema 版本 8→9，相关测试断言同步 +1。R13A 已结算记录不回填计价，仍按高峰价 |
+| Database 方法 | `reserveCharge/settleCharge` 支持 `kind: 'summary'` 与可选 `pricing`；`getCharge/listCharges` 合并两张账本并附 `settlement`、`writeOffs`、`kind`；`getRunBudget` 增加 `initialLimitMicro`、`topUps`、`writtenOffMicro`，`limitMicro` 改为含追加的总上限；新增 `addBudgetTopUp`、`writeOffCharge`、`listLedger`、`listLedgerLabels`、摘要相关读写；`readRunSnapshot` 增加 `summaries` | 返回结构只增字段 |
+| Shared `schemas/budget.ts` | `requestChargeSchema` 增加可选 `kind`、`settlement`、`writeOffs`，`chargedMicro` = `effectiveChargeMicro()`（settled 取实际计价、unknown 取最新核销或预留）；`settlementAmountMicro()`；`runBudgetSchema` 增加可选字段；`addRunBudgetInput/ResultSchema`（结果含可选 `resumeError`）、`writeOffChargeInput/ResultSchema`、`writeOffBasisSchema`、`containsApiKeyLike` | 只增可选字段；旧数据（无计价、无核销）结果与 R13A 相同 |
+| Shared `schemas/summary.ts`、`schemas/usage.ts`（新） | 摘要预览/生成/确认的输入输出、`contextSummarySchema`、`contextPressureSchema`、`summaryLabel()`；用量报表 `usageReportSchema`（按运行/模型/日期 + 未知费用列表）、`usageExportResultSchema` | 新文件 |
+| Shared `schemas/run.ts`、`host.ts`、`provider.ts`、`error.ts` | 快照增加可选 `summaries`、`contextPressure`；`charges` 中 `kind: 'summary'` 的条目须对应快照内的摘要请求；新增 run 级事件 `budget_updated`、`summary_updated`、`summary_delta`；`messageVersion.author` 增加 `summary`；usage 块增加可选 `cacheHitInputTokens`（≤ inputTokens）；`ErrorField` 增加 `amountMicroCny`、`basis`、`requestId`、`acknowledgedUncertainty`、`throughSlotId`、`summaryId` | 只增可选字段/枚举/事件；旧 Renderer 遇未知事件按既有规则重同步 |
+| IPC / Preload | 新通道：`run.addBudget`、`run.resumeAfterBudget`、`usage.getReport`、`usage.writeOff`、`usage.exportCsv`、`summary.preview`、`summary.generate`、`summary.confirm`；输出校验与请求 runId（核销另校验 requestId）一致；写入类通道计入关窗前待完成写入。Bridge 键集合变为 host/room/rooms/run/settings/summary/usage，仍无通用 invoke/send | 新增通道 |
+| Main 装配 | `RunService` 构造参数增加 `modelBudget(member)`（摘要计数与上下文占用）；`UsageService`；`registerIpc` 服务参数增加 `usage`；CSV 由 Main 的系统保存对话框选择路径；`main/index` 导出 `settlementClock`（仅供命名清楚的夹具探针替换） | — |
+| Provider | OpenAI 兼容适配器解析 `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`（和等于 prompt_tokens 时才给出命中数）；DeepSeek 策略带 `periodPricing`（空闲/高峰 × 命中/未命中/输出单价、北京时间窗口），`validPrice` 要求结算单价不高于预留单价；`RequestQuote.periodPricing` | 只增可选字段 |
+| R05 context（Main 私有） | `ContextInput.summary?`（已确认摘要与被覆盖的全部消息 ID）；被覆盖的历史以 `summarized` 排除；摘要作为必需上下文放在任务之后，来源 kind `summary`；`measureContext()` 按真实组装方式测量下一次请求 | 无摘要时与 R13A 相同 |
+| Renderer | 时间线编号、摘要消息、摘要面板、上下文提示；预算栏追加与历史、预算停止处"追加并继续"；花费行"按高峰价/按空闲价"、就地核销；新"用量"页；store 就地应用 `summary_delta` | — |
+
+安全影响：所有新写入只来自 typed IPC 和主持人点击，每次带 clientRequestId 幂等；模型文本不能触发追加、核销、确认或生成。摘要请求复用成员冻结的 Provider/模型、既有生成门禁、预留与结算；不自动生成、不自动重发。核销依据拒绝类密钥文本；CSV 由 Main 写入用户选择的文件，Renderer 无文件系统能力；导出单元格做公式中和。
