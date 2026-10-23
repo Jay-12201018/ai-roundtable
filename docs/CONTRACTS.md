@@ -358,7 +358,7 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 
 ## 合并前质量修复（2026-10-23，子会话候选，未合 main）
 
-分支 `codex/r13a-premerge-quality`（基线 `b3e3324`）。总控授权本子会话直接修改共享文件；共享与接线改动以 `contract:` / `wire:` 提交。决策见 [DECISIONS](DECISIONS.md) D095–D101。
+分支 `codex/r13a-premerge-quality`（基线 `b3e3324`）。总控授权本子会话直接修改共享文件；共享与接线改动以 `contract:` / `wire:` 提交。决策见 [DECISIONS](DECISIONS.md) D095–D103。
 
 | 层 | 变化 | 兼容性 |
 | --- | --- | --- |
@@ -370,5 +370,10 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Database | 读取 Provider / 成员时隐藏类密钥模型 ID 并打标；`validateModelSelection` 用 `modelIdSchema`；新增 `purgeKeyLikeModelIds()`，Main 启动时（初始化后、窗口与 IPC 之前）在一个事务里清除三处类密钥模型 ID，有清除时 `secure_delete` + `VACUUM` + `wal_checkpoint(TRUNCATE)`，只记录数量（D100） | 无 migration、不改表结构；会改写存量数据（清除疑似 Key） |
 | ProviderRegistry / ProviderSettingsService | `isTargetConfirmed(id)`；`getProviderKeyState` 在有注册表时附带 `sessionTargetConfirmed` | IPC 通道不变 |
 | Renderer | 设置页接入进度、Key 输入框就近原因与一键操作、模型 ID 示例与类密钥提示；成员编辑器同样提示；App 输入区固定在窗口底部，运行时"开始协作"原地变为 暂停/继续 · 下一步 · 停止（停止在末尾并轻量确认），右侧面板去掉重复的运行按钮；`HostTimeline` 新增可选 `providers`（名称表与读取状态），身份行显示 Provider 名称而非 ID（D101）；开始前可选逐回合推进（`run.start` 已有的 `mode: 'step'`，未新增字段）；`rendererSession.startRun` 的 limits 增加可选 `mode` | — |
+
+| migration 8 / Database（D102） | `request_attempts.finish_reason`（NULL / stop / length，写入后不可改，触发器 `request_attempt_finish_once`）；`updateAttempt` 接受 `finishReason`；`validateDatabase` 对 v8 校验列、触发器以及"只出现在已完成请求上"；`insertRun` 缺省输出上限 4096 | migration 1–7 未改；当前 schema 版本 7→8，相关测试断言同步 +1 |
+| Shared（D102/D103） | Attempt 记录与快照投影增加可选 `finishReason`；`regenerateMessage` 命令增加可选 `mode: 'continue'`；`DEFAULT_OUTPUT_TOKEN_LIMIT = 4096` | 只增可选字段 |
+| RunService / HostService（D102/D103） | `finish=length` 按截断完成结算并继续调度，content_filter 仍失败；`regenerateMessage(runId, messageId, actionId, mode?)` 的续写版本作业；启动时核对成员模型策略的 `maxOutputTokens` | 公开命令不变（仍是 `host.command` / `run.start`） |
+| Renderer（D102/D103） | 时间线截断标注与「续写」；输入区"更多设置"中的单次输出上限；启动被拒时按字段给出中文原因 | — |
 
 安全影响：防注入边界从"JSON 字段 + 角色"变为"应用标签 + 全行引用"，可信指令仍只在 system 段；Key 不再可能以模型 ID 的形式进入请求、Renderer 或日志；会话目标确认机制与失效规则不变。
