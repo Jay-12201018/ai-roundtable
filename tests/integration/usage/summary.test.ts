@@ -4,7 +4,7 @@ import { closeFixtures, hostFixture, publicHistory, startFree, ScriptedProvider 
 import { RunService } from '../../../src/main/services/RunService';
 import { HostService } from '../../../src/main/host/HostService';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
-import { mockModelBudget } from '../../../src/main/providers/mock/tokenBudget';
+import { countMockInputTokens, mockModelBudget } from '../../../src/main/providers/mock/tokenBudget';
 import { runSnapshotSchema } from '../../../src/shared/schemas/run';
 
 afterEach(closeFixtures);
@@ -68,7 +68,13 @@ describe('conversation summaries (D107)', () => {
     let summaryVersion = f.run.getSnapshot(runId).versions!.find(version => version.messageId === result.messageId)!;
     expect(summaryVersion.affectedBy).toEqual([covered]);
     await f.run.step(runId);
-    expect(publicHistory(lastInput(f))[0]).toMatchObject({ speaker: '讨论摘要', basedOnRevisedHistory: true });
+    // D109: the host's revision reaches the model right after the summary; unchanged covered messages stay replaced.
+    const entries = publicHistory(lastInput(f));
+    expect(entries[0]).toMatchObject({ speaker: '讨论摘要', basedOnRevisedHistory: true });
+    expect(entries[1]).toMatchObject({ speaker: '成员 a', publicText: '主持人修改后的第一条', editedByHost: true, revisedAfterSummary: true });
+    expect(entries.filter(entry => entry.speaker !== '讨论摘要').map(entry => entry.publicText)).not.toEqual(expect.arrayContaining([expect.stringContaining('answer 1 ')]));
+    expect(JSON.stringify(lastInput(f).messages)).not.toContain('answer 0 ');
+    expect(f.run.getSnapshot(runId).summaries![0].revisedSlotIds).toEqual([f.run.getSnapshot(runId).turns[0].turnId]);
 
     await f.command({ runId, kind: 'editMessage', messageId: result.messageId!, content: '主持人改写的摘要：第一条已改为新内容。' });
     const snapshot = f.run.getSnapshot(runId);
@@ -79,6 +85,10 @@ describe('conversation summaries (D107)', () => {
     expect(summaryVersion.active).toBe(false);
     await f.run.step(runId);
     expect(publicHistory(lastInput(f))[0]).toMatchObject({ speaker: '讨论摘要', editedByHost: true, basedOnRevisedHistory: false, publicText: '主持人改写的摘要：第一条已改为新内容。' });
+    // Re-confirmed against the current originals: the revision is summarized now and no longer sent separately.
+    expect(publicHistory(lastInput(f)).some(entry => entry.revisedAfterSummary)).toBe(false);
+    expect(JSON.stringify(lastInput(f).messages)).not.toContain('主持人修改后的第一条');
+    expect(f.run.getSnapshot(runId).summaries![0].revisedSlotIds).toBeUndefined();
   });
 
   it('regenerates as a new version that must be confirmed again, and a later summary builds on a confirmed one', async () => {
@@ -164,6 +174,20 @@ describe('conversation summaries (D107)', () => {
     run.confirmSummary({ runId, clientRequestId: 'c', messageId: result.messageId! });
     expect(run.getSnapshot(runId).contextPressure).toMatchObject({ summarizedMessages: 4 });
     expect(run.getSnapshot(runId).contextPressure!.omittedMessages).toBeLessThan(pressure.omittedMessages);
+
+    // D109: a covered message the host revises is required context: it is sent even when that crowds out an older
+    // uncovered reply, and it is counted in the bound like everything else.
+    const first = run.getSnapshot(runId).turns[0].messageId!;
+    await host.command({ runId, clientRequestId: 'edit-first', kind: 'editMessage', messageId: first, content: `修订：${'改过的要点。'.repeat(1400)}` });
+    await run.step(runId);
+    const input = provider.inputs.at(-1)!;
+    const entries = publicHistory(input);
+    expect(entries[0]).toMatchObject({ speaker: '讨论摘要', basedOnRevisedHistory: true });
+    expect(entries[1]).toMatchObject({ revisedAfterSummary: true, editedByHost: true, publicText: expect.stringContaining('修订：') });
+    // The older uncovered reply gives way; the revision does not.
+    expect(entries.some(entry => entry.publicText.startsWith('第 5 条'))).toBe(false);
+    expect(entries.some(entry => entry.publicText.startsWith('第 6 条'))).toBe(true);
+    expect(countMockInputTokens(input.messages) + 512).toBeLessThanOrEqual(small.contextWindowTokens);
     await run.shutdown();
     vi.restoreAllMocks();
   });

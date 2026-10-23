@@ -47,13 +47,26 @@ export function SummarySlotView({ slot, snapshot, commands, summaries, ledger, o
   const summary = snapshot.summaries?.find(item => item.slotId === slot.slotId);
   const index = Math.max(0, slot.versions.findIndex(version => version.messageId === (viewing ?? slot.active.messageId)));
   const shown = slot.versions[index] ?? slot.active;
+  const writable = summaryWritable(snapshot);
+  const revisedNumbers = (timelineSlots(snapshot) ?? []).filter(item => summary?.revisedSlotIds?.includes(item.slotId)).map(item => item.number!);
+  const affected = shown.affectedBy.length > 0 && shown.active;
+  // D109: the cost of bringing an affected summary up to date is shown before the host opens the panel.
+  const [regenerateCost, setRegenerateCost] = useState<string>();
+  const { preview } = summaries;
+  useEffect(() => {
+    if (!affected || !writable || !summary) { setRegenerateCost(undefined); return; }
+    let current = true;
+    preview({ summaryId: summary.summaryId }).then(result => {
+      if (current) setRegenerateCost(result.cost.kind === 'priced' ? `预计最高 ${formatYuan(result.cost.maxMicro)}` : result.cost.kind === 'free' ? '内置 Mock，不产生费用' : undefined);
+    }).catch(() => { if (current) setRegenerateCost(undefined); });
+    return () => { current = false; };
+  }, [affected, writable, summary?.summaryId, snapshot.sequence, preview]);
   if (!summary) return null;
   const request = summary.requests.find(item => item.messageId === shown.messageId);
   const generating = summary.requests.some(item => item.status === 'generating');
   const confirmed = shown.origin === 'edit' || summary.confirmedMessageIds.includes(shown.messageId);
   const used = usedSummary(snapshot)?.summaryId === summary.summaryId && shown.active;
   const complete = shown.message.status === 'completed' && shown.message.content.trim().length > 0;
-  const writable = summaryWritable(snapshot);
   const disabled = !commands.available || commands.pending !== undefined || summaries.pending !== undefined;
   const range = `第 ${summary.firstNumber}–${summary.lastNumber} 条`;
   const author = snapshot.execution?.membersSnapshot?.find(member => member.agentId === summary.agentId)?.displayName;
@@ -70,7 +83,7 @@ export function SummarySlotView({ slot, snapshot, commands, summaries, ledger, o
     <div className="message-identity">{author ? `由${author}生成` : '生成成员未记录'}{shown.origin !== 'original' ? ` · ${originLabels[shown.origin]}` : ''} · 原文保留在上方，摘要只替代发给模型的内容</div>
     {shown.message.content ? <p>{shown.message.content}</p> : <p className="summary-placeholder">{request?.status === 'generating' ? '等待输出…' : '（没有生成内容）'}</p>}
     <MessageUsage charge={chargeOfMessage(snapshot, shown.messageId)} runId={snapshot.runId} ledger={ledger} />
-    {shown.affectedBy.length > 0 && <p className="host-affected" role="note">受影响：这份摘要生成后，它覆盖的原文被修改或重新生成，摘要可能已经过时。之后的发言仍会看到它，并被提示以后续发言为准；可以修改或重新生成摘要。</p>}
+    {shown.affectedBy.length > 0 && <p className="host-affected" role="note">受影响：这份摘要生成后，{revisedNumbers.length ? `第 ${revisedNumbers.join('、')} 条` : '它覆盖的发言'}被修改或重新生成。修改后的发言会照常发给之后的成员，紧跟在摘要后面，摘要里与之冲突的内容不再采用。建议重新生成摘要，把这些修改也整理进去。</p>}
     {complete && shown.active && !confirmed && <p className="summary-confirm-hint">请先读一遍：确认后，之后的发言会用这份摘要代替{range}原文（原文不会删除）；也可以修改后再用。</p>}
     <div className="host-version-actions" role="group" aria-label="讨论摘要的操作">
       {slot.versions.length > 1 && <>
@@ -81,7 +94,8 @@ export function SummarySlotView({ slot, snapshot, commands, summaries, ledger, o
       {complete && shown.active && !confirmed && <button type="button" className="primary" disabled={disabled} onClick={() => void summaries.confirm(shown.messageId)}>确认使用</button>}
       {!shown.active && complete && !generating && <button type="button" disabled={disabled} onClick={() => void commands.send(`select:${slot.slotId}`, { kind: 'selectVersion', messageId: shown.messageId }, '已切换当前有效版本。').then(ok => { if (ok) setViewing(undefined); })}>设为当前版本</button>}
       {draft === undefined && !generating && shown.message.status !== 'streaming' && <button type="button" disabled={disabled} onClick={() => setDraft(shown.message.content)}>修改</button>}
-      {!generating && <button type="button" disabled={disabled || !writable} title={writable ? undefined : '有请求正在进行，暂停或结束后可以重新生成'} onClick={() => onRegenerate(summary.summaryId)}>重新生成…</button>}
+      {!generating && <button type="button" className={affected ? 'primary' : undefined} disabled={disabled || !writable} title={writable ? undefined : '有请求正在进行，暂停或结束后可以重新生成'} onClick={() => onRegenerate(summary.summaryId)}>重新生成摘要…</button>}
+      {!generating && affected && regenerateCost && <span className="summary-cost-hint">{regenerateCost}</span>}
       {generating && <button type="button" disabled={disabled} onClick={() => void commands.send('abort', { kind: 'abortGeneration' }, '已中止生成，已输出的部分保留。')}>中止生成</button>}
     </div>
     {summaries.error?.key === `confirm:${shown.messageId}` && <p role="alert" className="error">{summaries.error.message}</p>}

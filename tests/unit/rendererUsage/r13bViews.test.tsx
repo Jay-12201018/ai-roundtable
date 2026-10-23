@@ -48,7 +48,7 @@ describe('settlement and write-off display (D105/D106)', () => {
 
   it('shows a written-off amount next to the cap and the difference', () => {
     render(<MessageUsage charge={unknown({ chargedMicro: 1200, writeOffs: [{ writeOffId: 'w', amountMicro: 1200, basis: '控制台明细', createdAt: time }] })} runId="run" ledger={ledger()} />);
-    expect(document.body.textContent).toContain('已核销 ¥0.001200（原按上限计 ¥0.003448，少计 ¥0.002248）· 依据：控制台明细');
+    expect(document.body.textContent).toContain('已核销 ¥0.001200（原按上限计 ¥0.003448，比原上限少 ¥0.002248） · 依据：控制台明细');
     expect(screen.getByRole('button', { name: '更正核销' })).toBeTruthy();
   });
 

@@ -37,7 +37,9 @@ export const contextInputSchema = z.object({
   // R13B (D107): a host-confirmed summary that stands in for every version of the slots it covers.
   summary: z.object({
     messageId: idSchema, content: z.string().min(1), firstNumber: z.number().int().min(1), lastNumber: z.number().int().min(1),
-    coveredMessageIds: z.array(idSchema).min(1).max(65536), editedByHost: z.boolean(), affected: z.boolean(),
+    coveredMessageIds: z.array(idSchema).max(65536), editedByHost: z.boolean(), affected: z.boolean(),
+    // D109: covered messages revised after the summary; they are sent themselves, as required context, with a note.
+    revisedMessageIds: z.array(idSchema).max(4096).optional(),
   }).strict().optional(),
 }).strict();
 export type ContextInput = z.infer<typeof contextInputSchema>;

@@ -40,7 +40,8 @@ export function HostTimeline({ snapshot, commands, providers, ledger, summaries,
   const used = usedSummary(snapshot);
   return <>{slots.map(slot => slot.author === 'summary'
     ? summaries && <SummarySlotView key={slot.slotId} slot={slot} snapshot={snapshot!} commands={commands} summaries={summaries} ledger={ledger} onRegenerate={onRegenerateSummary ?? (() => {})} />
-    : <SlotView key={slot.slotId} slot={slot} snapshot={snapshot!} commands={commands} providers={providers} ledger={ledger} coveredBy={used?.coveredSlotIds.includes(slot.slotId) ? used : undefined} />)}</>;
+    : <SlotView key={slot.slotId} slot={slot} snapshot={snapshot!} commands={commands} providers={providers} ledger={ledger} coveredBy={used?.coveredSlotIds.includes(slot.slotId) ? used : undefined}
+      revisedAfterSummary={used?.revisedSlotIds?.includes(slot.slotId) ?? false} />)}</>;
 }
 
 /** Names the upstream messages a version was based on, e.g. 「起草者」「主持人」的发言. */
@@ -54,8 +55,8 @@ function upstream(snapshot: RunSnapshot, messageIds: string[]): string {
   return [...new Set(names)].map(name => `「${name}」`).join('') + '的发言';
 }
 
-function SlotView({ slot, snapshot, commands, providers, ledger, coveredBy }: { slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames;
-  ledger?: LedgerCommands; coveredBy?: { firstNumber: number; lastNumber: number } }) {
+function SlotView({ slot, snapshot, commands, providers, ledger, coveredBy, revisedAfterSummary }: { slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames;
+  ledger?: LedgerCommands; coveredBy?: { firstNumber: number; lastNumber: number }; revisedAfterSummary?: boolean }) {
   const [viewing, setViewing] = useState<string>();
   const [draft, setDraft] = useState<string>();
   const index = Math.max(0, slot.versions.findIndex(version => version.messageId === (viewing ?? slot.active.messageId)));
@@ -80,10 +81,13 @@ function SlotView({ slot, snapshot, commands, providers, ledger, coveredBy }: { 
     if (draft === undefined || !draft.trim() || draft === shown.message.content) return;
     if (await commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content: draft }, '已保存为新版本。')) { setDraft(undefined); setViewing(undefined); }
   };
-  return <article className={`message host-slot${slot.author === 'host' ? ' is-host' : ''}${coveredBy ? ' is-summarized' : ''}`} data-slot={slot.slotId}>
+  // D109: a covered message revised after the summary is sent itself, so it is not shown as replaced.
+  const replaced = coveredBy && !revisedAfterSummary;
+  return <article className={`message host-slot${slot.author === 'host' ? ' is-host' : ''}${replaced ? ' is-summarized' : ''}`} data-slot={slot.slotId}>
     {slot.number !== undefined && <span className="slot-number" aria-label={`第 ${slot.number} 条`}>#{slot.number}</span>}
     <strong>{name}</strong>
-    {coveredBy && <span className="host-badge" title="原文保留；之后的请求用已确认的讨论摘要代替它">已由摘要代替（第 {coveredBy.firstNumber}–{coveredBy.lastNumber} 条）</span>}
+    {replaced && <span className="host-badge" title="原文保留；之后的请求用已确认的讨论摘要代替它">已由摘要代替（第 {coveredBy.firstNumber}–{coveredBy.lastNumber} 条）</span>}
+    {coveredBy && revisedAfterSummary && <span className="host-badge is-revised" title="摘要生成后修改过，所以这条会照常发给之后的成员，紧跟在摘要后面">摘要后已修改 · 照常发给后续成员</span>}
     {turn?.overrideActionId && <span className="host-badge">主持人点名</span>}
     {slot.author === 'host' && <span className="host-badge">主持人插话</span>}
     {slot.author === 'agent' && <div className="message-identity">{line}</div>}

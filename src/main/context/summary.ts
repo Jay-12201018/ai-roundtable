@@ -27,7 +27,30 @@ export function publicSlots(snapshot: Pick<Snapshot, 'messages' | 'versions' | '
 }
 
 export type ActiveSummary = { record: SummaryRecord; message: MessageRecord; version: VersionRecord; firstNumber: number; lastNumber: number;
-  coveredSlotIds: Set<string>; coveredMessageIds: string[]; editedByHost: boolean; affected: boolean; position: number };
+  coveredSlotIds: Set<string>; coveredMessageIds: string[]; editedByHost: boolean; affected: boolean; position: number;
+  /** D109: covered messages whose effective version is not one the summary stands for (revised after it was written). */
+  revisedSlotIds: string[]; revisedMessageIds: string[] };
+
+/**
+ * D109: the versions a summary version stands for, following the earlier summary it builds on. A covered slot whose
+ * effective, completed version is not among them was edited or regenerated after the summary was written; later
+ * requests must see that revision itself, not only a summary that predates it.
+ */
+export function revisedCoveredSlots(snapshot: Pick<Snapshot, 'messages' | 'versions' | 'turns'>, covered: readonly string[], summaryMessageId: string): PublicSlot[] {
+  const byId = new Map(snapshot.versions.map(version => [version.messageId, version]));
+  const summarized = new Set<string>();
+  const visit = (messageId: string) => {
+    for (const id of byId.get(messageId)?.basis ?? []) {
+      if (summarized.has(id)) continue;
+      summarized.add(id);
+      // An earlier summary in the basis stands for its own basis too.
+      if (snapshot.messages.find(message => message.id === id)?.senderType === 'system') visit(id);
+    }
+  };
+  visit(summaryMessageId);
+  const coveredSet = new Set(covered);
+  return publicSlots(snapshot).filter(slot => coveredSet.has(slot.slotId) && slot.message.status === 'completed' && !summarized.has(slot.active.messageId));
+}
 
 /** The numbers a summary covers: always from message 1 through its last covered slot. */
 export function summaryRange(record: Pick<SummaryRecord, 'covered'>, slots: readonly PublicSlot[]): { firstNumber: number; lastNumber: number } | undefined {
@@ -58,8 +81,12 @@ export function activeSummary(snapshot: Pick<Snapshot, 'messages' | 'versions' |
   const range = summaryRange(chosen.record, slots);
   if (!range) return;
   const coveredSlotIds = new Set(chosen.record.covered);
+  const revised = revisedCoveredSlots(snapshot, chosen.record.covered, chosen.version!.messageId);
+  const revisedSlotIds = new Set(revised.map(slot => slot.slotId));
   return { record: chosen.record, message: chosen.message!, version: chosen.version!, ...range, coveredSlotIds,
-    coveredMessageIds: snapshot.versions.filter(version => coveredSlotIds.has(version.slotId)).map(version => version.messageId),
+    // A revised covered message is sent itself (D109); only the unchanged ones are replaced by the summary.
+    coveredMessageIds: snapshot.versions.filter(version => coveredSlotIds.has(version.slotId) && !revisedSlotIds.has(version.slotId)).map(version => version.messageId),
+    revisedSlotIds: [...revisedSlotIds], revisedMessageIds: revised.map(slot => slot.active.messageId),
     editedByHost: chosen.version!.origin === 'edit', affected: (affected.get(chosen.version!.messageId)?.length ?? 0) > 0, position: chosen.position };
 }
 
@@ -101,13 +128,14 @@ export function buildSummaryMessages(input: { task: string; members: readonly Me
   if (input.basedOn) entries.push({ speaker: 'summary', summary: { firstNumber: input.basedOn.firstNumber, lastNumber: input.basedOn.lastNumber },
     content: input.basedOn.message.content, editedByHost: input.basedOn.editedByHost, basedOnRevisedHistory: input.basedOn.affected });
   for (const slot of input.slots) {
-    if (slot.number > input.lastNumber || input.basedOn && slot.number <= input.basedOn.lastNumber) continue;
+    const revised = input.basedOn?.revisedSlotIds.includes(slot.slotId) ?? false;
+    if (slot.number > input.lastNumber || input.basedOn && slot.number <= input.basedOn.lastNumber && !revised) continue;
     if (slot.message.status !== 'completed' || !slot.message.content.trim()) continue;
     const truncated = input.snapshot.attempts.find(attempt => attempt.messageId === slot.message.id)?.finishReason === 'length';
     const member = slot.agentId ? input.members.find(item => item.agentId === slot.agentId) : undefined;
     if (slot.author === 'agent' && !member) continue;
     entries.push({ speaker: slot.author === 'host' ? 'host' : 'member', ...(member ? { member } : {}), content: slot.message.content,
-      editedByHost: slot.active.origin === 'edit', basedOnRevisedHistory: (affected.get(slot.message.id)?.length ?? 0) > 0, truncated });
+      editedByHost: slot.active.origin === 'edit', basedOnRevisedHistory: (affected.get(slot.message.id)?.length ?? 0) > 0, truncated, ...(revised ? { revisedAfterSummary: true } : {}) });
   }
   return [
     { role: 'system', content: boundaryText },

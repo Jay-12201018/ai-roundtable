@@ -24,7 +24,7 @@ import { addRunBudgetInputSchema, writeOffChargeInputSchema, type AddRunBudgetIn
 import { summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, type ContextPressure, type ContextSummary,
   type SummaryCommandResult, type SummaryConfirmInput, type SummaryGenerateInput, type SummaryPreview, type SummaryPreviewInput } from '../../shared/schemas/summary';
 import { settlementClock, settlementPricing } from '../usage/pricing';
-import { activeSummary, buildSummaryMessages, publicSlots, summaryBasis, summaryRange, type ActiveSummary, type PublicSlot } from '../context/summary';
+import { activeSummary, buildSummaryMessages, publicSlots, revisedCoveredSlots, summaryBasis, summaryRange, type ActiveSummary, type PublicSlot } from '../context/summary';
 import { measureContext, type ModelBudget } from '../context/wirePublicContext';
 import { countModelTokens } from '../context/buildPublicContext';
 import { mockModelBudget } from '../providers/mock/tokenBudget';
@@ -247,7 +247,10 @@ export class RunService {
     const slots = publicSlots(data);
     return data.summaries.map(record => {
       const range = summaryRange(record, slots) ?? { firstNumber: 1, lastNumber: record.covered.length };
+      const active = data.versions.find(version => version.slotId === record.id && version.active);
+      const revised = active ? revisedCoveredSlots(data, record.covered, active.messageId).map(slot => slot.slotId) : [];
       return { summaryId: record.id, slotId: record.id, agentId: record.agentId, coveredSlotIds: record.covered, ...range,
+        ...(revised.length ? { revisedSlotIds: revised } : {}),
         ...(record.basedOnSummaryId ? { basedOnSummaryId: record.basedOnSummaryId } : {}),
         requests: record.requests.map(request => ({ requestId: request.requestId, messageId: request.messageId, status: request.status,
           ...(request.finishReason ? { finishReason: request.finishReason } : {}), createdAt: request.createdAt })),

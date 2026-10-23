@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { RoundtableApiContract } from '../../../shared/contracts/app';
 import { formatYuan, type RequestCharge } from '../../../shared/schemas/budget';
 import type { UsageBucket, UsageReport, UsageUnknownRow } from '../../../shared/schemas/usage';
-import { WriteOffForm } from './UsageViews';
+import { WriteOffForm, writeOffSummary } from './UsageViews';
 import { useLedgerCommands } from './useLedgerCommands';
 import './usage.css';
 
@@ -98,7 +98,7 @@ export function UsagePage({ api, onOpenRun }: { api: Pick<RoundtableApiContract,
             return <li key={row.requestId}>
               <div className="usage-unknown-row">
                 <span><strong>{row.speaker}</strong>{row.kind === 'summary' ? '（讨论摘要）' : ''} · {row.task || row.roomName} · {row.providerName} {row.modelId} · {when(row.createdAt)}</span>
-                <span>{writeOff ? `已核销 ${formatYuan(writeOff.amountMicro, 6)}（原按上限计 ${formatYuan(row.reservedMicro, 6)}）· 依据：${writeOff.basis}` : `按上限计 ${formatYuan(row.reservedMicro, 6)}`}</span>
+                <span>{writeOff ? `已核销 ${writeOffSummary(writeOff.amountMicro, row.reservedMicro)} · 依据：${writeOff.basis}` : `按上限计 ${formatYuan(row.reservedMicro, 6)}`}</span>
                 {writing !== row.requestId && <button type="button" className="link-button" onClick={() => setWriting(row.requestId)}>{writeOff ? '更正核销' : '核销'}</button>}
               </div>
               {writing === row.requestId && <WriteOffForm charge={asCharge(row)} runId={row.runId} ledger={ledger} onDone={() => setWriting(undefined)} />}

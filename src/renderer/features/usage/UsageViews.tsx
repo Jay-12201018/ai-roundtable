@@ -11,6 +11,9 @@ export function chargeOfMessage(snapshot: RunSnapshot | undefined, messageId: st
   return requestId ? snapshot?.charges?.find(charge => charge.requestId === requestId) : undefined;
 }
 
+/** One wording for a write-off everywhere: the console amount, the cap it replaced and how much lower it is. */
+export const writeOffSummary = (amountMicro: number, capMicro: number) =>
+  `${formatYuan(amountMicro, 6)}（原按上限计 ${formatYuan(capMicro, 6)}，比原上限少 ${formatYuan(capMicro - amountMicro, 6)}）`;
 const clock = (iso: string) => new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 /** D106: how a settled amount was priced, in the words the provider console uses. */
 export function pricingLabel(charge: RequestCharge): string {
@@ -28,7 +31,7 @@ export function MessageUsage({ charge, runId, ledger }: { charge: RequestCharge 
   const writeOff = charge.writeOffs?.at(-1);
   const text = charge.state === 'settled' ? `${tokens} · 花费 ${formatYuan(charge.chargedMicro, 6)} · ${pricingLabel(charge)}`
     : charge.state === 'reserved' ? `生成中 · 已预留最高 ${formatYuan(charge.reservedMicro, 6)}`
-    : charge.state === 'unknown' && writeOff ? `已核销 ${formatYuan(writeOff.amountMicro, 6)}（原按上限计 ${formatYuan(charge.reservedMicro, 6)}，少计 ${formatYuan(charge.reservedMicro - writeOff.amountMicro, 6)}）· 依据：${writeOff.basis}`
+    : charge.state === 'unknown' && writeOff ? `已核销 ${writeOffSummary(writeOff.amountMicro, charge.reservedMicro)} · 依据：${writeOff.basis}`
     : charge.state === 'unknown' ? `费用未知（按上限计 ${formatYuan(charge.reservedMicro, 6)}）${tokens ? ` · 已观察 ${tokens}` : ' · 服务商未返回用量'}`
     : '请求未发出，未计费';
   const canWriteOff = charge.state === 'unknown' && charge.currency === 'CNY' && runId !== undefined && ledger !== undefined;

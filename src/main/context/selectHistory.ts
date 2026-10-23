@@ -46,6 +46,7 @@ export function selectHistory(input: ContextInput): { candidates: HistoryCandida
   const ordered = [...snapshot.messages.entries()].sort(([a, left], [b, right]) => position(left, a) - position(right, b) || a - b);
   const visible = new Set(input.visibleMessageIds);
   const summarized = new Set(input.summary?.coveredMessageIds ?? []);
+  const revisedAfterSummary = new Set(input.summary?.revisedMessageIds ?? []);
   const seen = new Map<string, string>();
   const candidates: HistoryCandidate[] = [];
   const decisions: HistoryDecision[] = [];
@@ -101,7 +102,7 @@ export function selectHistory(input: ContextInput): { candidates: HistoryCandida
     candidates.push({
       entry: { speaker, ...(source.agentId ? { member: members.get(source.agentId)! } : {}), content: message.content,
         editedByHost: version?.origin === 'edit', basedOnRevisedHistory: version?.affected ?? false,
-        truncated: attempts.get(message.id)?.finishReason === 'length' },
+        truncated: attempts.get(message.id)?.finishReason === 'length', ...(revisedAfterSummary.has(message.id) ? { revisedAfterSummary: true } : {}) },
       source, decision,
     });
   }

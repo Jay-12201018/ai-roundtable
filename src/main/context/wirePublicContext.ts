@@ -33,7 +33,8 @@ function contextFor({run,member,turnIndex,preparation:{snapshot,current,workflow
         ...(versions.length?{versions:versions.map(v=>({messageId:v.messageId,slotId:v.slotId,versionNumber:v.versionNumber,active:v.active,origin:v.origin,affected:(affected.get(v.messageId)?.length??0)>0}))}:{})},
       visibleMessageIds:visible,applicationInstructions:workflowStep?[{id:`workflow-${workflowStep.stageId}`,content:workflowStageInstruction(workflowStep.kind)}]:[],hostInstructions,contextWindowTokens:budget.contextWindowTokens,
       ...(summary?{summary:{messageId:summary.message.id,content:summary.message.content,firstNumber:summary.firstNumber,lastNumber:summary.lastNumber,
-        coveredMessageIds:summary.coveredMessageIds,editedByHost:summary.editedByHost,affected:summary.affected}}:{}),
+        coveredMessageIds:summary.coveredMessageIds,editedByHost:summary.editedByHost,affected:summary.affected,
+        ...(summary.revisedMessageIds.length?{revisedMessageIds:summary.revisedMessageIds}:{})}}:{}),
     },budget.counter);
 }
 

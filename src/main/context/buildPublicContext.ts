@@ -45,11 +45,15 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   const summary = input.summary;
   const summaryEntries: TranscriptEntry[] = summary ? [{ speaker: 'summary', summary: { firstNumber: summary.firstNumber, lastNumber: summary.lastNumber },
     content: summary.content, editedByHost: summary.editedByHost, basedOnRevisedHistory: summary.affected }] : [];
+  // D109: covered messages revised after the summary are required context right after it, like the summary itself.
+  const forced = history.candidates.filter(candidate => candidate.entry.revisedAfterSummary);
+  const optional = history.candidates.filter(candidate => !candidate.entry.revisedAfterSummary);
   // The task, quoted history and the turn cue are assembled into the exact final messages before every count.
   const assemble = (selected: readonly HistoryCandidate[]) => {
-    const discussion = assembleDiscussion(run.task!, [...summaryEntries, ...selected.map(candidate => candidate.entry)], member, prefix.length);
+    const discussion = assembleDiscussion(run.task!, [...summaryEntries, ...forced.map(candidate => candidate.entry), ...selected.map(candidate => candidate.entry)], member, prefix.length);
     return { ...discussion, messages: [...prefix.map(message => ({ ...message })), ...discussion.messages] };
   };
+  for (const candidate of forced) candidate.decision.reason = 'selected';
   const required = assemble([]);
   const messages = required.messages;
 
@@ -86,14 +90,14 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   // Every count is of the final assembled messages, so the bound holds for exactly what is sent.
   const selected: HistoryCandidate[] = [];
   let final = required;
-  for (let index = history.candidates.length - 1; index >= 0; index--) {
-    const candidate = history.candidates[index];
+  for (let index = optional.length - 1; index >= 0; index--) {
+    const candidate = optional[index];
     const next = assemble([candidate, ...selected]);
     const tokens = count(next.messages);
     // Adding a labelled entry always adds text, so a sound counter must strictly increase.
     if (tokens === undefined || tokens <= inputTokens) return reject('invalid_token_count');
     if (tokens > report.budget.inputBudgetTokens) {
-      for (let omitted = 0; omitted <= index; omitted++) history.candidates[omitted].decision.reason = 'input_budget';
+      for (let omitted = 0; omitted <= index; omitted++) optional[omitted].decision.reason = 'input_budget';
       break;
     }
     inputTokens = tokens;
@@ -102,7 +106,7 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
     candidate.decision.reason = 'selected';
   }
   const offset = summaryEntries.length;
-  const selectedHistory = selected.map((candidate, index) => ({ ...candidate.source, providerMessageIndex: final.indexes[index + offset] }));
+  const selectedHistory = [...forced, ...selected].map((candidate, index) => ({ ...candidate.source, providerMessageIndex: final.indexes[index + offset] }));
   sources.push({ kind: 'task', sourceId: run.id, runId: run.id, roomId: run.roomId, providerMessageIndex: final.taskIndex });
   if (summary) sources.push({ kind: 'summary', sourceId: summary.messageId, messageId: summary.messageId, runId: run.id, roomId: run.roomId, providerMessageIndex: final.indexes[0] });
   report.sources = [...sources, ...selectedHistory,

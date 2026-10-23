@@ -75,6 +75,8 @@ export interface TranscriptEntry {
   basedOnRevisedHistory: boolean;
   /** D102: the reply stopped at the output limit; later speakers are told it is unfinished. */
   truncated?: boolean;
+  /** D109: a message the confirmed summary covers, edited or regenerated after the summary was written. */
+  revisedAfterSummary?: boolean;
 }
 
 /** Own, unedited, non-empty replies stay `assistant`; everything else is a labelled quote on the `user` side. */
@@ -85,7 +87,7 @@ export function renderEntry(entry: TranscriptEntry): string {
   if (entry.speaker === 'summary') {
     const notes = [
       ...(entry.editedByHost ? ['（此摘要由主持人修改后确认。）'] : []),
-      ...(entry.basedOnRevisedHistory ? ['（注意：此摘要生成后，它覆盖的部分原文被主持人修改或重新生成，摘要可能已经过时：与后续发言冲突时，以后续发言为准。）'] : []),
+      ...(entry.basedOnRevisedHistory ? ['（注意：此摘要生成后，它覆盖的部分发言被主持人修改或重新生成。修改后的发言紧接在摘要后面给出，以修改后的为准；摘要中与之冲突的内容已经失效。）'] : []),
     ];
     return [summaryLabel(entry.summary!.firstNumber, entry.summary!.lastNumber), ...notes, quoteText(entry.content)].join('\n');
   }
@@ -95,6 +97,7 @@ export function renderEntry(entry: TranscriptEntry): string {
     ...(entry.editedByHost ? ['（此发言已由主持人修改，以下是修改后的版本，请以此为准。）'] : []),
     ...(entry.basedOnRevisedHistory ? ['（注意：此发言写于主持人修改前序发言之前，其中依赖旧内容的结论可能已经失效，不要沿用。）'] : []),
     ...(entry.truncated ? ['（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）'] : []),
+    ...(entry.revisedAfterSummary ? ['（此发言在上面的摘要生成后由主持人修改或重新生成，以此为准；摘要中与之冲突的内容已经失效。）'] : []),
   ];
   return [label, ...notes, quoteText(entry.content)].join('\n');
 }

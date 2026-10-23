@@ -11,6 +11,8 @@ export interface ParsedEntry {
   truncated: boolean;
   /** R13B: a host-confirmed summary standing in for public messages first..last. */
   summary?: { first: number; last: number };
+  /** D109: a covered message revised after the summary, sent itself right after it. */
+  revisedAfterSummary?: boolean;
 }
 
 /**
@@ -44,9 +46,10 @@ export function parseDiscussion(messages: readonly ProviderMessage[]): { task: s
       entries.push({
         role: 'user', speaker: member ? member[2] : summary ? '讨论摘要' : '主持人', own: !!member?.[1], publicText: text,
         editedByHost: notes.some(note => note.includes('已由主持人修改') || note.includes('由主持人修改后确认')),
-        basedOnRevisedHistory: notes.some(note => note.includes('写于主持人修改前序发言之前') || note.includes('摘要可能已经过时')),
+        basedOnRevisedHistory: notes.some(note => note.includes('写于主持人修改前序发言之前') || note.includes('它覆盖的部分发言被主持人修改或重新生成')),
         truncated: notes.some(note => note.includes('因单次输出上限被截断')),
         ...(summary ? { summary: { first: Number(summary[1]), last: Number(summary[2]) } } : {}),
+        ...(notes.some(note => note.includes('在上面的摘要生成后由主持人修改或重新生成')) ? { revisedAfterSummary: true } : {}),
       });
     }
   }
