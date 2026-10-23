@@ -88,13 +88,16 @@ async function main() {
     check(typeof require === 'undefined' && typeof process === 'undefined', 'Renderer Node exposed');
     const api = window.roundtable;
     // R12 added the host group: exactly one typed method, no generic invoke/send.
-    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['host','room','rooms','run','settings']), 'Unexpected Bridge groups');
+    // R13B added the summary and usage groups (typed methods only).
+    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['host','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview','generate','confirm']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport','writeOff','exportCsv']), 'Unexpected summary/usage surface');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host surface');
     const rooms = ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'];
     const settings = ['confirmTarget','createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModels','listProviderSummaries','setKey','testConnection','updateProvider'];
     check(JSON.stringify(Object.keys(api.rooms).sort()) === JSON.stringify(rooms), 'Unexpected rooms surface');
     check(JSON.stringify(Object.keys(api.settings).sort()) === JSON.stringify(settings), 'Unexpected settings surface');
-    check(!('invoke' in api) && !('send' in api) && !('resolveKey' in api.settings) && !('invoke' in api.host) && !('send' in api.host), 'Unrestricted capability exposed');
+    check(!('invoke' in api) && !('send' in api) && !('resolveKey' in api.settings) && !('invoke' in api.host) && !('send' in api.host)
+      && !('invoke' in api.summary) && !('invoke' in api.usage), 'Unrestricted capability exposed');
     const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     check(csp.includes("connect-src 'none';") && !/unsafe-eval|localhost|127\\.0\\.0\\.1/u.test(csp), 'Production CSP broadened');
     return { groups: Object.keys(api).sort(), rooms: Object.keys(api.rooms).sort(), settings: Object.keys(api.settings).sort(), csp };

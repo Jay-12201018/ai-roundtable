@@ -167,11 +167,15 @@ async function probe() {
     check(typeof window.require === 'undefined' && typeof window.process === 'undefined', 'Node globals exposed');
     const api = window.roundtable;
     // R12 added the host group: exactly one typed method, no generic invoke/send.
-    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['host', 'room', 'rooms', 'run', 'settings']), 'Unexpected Bridge top-level API');
+    // R13B added the summary and usage groups: typed methods only, still no generic invoke/send.
+    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host API');
+    check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview', 'generate', 'confirm']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport', 'writeOff', 'exportCsv'])
+      && [...Object.values(api.summary), ...Object.values(api.usage)].every(value => typeof value === 'function'), 'Unexpected summary/usage API');
     check(JSON.stringify(Object.keys(api.room).sort()) === JSON.stringify(['createDemo', 'getMessages']), 'Unexpected room API');
     // R11 added previewWorkflow (a bounded preview that neither reads a Key nor sends a request).
-    const expected = ['continueMessage', 'getSnapshot', 'onEvent', 'pause', 'previewWorkflow', 'recoverInterruptedRun', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
+    // R13B added addBudget and resumeAfterBudget (D104).
+    const expected = ['addBudget', 'continueMessage', 'getSnapshot', 'onEvent', 'pause', 'previewWorkflow', 'recoverInterruptedRun', 'resumeAfterBudget', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
     check(JSON.stringify(Object.keys(api.run).sort()) === JSON.stringify(expected), 'Unexpected run API');
     const configurationKeys = {
       rooms: ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'],
