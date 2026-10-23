@@ -1,6 +1,12 @@
 # R00–R18 状态与授权看板
 
-## 当前状态（2026-10-23）
+## 当前状态（2026-10-24）
+
+- **R13B（运行中追加预算、核销未知费用、按时段与缓存结算、对话摘要、用量页）：merged / verified。** 分支 `codex/r13b-usage-summary`（`a96d4fe`，基于 main `03de217`），以 ff-only 方式合入 main。在合并候选上，总控复跑了 typecheck、130 个文件 / 1936 个测试、build；隔离生产探针 R01（三种模式）、R07/R08、R09、R12、R13A、R13B 的首次运行和 `--restart`（重启后 0 次请求），以及 R10/R11；实操探针 premerge（首次 + 重启）、R13A、R12、R13B。全部通过，liveApi=false。决策 D104–D109；migration 9（7 张只追加的表）。
+- **R13B 真实模型实测（用户本人的 DeepSeek Key，`deepseek-flash`，经本机代理，2026-10-23 周五 23:48 起，空闲时段）**：在逐回合推进的运行里，生成摘要（覆盖第 1–2 条）并确认，然后修改被覆盖的第 1 条（座位改为 250、考试周改为 2 周）。下一位成员收到的上下文依次是：摘要（附受影响说明）、修改后的第 1 条（附"以此为准"说明）、轮到你发言；未修改的原文仍由摘要代替（D109）。综合者在回答开头就指出修订作废了原来按 400 座计算的全部数字，并按新条件重新计算。4 笔请求（3 次发言、1 次摘要）全部按空闲价结算，命中缓存的 token 按缓存价计，向上取整逐笔验算一致，合计 ¥0.0286（按高峰价记账为 ¥0.0587）。请求次数、token 与 DeepSeek 控制台一致，用户已核对控制台扣费。
+- 遗留（并入 R16）：因预算停下的运行，右侧面板仍显示灰色的"重试当前回合/续写部分回复"；"上下文接近上限"的提示只有自动化测试覆盖（夹具填不满 131072 token 的窗口）。时段判定"按请求开始还是结束"以及调休周末的规则，官方没有写明，按从严原则处理（只要碰到高峰就按高峰计）。
+
+## 早前状态（2026-10-23）
 
 - **R12 主持人与消息版本、R13A 真实模型（DeepSeek）与运行预算、合并前质量修复：merged / verified。** 集成分支 `codex/integrate-r12-r13a`（R12 `codex/r12-host-message-versions` → R13A `codex/r13a-real-model-enable` → 质量修复 `codex/r13a-premerge-quality`，再合入 main 上的文档提交），以 ff-only 方式合入 main。合并结果上总控复跑：typecheck、126 文件 / 1903 测试、build；隔离生产探针 R01（默认、`--joint-ui`、`--r03-recovery`）、R07/R08、R09、R12、R13A 的首次运行和 `--restart`（重启后 0 次请求）、R10/R11；实操探针 premerge（首次 56 项 + 重启 11 项）、R13A、R12（25 项，截图已按最终代码重新生成）。全部通过，liveApi=false。
 - **真实模型实测（用户本人的 DeepSeek Key，`deepseek-flash`，经本机代理）**：请求次数、token 与 DeepSeek 控制台逐项一致；花费按高峰价记账，空闲时段实际扣费约为显示值的一半（D090 的保守取向，按时段结算列入 R13B）。主持人点名、插话、持续指令、修改与重新生成、版本切换在真实模型上生效；修复上下文格式（D095）后，审查者给出带出处的具体意见、不再照抄，综合者能整合并做取舍，主持人修改后的条件会被采用；写到输出上限时保留并标注截断，运行继续（D102，默认上限 4096，D103）。
@@ -66,7 +72,7 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 | R10B | Gemini | R09 fixture已合main verified | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main；真实调用需获审价格策略 | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 1732测试、build、生产探针fixture通过 |
 | R11 | 声明式工作流 | R07/R04–R06 | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 四种模板经生产入口fixture完整运行与重启验证；真实模型工作流待测 |
 | R12 | 主持人与消息版本 | R11 | R12子会话；总控集成 | merged / verified | 用户批准合main | codex/r12-host-message-versions → codex/integrate-r12-r13a | 15e2e30；合并见顶部 | 自动化、实操、DeepSeek真实模型三层通过 |
-| R13 | 摘要、usage、费用预算 | R05/R09/R11 | R13A子会话；总控集成 | R13A merged / verified；R13B not_started | R13A获批；R13B待派发 | codex/r13a-real-model-enable、codex/r13a-premerge-quality → codex/integrate-r12-r13a | b3e3324、0ccb49c | DeepSeek预算与账本经真实账单核对；R13B见顶部路线 |
+| R13 | 摘要、usage、费用预算 | R05/R09/R11 | R13A/R13B子会话；总控集成 | merged / verified | 用户批准合main | codex/r13a-real-model-enable、codex/r13a-premerge-quality、codex/r13b-usage-summary | b3e3324、0ccb49c、a96d4fe | 预算、账本、按时段与缓存结算、摘要均经DeepSeek真实账单核对 |
 | R14 | 结构化产物 | R11 | 未分派 | ready | 待派发 | 未创建 | 无 | 未运行 |
 | R15 | 安全代码导出 | R14 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R16 | 聊天 UI 与可用性 | R06；主要交互稳定 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
