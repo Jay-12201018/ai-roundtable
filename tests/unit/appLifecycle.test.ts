@@ -39,7 +39,7 @@ const fixture = vi.hoisted(() => {
     resolveReady: () => {},
     app: { requestSingleInstanceLock: vi.fn(), on: vi.fn(), whenReady: vi.fn(), isReady: vi.fn(), getPath: vi.fn(), quit: vi.fn(), exit: vi.fn() },
     dialog: { showErrorBox: vi.fn(), showMessageBoxSync: vi.fn() },
-    database: { initialize: vi.fn(), markInFlightRunsInterrupted: vi.fn(), recoverControlledTrials: vi.fn(), close: vi.fn() },
+    database: { initialize: vi.fn(), purgeKeyLikeModelIds: vi.fn(() => 0), markInFlightRunsInterrupted: vi.fn(), recoverControlledTrials: vi.fn(), close: vi.fn() },
     service: { shutdown: vi.fn(), hasActiveRuns: vi.fn() },
     trial: { shutdown: vi.fn(), isBusy: vi.fn() },
     confirmTrial: vi.fn(), installTrialMenu: vi.fn(),
@@ -133,6 +133,18 @@ describe('application lifecycle', () => {
     expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host });
   });
 
+  it('clears key-like model IDs after initialization and before any window or IPC, logging only the count', async () => {
+    fixture.database.purgeKeyLikeModelIds.mockReturnValueOnce(3);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await startApp();
+    expect(fixture.database.purgeKeyLikeModelIds).toHaveBeenCalledOnce();
+    const purged = fixture.database.purgeKeyLikeModelIds.mock.invocationCallOrder[0];
+    expect(purged).toBeGreaterThan(fixture.database.initialize.mock.invocationCallOrder[0]);
+    expect(purged).toBeLessThan(fixture.createWindow.mock.invocationCallOrder[0]);
+    expect(purged).toBeLessThan(fixture.registerIpc.mock.invocationCallOrder[0]);
+    expect(info).toHaveBeenCalledExactlyOnceWith('已清除 3 处疑似 API Key 的模型 ID');
+  });
+
   it('waits for current and already closed window configuration writes before closing SQLite', async () => {
     const pending: (() => void)[] = [];
     fixture.registerIpc.mockImplementation(() => {
@@ -167,6 +179,7 @@ describe('application lifecycle', () => {
     await vi.waitFor(()=>expect(fixture.app.exit).toHaveBeenCalledWith(0));
     await vi.waitFor(() => expect(fixture.database.close).toHaveBeenCalledOnce());
     expect(fixture.database.markInFlightRunsInterrupted).not.toHaveBeenCalled();
+    expect(fixture.database.purgeKeyLikeModelIds).not.toHaveBeenCalled();
     expect(fixture.createWindow).not.toHaveBeenCalled();
   });
 

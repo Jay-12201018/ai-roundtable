@@ -65,6 +65,7 @@ it('rejects an old subscription and its deltas after selecting a different room 
 
 it('renders each message with its frozen member, including earlier Attempts and duplicate names', async () => {
   const f = fixture(); f.db.createRoom({ id: 'r2', name: '历史房间' }); const saved = completed();
+  f.db.createProvider({ id: 'provider-one', name: '第一服务商', kind: 'mock' }); f.db.createProvider({ id: 'provider-two', name: '第二服务商', kind: 'mock' });
   saved.execution!.membersSnapshot = [
     { agentId: 'agent', displayName: '同名成员', roleTemplateId: '旧起草角色', systemPrompt: '', providerId: 'provider-one', modelId: 'model-one', displayOrder: 0 },
     { agentId: 'agent-two', displayName: '同名成员', roleTemplateId: '旧审查角色', systemPrompt: '', providerId: 'provider-two', modelId: 'model-two', displayOrder: 1 },
@@ -79,9 +80,12 @@ it('renders each message with its frozen member, including earlier Attempts and 
   vi.mocked(f.api.run.subscribe).mockResolvedValue(subscription(saved)); localStorage.setItem('roundtable.runId', 'saved');
   render(<App />);
   const earlier = (await screen.findByText('旧尝试部分正文')).closest('article')!;
-  expect(earlier.textContent).toContain('旧起草角色'); expect(earlier.textContent).toContain('model-one'); expect(earlier.textContent).toContain('provider-one');
+  // D101: the frozen Provider id is shown by its name, never as the id itself.
+  await waitFor(() => expect(earlier.textContent).toContain('Provider：第一服务商'));
+  expect(earlier.textContent).toContain('旧起草角色'); expect(earlier.textContent).toContain('model-one'); expect(earlier.textContent).not.toContain('provider-one');
   const second = screen.getByText('第二成员正文').closest('article')!;
   expect(second.textContent).toContain('旧审查角色'); expect(second.textContent).toContain('model-two'); expect(second.textContent).not.toContain('model-one');
+  expect(second.textContent).toContain('Provider：第二服务商'); expect(second.textContent).not.toContain('第一服务商'); expect(second.textContent).not.toContain('provider-two');
 });
 
 it('refreshes member Provider summaries when a settings mutation settles after leaving settings', async () => {
