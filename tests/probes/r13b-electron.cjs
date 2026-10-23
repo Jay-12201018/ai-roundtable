@@ -62,7 +62,7 @@ const fixture = http.createServer(async (req, res) => {
     const body = JSON.parse(Buffer.concat(chunks).toString());
     const summary = body.messages.some(message => message.content.includes('【请写摘要】'));
     requests.push({ method: req.method, path: req.url, model: body.model, maxTokens: body.max_tokens, thinking: body.thinking, keyMatches: req.headers.authorization === `Bearer ${fakeKey}`, summary,
-      summaryLabel: body.messages.some(message => message.content.includes('【讨论摘要 · 覆盖第 1–3 条，由主持人确认】')) });
+      summaryLabel: body.messages.some(message => message.content.includes('【讨论摘要 · 覆盖第 1–3 条，由主持人确认】')), text: body.messages.map(message => message.content).join('\n') });
     assert.equal(req.method, 'POST'); assert.equal(req.url, '/deepseek/chat/completions');
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const emit = value => res.write(`data: ${JSON.stringify(value)}\n\n`);
@@ -215,6 +215,30 @@ async function main() {
     const csv = fs.readFileSync(exportPath, 'utf8');
     check(exported.saved && exported.rows === 6 && csv.startsWith('﻿请求ID') && csv.trim().split('\r\n').length === 7 && csv.includes('空闲价') && csv.includes('已核销'), 'CSV export: one row per ledger entry, with period and write-off');
 
+    // D109: after the host revises a covered message, the next request carries the summary *and* that revision.
+    const runD = await api('run.start', { roomId: room.id, task: '摘要后修改原文的运行', workflowSnapshot: {}, maxTurns: 4, mode: 'step' });
+    await until(`window.roundtable.run.getSnapshot(${JSON.stringify(runD.runId)}).then(s => s.status === 'paused')`, 'first step');
+    for (let i = 0; i < 2; i++) { await api('run.step', runD.runId); await until(`window.roundtable.run.getSnapshot(${JSON.stringify(runD.runId)}).then(s => s.status === 'paused' && s.turns.length === ${i + 2})`, 'step'); }
+    let d = await snapshot(runD.runId);
+    const dPreview = await api('summary.preview', { runId: runD.runId });
+    const dSummary = await api('summary.generate', { runId: runD.runId, clientRequestId: 'probe-d-summary', agentId: dPreview.agentId, throughSlotId: dPreview.candidates[1].slotId });
+    await settledRun(runD.runId);
+    await api('summary.confirm', { runId: runD.runId, clientRequestId: 'probe-d-confirm', messageId: dSummary.messageId });
+    d = await snapshot(runD.runId);
+    const [firstTurn, secondTurn] = d.turns;
+    const unedited = d.messages.find(message => message.id === secondTurn.messageId).content;
+    await api('host.command', { runId: runD.runId, clientRequestId: 'probe-d-edit', kind: 'editMessage', messageId: firstTurn.messageId, content: '主持人修订：只在两栋宿舍楼试点。' });
+    d = await snapshot(runD.runId);
+    check(d.summaries[0].revisedSlotIds?.[0] === firstTurn.turnId && d.versions.find(v => v.messageId === dSummary.messageId).affectedBy.length > 0, 'Summary affected; the revised covered slot is reported');
+    const before = requests.length;
+    await api('run.step', runD.runId);
+    await until(`window.roundtable.run.getSnapshot(${JSON.stringify(runD.runId)}).then(s => s.status === 'completed')`, 'run D completed');
+    const sent = requests[before].text;
+    check(requests.length === before + 1 && sent.includes('【讨论摘要 · 覆盖第 1–2 条，由主持人确认】') && sent.includes('> 主持人修订：只在两栋宿舍楼试点。')
+      && sent.includes('（此发言在上面的摘要生成后由主持人修改或重新生成，以此为准；摘要中与之冲突的内容已经失效。）'), 'The next request carries the summary and the labelled revision');
+    check(!sent.includes(`> ${unedited}`), 'The unchanged covered message stays replaced by the summary');
+    check(sent.indexOf('【讨论摘要') < sent.indexOf('主持人修订：只在两栋宿舍楼试点'), 'The revision follows the summary');
+
     // Crash while regenerating the summary: its reservation must survive as unknown and never be resent.
     mode = 'hang';
     const again = await api('summary.generate', { runId: runA.runId, clientRequestId: 'probe-regenerate', agentId: preview.agentId, throughSlotId: preview.throughSlotId, summaryId: generated.summaryId });
@@ -222,7 +246,7 @@ async function main() {
     const inFlight = await snapshot(runA.runId);
     check(inFlight.charges.find(item => item.requestId === again.requestId)?.state === 'reserved', 'In-flight summary holds its reservation');
     fs.writeFileSync(manifestPath, JSON.stringify({ status: 'FIRST_PASS_SUMMARY_IN_FLIGHT', directory, providerId: provider.id, runA: runA.runId, runB: runB.runId, runC: runC.runId,
-      summaryId: generated.summaryId, confirmedMessageId: generated.messageId, inFlightRequestId: again.requestId, inFlightMessageId: again.messageId, settledCount: 5 }), { mode: 0o600, flag: 'wx' });
+      summaryId: generated.summaryId, confirmedMessageId: generated.messageId, inFlightRequestId: again.requestId, inFlightMessageId: again.messageId, settledCount: 10 }), { mode: 0o600, flag: 'wx' });
   }
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);
   check(!JSON.stringify(result).includes(fakeKey), 'Key absent from probe result');

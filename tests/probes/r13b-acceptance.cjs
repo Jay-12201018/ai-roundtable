@@ -268,9 +268,13 @@ async function main() {
   await click('修改', { slot: 0 });
   await field('修改消息内容'); await selectAll(); await ime('fangan', '方案（主持人修改）：按距离分两档计价，起步价 2 元。');
   await click('保存为新版本', { slot: 0 });
-  await until(`document.querySelector('.summary-slot').innerText.includes('受影响')`, 'summary affected');
+  await until(`document.querySelector('.summary-slot').innerText.includes('受影响') && document.querySelector('.summary-cost-hint')`, 'summary affected with regenerate cost');
   check((await snapshot()).versions.find(version => version.author === 'summary' && version.active)?.affectedBy.length > 0, 'Snapshot marks the summary affected');
-  await capture('summary-affected', '再修改被摘要覆盖的第 1 条原文（输入法输入）：第 1 条变成版本 2，摘要随即标出"受影响：这份摘要生成后，它覆盖的原文被修改或重新生成，摘要可能已经过时"，提示可以修改或重新生成摘要；之后发给模型时也会附上同样的说明。', '.summary-slot');
+  const affectedText = await js(`document.querySelector('.summary-slot').innerText`);
+  check(affectedText.includes('第 1 条被修改或重新生成') && affectedText.includes('修改后的发言会照常发给之后的成员') && affectedText.includes('建议重新生成摘要'), 'The note says the revision is sent and suggests regenerating');
+  check((await js(`document.querySelector('.summary-cost-hint').textContent`)).startsWith('预计最高 ¥'), 'The regenerate button shows its maximum cost');
+  check((await js(`document.querySelectorAll('.message')[0].innerText`)).includes('摘要后已修改 · 照常发给后续成员') && (await js(`document.querySelectorAll('.host-slot.is-summarized').length`)) === 2, 'The revised message is no longer shown as replaced; the other two still are');
+  await capture('summary-affected', '再修改被摘要覆盖的第 1 条原文（输入法输入）。摘要标出"受影响：这份摘要生成后，第 1 条被修改或重新生成。修改后的发言会照常发给之后的成员，紧跟在摘要后面，摘要里与之冲突的内容不再采用。建议重新生成摘要……"；"重新生成摘要…"旁直接显示预计最高花费。第 1 条的标注从"已由摘要代替"变成"摘要后已修改 · 照常发给后续成员"，第 2、3 条仍由摘要代替。（实际请求的输入由生产探针核对：下一次请求同时带摘要和这条修改及说明。）', '.summary-slot');
 
   // Step 6 (D105): an answer without usage is unknown at the cap; the host writes it off from the console amount.
   mode = 'no-usage';
@@ -290,7 +294,8 @@ async function main() {
   const run2 = await snapshot();
   check(run2.charges[0].state === 'unknown' && run2.charges[0].chargedMicro === 300 && run2.budget.writtenOffMicro === 300 && run2.budget.unknownMicro === 0, 'Write-off counts ¥0.0003; the unknown row stays');
   check((await text()).includes('含已核销 ¥0.0003'), 'Budget bar counts the written-off amount');
-  await capture('written-off', '保存后这条显示"已核销 ¥0.000300（原按上限计 ¥…，少计 ¥…）· 依据：…"，并可"更正核销"；预算栏的累计花费改按核销金额计（"含已核销 ¥0.0003"），剩余额度随之恢复。账本里原来的 unknown 记录没有改动。', 0);
+  check((await text()).includes('比原上限少 ¥') && !(await text()).includes('少计'), 'Write-off wording: 比原上限少, never 少计');
+  await capture('written-off', '保存后这条显示"已核销 ¥0.000300（原按上限计 ¥…，比原上限少 ¥…） · 依据：…"，并可"更正核销"；预算栏的累计花费改按核销金额计（"含已核销 ¥0.0003"），剩余额度随之恢复。账本里原来的 unknown 记录没有改动。', 0);
   mode = 'ok';
 
   // Step 7 (D108): the usage page keeps the three categories apart and exports a CSV through Main.
@@ -298,6 +303,7 @@ async function main() {
   await until(`document.querySelector('.usage-totals')`, 'usage page');
   const usagePage = await js(`document.querySelector('.usage-page').innerText`);
   check(usagePage.includes('已结算') && usagePage.includes('未知（按上限计）') && usagePage.includes('已核销') && usagePage.includes('全按高峰价为'), 'Usage totals by category');
+  check(usagePage.includes('比原上限少 ¥'), 'Usage page uses the same write-off wording');
   await capture('usage-by-run', '顶部导航"用量"：合计、已结算（含"其中 3 次按空闲价；全按高峰价为 ¥…"对照）、未知（按上限计）、已核销分开列出；下方"按运行"表格逐次运行汇总 token 和三类金额，点运行名可回到该运行。', '.usage-page');
   await click('按日期');
   await click('导出 CSV');
