@@ -1,0 +1,271 @@
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { ArrowUp, AtSign, Check, ChevronDown, Clock, Ellipsis, JapaneseYen, Pause, Pin, Play, Square, StepForward, Workflow } from 'lucide-react';
+import type { RunSnapshot } from '../../../shared/types/run';
+import { Avatar, Button, IconButton, cx, useDismiss } from '../../components/ui';
+import { canDirectRun, nextSpeaker } from '../host/model';
+import type { HostCommands } from '../host/useHostCommands';
+import { sendInterjection } from './interject';
+import { mentionOptions, mentionQuery, type MentionOption } from './mention';
+import './composer.css';
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/u.test(navigator.platform || navigator.userAgent);
+const modifier = isMac ? '⌘' : 'Ctrl';
+/**
+ * Which box the dock shows: live Runs and stopped ones Main can still direct get the interjection box; a finished
+ * Run (or none) gets the goal box for the next discussion.
+ */
+export const interjectionBoxFor = (snapshot: RunSnapshot | undefined, live: boolean) =>
+  !!snapshot && (live || ['error', 'cancelled', 'interrupted'].includes(snapshot.status) && canDirectRun(snapshot));
+/** Unsent interjections are kept per discussion while the window is open. */
+const interjectionDrafts = new Map<string, string>();
+
+/** Enter while an IME composition is active only confirms the candidate (keyCode 229 covers IMEs that end first). */
+export const isComposing = (event: KeyboardEvent, composing: boolean) => composing || event.nativeEvent.isComposing || event.keyCode === 229;
+
+function useAutosize(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
+  useLayoutEffect(() => {
+    const area = ref.current; if (!area) return;
+    area.style.height = 'auto';
+    area.style.height = `${Math.min(200, Math.max(48, area.scrollHeight))}px`;
+  }, [ref, value]);
+}
+
+export type TaskSettings = {
+  budgetText: string; setBudgetText: (value: string) => void; budgetValid: boolean;
+  outputLimitText: string; setOutputLimitText: (value: string) => void; outputLimitValid: boolean;
+  stepMode: boolean; setStepMode: (value: boolean) => void;
+  workflowLabel: string; onOpenWorkflow?: () => void;
+};
+
+/** 未开始: a multi-line goal, the discussion settings as chips, and 开始讨论 in the slot 暂停 will take (D098). */
+export function TaskComposer({ draft, setDraft, canStart, starting, onStart, settings, notices, hint, label = '讨论目标', placeholder }: {
+  draft: string; setDraft: (value: string) => void; canStart: boolean; starting: boolean; onStart: () => void; settings: TaskSettings;
+  notices?: ReactNode; hint?: ReactNode; label?: string; placeholder?: string;
+}) {
+  const area = useRef<HTMLTextAreaElement>(null);
+  const composing = useRef(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const popover = useRef<HTMLDivElement>(null), trigger = useRef<HTMLDivElement>(null);
+  const invalid = !settings.budgetValid || !settings.outputLimitValid;
+  // An invalid value keeps its field open, so the reason the start button is disabled stays visible.
+  const open = moreOpen || invalid;
+  const close = useCallback(() => setMoreOpen(false), []);
+  useDismiss(moreOpen && !invalid, close, [popover, trigger]);
+  useAutosize(area, draft);
+  const panelId = useId();
+  const budgetLabel = settings.budgetValid ? `预算 ¥${Number(settings.budgetText.trim()).toFixed(Math.max(2, (settings.budgetText.trim().split('.')[1] ?? '').length))}` : '预算有误';
+  return <div className="dock">
+    <div className="dock-inner">
+      {notices}
+      {open && <div ref={popover} id={panelId} className="popover settings-pop" role="group" aria-label="更多设置">
+        <label className="field"><span>本次预算</span>
+          <span className="money-input" data-invalid={!settings.budgetValid || undefined}><span aria-hidden>¥</span>
+            <input aria-label="本次运行预算（元）" inputMode="decimal" value={settings.budgetText} aria-invalid={!settings.budgetValid} onChange={event => settings.setBudgetText(event.target.value)} /></span>
+          {settings.budgetValid ? <span className="field-help">花到上限就停下，已有发言都保留，之后可以追加。每次发言前按上限预留，结束后按实际用量结算。</span>
+            : <span className="field-error" role="alert">请输入 0.000001 到 1000 之间的金额，最多 6 位小数。</span>}
+        </label>
+        <label className="field"><span>单次发言上限</span>
+          <span className="inline-field"><input className="input" style={{ width: 110 }} aria-label="单次输出上限（token）" inputMode="numeric" value={settings.outputLimitText}
+            aria-invalid={!settings.outputLimitValid} aria-describedby="output-limit-help" onChange={event => settings.setOutputLimitText(event.target.value)} /><span className="muted small">tokens</span></span>
+          {settings.outputLimitValid ? <span id="output-limit-help" className="field-help">每位成员每次最多写这么长（4096 约 3,000 汉字）。每次请求按这个上限预留费用，实际按用量结算；写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）。</span>
+            : <span id="output-limit-help" className="field-error" role="alert">单次输出上限请输入 1 到 65536 之间的整数。</span>}
+        </label>
+      </div>}
+      <div className="composer">
+        <div className="composer-text">
+          <textarea ref={area} aria-label={label} value={draft} rows={2} placeholder={placeholder ?? '这场讨论要解决什么？写下目标和约束，例如范围、预算、要交付什么…'}
+            onChange={event => setDraft(event.target.value)}
+            onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
+            onKeyDown={event => {
+              if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || isComposing(event, composing.current)) return;
+              event.preventDefault(); if (canStart) onStart();
+            }} />
+        </div>
+        <div className="composer-row">
+          <div className="chips" ref={trigger}>
+            {settings.onOpenWorkflow && <button type="button" className="chip" onClick={settings.onOpenWorkflow} aria-label={`讨论方式：${settings.workflowLabel}`} title="选择谁在什么时候发言"><Workflow aria-hidden size={15} />{settings.workflowLabel}<ChevronDown aria-hidden size={14} /></button>}
+            <button type="button" className={cx('chip', !settings.budgetValid && 'is-warn')} aria-expanded={open} aria-controls={panelId} onClick={() => setMoreOpen(value => !value)}><JapaneseYen aria-hidden size={15} />{budgetLabel}<ChevronDown aria-hidden size={14} /></button>
+            <label className={cx('chip', 'chip-check', settings.stepMode && 'is-on')} title="每位成员说完一次就停下，方便你插话或点名，再点「下一步」或「继续」">
+              <input type="checkbox" checked={settings.stepMode} onChange={event => settings.setStepMode(event.target.checked)} />每回合后暂停</label>
+            <IconButton icon={Ellipsis} label="更多设置" className="chip-icon" aria-expanded={open} aria-controls={panelId} onClick={() => setMoreOpen(value => !value)} />
+          </div>
+          <div className="controls">
+            <Button variant="primary" className="slot" disabled={!canStart} onClick={onStart}>{starting ? '正在开始…' : '开始讨论'}</Button>
+          </div>
+        </div>
+      </div>
+      <div className="dock-hint">{hint ?? <><span><span className="kbd">{modifier}</span> <span className="kbd">Enter</span> 开始</span><span aria-hidden>·</span><span>每次发言前按预算预留费用，结束后按实际用量结算</span></>}</div>
+    </div>
+  </div>;
+}
+
+export type RunControls = {
+  status: RunSnapshot['status']; pause: { enabled: boolean; run: () => void }; resume: { enabled: boolean; run: () => void };
+  step: { enabled: boolean; run: () => void }; stop: { enabled: boolean; run: () => void };
+  /** A request is out; stopping may already be billed. */
+  inFlight: boolean; inFlightCost?: string; speaker?: string;
+};
+
+/** D098: 停止 | 下一步 | 暂停/继续 — the primary slot keeps its place and width; stopping asks once, above it. */
+function LiveControls({ controls }: { controls: RunControls }) {
+  const [confirming, setConfirming] = useState(false);
+  const stopButton = useRef<HTMLButtonElement>(null), pop = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setConfirming(false), []);
+  useDismiss(confirming, close, [pop, stopButton]);
+  useEffect(() => { if (!controls.stop.enabled) setConfirming(false); }, [controls.stop.enabled]);
+  const { status } = controls;
+  return <div className="controls" role="group" aria-label="运行控制">
+    {confirming && controls.stop.enabled && <div ref={pop} id="stop-confirm" className="popover stop-pop" role="dialog" aria-label="确认停止运行"
+      onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setConfirming(false); stopButton.current?.focus(); } }}>
+      <h3>停止这次讨论？</h3>
+      <p>{controls.inFlight
+        ? `${controls.speaker ? `${controls.speaker}正在发言，` : ''}停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限${controls.inFlightCost ? ` ${controls.inFlightCost} ` : ''}计入本次花费。`
+        : '停止会结束本次运行，后续回合不再执行。已有发言都会保留。'}停止后不会自动继续。</p>
+      <div className="stop-actions">
+        <Button autoFocus onClick={() => { setConfirming(false); stopButton.current?.focus(); }}>不停止</Button>
+        <Button variant="danger" solid onClick={() => { setConfirming(false); controls.stop.run(); }}>停止讨论</Button>
+      </div>
+    </div>}
+    <Button ref={stopButton} variant="danger" size="sm" icon={Square} disabled={!controls.stop.enabled} aria-expanded={confirming} aria-controls="stop-confirm"
+      onClick={() => setConfirming(true)}>{status === 'cancelling' ? '正在停止…' : '停止'}</Button>
+    <span className="controls-gap" aria-hidden />
+    <Button size="sm" icon={StepForward} disabled={!controls.step.enabled} title={controls.step.enabled ? '只让下一位说一次，然后再停下' : '暂停后可以单步'} onClick={controls.step.run}>下一步</Button>
+    {status === 'paused'
+      ? <Button variant="primary" className="slot" icon={Play} disabled={!controls.resume.enabled} onClick={controls.resume.run}>继续</Button>
+      : <Button variant="primary" className="slot" icon={Pause} disabled={!controls.pause.enabled} onClick={controls.pause.run}>{status === 'pausing' ? '正在暂停…' : '暂停'}</Button>}
+  </div>;
+}
+
+function MentionMenu({ id, options, query, active, onPick, onHover }: { id: string; options: MentionOption[]; query: string; active: number; onPick: (option: MentionOption) => void; onHover: (index: number) => void }) {
+  return <div id={id} className="popover mention-pop" role="listbox" aria-label="点名下一位">
+    <h4>点名下一位发言</h4>
+    {options.length === 0 && <p className="mention-empty">没有名字以“{query}”开头的成员。</p>}
+    {options.map((option, index) => <button key={option.agentId} id={`${id}-${index}`} type="button" role="option" aria-selected={index === active} aria-disabled={!option.available}
+      className={cx('mention-item', index === active && 'is-active', !option.available && 'is-off')}
+      onMouseDown={event => event.preventDefault()} onMouseEnter={() => onHover(index)} onClick={() => { if (option.available) onPick(option); }}>
+      <Avatar name={option.name} size="sm" /><span className="grow">{option.name}<small>{option.reason}</small></span>{option.reason.startsWith('已点名') && <Check aria-hidden size={14} />}
+    </button>)}
+    <p className="pop-foot">被点名的成员排在下一回合发言，不会打断正在进行的发言。按讨论方式进行时，只能点名当前阶段的成员。发送时，带 @ 的插话会先点名、再插话。</p>
+  </div>;
+}
+
+/**
+ * 运行中: the box is the interjection box. Enter sends, Shift+Enter adds a line, `@` names the next speaker (D4),
+ * and 设为持续指令 turns the text into a standing instruction. The run controls sit at its right.
+ */
+export function HostComposer({ snapshot, commands, controls, settledSlot, notices, instructionsWritable }: {
+  snapshot: RunSnapshot; commands: HostCommands; controls?: RunControls;
+  /** For a Run that is no longer live: what sits in the primary slot instead of the run controls. */
+  settledSlot?: ReactNode; notices?: ReactNode; instructionsWritable: boolean;
+}) {
+  const key = snapshot.runId;
+  const [text, setTextState] = useState(() => interjectionDrafts.get(key) ?? '');
+  const setText = (value: string) => { setTextState(value); if (value) interjectionDrafts.set(key, value); else interjectionDrafts.delete(key); };
+  useEffect(() => { setTextState(interjectionDrafts.get(key) ?? ''); }, [key]);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const composing = useRef(false);
+  const [menu, setMenu] = useState<{ start: number; query: string } | undefined>();
+  const [active, setActive] = useState(0);
+  const menuId = useId();
+  const dockRef = useRef<HTMLDivElement>(null);
+  useAutosize(area, text);
+  const options = mentionOptions(snapshot);
+  const filtered = menu ? options.filter(option => option.name.startsWith(menu.query)) : [];
+  const closeMenu = useCallback(() => setMenu(undefined), []);
+  useDismiss(menu !== undefined, closeMenu, [dockRef]);
+  const busy = commands.pending !== undefined;
+  const status = snapshot.status;
+  const next = ['running', 'pausing', 'paused'].includes(status) || snapshot.host?.override ? nextSpeaker(snapshot) : undefined;
+  const override = snapshot.host?.override;
+  const overrideName = override ? options.find(option => option.agentId === override.agentId)?.name ?? '成员' : undefined;
+
+  const syncMenu = (value: string, caret: number) => {
+    const found = mentionQuery(value, caret);
+    setMenu(found); if (found) setActive(Math.max(0, options.filter(option => option.name.startsWith(found.query)).findIndex(option => option.available)));
+  };
+  const pick = (option: MentionOption) => {
+    if (!menu) return;
+    const caret = area.current?.selectionStart ?? text.length;
+    const value = `${text.slice(0, menu.start)}@${option.name} ${text.slice(caret)}`;
+    setText(value); setMenu(undefined);
+    requestAnimationFrame(() => { const position = menu.start + option.name.length + 2; area.current?.focus(); area.current?.setSelectionRange(position, position); });
+  };
+  const openMenu = () => {
+    const areaNode = area.current; const caret = areaNode?.selectionStart ?? text.length;
+    const needsSpace = caret > 0 && !/\s/u.test(text[caret - 1]);
+    const value = `${text.slice(0, caret)}${needsSpace ? ' ' : ''}@${text.slice(caret)}`;
+    const position = caret + (needsSpace ? 2 : 1);
+    setText(value); setMenu({ start: position - 1, query: '' }); setActive(Math.max(0, options.findIndex(option => option.available)));
+    requestAnimationFrame(() => { areaNode?.focus(); areaNode?.setSelectionRange(position, position); });
+  };
+  const send = async () => {
+    if (!text.trim() || busy || !commands.available) return;
+    const result = await sendInterjection(text, options, override?.agentId, commands.request);
+    commands.report({ notice: result.notice, error: result.error });
+    if (result.clear) setText('');
+  };
+  const addInstruction = async () => {
+    if (!text.trim() || busy) return;
+    const result = await commands.request('instruction:new', { kind: 'setInstruction', content: text }, { quiet: true });
+    commands.report(result.ok ? { notice: '已设为持续指令：从下一个新请求起，每位成员都会遵守。可以在「本场信息 › 指令」里修改或清除。' } : { error: `持续指令没有保存：${result.message}` });
+    if (result.ok) setText('');
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menu && !isComposing(event, composing.current)) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (filtered.length) setActive(index => (index + (event.key === 'ArrowDown' ? 1 : filtered.length - 1)) % filtered.length);
+        return;
+      }
+      if (event.key === 'Escape') { event.preventDefault(); setMenu(undefined); return; }
+      // With the menu open, Enter picks; a member who cannot be named is not picked and nothing is sent.
+      if (event.key === 'Enter' && !event.shiftKey || event.key === 'Tab' && filtered.length) { event.preventDefault(); if (filtered[active]?.available) pick(filtered[active]); return; }
+    }
+    if (event.key !== 'Enter' || event.shiftKey || isComposing(event, composing.current)) return;
+    event.preventDefault(); void send();
+  };
+  const placeholder = status === 'error' && snapshot.budget?.blocked ? '仍然可以插话；追加预算后，下一位会看到'
+    : ['error', 'cancelled', 'interrupted'].includes(status) ? '插话会在重试或恢复后被成员看到；要讨论新问题，点「新讨论」'
+    : '插话，所有成员从下一回合起可见；输入 @ 点名下一位…';
+  const hint = status === 'paused' ? <><span><span className="kbd">Enter</span> 发送插话</span><span aria-hidden>·</span><span>下一步：只让下一位说一次</span><span aria-hidden>·</span><span>继续：恢复自动轮流</span></>
+    : status === 'pausing' ? <span>当前回合说完后会停下</span>
+    : status === 'cancelling' ? <span>等待当前请求中止，已生成的文字会保留</span>
+    : status === 'running' ? <><span>暂停会等{controls?.speaker ?? '当前成员'}说完再停</span><span aria-hidden>·</span><span>停止会立即中止当前发言</span></>
+    : snapshot.budget?.blocked && status === 'error' ? <span>预算不足：在上方追加预算后继续；已有发言都保留</span>
+    : <><span><span className="kbd">Enter</span> 发送</span><span aria-hidden>·</span><span><span className="kbd">Shift</span> <span className="kbd">Enter</span> 换行</span></>;
+  return <div className="dock">
+    <div className="dock-inner" ref={dockRef}>
+      {notices}
+      {menu && <MentionMenu id={menuId} options={filtered} query={menu.query} active={active} onPick={pick} onHover={setActive} />}
+      {(next || override) && <div className="next-strip" role="status" aria-label="下一位">
+        <Clock aria-hidden size={14} />
+        <span>{status === 'paused' ? '已暂停，等你决定 · ' : ''}{next ? <>下一位：<b>{next.name}</b>{next.source === 'override' ? '（主持人点名，排在下一回合，不打断正在进行的发言）' : '（按计划）'}</> : `已点名${overrideName}`}</span>
+        {override && <button type="button" className="link-btn" disabled={busy} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名，恢复按计划发言。')}>取消点名</button>}
+      </div>}
+      {(commands.pending || commands.notice || commands.error) && <div className="composer-feedback">
+        {commands.pending && <p role="status" className="muted">正在发送，等待主进程确认…</p>}
+        {!commands.pending && commands.notice && <p role="status">{commands.notice}</p>}
+        {!commands.pending && commands.error && <p role="alert" className="field-error">{commands.error}</p>}
+      </div>}
+      <div className="composer">
+        <div className="composer-text">
+          <textarea ref={area} aria-label="主持人插话" value={text} rows={2} placeholder={placeholder}
+            aria-controls={menu ? menuId : undefined} aria-expanded={menu ? true : undefined} aria-activedescendant={menu && filtered[active] ? `${menuId}-${active}` : undefined}
+            onChange={event => { setText(event.target.value); syncMenu(event.target.value, event.target.selectionStart ?? event.target.value.length); }}
+            onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
+            onKeyDown={onKeyDown} />
+          <IconButton icon={ArrowUp} label="发送插话" className="send" disabled={!text.trim() || busy || !commands.available} onClick={() => void send()} />
+        </div>
+        <div className="composer-row">
+          <div className="chips">
+            <button type="button" className="chip" aria-expanded={menu !== undefined} aria-controls={menuId} onClick={() => (menu ? setMenu(undefined) : openMenu())}><AtSign aria-hidden size={15} />点名</button>
+            <button type="button" className="chip" disabled={!text.trim() || busy || !instructionsWritable} title="把这段话作为持续指令：之后每位成员的每次发言都遵守，可随时修改或清除" onClick={() => void addInstruction()}><Pin aria-hidden size={15} />设为持续指令</button>
+          </div>
+          {controls ? <LiveControls controls={controls} /> : <div className="controls">{settledSlot}</div>}
+        </div>
+      </div>
+      <div className="dock-hint">{hint}</div>
+    </div>
+  </div>;
+}
+
