@@ -1,89 +1,24 @@
-:root {
-  font: 14px/20px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --canvas: #f7f7f5; --panel: #fff; --subtle: #f0f1ee; --text: #202722; --secondary: #535e57; --border: #dce1db;
-  --control: #7a897f; --accent: #2f6b52; --on-accent: #fff; --selection: #e3eee6; --error: #a93434; --success: #2d6a43; --warning: #7b5c17;
-  color: var(--text); background: var(--canvas); color-scheme: light;
-}
-:root[data-theme='dark'] { --canvas: #161b18; --panel: #1d2420; --subtle: #252e28; --text: #e6ebe6; --secondary: #bac5bc; --border: #354139; --control: #768a7c; --accent: #9ac7aa; --on-accent: #161b18; --selection: #304237; --error: #f09a94; --success: #a2d5b0; --warning: #dfc284; color-scheme: dark; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']):not([data-theme='dark']) { --canvas: #161b18; --panel: #1d2420; --subtle: #252e28; --text: #e6ebe6; --secondary: #bac5bc; --border: #354139; --control: #768a7c; --accent: #9ac7aa; --on-accent: #161b18; --selection: #304237; --error: #f09a94; --success: #a2d5b0; --warning: #dfc284; color-scheme: dark; }
-}
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-body { margin: 0; }
-button, input, select { font: inherit; }
-button, select { border: 1px solid var(--control); border-radius: 8px; color: var(--text); background: var(--panel); padding: 8px 12px; min-height: 36px; }
-button { cursor: pointer; }
-button:hover:enabled { background: var(--subtle); }
-button:disabled { cursor: default; color: var(--secondary); background: var(--subtle); border-style: dashed; }
-:is(button, input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.app-shell { min-height: 100dvh; }
-.app-navigation { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
-.brand { font-size: 16px; font-weight: 700; margin-right: 24px; }
-.brand span { display: block; color: var(--secondary); font-size: 14px; font-weight: 400; }
-.app-navigation button[aria-current] { border-color: var(--accent); background: var(--selection); font-weight: 600; }
-.theme-control { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.discussion-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 280px); min-height: calc(100dvh - 73px); }
-.discussion-layout > * { min-width: 0; }
-.timeline { display: flex; flex-direction: column; min-height: calc(100dvh - 73px); }
-.timeline > header { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; padding: 24px; border-bottom: 1px solid var(--border); }
-.timeline h1 { margin: 4px 0 0; font-size: 20px; line-height: 28px; overflow-wrap: anywhere; }
-.timeline header small, .status, .message-identity, .message small { color: var(--secondary); }
-.messages { flex: 1; padding: 24px; overflow: auto; }
-.empty { color: var(--secondary); text-align: center; padding: 48px 16px; }
-.message { max-width: 760px; margin: 0 auto; padding: 24px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
-.message strong { font-size: 16px; line-height: 24px; }
-.message-identity { margin-top: 4px; }
-.message p { white-space: pre-wrap; font-size: 15px; line-height: 24px; }
-/* Pinned to the bottom of the window: streaming output never pushes the run controls away from the pointer. */
-.composer { position: sticky; bottom: 0; z-index: 1; display: flex; flex-direction: column; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--border); background: var(--canvas); }
-.composer input:not([type=checkbox]) { min-width: 0; border: 1px solid var(--control); border-radius: 8px; background: var(--panel); color: var(--text); padding: 8px 12px; min-height: 40px; }
-.composer input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
-/* D098: the first slot holds 开始协作 and, once running, 暂停/继续 at the same spot. */
-.composer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.composer-primary { min-width: 112px; text-align: center; }
-.composer button.composer-primary:enabled { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
-.composer button.composer-primary:hover:enabled { background: var(--accent); text-decoration: underline; }
-.run-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.run-bar button.danger { margin-left: 16px; }
-.composer button.danger { color: var(--error); border-color: var(--error); background: var(--panel); }
-.composer button.danger:disabled { color: var(--secondary); border-color: var(--control); background: var(--subtle); }
-.composer-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-left: auto; }
-.composer-step { display: flex; align-items: center; gap: 8px; color: var(--secondary); }
-.composer-hint { margin: 0; color: var(--secondary); flex: 1 1 240px; }
-.stop-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border: 1px solid var(--error); border-radius: 8px; background: var(--panel); }
-.stop-confirm p { margin: 0; flex: 1 1 320px; overflow-wrap: anywhere; }
+@import './theme/tokens.css';
+@import './theme/base.css';
 
-.error, .sync-feedback { margin: 0 24px 16px; overflow-wrap: anywhere; }
-.error { color: var(--error); }
-.messages > .run-feedback { max-width: 760px; margin: 16px auto 0; }
-.retry-sync { align-self: flex-start; margin: 0 24px 16px; }
-.workbench { padding: 24px; background: var(--panel); border-left: 1px solid var(--border); }
-.workbench h2 { font-size: 16px; line-height: 24px; margin: 0; }
-.workbench button { display: block; width: 100%; margin: 8px 0; }
-.room-card { color: var(--secondary); overflow-wrap: anywhere; }
-.workbench dl { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 24px; color: var(--secondary); }
-.workbench dd { margin: 0; color: var(--text); }
-.controls-toggle { display: none; }
-.app-shell .rooms-feature { --rooms-canvas: var(--canvas); --rooms-panel: var(--panel); --rooms-subtle: var(--subtle); --rooms-text: var(--text); --rooms-secondary: var(--secondary); --rooms-border: var(--border); --rooms-control: var(--control); --rooms-accent: var(--accent); --rooms-on-accent: var(--on-accent); --rooms-selection: var(--selection); --rooms-error: var(--error); --rooms-success: var(--success); --rooms-warning: var(--warning); color-scheme: inherit; }
-.app-shell .settings-feature { --settings-canvas: var(--canvas); --settings-panel: var(--panel); --settings-subtle: var(--subtle); --settings-text: var(--text); --settings-secondary: var(--secondary); --settings-border: var(--border); --settings-control: var(--control); --settings-accent: var(--accent); --settings-on-accent: var(--on-accent); --settings-selection: var(--selection); --settings-error: var(--error); --settings-warning: var(--warning); color-scheme: inherit; }
-@media (max-width: 1279px) {
-  .discussion-layout { grid-template-columns: minmax(0, 1fr); }
-  .controls-toggle { display: block; }
-  .workbench { display: none; border-left: 0; border-bottom: 1px solid var(--border); }
-  .workbench.is-open { display: block; grid-row: 1; }
-  .workbench button { display: inline-block; width: auto; margin-right: 8px; }
-  .workbench dl { grid-template-columns: auto 1fr; }
+/*
+ * R16 batch 1: the discussion screen is rebuilt on the tokens. The pages redesigned in batch 2 (rooms, workflow,
+ * usage, settings) keep their markup and read the same tokens through the names they already use.
+ */
+:root {
+  --canvas: var(--bg); --panel: var(--surface); --subtle: var(--surface-2); --secondary: var(--text-2); --border: var(--line);
+  --control: var(--line-strong); --selection: var(--accent-soft); --error: var(--danger); --warning: var(--warn);
 }
-@media (max-width: 1023px) {
-  .app-navigation { padding: 12px 16px; }
-  .brand { margin-right: 8px; }
-  .timeline > header, .messages, .workbench { padding: 16px; }
-  .composer { padding: 16px; }
-  .theme-control { margin-left: 0; }
+.legacy button:not(.btn):not(.icon-btn):not(.link-btn):not(.link-button), .legacy select {
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); color: var(--text); background: var(--surface); padding: 7px 12px; min-height: 36px;
 }
-.workbench .control-help { color: var(--secondary); margin: 4px 0 0; }
-.composer-more { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; color: var(--secondary); }
-.composer-more p { margin: 0; flex: 1 1 320px; max-width: 640px; }
-.composer button.composer-more-toggle { border-color: transparent; background: transparent; color: var(--secondary); }
-.composer button.composer-more-toggle[aria-expanded=true] { color: var(--text); }
+.legacy button:not(.btn):not(.icon-btn):not(.link-btn):not(.link-button):hover:enabled { background: var(--surface-2); }
+.legacy button:not(.btn):not(.icon-btn):not(.link-btn):not(.link-button):disabled { color: var(--text-3); background: var(--surface-2); border-style: dashed; }
+.legacy .error { color: var(--danger); }
+.legacy .rooms-feature { --rooms-canvas: var(--bg); --rooms-panel: var(--surface); --rooms-subtle: var(--surface-2); --rooms-text: var(--text); --rooms-secondary: var(--text-2); --rooms-border: var(--line);
+  --rooms-control: var(--line-strong); --rooms-accent: var(--accent); --rooms-on-accent: var(--on-accent); --rooms-selection: var(--accent-soft); --rooms-error: var(--danger); --rooms-success: var(--success); --rooms-warning: var(--warn); color-scheme: inherit; min-height: 100%; }
+.legacy .settings-feature { --settings-canvas: var(--bg); --settings-panel: var(--surface); --settings-subtle: var(--surface-2); --settings-text: var(--text); --settings-secondary: var(--text-2); --settings-border: var(--line);
+  --settings-control: var(--line-strong); --settings-accent: var(--accent); --settings-on-accent: var(--on-accent); --settings-selection: var(--accent-soft); --settings-error: var(--danger); --settings-warning: var(--warn); color-scheme: inherit; min-height: auto; }
+.legacy .workflows-feature, .legacy .workflows-feature[data-theme] { --wf-panel: var(--surface); --wf-subtle: var(--surface-2); --wf-text: var(--text); --wf-muted: var(--text-2); --wf-border: var(--line-strong);
+  --wf-accent: var(--accent); --wf-on-accent: var(--on-accent); --wf-error: var(--danger); color-scheme: inherit; margin-top: 24px; border-radius: var(--r-md); }
+.legacy .usage-page { color: var(--text); }
