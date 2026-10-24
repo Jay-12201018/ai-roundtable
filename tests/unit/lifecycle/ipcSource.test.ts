@@ -27,6 +27,7 @@ vi.mock('electron', () => ({
   app: { quit: vi.fn() },
   dialog: { showErrorBox: vi.fn(), showMessageBoxSync: vi.fn() },
   shell: { openExternal: vi.fn() },
+  nativeTheme: { shouldUseDarkColors: false },
   ipcMain: {
     handle: (channel: string, handler: (...args: any[]) => unknown) => fixture.handle(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel),

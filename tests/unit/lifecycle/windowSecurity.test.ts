@@ -12,6 +12,7 @@ const fixture = vi.hoisted(() => ({
   quit: vi.fn(),
   showErrorBox: vi.fn(),
   showMessageBoxSync: vi.fn(),
+  nativeTheme: { shouldUseDarkColors: false },
   app: { isPackaged: false },
 }));
 
@@ -34,6 +35,7 @@ vi.mock('electron', () => ({
     constructor(public options: Electron.BrowserWindowConstructorOptions) { fixture.windows.push(this); }
   },
   shell: { openExternal: fixture.openExternal },
+  nativeTheme: fixture.nativeTheme,
   app: Object.assign(fixture.app, { quit: fixture.quit }),
   dialog: { showErrorBox: fixture.showErrorBox, showMessageBoxSync: fixture.showMessageBoxSync },
 }));
@@ -60,6 +62,13 @@ describe('window navigation security', () => {
     expect(fixture.windows[0].options.minWidth).toBe(800);
     expect(fixture.windows[0].options.minHeight).toBe(600);
     expect(fixture.windows[0].options.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true });
+  });
+
+  it('paints the R16 canvas colour before the renderer loads, following the system light or dark setting', () => {
+    fixture.nativeTheme.shouldUseDarkColors = false; createMainWindow();
+    fixture.nativeTheme.shouldUseDarkColors = true; createMainWindow();
+    fixture.nativeTheme.shouldUseDarkColors = false;
+    expect(fixture.windows.slice(-2).map(window => window.options.backgroundColor)).toEqual(['#F7F6F2', '#1F1E1C']);
   });
 
   it.each([

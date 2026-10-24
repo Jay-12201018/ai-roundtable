@@ -51,7 +51,7 @@ const fixture = vi.hoisted(() => {
   };
 });
 
-vi.mock('electron', () => ({ app: fixture.app, dialog: fixture.dialog, BrowserWindow: fixture.Window, shell: { openExternal: vi.fn() } }));
+vi.mock('electron', () => ({ app: fixture.app, dialog: fixture.dialog, BrowserWindow: fixture.Window, shell: { openExternal: vi.fn() }, nativeTheme: { shouldUseDarkColors: false } }));
 vi.mock('../../src/main/database/Database', () => ({ Database: vi.fn(function () { return fixture.database; }) }));
 vi.mock('../../src/main/security/electronSafeStorage', () => ({ createElectronKeyBackend: vi.fn() }));
 vi.mock('../../src/main/security/KeyService', () => ({ KeyService: vi.fn(function () { return fixture.keys; }) }));

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, dialog, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron';
 
 const trustedRenderers = new WeakMap<BrowserWindow, URL>();
 
@@ -42,7 +42,8 @@ export function createMainWindow(): BrowserWindow {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    backgroundColor: '#0f172a',
+    // R16 canvas (--bg) before the renderer paints, light or dark with the system, so opening never flashes navy.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1F1E1C' : '#F7F6F2',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
