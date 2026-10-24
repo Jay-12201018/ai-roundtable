@@ -26,12 +26,12 @@ function completed(runId = 'saved', roomId = 'r2'): RunSnapshot {
   value.execution!.currentTurnId = null; value.execution!.currentAgentId = null;
   return value;
 }
-function openRooms() { fireEvent.click(screen.getByRole('button', { name: '房间与成员' })); }
+function openRooms() { fireEvent.click(screen.getByRole('button', { name: '管理房间与成员' })); }
 
 it('keeps start disabled with no room and never creates an implicit Demo', async () => {
   const f = fixture(); render(<App />);
-  await waitFor(() => expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(true));
-  fireEvent.click(screen.getByRole('button', { name: '开始协作' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(true));
+  fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
   expect(f.api.room.createDemo).not.toHaveBeenCalled(); expect(f.api.run.start).not.toHaveBeenCalled();
   const session = createRendererSession(f.api, undefined, { requireRoom: true }); const dispose = session.mount();
   await session.startRun();
@@ -46,7 +46,7 @@ it.each([false, true])('restores the saved Run in its own room without switching
   await screen.findByText('持久历史正文'); openRooms();
   await screen.findByRole('heading', { name: '历史所在房间' });
   expect((screen.getByLabelText('显示归档房间') as HTMLInputElement).checked).toBe(archived);
-  fireEvent.click(screen.getByRole('button', { name: '讨论' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回讨论' }));
   expect(screen.getByText('持久历史正文')).toBeTruthy(); expect(localStorage.getItem('roundtable.runId')).toBe('saved');
 });
 
@@ -56,10 +56,10 @@ it('rejects an old subscription and its deltas after selecting a different room 
   vi.spyOn(f.api.rooms, 'listRoomRuns').mockResolvedValue({ items: [{ id: 'old', roomId: 'r1', task: '旧 Run', status: 'completed', createdAt: time, updatedAt: time }], nextCursor: null, hasMore: false });
   render(<App />); openRooms(); await screen.findByRole('heading', { name: '原房间' });
   fireEvent.click(screen.getByRole('button', { name: '历史记录' })); fireEvent.click(await screen.findByRole('button', { name: '旧 Run' }));
-  openRooms(); fireEvent.click(screen.getByRole('button', { name: '新房间' }));
+  openRooms(); fireEvent.click(await within(await screen.findByRole('complementary', { name: '房间导航' })).findByRole('button', { name: '新房间' }));
   await act(async () => late.resolve(subscription(completed('old', 'r1'))));
   f.emit({ version: 1, runId: 'old', turnId: 'old-turn', requestId: 'old-request', sequence: 5, type: 'text_delta', timestamp: time, payload: { turnId: 'old-turn', messageId: 'old-message', senderName: '起草者', text: '迟到秘密正文' } });
-  fireEvent.click(screen.getByRole('button', { name: '讨论' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回讨论' }));
   expect(screen.queryByText('持久历史正文')).toBeNull(); expect(screen.queryByText('迟到秘密正文')).toBeNull();
   expect(localStorage.getItem('roundtable.runId')).toBeNull();
 });
@@ -82,11 +82,14 @@ it('renders each message with its frozen member, including earlier Attempts and 
   render(<App />);
   const earlier = (await screen.findByText('旧尝试部分正文')).closest('article')!;
   // D101: the frozen Provider id is shown by its name, never as the id itself.
-  await waitFor(() => expect(earlier.textContent).toContain('Provider：第一服务商'));
+  // R16: the service and model ID are in 请求详情, one click from each message.
+  fireEvent.click(within(earlier).getByRole('button', { name: '请求详情' }));
+  await waitFor(() => expect(earlier.textContent).toContain('服务第一服务商'));
   expect(earlier.textContent).toContain('旧起草角色'); expect(earlier.textContent).toContain('model-one'); expect(earlier.textContent).not.toContain('provider-one');
   const second = screen.getByText('第二成员正文').closest('article')!;
+  fireEvent.click(within(second).getByRole('button', { name: '请求详情' }));
   expect(second.textContent).toContain('旧审查角色'); expect(second.textContent).toContain('model-two'); expect(second.textContent).not.toContain('model-one');
-  expect(second.textContent).toContain('Provider：第二服务商'); expect(second.textContent).not.toContain('第一服务商'); expect(second.textContent).not.toContain('provider-two');
+  expect(second.textContent).toContain('服务第二服务商'); expect(second.textContent).not.toContain('第一服务商'); expect(second.textContent).not.toContain('provider-two');
 });
 
 it('refreshes member Provider summaries when a settings mutation settles after leaving settings', async () => {
@@ -94,7 +97,7 @@ it('refreshes member Provider summaries when a settings mutation settles after l
   f.db.createAgent({ id: 'agent', roomId: 'r1', displayName: '成员', roleTemplateId: '角色', providerId: 'p', modelId: 'mock' });
   const gate = deferred<void>(); const update = f.api.settings.updateProvider.bind(f.api.settings);
   vi.spyOn(f.api.settings, 'updateProvider').mockImplementation(async input => { await gate.promise; return update(input); });
-  render(<App />); fireEvent.click(screen.getByRole('button', { name: '模型设置' }));
+  render(<App />); fireEvent.click(screen.getByRole('button', { name: '设置' }));
   await screen.findByLabelText('Provider 名称'); fireEvent.change(screen.getByLabelText('Provider 名称'), { target: { value: '新 Provider' } });
   fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
   fireEvent.click(screen.getByRole('button', { name: '返回讨论' })); openRooms();
@@ -107,10 +110,14 @@ it('refreshes member Provider summaries when a settings mutation settles after l
 it('persists explicit theme preference and can return to following the system', async () => {
   fixture(); const view = render(<App />);
   await act(async () => {});
-  fireEvent.change(screen.getByLabelText('外观'), { target: { value: 'dark' } });
+  // R16: 外观 lives in 设置.
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
+  fireEvent.click(within(screen.getByRole('group', { name: '外观' })).getByRole('button', { name: '深色' }));
   expect(document.documentElement.dataset.theme).toBe('dark'); view.unmount();
-  render(<App />); await act(async () => {}); expect((screen.getByLabelText('外观') as HTMLSelectElement).value).toBe('dark');
-  fireEvent.change(screen.getByLabelText('外观'), { target: { value: 'system' } });
+  render(<App />); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
+  expect(within(screen.getByRole('group', { name: '外观' })).getByRole('button', { name: '深色' }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(within(screen.getByRole('group', { name: '外观' })).getByRole('button', { name: '跟随系统' }));
   expect(document.documentElement.dataset.theme).toBe('system');
 });
 
@@ -128,10 +135,10 @@ it.each(['archive', 'delete', 'filter'] as const)('clears restored messages and 
   }
   await screen.findByRole('heading', { name: '你的下一场圆桌' });
   act(() => f.emit({ version: 1, runId: 'saved', turnId: 'saved-turn', requestId: 'saved-request', sequence: 5, type: 'text_delta', timestamp: time, payload: { turnId: 'saved-turn', messageId: 'saved-message', senderName: '起草者', text: '旧选择的迟到内容' } }));
-  fireEvent.click(screen.getByRole('button', { name: '讨论' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回讨论' }));
   expect(screen.queryByText('持久历史正文')).toBeNull(); expect(screen.queryByText('旧选择的迟到内容')).toBeNull();
   expect(localStorage.getItem('roundtable.runId')).toBeNull();
-  expect((screen.getByRole('button', { name: '开始协作' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('shows unrecorded metadata for old Runs without using live member configuration', async () => {
@@ -157,7 +164,7 @@ it.each(['createProvider', 'deleteProvider', 'setKey', 'deleteKey'] as const)('r
     : operation === 'deleteProvider' ? vi.spyOn(f.api.settings, 'deleteProvider').mockImplementation(async input => { await gate.promise; return original.deleteProvider(input); })
     : operation === 'setKey' ? vi.spyOn(f.api.settings, 'setKey').mockImplementation(async input => { await gate.promise; return original.setKey(input); })
     : vi.spyOn(f.api.settings, 'deleteKey').mockImplementation(async input => { await gate.promise; return original.deleteKey(input); });
-  render(<App />); fireEvent.click(screen.getByRole('button', { name: '模型设置' }));
+  render(<App />); fireEvent.click(screen.getByRole('button', { name: '设置' }));
   await screen.findByLabelText('Provider 名称');
   if (operation === 'createProvider') {
     fireEvent.click(screen.getByRole('button', { name: '新增 Provider' }));

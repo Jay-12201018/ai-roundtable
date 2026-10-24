@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BudgetStopNotice, MessageUsage, RunBudgetBar, UsagePage, parseAmountYuan, type LedgerCommands } from '../../../src/renderer/features/usage';
-import { ContextHint, SummaryPanel, type SummaryCommands } from '../../../src/renderer/features/host';
+import { BudgetStopNotice, UsagePage, parseAmountYuan, type LedgerCommands } from '../../../src/renderer/features/usage';
+import type { SummaryCommands } from '../../../src/renderer/features/host';
+import { ContextHint, SummaryDialog } from '../../../src/renderer/features/timeline';
+import { RequestDetails } from '../../../src/renderer/features/timeline/MessageItem';
+import { BudgetCard } from '../../../src/renderer/features/runPanel/RunPanel';
 import { requestChargeSchema, type RequestCharge, type RunBudget } from '../../../src/shared/schemas/budget';
 import type { RunSnapshot } from '../../../src/shared/types/run';
 import type { UsageReport } from '../../../src/shared/schemas/usage';
@@ -23,14 +26,14 @@ const budget = (overrides: Partial<RunBudget> = {}): RunBudget => ({ currency: '
 
 describe('settlement and write-off display (D105/D106)', () => {
   it('says an off-peak, cache-hit settlement in the words of the console', () => {
-    render(<MessageUsage charge={charge({ chargedMicro: 128, settlement: { period: 'off_peak', startedAt: time, finishedAt: time, cacheHitTokens: 200,
+    render(<RequestDetails id="d" runId="run" lines={[]} charge={charge({ chargedMicro: 128, settlement: { period: 'off_peak', startedAt: time, finishedAt: time, cacheHitTokens: 200,
       cacheHitMicroPerMillion: 20_000, cacheMissMicroPerMillion: 1_000_000, outputMicroPerMillion: 4_000_000, amountMicro: 128, evidence: 'e' } })} />);
     expect(document.body.textContent).toContain('输入 300（缓存命中 200） / 输出 6 tokens · 花费 ¥0.000128 · 按空闲价（高峰价的一半）');
   });
 
   it('writes off an unknown charge only with an amount within the cap, a clean basis and the console check', async () => {
     const commands = ledger();
-    render(<MessageUsage charge={unknown()} runId="run" ledger={commands} />);
+    render(<RequestDetails id="d" lines={[]} charge={unknown()} runId="run" ledger={commands} />);
     fireEvent.click(screen.getByRole('button', { name: '核销' }));
     const save = screen.getByRole('button', { name: '保存核销' }) as HTMLButtonElement;
     fireEvent.change(screen.getByLabelText('实际金额（元）'), { target: { value: '0.004' } });
@@ -47,7 +50,7 @@ describe('settlement and write-off display (D105/D106)', () => {
   });
 
   it('shows a written-off amount next to the cap and the difference', () => {
-    render(<MessageUsage charge={unknown({ chargedMicro: 1200, writeOffs: [{ writeOffId: 'w', amountMicro: 1200, basis: '控制台明细', createdAt: time }] })} runId="run" ledger={ledger()} />);
+    render(<RequestDetails id="d" lines={[]} charge={unknown({ chargedMicro: 1200, writeOffs: [{ writeOffId: 'w', amountMicro: 1200, basis: '控制台明细', createdAt: time }] })} runId="run" ledger={ledger()} />);
     expect(document.body.textContent).toContain('已核销 ¥0.001200（原按上限计 ¥0.003448，比原上限少 ¥0.002248） · 依据：控制台明细');
     expect(screen.getByRole('button', { name: '更正核销' })).toBeTruthy();
   });
@@ -74,12 +77,13 @@ describe('budget top-ups (D104)', () => {
     expect(commands.resume).toHaveBeenCalled();
   });
 
-  it('shows the top-up total and history in the budget bar, and adds from there', async () => {
+  it('shows the top-up total and history in the budget card, and adds from there', async () => {
     const commands = ledger();
-    render(<RunBudgetBar snapshot={{ status: 'paused', budget: budget({ limitMicro: 2_000_000, initialLimitMicro: 1_000_000, remainingMicro: 2_000_000,
+    render(<BudgetCard snapshot={{ status: 'paused', budget: budget({ limitMicro: 2_000_000, initialLimitMicro: 1_000_000, remainingMicro: 2_000_000,
       topUps: [{ topUpId: 't', amountMicro: 1_000_000, createdAt: time }] }) } as RunSnapshot} ledger={commands} />);
     const bar = screen.getByRole('region', { name: '运行预算' });
-    expect(bar.textContent).toContain('预算 ¥2.0000（含追加 ¥1.0000）');
+    expect(bar.textContent).toContain('/ ¥2.00（含追加 ¥1.00）');
+    expect(bar.textContent).toContain('开始时 ¥1.0000，之后共追加 ¥1.0000。');
     expect(bar.textContent).toContain('追加记录（1）');
     fireEvent.click(screen.getByRole('button', { name: '追加预算' }));
     fireEvent.change(screen.getByLabelText('追加预算（元）'), { target: { value: '0.5' } });
@@ -125,8 +129,9 @@ const previewOf = (overrides: Partial<SummaryPreview> = {}): SummaryPreview => (
 describe('summary controls (D107)', () => {
   it('states coverage, writer and maximum cost before anything is sent, and generates on the host\'s click', async () => {
     const commands = summaryCommands(previewOf());
-    render(<SummaryPanel snapshot={{ runId: 'run', sequence: 3, messages: [] } as unknown as RunSnapshot} summaries={commands} onClose={() => {}} />);
-    const panel = await screen.findByRole('region', { name: '生成讨论摘要' });
+    render(<SummaryDialog snapshot={{ runId: 'run', sequence: 3, messages: [] } as unknown as RunSnapshot} summaries={commands} onClose={() => {}} />);
+    const panel = await screen.findByRole('dialog', { name: '生成讨论摘要' });
+    expect(panel.textContent).toContain('预计最多 ¥0.0123');
     expect(panel.textContent).toContain('预计最高 ¥0.0123：发送前按高峰价和输出上限预留');
     expect((screen.getByLabelText('摘要覆盖到第几条') as HTMLSelectElement).value).toBe('s2');
     expect(commands.generate).not.toHaveBeenCalled();
@@ -135,7 +140,7 @@ describe('summary controls (D107)', () => {
   });
 
   it('explains why a summary cannot be generated now', async () => {
-    render(<SummaryPanel snapshot={{ runId: 'run', sequence: 3, messages: [] } as unknown as RunSnapshot} onClose={() => {}}
+    render(<SummaryDialog snapshot={{ runId: 'run', sequence: 3, messages: [] } as unknown as RunSnapshot} onClose={() => {}}
       summaries={summaryCommands(previewOf({ available: false, reason: 'budget_insufficient', cost: { kind: 'priced', maxMicro: 50_000, remainingMicro: 10_000 } }))} />);
     expect((await screen.findByRole('alert')).textContent).toContain('这次摘要最高可能花费 ¥0.0500，剩余额度 ¥0.0100');
     expect((screen.getByRole('button', { name: '生成摘要（发送 1 次请求）' }) as HTMLButtonElement).disabled).toBe(true);

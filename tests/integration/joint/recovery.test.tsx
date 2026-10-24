@@ -31,12 +31,12 @@ describe('joint interrupted recovery and reload',()=>{
   it('refreshes the authoritative interrupted App without calling Provider; inspect and discard keep evidence',async()=>{
     const f=recovered();window.roundtable=f.api;localStorage.setItem('roundtable.runId','run');const before=f.db.readRunSnapshot('run');
     try{
-      const page=render(<App/>);await screen.findByText('saved alpha');expect(screen.getByRole('status').textContent).toContain('已中断');
+      const page=render(<App/>);await screen.findByText('saved alpha');expect(screen.getByRole('status',{name:'运行状态'}).textContent).toContain('已中断');
       expect((screen.getByRole('button',{name:'恢复后续回合'}) as HTMLButtonElement).disabled).toBe(true);
       fireEvent.click(screen.getByRole('button',{name:'检查中断记录'}));await waitFor(()=>expect((screen.getByRole('button',{name:'检查中断记录'}) as HTMLButtonElement).disabled).toBe(false));
       expect(f.db.readRunSnapshot('run')).toEqual(before);expect(f.provider.inputs).toEqual([]);
       page.unmount();render(<App/>);await screen.findByText('saved alpha');expect(f.provider.inputs).toEqual([]);
-      fireEvent.click(screen.getByRole('button',{name:'放弃中断执行'}));await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('已停止'));
+      fireEvent.click(screen.getByRole('button',{name:'放弃中断执行'}));await waitFor(()=>expect(screen.getByRole('status',{name:'运行状态'}).textContent).toContain('已停止'));
       const after=f.db.readRunSnapshot('run');expect(after.turns).toEqual(before.turns);expect(after.messages).toEqual(before.messages);expect(after.attempts).toEqual(before.attempts);expect(f.provider.inputs).toEqual([]);
     }finally{cleanup();await f.close();}
   });

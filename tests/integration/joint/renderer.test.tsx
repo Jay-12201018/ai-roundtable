@@ -35,15 +35,15 @@ describe('R04 + R05 + R06 live integration',()=>{
   it('projects real alpha/beta/gamma to the DOM with Pause, one Step and Resume',async()=>{
     const f=fixture();f.service.createDemoRoom('联合 Mock');window.roundtable=f.api;
     try{
-      render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始协作'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始协作'}));
+      render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始讨论'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始讨论'}));
       await screen.findByText('alpha');expect(f.provider.inputs).toHaveLength(1);
       await waitFor(()=>expect((screen.getByRole('button',{name:'暂停'}) as HTMLButtonElement).disabled).toBe(false));
-      fireEvent.click(screen.getByRole('button',{name:'暂停'}));await screen.findByText(/正在暂停/);
-      await act(async()=>{f.provider.release(0);});await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('已暂停'));
+      fireEvent.click(screen.getByRole('button',{name:'暂停'}));await waitFor(()=>expect(screen.getByRole('status',{name:'运行状态'}).textContent).toContain('正在暂停'));
+      await act(async()=>{f.provider.release(0);});await waitFor(()=>expect(screen.getByRole('status',{name:'运行状态'}).textContent).toContain('已暂停'));
       fireEvent.click(screen.getByRole('button',{name:'下一步'}));await screen.findByText('beta');expect(f.provider.inputs).toHaveLength(2);
-      await act(async()=>{f.provider.release(1);});await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('已暂停'));
+      await act(async()=>{f.provider.release(1);});await waitFor(()=>expect(screen.getByRole('status',{name:'运行状态'}).textContent).toContain('已暂停'));
       fireEvent.click(screen.getByRole('button',{name:'继续'}));await screen.findByText('gamma');expect(f.provider.inputs).toHaveLength(3);
-      await act(async()=>{f.provider.release(2);});await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('已完成'));
+      await act(async()=>{f.provider.release(2);});await waitFor(()=>expect(screen.getByRole('status',{name:'运行状态'}).textContent).toContain('已完成'));
       const runId=f.db.getAttempt(f.provider.inputs[0].requestId)!.runId;
       expect(f.service.getSnapshot(runId).turns).toHaveLength(3);
       expect(JSON.stringify(f.provider.inputs[1].messages)).toContain('alpha');expect(JSON.stringify(f.provider.inputs[2].messages)).toContain('beta');

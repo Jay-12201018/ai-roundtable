@@ -1,6 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HostPanel, HostTimeline, useHostCommands } from '../../../src/renderer/features/host';
+import { useHostCommands, useSummaryCommands } from '../../../src/renderer/features/host';
+import { DiscussionTimeline, type ProviderNames } from '../../../src/renderer/features/timeline';
+import { RunPanel, type PanelTab } from '../../../src/renderer/features/runPanel/RunPanel';
+import { HostComposer, interjectionBoxFor } from '../../../src/renderer/features/composer/Composer';
 import { HostTextArea } from '../../../src/renderer/features/host/HostTextArea';
 import { nextSpeaker, overrideCandidates, timelineSlots } from '../../../src/renderer/features/host/model';
 import { compileWorkflow } from '../../../src/main/workflow';
@@ -39,9 +42,15 @@ function pausedSnapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
     ...overrides,
   };
 }
-function Harness({ snapshot, api, onApplied = () => {} }: { snapshot: RunSnapshot; api: HostApiContract; onApplied?: () => void }) {
+/** The R16 discussion screen without the shell: timeline, 本场信息 (one tab) and the interjection box. */
+function Harness({ snapshot, api, onApplied = () => {}, tab = 'members', providers }: { snapshot: RunSnapshot; api: HostApiContract; onApplied?: () => void; tab?: PanelTab; providers?: ProviderNames }) {
   const commands = useHostCommands(api, snapshot.runId, onApplied);
-  return <><HostTimeline snapshot={snapshot} commands={commands} /><HostPanel snapshot={snapshot} commands={commands} /></>;
+  const summaries = useSummaryCommands(undefined, snapshot.runId, () => {});
+  return <>
+    <DiscussionTimeline snapshot={snapshot} commands={commands} summaries={summaries} providers={providers} onRegenerateSummary={() => {}} />
+    <RunPanel snapshot={snapshot} commands={commands} tab={tab} onTab={() => {}} onClose={() => {}} syncLabel="已同步" />
+    {interjectionBoxFor(snapshot, ['running', 'pausing', 'paused', 'cancelling'].includes(snapshot.status)) && <HostComposer snapshot={snapshot} commands={commands} instructionsWritable />}
+  </>;
 }
 const hostApi = (implementation?: HostApiContract['command']) => ({ command: vi.fn(implementation ?? (async input => ({ runId: input.runId, actionId: 'action', kind: input.kind, duplicate: false }))) });
 
@@ -80,7 +89,7 @@ describe('R12 host IME-safe text input', () => {
 
 describe('R12 host UI', () => {
   it('shows the effective version, version navigation, affected marks and host attribution', () => {
-    render(<Harness snapshot={pausedSnapshot()} api={hostApi()} />);
+    render(<Harness snapshot={pausedSnapshot()} api={hostApi()} tab="instructions" />);
     expect(screen.getByText('新开场')).toBeTruthy();
     expect(screen.queryByText('旧开场')).toBeNull();
     expect(screen.getByText('版本 2/2')).toBeTruthy();
@@ -88,9 +97,9 @@ describe('R12 host UI', () => {
     expect(screen.getByText('旧开场')).toBeTruthy();
     expect(screen.getByText(/未生效的历史版本/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '设为当前版本' })).toBeTruthy();
-    expect(screen.getByRole('note').textContent).toContain('受影响：生成时依据的「成员 a」的发言已被修改');
+    expect(screen.getByRole('note').textContent).toContain('受影响 · 写这条时依据的「成员 a」的发言已被修改');
     expect(screen.getByText('主持人插话')).toBeTruthy();
-    expect(screen.getByText(/下一位：成员 c（按计划）/)).toBeTruthy();
+    expect(screen.getByRole('status', { name: '下一位' }).textContent).toContain('下一位：成员 c（按计划）');
     expect(screen.getByText('只用中文')).toBeTruthy();
   });
 
@@ -103,7 +112,7 @@ describe('R12 host UI', () => {
     fireEvent.click(button); fireEvent.click(button);
     expect(api.command).toHaveBeenCalledTimes(1);
     expect(api.command.mock.calls[0][0]).toMatchObject({ runId: 'run', kind: 'setOverride', agentId: 'c', clientRequestId: expect.any(String) });
-    expect(screen.getByText('主持人操作已发送，等待主进程确认')).toBeTruthy();
+    expect(screen.getByText('正在发送，等待主进程确认…')).toBeTruthy();
     await act(async () => { finish(); });
     expect(onApplied).toHaveBeenCalledTimes(1);
     expect(screen.getByText('已点名成员 c，将在下一回合发言。')).toBeTruthy();
@@ -122,7 +131,7 @@ describe('R12 host UI', () => {
 
   it('edits a message as a new version, and interjects and manages instructions with the IME-safe composer', async () => {
     const api = hostApi();
-    render(<Harness snapshot={pausedSnapshot()} api={api} />);
+    render(<Harness snapshot={pausedSnapshot()} api={api} tab="instructions" />);
     fireEvent.click(screen.getAllByRole('button', { name: '修改' })[0]);
     const editor = screen.getByLabelText('修改消息内容');
     expect(document.activeElement).toBe(editor);
@@ -136,7 +145,7 @@ describe('R12 host UI', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '修改' }).at(-1)!);
     expect(document.activeElement).toBe(screen.getByLabelText('修改持续指令'));
     expect((screen.getByRole('button', { name: '保存修改' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    fireEvent.click(within(document.querySelector('.instr')!).getByRole('button', { name: '取消' }));
     fireEvent.click(screen.getByRole('button', { name: '清除' }));
     await waitFor(() => expect(api.command).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'clearInstruction', instructionId: 'i1' })));
     fireEvent.change(screen.getByLabelText('新增持续指令'), { target: { value: '给出编号' } });
@@ -159,7 +168,7 @@ describe('R12 host UI', () => {
     expect(screen.getByRole('button', { name: '中止重新生成' })).toBeTruthy();
   });
 
-  it('explains instead of offering an unusable composer once the Run is completed, and labels an unfinished current version', () => {
+  it('offers no interjection box once the Run is completed, and labels an unfinished current version', () => {
     const base = pausedSnapshot();
     const failed = pausedSnapshot({ status: 'error', messages: base.messages.map(m => m.id === 'm2' ? { ...m, status: 'failed' as const } : m),
       turns: base.turns.map(t => t.turnId === 't2' ? { ...t, status: 'failed' as const } : t),
@@ -171,8 +180,10 @@ describe('R12 host UI', () => {
     expect(screen.getByText(/重试 · 当前版本（未完成）/)).toBeTruthy();
     unmount();
     render(<Harness snapshot={pausedSnapshot({ status: 'completed' })} api={hostApi()} />);
+    // A finished Run takes no interjection: the dock offers the goal box for a new discussion instead (App).
     expect(screen.queryByLabelText('主持人插话')).toBeNull();
-    expect(screen.getByText(/运行已完成，不能再插话/)).toBeTruthy();
+    expect(interjectionBoxFor(pausedSnapshot({ status: 'completed' }), false)).toBe(false);
+    expect(interjectionBoxFor(failed, false)).toBe(true);
     expect(screen.getByText('下一位：无（运行已完成）')).toBeTruthy();
   });
 });
@@ -182,32 +193,38 @@ describe('Provider names in member identity lines', () => {
   const withProvider = (id: string | null, modelId = 'deepseek-flash') => pausedSnapshot({
     execution: { ...pausedSnapshot().execution!, membersSnapshot: pausedSnapshot().execution!.membersSnapshot!.map(m => ({ ...m, roleTemplateId: 'Drafter', providerId: id, modelId })) },
   });
-  function TimelineOnly({ snapshot, providers }: { snapshot: RunSnapshot; providers?: import('../../../src/renderer/features/host').ProviderNames }) {
+  function TimelineOnly({ snapshot, providers }: { snapshot: RunSnapshot; providers?: ProviderNames }) {
     const commands = useHostCommands(hostApi(), snapshot.runId, () => {});
-    return <HostTimeline snapshot={snapshot} commands={commands} providers={providers} />;
+    const summaries = useSummaryCommands(undefined, snapshot.runId, () => {});
+    return <DiscussionTimeline snapshot={snapshot} commands={commands} summaries={summaries} providers={providers} onRegenerateSummary={() => {}} />;
   }
-  const lines = () => [...document.querySelectorAll('.message-identity')].map(node => node.textContent);
+  // R16: the identity line names the model; the service and model ID are one click away in 请求详情.
+  const models = () => [...document.querySelectorAll('.msg-meta')].map(node => node.textContent);
+  const details = () => { for (const button of screen.getAllByRole('button', { name: '请求详情' })) fireEvent.click(button); return screen.getAllByRole('region', { name: '请求详情' }).map(node => node.textContent); };
 
   it('shows the Provider name from the frozen snapshot id, never the UUID', () => {
-    render(<TimelineOnly snapshot={withProvider(providerId)} providers={{ state: 'ready', names: new Map([[providerId, 'DeepSeek 直连']]) }} />);
-    expect(lines().length).toBeGreaterThan(0);
-    for (const line of lines()) expect(line).toBe('Drafter · Provider：DeepSeek 直连 · Model：deepseek-flash');
+    render(<TimelineOnly snapshot={withProvider(providerId)} providers={{ state: 'ready', names: new Map([[providerId, 'DeepSeek 直连']]), models: new Map([[`${providerId}:deepseek-flash`, 'DeepSeek Flash']]) }} />);
+    expect(models().length).toBeGreaterThan(0);
+    for (const line of models()) expect(line).toBe('DeepSeek Flash');
+    for (const line of details()) expect(line).toBe('角色Drafter服务DeepSeek 直连模型 IDdeepseek-flash');
     expect(document.body.textContent).not.toContain(providerId);
   });
 
   it.each([
-    ['ready', 'Drafter · Provider 已删除 · Model：deepseek-flash'],
-    ['loading', 'Drafter · Provider 读取中 · Model：deepseek-flash'],
-    ['error', 'Drafter · Provider 名称暂时无法读取 · Model：deepseek-flash'],
+    ['ready', '服务已删除'],
+    ['loading', '正在读取服务名称'],
+    ['error', '服务名称暂时无法读取'],
   ] as const)('explains a Provider it cannot name (%s) instead of showing its id', (state, expected) => {
     render(<TimelineOnly snapshot={withProvider(providerId)} providers={{ state, names: new Map() }} />);
-    for (const line of lines()) expect(line).toBe(expected);
+    for (const line of models()) expect(line).toBe('deepseek-flash');
+    for (const line of details()) expect(line).toContain(`服务${expected}`);
     expect(document.body.textContent).not.toContain(providerId);
   });
 
   it('names the built-in Mock of legacy demo members', () => {
     render(<TimelineOnly snapshot={withProvider(null, 'mock')} providers={{ state: 'ready', names: new Map() }} />);
-    for (const line of lines()) expect(line).toBe('Drafter · Provider：内置 Mock · Model：mock');
+    for (const line of models()) expect(line).toBe('内置演示（Mock）');
+    for (const line of details()) expect(line).toContain('服务内置 Mock（不联网、不计费）');
   });
 });
 
@@ -218,24 +235,27 @@ describe('D102 truncated replies in the timeline', () => {
     return snapshot;
   };
   const slotOf = (content: string) => screen.getByText(content).closest('article')!;
+  const truncatedNote = (slot: Element) => [...slot.querySelectorAll('.note[role=note]')].find(note => note.textContent!.includes('单次上限'));
 
   it('marks the reply and continues it as a new version while the Run is idle', async () => {
     const api = hostApi();
     render(<Harness snapshot={truncatedSnapshot()} api={api} />);
     const slot = slotOf('回应');
-    expect(slot.querySelector('.host-truncated[role=note]')!.textContent).toBe('已达单次输出上限，内容可能不完整。');
+    expect(truncatedNote(slot)!.querySelector('.note-body')!.textContent).toBe('写到单次上限停下了，内容可能不完整。续写会生成一个新版本，按新请求计费。');
+    // The one next step, with what it may cost: a Mock member costs nothing.
+    expect(truncatedNote(slot)!.querySelector('.note-cost')!.textContent).toBe('内置 Mock，不花钱');
     const button = within(slot).getByRole('button', { name: '续写' }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     fireEvent.click(button);
     await waitFor(() => expect(api.command).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run', kind: 'regenerateMessage', messageId: 'm2', mode: 'continue' })));
     expect(within(slotOf('新开场')).queryByRole('button', { name: '续写' })).toBeNull();
-    expect(slotOf('新开场').querySelector('.host-truncated')).toBeNull();
+    expect(truncatedNote(slotOf('新开场'))).toBeUndefined();
   });
 
   it('never preempts a running Run: the button waits and says why', () => {
     render(<Harness snapshot={truncatedSnapshot('running')} api={hostApi()} />);
     const slot = slotOf('回应');
-    expect(slot.querySelector('.host-truncated[role=note]')!.textContent).toBe('已达单次输出上限，内容可能不完整。运行暂停或结束后可以续写。');
+    expect(truncatedNote(slot)!.querySelector('.note-body')!.textContent).toBe('写到单次上限停下了，内容可能不完整。续写会生成一个新版本，按新请求计费。运行暂停或结束后可以续写。');
     expect((within(slot).getByRole('button', { name: '续写' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

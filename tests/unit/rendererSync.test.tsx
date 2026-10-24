@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/renderer/App';
 import { props as roomProps, room } from './rendererRooms/fixtures';
@@ -26,6 +26,15 @@ function configurationApis() {
     getProviderKeyState: vi.fn(), getKeyStorageStatus: vi.fn(), listModels: vi.fn(), testConnection: vi.fn(),
   } };
 }
+
+/** R16: the event sequence is in 本场信息 › 运行详情 (a drawer at this width), not on the page itself. */
+async function eventSequence(value: string) {
+  const toggle = await screen.findByRole('button', { name: '本场信息' });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+  await waitFor(() => expect(within(screen.getByRole('dialog', { name: '本场信息' })).getByText(value)).toBeTruthy());
+  fireEvent.keyDown(screen.getByRole('dialog', { name: '本场信息' }), { key: 'Escape' });
+}
+const runStatus = () => screen.getByRole('status', { name: '运行状态' }).textContent;
 
 describe('Renderer run synchronization', () => {
   let listener: (event: RunEvent) => void;
@@ -65,8 +74,8 @@ describe('Renderer run synchronization', () => {
     localStorage.setItem('roundtable.runId', 'old');
     subscribe.mockImplementation(async (id: string) => ({ snapshot: { ...snapshot(id, id === 'old' ? 36 : 2), status: id === 'old' ? 'completed' : 'running' }, events: [], nextCursor: id === 'old' ? 36 : 2, resyncRequired: false }));
     render(<App />);
-    await waitFor(() => expect(screen.getByText('36')).toBeTruthy());
-    fireEvent.click(screen.getByText('开始协作'));
+    await eventSequence('36');
+    fireEvent.click(screen.getByText('开始讨论'));
     await waitFor(() => expect(subscribe).toHaveBeenCalledWith('new', expect.any(Number)));
     act(() => { listener(delta('old', 37, '旧请求内容')); listener(delta('new', 3, '新请求内容')); });
     await waitFor(() => expect(screen.getByText('新请求内容')).toBeTruthy());
@@ -89,7 +98,7 @@ describe('Renderer run synchronization', () => {
     subscribe.mockResolvedValueOnce({ snapshot: snapshot('gap', 2), events: [], nextCursor: 2, resyncRequired: false });
     subscribe.mockResolvedValue({ snapshot: snapshot('gap', 4, '完整恢复文本'), events: [], nextCursor: 4, resyncRequired: true });
     render(<App />);
-    await waitFor(() => expect(screen.getByText('2')).toBeTruthy());
+    await eventSequence('2');
     act(() => listener(delta('gap', 4, '缺口后的尾部')));
     await waitFor(() => expect(screen.getByText('完整恢复文本')).toBeTruthy());
     expect(screen.queryByText('缺口后的尾部')).toBeNull();
@@ -100,7 +109,7 @@ describe('Renderer run synchronization', () => {
     const unchanged = { snapshot: snapshot('resync', 4, '保留文本'), events: [], nextCursor: 4, resyncRequired: false };
     subscribe.mockResolvedValueOnce(unchanged).mockResolvedValueOnce(unchanged).mockRejectedValue(new Error('Repeated resynchronization'));
     render(<App />);
-    await waitFor(() => expect(screen.getByText('4')).toBeTruthy());
+    await eventSequence('4');
     act(() => listener({ version: 1, runId: 'resync', sequence: 5, type: 'snapshot_required', payload: { reason: 'invalid_event' }, timestamp: new Date().toISOString() }));
     await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(2));
     expect(screen.getByText('保留文本')).toBeTruthy();
@@ -109,9 +118,11 @@ describe('Renderer run synchronization', () => {
   it('starts only once while the start command is pending and releases its listener', async () => {
     start.mockReturnValue(new Promise(() => {}));
     const view = render(<App />);
-    await waitFor(() => expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByText('开始协作'));
-    fireEvent.click(screen.getByText('开始协作'));
+    await waitFor(() => expect((screen.getByText('开始讨论') as HTMLButtonElement).disabled).toBe(false));
+    // Two clicks on the same button in one burst; the label changes to 正在开始… in place.
+    const button = screen.getByText('开始讨论');
+    fireEvent.click(button);
+    fireEvent.click(button);
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     view.unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
@@ -121,9 +132,9 @@ describe('Renderer run synchronization', () => {
     localStorage.setItem('roundtable.runId', 'restoring');
     subscribe.mockReturnValue(new Promise(() => {}));
     render(<App />);
-    expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByText('房间与成员') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByText('开始协作'));
+    expect((screen.getByText('开始讨论') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '管理房间与成员' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText('开始讨论'));
     expect(start).not.toHaveBeenCalled();
     await act(async () => {});
   });
@@ -136,7 +147,10 @@ describe('Renderer run synchronization', () => {
     saved.messages[0].status = 'completed';
     subscribe.mockResolvedValue({ snapshot: saved, events: [], nextCursor: 4, resyncRequired: false });
     render(<App />);
-    await waitFor(() => expect(screen.getAllByText('已完成')).toHaveLength(2));
+    await waitFor(() => expect(runStatus()).toContain('已完成'));
+    expect(screen.getByText('讨论已完成')).toBeTruthy();
+    // A finished message carries no status line; an unfinished one says so in Chinese.
+    expect(screen.queryByText('completed')).toBeNull();
   });
 });
 
@@ -163,7 +177,7 @@ describe('Renderer task identity and command feedback', () => {
     render(<App />);
     await screen.findByText('历史消息');
     await act(async () => {});
-    fireEvent.change(screen.getByLabelText('任务目标'), { target: { value: '这是另一份草稿' } });
+    fireEvent.change(screen.getByLabelText('讨论目标'), { target: { value: '这是另一份草稿' } });
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('数据库中的真实目标');
     expect(screen.getAllByText('数据库中的真实目标')).toHaveLength(2);
   });
@@ -174,14 +188,14 @@ describe('Renderer task identity and command feedback', () => {
     let finish!: (value: ReturnType<typeof room>) => void;
     vi.mocked(window.roundtable.rooms.createRoom).mockReturnValue(new Promise(resolve => { finish = resolve; }));
     render(<App />);
-    fireEvent.click(screen.getByText('房间与成员'));
-    fireEvent.click(await screen.findByRole('button', { name: '新建房间' }));
+    fireEvent.click(screen.getByRole('button', { name: '管理房间与成员' }));
+    fireEvent.click(await within(await screen.findByRole('region', { name: '房间管理' })).findByRole('button', { name: '新建房间' }));
     fireEvent.change(screen.getByLabelText('房间名称'), { target: { value: '创建目标' } });
     fireEvent.click(screen.getByRole('button', { name: '保存房间' }));
     fireEvent.click(screen.getByRole('button', { name: '正在保存…' }));
     expect(window.roundtable.rooms.createRoom).toHaveBeenCalledTimes(1);
     expect(window.roundtable.rooms.createRoom).toHaveBeenCalledWith({ name: '创建目标', objective: '' });
-    expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(true);
+    expect(window.roundtable.run.start).not.toHaveBeenCalled();
     await act(async () => finish(room('created', '创建目标')));
     expect(screen.getByRole('heading', { name: '创建目标' })).toBeTruthy();
   });
@@ -195,11 +209,11 @@ describe('Renderer task identity and command feedback', () => {
     setup(saved);
     render(<App />);
     await screen.findByText('必须保留的部分输出');
-    expect(screen.getByText(status === 'interrupted' ? '已中断' : '运行失败')).toBeTruthy();
-    // D098: run controls exist only while a Run is live; a settled Run shows 开始协作 in their place instead.
+    expect(runStatus()).toContain(status === 'interrupted' ? '已中断' : '运行失败');
+    // D098: run controls exist only while a Run is live; a settled Run offers a new discussion in their place.
     expect(screen.queryByRole('group', { name: '运行控制' })).toBeNull();
     for (const name of ['暂停', '继续', '下一步', '停止']) expect(screen.queryByRole('button', { name })).toBeNull();
-    expect(screen.getByRole('button', { name: '开始协作' })).toBeTruthy();
+    expect(document.querySelector('.composer .controls .slot')!.textContent).toBe('新讨论');
     expect(window.roundtable.run.recoverInterruptedRun).not.toHaveBeenCalled();
   });
 
@@ -219,7 +233,7 @@ describe('Renderer task identity and command feedback', () => {
     render(<App />);
     await screen.findByRole('alert');
     expect(screen.getByRole('alert').textContent).not.toContain('/private');
-    expect((screen.getByText('开始协作') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('开始讨论') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('重试同步'));
     await screen.findByText('恢复文本');
     expect(window.roundtable.run.start).not.toHaveBeenCalled();
