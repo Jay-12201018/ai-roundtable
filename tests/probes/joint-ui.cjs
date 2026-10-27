@@ -12,12 +12,13 @@ async function page(stage) {
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   };
-  const button = name => [...document.querySelectorAll('button')].find(b => b.textContent === name);
+  const button = name => [...document.querySelectorAll('button')].find(b => !b.closest('[hidden]') && (b.getAttribute('aria-label') === name || b.textContent === name));
   const click = async name => {
     await wait(() => button(name), b => b && !b.disabled, 'Button unavailable: ' + name);
     button(name).click();
   };
-  const text = () => [...document.querySelectorAll('.message p:not([class])')].map(p => p.textContent);
+  // R16: one .thread-item per slot; a member's text is its Markdown body, the host's is its bubble.
+  const text = () => [...document.querySelectorAll('.thread-item')].map(item => item.querySelector('.msg-body .md, .bubble')?.textContent ?? '');
   // R12: one timeline entry per message slot, showing its effective version; earlier versions stay reachable.
   const effective = s => { if (!s.versions) return s.messages.map(m => m.content);
     const slots = new Map(); for (const m of s.messages) { const v = s.versions.find(item => item.messageId === m.id); if (!v) continue;
@@ -27,13 +28,13 @@ async function page(stage) {
   const api = window.roundtable;
   const selectDemo = async () => {
     const { roomId } = await api.room.createDemo('R04-R06 regression fixture');
-    await click('房间与成员'); await click('刷新房间');
+    await click('管理房间与成员'); await click('刷新房间');
     const rooms = await api.rooms.listRooms();
     const index = rooms.findIndex(room => room.id === roomId);
     check(index >= 0, 'Fresh demo room absent');
     await wait(() => document.querySelectorAll('.rooms-navigation .rooms-list button'), buttons => buttons.length === rooms.length, 'Rooms projection stale');
     document.querySelectorAll('.rooms-navigation .rooms-list button')[index].click();
-    await click('讨论');
+    await click('返回讨论');
   };
   let id;
   const read = () => api.run.getSnapshot(id);
@@ -41,7 +42,7 @@ async function page(stage) {
     && JSON.stringify(text()) === JSON.stringify(effective(s)), 'DOM/snapshot did not settle: ' + status);
   if (stage === 'pause') {
     await selectDemo();
-    await click('开始协作');
+    await click('开始讨论');
     id = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run identity not saved');
     await wait(() => text(), t => t[0]?.length > 0, 'First partial text absent');
     await click('暂停');
@@ -56,25 +57,29 @@ async function page(stage) {
   const completed = await settled('completed', 3);
   await selectDemo();
   await wait(() => localStorage.getItem('roundtable.runId'), value => value === null, 'New room selection not committed');
-  await click('开始协作');
+  // The goal box is empty after a start (R16); give the next discussion its own goal.
+  const goal = document.querySelector('textarea[aria-label="讨论目标"]');
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(goal, 'R04-R06 stop and repeat'); goal.dispatchEvent(new Event('input', { bubbles: true }));
+  await click('开始讨论');
   id = await wait(() => localStorage.getItem('roundtable.runId'), value => value && value !== completed.runId, 'New Run not saved');
   await wait(() => text(), t => t[0]?.length > 0, 'Stop partial absent');
-  await click('停止'); await click('确认停止');
+  await click('停止'); await click('停止讨论');
   const stopped = await settled('cancelled', 1);
   const repeats = [];
   for (const name of ['重试当前回合', '续写部分回复']) {
     await click(name);
     await wait(read, s => s.messages.length === repeats.length + 2 && s.messages.at(-1).content.length > 0
       && JSON.stringify(text()) === JSON.stringify(effective(s)), 'Repeat message absent');
-    await click('停止'); await click('确认停止');
+    await click('停止'); await click('停止讨论');
     repeats.push(await settled('cancelled', 1));
   }
   // The original partial and both repeats remain reachable as versions of the first slot.
-  const first = document.querySelectorAll('.message')[0];
-  check(first.textContent.includes('版本 3/3'), 'Repeat versions not reachable');
+  const first = document.querySelectorAll('.thread-item')[0];
+  // R16 hides version stepping while a reply streams; wait for the renderer to apply the final stop.
+  await wait(() => first.textContent, value => value.includes('版本 3/3'), 'Repeat versions not reachable');
   first.querySelector('button[aria-label="查看上一个版本"]').click(); await new Promise(resolve => setTimeout(resolve, 50));
   first.querySelector('button[aria-label="查看上一个版本"]').click(); await new Promise(resolve => setTimeout(resolve, 50));
-  check(first.querySelector('p:not([class])').textContent === stopped.messages[0].content, 'Original partial not reachable');
+  check(first.querySelector('.msg-body .md').textContent === stopped.messages[0].content, 'Original partial not reachable');
   return { refreshed, stepped, completed, stopped, repeats, cspViolations: window.__r01ProbeViolations };
 }
 

@@ -133,8 +133,9 @@ async function main() {
     check(crashed.budget.unknownMicro === prior.crashedReservedMicro && crashed.budget.reservedMicro === 0, 'Unknown cost counts against the budget after restart');
     check((await api('settings.getProviderKeyState', { providerId: prior.providerId })).state === 'configured', 'safeStorage-encrypted Key restored');
     await js(`localStorage.setItem('roundtable.runId', ${JSON.stringify(prior.crashedRunId)}); location.reload(); true`);
-    await until(`document.body.innerText.includes('费用未知（按上限计')`, 'unknown cost shown after restart');
-    check((await text()).includes('含未知费用按上限计'), 'Run budget bar shows unknown spend at the cap');
+    // R16: the message footer names the unknown cost; 本场信息's budget card counts it at the cap.
+    await until(`[...document.querySelectorAll('.cost')].some(e => e.textContent.startsWith('费用未知 · 按上限 ¥'))`, 'unknown cost shown after restart');
+    check(/未知费用（按上限计）¥0\.\d{4}/u.test(await js(`document.querySelector('.budget-card').textContent`)), 'Run budget card shows unknown spend at the cap');
     await sleep(500); check(requests.length === 0, 'Viewing the interrupted Run sent no request');
   } else {
     const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'deepseek-flash' }] });
@@ -152,9 +153,13 @@ async function main() {
     check(settled.charges.length === 3 && settled.charges.every(c => c.state === 'settled' && c.inputTokens === 300 && c.outputTokens === 6 && c.accountedMicro === 648 && c.reservedMicro === c.inputTokenBound * 2 + 4096 * 8), 'Each request reserved its maximum and settled at ¥2/M input and ¥8/M output');
     check(settled.budget.settledMicro === 1944 && settled.budget.reservedMicro === 0 && settled.budget.remainingMicro === 1_000_000 - 1944, 'Run spend and remaining budget');
     await js(`localStorage.setItem('roundtable.runId', ${JSON.stringify(started.runId)}); location.reload(); true`);
-    await until(`document.querySelectorAll('.message-usage').length === 3`, 'per-message usage rendered');
-    const page = await text();
-    check(page.includes('输入 300 / 输出 6 tokens · 花费 ¥0.000648') && page.includes('累计花费 ¥0.0019') && page.includes('剩余额度 ¥0.9981'), 'UI shows per-message usage/cost and Run totals');
+    // R16: each reply's footer shows its amount; clicking it opens the usage and price; the budget card has the totals.
+    await until(`document.querySelectorAll('.thread-item .cost').length === 3`, 'per-message usage rendered');
+    await js(`document.querySelectorAll('.thread-item .cost').forEach(button => button.click()); true`);
+    await until(`document.querySelectorAll('.msg-details').length === 3`, 'request details opened');
+    const details = await js(`[...document.querySelectorAll('.msg-details')].map(e => e.textContent)`);
+    const card = await js(`document.querySelector('.budget-card').textContent`);
+    check(details.every(value => value.includes('输入 300 / 输出 6 tokens · 花费 ¥0.000648')) && card.includes('¥0.0019 / ¥1.00') && card.includes('剩余额度¥0.9981'), 'UI shows per-message usage/cost and Run totals');
 
     const sent = requests.length;
     const blocked = await api('run.start', { roomId: room.id, task: '预算不足的运行', workflowSnapshot: {}, maxTurns: 3, budgetMicroCny: 1000 });
@@ -163,7 +168,7 @@ async function main() {
     check(requests.length === sent && blockedSnapshot.turns.length === 0 && blockedSnapshot.charges.length === 0, 'Insufficient budget sent zero requests and created no Turn');
     check(blockedSnapshot.budget.blocked?.reason === 'insufficient' && blockedSnapshot.budget.blocked.remainingMicro === 1000 && blockedSnapshot.budget.blocked.requiredMicro > 1000, 'Block records required vs remaining');
     await js(`localStorage.setItem('roundtable.runId', ${JSON.stringify(blocked.runId)}); location.reload(); true`);
-    await until(`document.body.innerText.includes('预算不足，已暂停发送。下一次请求最高可能花费')`, 'Chinese budget message');
+    await until(`document.body.innerText.includes('预算不足，已暂停发送') && document.body.innerText.includes('下一次请求最高可能花费')`, 'Chinese budget message');
     check((await text()).includes('剩余额度 ¥0.0010。追加预算后从这里继续'), 'UI explains the refusal in Chinese');
 
     // Crash with one request in flight: the reservation must survive as unknown, never be released as zero.
@@ -173,8 +178,8 @@ async function main() {
     const inFlight = await api('run.getSnapshot', crashed.runId);
     check(requests.length === sent + 1 && inFlight.charges[0].state === 'reserved' && inFlight.budget.reservedMicro === inFlight.charges[0].reservedMicro, 'In-flight request holds its reservation');
     await js(`localStorage.setItem('roundtable.runId', ${JSON.stringify(crashed.runId)}); location.reload(); true`);
-    await until(`document.body.innerText.includes('生成中 · 已预留最高')`, 'reservation shown while streaming');
-    check((await text()).includes('进行中预留'), 'Run budget bar shows the in-flight reservation');
+    await until(`document.body.innerText.includes('正在发言 · 已预留最高')`, 'reservation shown while streaming');
+    check(/进行中预留¥0\.\d{4}/u.test(await js(`document.querySelector('.budget-card').textContent`)), 'Run budget card shows the in-flight reservation');
     fs.writeFileSync(manifestPath, JSON.stringify({ status: 'FIRST_PASS_CRASHED_IN_FLIGHT', directory, providerId: provider.id, roomId: room.id,
       settledRunId: started.runId, blockedRunId: blocked.runId, crashedRunId: crashed.runId, crashedReservedMicro: inFlight.charges[0].reservedMicro }), { mode: 0o600, flag: 'wx' });
   }

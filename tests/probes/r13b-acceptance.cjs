@@ -138,12 +138,14 @@ async function main() {
     const deadline = Date.now() + timeout;
     for (;;) { const value = await js(code); if (value) return value; if (Date.now() > deadline) throw new Error('Timed out: ' + message); await sleep(50); }
   };
+  // The content size set above settles asynchronously; aim the first click only once the layout has it.
+  await until(`window.innerWidth === 1440 && window.innerHeight === 900`, 'window size applied'); await sleep(300);
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   const locator = `window.__r13b = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
     const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
     let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
-    if (o.slot !== undefined) { const slot = document.querySelectorAll('.message')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
+    if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
     const e = o.which === 'last' ? list.at(-1) : list[o.which || 0];
     if (!e) return null;
@@ -179,7 +181,7 @@ async function main() {
   };
   let shot = 0;
   const capture = async (name, caption, focus) => {
-    if (typeof focus === 'number') await js(`document.querySelectorAll('.message')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
+    if (typeof focus === 'number') await js(`document.querySelectorAll('.thread-item')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
     else if (focus) await js(`document.querySelector(${JSON.stringify(focus)})?.scrollIntoView({ block: 'center' }); true`);
     await sleep(350);
     const file = `${String(++shot).padStart(2, '0')}-${name}.png`;
@@ -196,7 +198,7 @@ async function main() {
   const snapshot = () => js(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'))`);
 
   const api = (path, ...input) => js(`window.roundtable.${path}(...${JSON.stringify(input)})`);
-  const status = () => js(`document.querySelector('.timeline .status').textContent`);
+  const status = () => js(`document.querySelector('[role=status][aria-label=运行状态]').textContent`);
 
   // Setup (already accepted hands-on in R13A): a DeepSeek direct Provider with a fake Key, its session target
   // confirmed, and a room with three DeepSeek members. Everything after this is driven by real input.
@@ -208,83 +210,91 @@ async function main() {
     await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });
   }
   // Reload so the page reads the Provider list as it would after configuring it in Settings.
-  await js('location.reload(); true'); await until(`document.querySelector('.app-navigation')`, 'reloaded');
+  await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded');
   await js(locator);
-  await click('房间与成员'); await click('刷新房间'); await click('校园跑腿讨论'); await click('讨论');
+  // R16: opening the room list refreshes the sidebar; the sidebar room opens a new discussion in it.
+  await click('管理房间与成员'); await click('校园跑腿讨论', { scope: '.sidebar' });
 
   // Step 1 (D104): a budget smaller than one request stops before sending; the reason and the way on sit together.
-  await field('任务目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
-  await field('本次运行预算（元）'); await selectAll(); await type('0.001');
-  await click('开始协作');
-  await until(`document.querySelector('.budget-stop')`, 'budget stop notice');
+  await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
+  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.001');
+  await click('开始讨论');
+  await until(`document.querySelector('[role=alert][aria-label=预算不足]')`, 'budget stop notice');
   check(requests.length === 0, 'Budget stop sent zero requests');
-  check((await text()).includes('预算不足，已暂停发送。') && (await text()).includes('追加并继续'), 'The stop explains itself and offers 追加并继续 in place');
-  await capture('budget-stop', '预算填 0.001 元后点"开始协作"：发送前就被拦下（夹具没收到任何请求）。原因和继续的办法出现在同一处：最后一条消息的位置显示"预算不足，已暂停发送。下一次请求最高可能花费 …，剩余额度 ¥0.0010"，并给出"追加（元）"（建议值至少补足差额、不少于 ¥1）和"追加并继续"。', '.budget-stop');
+  check((await text()).includes('预算不足，已暂停发送') && (await text()).includes('追加并继续'), 'The stop explains itself and offers 追加并继续 in place');
+  await capture('budget-stop', '预算填 0.001 元后点"开始讨论"：发送前就被拦下（夹具没收到任何请求）。原因和继续的办法出现在同一处：最后一条消息的位置显示"预算不足，已暂停发送。下一次请求最高可能花费 …，剩余额度 ¥0.0010"，并给出"追加（元）"（建议值至少补足差额、不少于 ¥1）和"追加并继续"。', '.notice-card');
 
   // Step 2: top up ¥0.5 and continue the same Run; off-peak fixture clock, provider cache split.
-  await field('追加预算（元）', { scope: '.budget-stop' }); await selectAll(); await type('0.5');
+  await field('追加预算（元）', { scope: '.notice-card' }); await selectAll(); await type('0.5');
   await click('追加并继续');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'run completed after top-up');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'run completed after top-up');
   let snapshot1 = await snapshot();
   check(requests.length === 3 && snapshot1.budget.limitMicro === 501_000 && snapshot1.budget.topUps.length === 1, 'Top-up of ¥0.5 recorded; the Run continued with three requests');
   check(snapshot1.charges.every(charge => charge.settlement?.period === 'off_peak' && charge.chargedMicro === 226), 'Settled off-peak with the cache split');
-  const page2 = await text();
+  // R16: each reply's footer amount opens its usage and price; 本场信息's budget card carries the top-up.
+  await js(`document.querySelectorAll('.thread-item .cost').forEach(button => button.click()); true`);
+  await until(`document.querySelectorAll('.thread-item .msg-details').length === 3`, 'request details opened');
+  const page2 = await js(`[...document.querySelectorAll('.msg-details')].map(e => e.textContent).join('\\n')`);
   check((page2.match(/输入 300（缓存命中 100） \/ 输出 6 tokens · 花费 ¥0\.000226 · 按空闲价（高峰价的一半）/gu) ?? []).length === 3, 'Each reply says off-peak and the cache hits');
-  check(page2.includes('预算 ¥0.5010（含追加 ¥0.5000）'), 'Budget bar shows the top-up');
+  check((await js(`document.querySelector('.budget-card').textContent`)).includes('/ ¥0.5010（含追加 ¥0.50）'), 'Budget card shows the top-up');
   await click('追加记录（1）', { selector: 'summary' });
   await capture('topped-up', '把追加金额改成 0.5 并点"追加并继续"：同一次运行从被拦下的地方继续，三位成员依次发言。预算栏显示"预算 ¥0.5010（含追加 ¥0.5000）"，展开的"追加记录"列出这次 +¥0.5000 和时间、开始时的 ¥0.0010。每条回复下写"输入 300（缓存命中 100） / 输出 6 tokens · 花费 ¥0.000226 · 按空闲价（高峰价的一半）"——夹具时钟是北京时间周五 21:00，按空闲价和缓存命中价结算（高峰未命中价应为 ¥0.000648）。', 0);
 
   // Step 3 (D107): the host opens the summary panel; coverage, writer and maximum cost come first, nothing is sent.
   clock = beijing('2026-10-23T10:00:00');
   await click('生成讨论摘要…');
-  await until(`document.querySelector('.summary-panel .summary-cost')`, 'summary panel');
+  await until(`document.querySelector('dialog.modal .summary-cost')`, 'summary panel');
   check(requests.length === 3, 'Opening the summary panel sent nothing');
-  const panel = await js(`({ text: document.querySelector('.summary-panel').innerText,
+  const panel = await js(`({ text: document.querySelector('dialog.modal').innerText,
     through: document.querySelector('[aria-label="摘要覆盖到第几条"]').selectedOptions[0].textContent, writer: document.querySelector('[aria-label="生成摘要的成员"]').selectedOptions[0].textContent })`);
   check(panel.writer.startsWith('综合者') && panel.text.includes('预计最高 ¥') && panel.through.startsWith('第 1 条 到 第 3 条'), 'Panel shows coverage 1–3, the synthesizer and the maximum cost');
-  await capture('summary-panel', '在右侧"主持人控制"点"生成讨论摘要…"，面板在时间线末尾打开（不自动生成）：覆盖范围"第 1 条 到 第 3 条"、默认由"综合者"来写，先说明"预计最高 ¥…：发送前按高峰价和输出上限预留，结束后按实际用量和时段结算"和当前剩余额度，按钮写明"生成摘要（发送 1 次请求）"。每条发言左上角的 #1、#2、#3 就是这里的编号。', '.summary-panel');
+  await capture('summary-panel', '在右侧"主持人控制"点"生成讨论摘要…"，面板在时间线末尾打开（不自动生成）：覆盖范围"第 1 条 到 第 3 条"、默认由"综合者"来写，先说明"预计最高 ¥…：发送前按高峰价和输出上限预留，结束后按实际用量和时段结算"和当前剩余额度，按钮写明"生成摘要（发送 1 次请求）"。每条发言左上角的 #1、#2、#3 就是这里的编号。', 'dialog.modal');
 
   await click('生成摘要（发送 1 次请求）');
-  await until(`document.querySelector('.summary-slot') && document.querySelector('.summary-slot').innerText.includes('待确认')`, 'summary generated');
+  await until(`document.querySelector('.summary-card') && document.querySelector('.summary-card').innerText.includes('待确认')`, 'summary generated');
   const summaryCharge = (await snapshot()).charges.find(charge => charge.kind === 'summary');
   check(requests.length === 4 && requests[3].maxTokens === 4096 && summaryCharge?.settlement?.period === 'peak' && summaryCharge.chargedMicro === 452, 'One summary request, settled at the peak cache price');
-  check((await js(`document.querySelector('.summary-slot').innerText`)).includes('按高峰价'), 'The summary cost says peak');
-  await capture('summary-pending', '点"生成摘要（发送 1 次请求）"：时间线末尾出现"讨论摘要 · 覆盖第 1–3 条 · 待确认 · 确认前之后的发言仍使用原文"，并提示先读一遍再确认。这次请求按夹具时钟周五 10:00 结算，显示"花费 ¥0.000452 · 按高峰价"（同样的用量在空闲时段是 ¥0.000226）。', '.summary-slot');
+  await click('请求详情', { scope: '.summary-card' });
+  check((await js(`document.querySelector('.summary-card .msg-details').innerText`)).includes('按高峰价'), 'The summary cost says peak');
+  await capture('summary-pending', '点"生成摘要（发送 1 次请求）"：时间线末尾出现"讨论摘要 · 覆盖第 1–3 条 · 待确认 · 确认前之后的发言仍使用原文"，并提示先读一遍再确认。这次请求按夹具时钟周五 10:00 结算，显示"花费 ¥0.000452 · 按高峰价"（同样的用量在空闲时段是 ¥0.000226）。', '.summary-card');
 
   await click('确认使用');
-  await until(`document.querySelector('.summary-slot').innerText.includes('已确认 · 之后的发言用它代替原文')`, 'summary confirmed');
-  check((await js(`document.querySelectorAll('.host-slot.is-summarized').length`)) === 3, 'The three originals are marked as replaced, and still shown');
+  await until(`document.querySelector('.summary-card').innerText.includes('已确认 · 之后的发言用它代替原文')`, 'summary confirmed');
+  check((await js(`document.querySelectorAll('.msg.is-covered').length`)) === 3, 'The three originals are marked as replaced, and still shown');
   await capture('summary-confirmed', '点"确认使用"：摘要标为"已确认 · 之后的发言用它代替原文"；上面三条原文仍完整显示，只在名字旁标注"已由摘要代替（第 1–3 条）"、正文变灰。', 0);
 
   // Step 4: the host edits the summary (Chinese via IME): a new version, confirmed by its author.
-  await click('修改', { scope: '.summary-slot' });
+  await click('修改', { scope: '.summary-card' });
   await field('修改摘要内容'); await selectAll(); await ime('zhuchiren', '主持人修订：试点范围改为三栋宿舍楼；夜间 22 点后暂停接单；骑手保险仍待定。');
-  await click('保存为新版本', { scope: '.summary-slot' });
-  await until(`document.querySelector('.summary-slot').innerText.includes('主持人修订')`, 'summary edited');
-  check((await js(`document.querySelector('.summary-slot').innerText`)).includes('已确认 · 之后的发言用它代替原文') && (await js(`document.querySelector('.summary-slot').innerText`)).includes('版本 2/2'), 'The edit is version 2 and used');
-  await capture('summary-edited', '在摘要上点"修改"，用输入法改写并"保存为新版本"：变成版本 2/2（来源"主持人修改"），修改即视为主持人确认，仍是"已确认 · 之后的发言用它代替原文"；原版本可用 ‹ › 翻看。', '.summary-slot');
+  await click('保存为新版本', { scope: '.summary-card' });
+  await until(`document.querySelector('.summary-card').innerText.includes('主持人修订')`, 'summary edited');
+  check((await js(`document.querySelector('.summary-card').innerText`)).includes('已确认 · 之后的发言用它代替原文') && (await js(`document.querySelector('.summary-card').innerText`)).includes('版本 2/2'), 'The edit is version 2 and used');
+  await capture('summary-edited', '在摘要上点"修改"，用输入法改写并"保存为新版本"：变成版本 2/2（来源"主持人修改"），修改即视为主持人确认，仍是"已确认 · 之后的发言用它代替原文"；原版本可用 ‹ › 翻看。', '.summary-card');
 
   // Step 5 (D087): editing a covered original marks the summary affected.
   await click('修改', { slot: 0 });
   await field('修改消息内容'); await selectAll(); await ime('fangan', '方案（主持人修改）：按距离分两档计价，起步价 2 元。');
   await click('保存为新版本', { slot: 0 });
-  await until(`document.querySelector('.summary-slot').innerText.includes('受影响') && document.querySelector('.summary-cost-hint')`, 'summary affected with regenerate cost');
+  await until(`document.querySelector('.summary-card').innerText.includes('受影响') && document.querySelector('.summary-card .note-cost')`, 'summary affected with regenerate cost');
   check((await snapshot()).versions.find(version => version.author === 'summary' && version.active)?.affectedBy.length > 0, 'Snapshot marks the summary affected');
-  const affectedText = await js(`document.querySelector('.summary-slot').innerText`);
+  const affectedText = await js(`document.querySelector('.summary-card').innerText`);
   check(affectedText.includes('第 1 条被修改或重新生成') && affectedText.includes('修改后的发言会照常发给之后的成员') && affectedText.includes('建议重新生成摘要'), 'The note says the revision is sent and suggests regenerating');
-  check((await js(`document.querySelector('.summary-cost-hint').textContent`)).startsWith('预计最高 ¥'), 'The regenerate button shows its maximum cost');
-  check((await js(`document.querySelectorAll('.message')[0].innerText`)).includes('摘要后已修改 · 照常发给后续成员') && (await js(`document.querySelectorAll('.host-slot.is-summarized').length`)) === 2, 'The revised message is no longer shown as replaced; the other two still are');
-  await capture('summary-affected', '再修改被摘要覆盖的第 1 条原文（输入法输入）。摘要标出"受影响：这份摘要生成后，第 1 条被修改或重新生成。修改后的发言会照常发给之后的成员，紧跟在摘要后面，摘要里与之冲突的内容不再采用。建议重新生成摘要……"；"重新生成摘要…"旁直接显示预计最高花费。第 1 条的标注从"已由摘要代替"变成"摘要后已修改 · 照常发给后续成员"，第 2、3 条仍由摘要代替。（实际请求的输入由生产探针核对：下一次请求同时带摘要和这条修改及说明。）', '.summary-slot');
+  check((await js(`document.querySelector('.summary-card .note-cost').textContent`)).startsWith('最多 ¥'), 'The regenerate button shows its maximum cost');
+  check((await js(`document.querySelectorAll('.thread-item')[0].innerText`)).includes('摘要后已修改 · 照常发送') && (await js(`document.querySelectorAll('.msg.is-covered').length`)) === 2, 'The revised message is no longer shown as replaced; the other two still are');
+  await capture('summary-affected', '再修改被摘要覆盖的第 1 条原文（输入法输入）。摘要标出"受影响：这份摘要生成后，第 1 条被修改或重新生成。修改后的发言会照常发给之后的成员，紧跟在摘要后面，摘要里与之冲突的内容不再采用。建议重新生成摘要……"；"重新生成摘要…"旁直接显示预计最高花费。第 1 条的标注从"已由摘要代替"变成"摘要后已修改 · 照常发给后续成员"，第 2、3 条仍由摘要代替。（实际请求的输入由生产探针核对：下一次请求同时带摘要和这条修改及说明。）', '.summary-card');
 
   // Step 6 (D105): an answer without usage is unknown at the cap; the host writes it off from the console amount.
   mode = 'no-usage';
-  await field('任务目标'); await selectAll(); await ime('dingjia', '再讨论一次定价');
-  await field('本次运行预算（元）'); await selectAll(); await type('1');
-  await click('每个回合结束后暂停，方便插话或点名', { selector: 'input[type=checkbox]' });
-  await click('开始协作');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已暂停')`, 'paused after one turn');
-  check((await text()).includes('费用未知（按上限计'), 'Unknown cost shown at the cap');
-  await click('核销');
+  await field('讨论目标'); await selectAll(); await ime('dingjia', '再讨论一次定价');
+  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('1');
+  await click('每回合后暂停', { selector: 'input[type=checkbox]' });
+  await click('开始讨论');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已暂停')`, 'paused after one turn');
+  // R16: the footer amount is a button; it opens the request details, where the write-off is.
+  const unknownLabel = await until(`[...document.querySelectorAll('.cost')].map(e => e.textContent).find(t => t.startsWith('费用未知 · 按上限 ¥'))`, 'unknown cost shown at the cap');
+  await click(unknownLabel, { selector: '.cost' });
+  check((await text()).includes('费用未知（按上限计'), 'Unknown cost explained at the cap');
+  await click('核销', { scope: '.msg-details' });
   await field('实际金额（元）'); await type('0.0003');
   await field('依据说明'); await ime('kongzhitai', '控制台十月二十三日用量明细，这次请求 ¥0.0003');
   await click('我已在服务商控制台核对过这次请求的实际扣费', { selector: 'input[type=checkbox]' });
@@ -293,7 +303,7 @@ async function main() {
   await until(`document.body.innerText.includes('已核销 ¥0.000300')`, 'written off');
   const run2 = await snapshot();
   check(run2.charges[0].state === 'unknown' && run2.charges[0].chargedMicro === 300 && run2.budget.writtenOffMicro === 300 && run2.budget.unknownMicro === 0, 'Write-off counts ¥0.0003; the unknown row stays');
-  check((await text()).includes('含已核销 ¥0.0003'), 'Budget bar counts the written-off amount');
+  check((await js(`document.querySelector('.budget-card').textContent`)).includes('已核销¥0.0003'), 'Budget card counts the written-off amount');
   check((await text()).includes('比原上限少 ¥') && !(await text()).includes('少计'), 'Write-off wording: 比原上限少, never 少计');
   await capture('written-off', '保存后这条显示"已核销 ¥0.000300（原按上限计 ¥…，比原上限少 ¥…） · 依据：…"，并可"更正核销"；预算栏的累计花费改按核销金额计（"含已核销 ¥0.0003"），剩余额度随之恢复。账本里原来的 unknown 记录没有改动。', 0);
   mode = 'ok';
@@ -313,14 +323,17 @@ async function main() {
   await capture('usage-export', '切到"按日期"并点"导出 CSV"：Main 弹出系统保存对话框（探针用自己的临时目录作答），写入 5 条记录后页面提示"已导出 5 条记录到…"。CSV 每笔一行，含北京时间计价起止、空闲/高峰价、单价、按高峰价金额、计入金额和核销依据。', '.usage-page');
 
   // Step 8: dark theme — the same views must stay legible.
-  check(await choose('外观', 'dark') === 'dark', 'Dark theme selected');
+  // R16: 外观 lives in 设置.
+  await click('设置'); await click('深色', { scope: '.seg' });
+  check(await js(`document.documentElement.dataset.theme`) === 'dark', 'Dark theme selected');
+  await click('用量'); await until(`document.querySelector('.usage-totals')`, 'usage page again');
   await capture('usage-dark', '外观切到"深色"：用量页的卡片、表格、未知费用列表在深色主题下层级和对比度正常。', '.usage-page');
   await click('按运行');
   const link = await js(`(() => { const e = [...document.querySelectorAll('.usage-table .link-button')].find(e => e.textContent.includes('设计一个校园跑腿平台')); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: link.x, y: link.y, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: link.x, y: link.y, button: 'left', clickCount: 1 });
-  await until(`document.querySelector('.summary-slot')`, 'run opened from the usage page');
-  await capture('summary-dark', '在用量页"按运行"里点"设计一个校园跑腿平台"回到这次运行（深色主题）：被摘要代替的原文、受影响的摘要、空闲价/高峰价花费行都清楚可读。', '.summary-slot');
+  await until(`document.querySelector('.summary-card')`, 'run opened from the usage page');
+  await capture('summary-dark', '在用量页"按运行"里点"设计一个校园跑腿平台"回到这次运行（深色主题）：被摘要代替的原文、受影响的摘要、空闲价/高峰价花费行都清楚可读。', '.summary-card');
 
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);
   check(!JSON.stringify(result).includes(fakeKey) && !csv.includes(fakeKey), 'Key absent from the result and the CSV');

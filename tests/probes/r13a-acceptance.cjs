@@ -126,12 +126,14 @@ async function main() {
     const deadline = Date.now() + timeout;
     for (;;) { const value = await js(code); if (value) return value; if (Date.now() > deadline) throw new Error('Timed out: ' + message); await sleep(50); }
   };
+  // The content size set above settles asynchronously; aim the first click only once the layout has it.
+  await until(`window.innerWidth === 1440 && window.innerHeight === 900`, 'window size applied'); await sleep(300);
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r13a = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
     const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
     let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
-    if (o.slot !== undefined) { const slot = document.querySelectorAll('.message')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
+    if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
     const e = o.which === 'last' ? list.at(-1) : list[o.which || 0];
     if (!e) return null;
@@ -166,7 +168,7 @@ async function main() {
   };
   let shot = 0;
   const capture = async (name, caption, focus) => {
-    if (typeof focus === 'number') await js(`document.querySelectorAll('.message')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
+    if (typeof focus === 'number') await js(`document.querySelectorAll('.thread-item')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
     else if (focus) await js(`document.querySelector(${JSON.stringify(focus)})?.scrollIntoView({ block: 'center' }); true`);
     await sleep(350);
     const file = `${String(++shot).padStart(2, '0')}-${name}.png`;
@@ -183,7 +185,7 @@ async function main() {
   const snapshot = () => js(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'))`);
 
   // Step 1: configure the DeepSeek direct Provider in Settings.
-  await click('模型设置'); await click('新增 Provider');
+  await click('设置'); await click('新增 Provider');
   await field('Provider 名称'); await ime('deepseek', 'DeepSeek 直连');
   check(await choose('Provider 类型', 'openai-compatible') === 'openai-compatible', 'Provider type OpenAI-Compatible');
   await field('Base URL'); await type('https://api.deepseek.com');
@@ -209,7 +211,7 @@ async function main() {
   await capture('target-confirmed', '再次勾选核对并点"确认本次会话目标"：显示"本次会话请求目标已确认；更换 Key 或目标后需重新确认。"，提醒消失。', '.settings-target');
 
   // Step 3: a room with two DeepSeek members.
-  await click('返回讨论'); await click('房间与成员'); await click('新建房间');
+  await click('返回讨论'); await click('管理房间与成员'); await click('新建房间');
   await field('房间名称'); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存房间');
   await until(`document.body.innerText.includes('新增成员')`, 'room saved');
   for (const [index, [pinyin, name, role]] of [['qicao', '起草者', 'Drafter'], ['shencha', '审查者', 'Critic']].entries()) {
@@ -229,38 +231,43 @@ async function main() {
   await capture('members', '新建房间"校园跑腿讨论"，添加"起草者""审查者"两个成员，Provider 均选"DeepSeek 直连"（选中后 Model 自动带出默认模型 deepseek-flash）。', '.rooms-feature');
 
   // Step 4: a budgeted Run; each message shows usage and cost, the header shows spend and what is left.
-  await click('讨论');
-  await field('任务目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
-  await field('本次运行预算（元）'); await selectAll(); await type('0.05');
-  await click('开始协作');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'run completed');
+  await click('返回讨论');
+  await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
+  // R16: the budget is in the settings popover beside the goal.
+  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.05');
+  await click('开始讨论');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'run completed');
   const done = await snapshot();
   check(done.charges.length === 3 && done.charges.every(c => c.state === 'settled' && c.accountedMicro === 648), 'Three settled requests at ¥0.000648 each');
   check(done.budget.limitMicro === 50000 && done.budget.settledMicro === 1944, 'The ¥0.05 budget and its spend');
-  const page4 = await text();
+  // R16: each reply's footer amount opens its usage and price; 本场信息's budget card has the Run totals.
+  await js(`document.querySelectorAll('.thread-item .cost').forEach(button => button.click()); true`);
+  await until(`document.querySelectorAll('.msg-details').length === 3`, 'request details opened');
+  const page4 = await js(`[...document.querySelectorAll('.msg-details')].map(e => e.textContent).join('\\n')`);
   check((page4.match(/输入 300 \/ 输出 6 tokens · 花费 ¥0\.000648/gu) ?? []).length === 3, 'Every message shows its usage and cost');
-  check(page4.includes('预算 ¥0.0500') && page4.includes('累计花费 ¥0.0019') && page4.includes('剩余额度 ¥0.0481'), 'Run budget bar totals');
+  const card = await js(`document.querySelector('.budget-card').textContent`);
+  check(card.includes('¥0.0019 / ¥0.05') && card.includes('剩余额度¥0.0481'), 'Run budget card totals');
   check(requests.length === 3 && requests.every(r => r.keyMatches && r.thinking?.type === 'disabled' && r.maxTokens === 4096), 'Requests carried the saved Key, max_tokens and thinking disabled');
-  await capture('run-usage', '输入任务（输入法）并把"本次预算（元）"改为 0.05 后点"开始协作"：三条 DeepSeek 回复下方各显示"输入 300 / 输出 6 tokens · 花费 ¥0.000648"；页头下方的预算栏显示"预算 ¥0.0500 · 累计花费 ¥0.0019 · 剩余额度 ¥0.0481"。', '.run-budget');
+  await capture('run-usage', '输入任务（输入法）并把"本次预算（元）"改为 0.05 后点"开始讨论"：三条 DeepSeek 回复下方各显示"输入 300 / 输出 6 tokens · 花费 ¥0.000648"；页头下方的预算栏显示"预算 ¥0.0500 · 累计花费 ¥0.0019 · 剩余额度 ¥0.0481"。', '.run-budget');
 
   // Step 5: an invalid budget is explained and cannot start.
-  await field('本次运行预算（元）'); await selectAll(); await type('abc');
-  check(await js(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '开始协作').disabled`), 'An invalid budget disables 开始协作');
+  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('abc');
+  check(await js(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '开始讨论').disabled`), 'An invalid budget disables 开始讨论');
   check((await text()).includes('请输入 0.000001 到 1000 之间的金额'), 'Invalid budget explained inline');
-  await capture('budget-invalid', '预算框输入"abc"：下方提示"请输入 0.000001 到 1000 之间的金额，最多 6 位小数。"，"开始协作"不可用。', '.composer');
+  await capture('budget-invalid', '预算框输入"abc"：下方提示"请输入 0.000001 到 1000 之间的金额，最多 6 位小数。"，"开始讨论"不可用。', '.composer');
 
   // Step 6: a budget smaller than one request's maximum cost is refused before anything is sent.
   await field('本次运行预算（元）'); await selectAll(); await type('0.001');
-  await field('任务目标'); await selectAll(); await ime('zaitao', '再讨论一次定价');
+  await field('讨论目标'); await selectAll(); await ime('zaitao', '再讨论一次定价');
   const before = requests.length;
-  await click('开始协作');
-  await until(`document.body.innerText.includes('预算不足，已暂停发送。下一次请求最高可能花费')`, 'budget refusal shown');
+  await click('开始讨论');
+  await until(`document.body.innerText.includes('预算不足，已暂停发送') && document.body.innerText.includes('下一次请求最高可能花费')`, 'budget refusal shown');
   const blocked = await snapshot();
   check(requests.length === before && blocked.turns.length === 0 && blocked.status === 'error', 'Zero requests and no Turn when the budget is insufficient');
   check((await text()).includes('剩余额度 ¥0.0010。追加预算后从这里继续') && (await text()).includes('已因预算不足停止发送'), 'Chinese refusal and the bar marker');
-  check((await js(`document.querySelector('.timeline .status').textContent`)).includes('已因预算停止') && !(await text()).includes('配置成员后，输入目标并开始协作'), 'Header says the budget stopped it, with no misleading empty-state hint');
+  check((await js(`document.querySelector('[role=status][aria-label=运行状态]').textContent`)).includes('已因预算停止') && !(await text()).includes('配置成员后，输入目标并开始讨论'), 'Header says the budget stopped it, with no misleading empty-state hint');
   const required = `¥${(blocked.budget.blocked.requiredMicro / 1e6).toFixed(4)}`;
-  await capture('budget-blocked', `预算改为 0.001 元再开始：在发送前拒绝（夹具未收到任何请求、没有新回合），页头状态"已因预算停止"，提示"预算不足，已暂停发送。下一次请求最高可能花费 ${required}，剩余额度 ¥0.0010。追加预算后从这里继续……"（R13B 起提示旁就是"追加并继续"），预算栏标出"已因预算不足停止发送"。实操中发现原来页头写"运行失败"、空时间线还提示"配置成员后…开始协作"，已改正。`, '.run-budget');
+  await capture('budget-blocked', `预算改为 0.001 元再开始：在发送前拒绝（夹具未收到任何请求、没有新回合），页头状态"已因预算停止"，提示"预算不足，已暂停发送。下一次请求最高可能花费 ${required}，剩余额度 ¥0.0010。追加预算后从这里继续……"（R13B 起提示旁就是"追加并继续"），预算栏标出"已因预算不足停止发送"。实操中发现原来页头写"运行失败"、空时间线还提示"配置成员后…开始讨论"，已改正。`, '.run-budget');
 
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);
   check(!JSON.stringify(result).includes(fakeKey), 'Key absent from the result');

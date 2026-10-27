@@ -148,13 +148,19 @@ async function main() {
     for (const theme of ['light', 'dark']) {
       for (const page of ['讨论','房间与成员','模型设置']) {
       const layout = await contents.executeJavaScript(`(async () => {
-        const visible = element => !element.closest('[hidden]') && element.getClientRects().length > 0;
-        const button = [...document.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === ${JSON.stringify(page)});
-        if (!button || button.disabled) throw new Error('Layout page button unavailable');
-        button.click(); await new Promise(resolve => setTimeout(resolve, 80));
-        const select = document.querySelector('.theme-control select');
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${JSON.stringify(theme)});
-        select.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 80));
+        const visible = element => !element.closest('[hidden]') && !element.closest('[inert]') && element.getClientRects().length > 0;
+        const pause = () => new Promise(resolve => setTimeout(resolve, 80));
+        const byName = name => [...document.querySelectorAll('button')].find(element => visible(element) && (element.getAttribute('aria-label') === name || element.textContent.trim() === name));
+        const press = async name => { const button = byName(name); if (!button || button.disabled) throw new Error('Layout control unavailable: ' + name); button.click(); await pause(); };
+        // R16: pages are reached from the sidebar (a drawer below 1024px); 返回讨论 leads back.
+        const go = async target => {
+          if (target === '讨论') { if (byName('返回讨论')) await press('返回讨论'); return; }
+          if (!byName(target === '房间与成员' ? '管理房间与成员' : '设置')) await press('打开导航');
+          await press(target === '房间与成员' ? '管理房间与成员' : '设置');
+        };
+        // 外观 lives in 设置; it applies to every page and is remembered.
+        await go('模型设置'); await press(${JSON.stringify(theme === 'light' ? '浅色' : '深色')});
+        await go(${JSON.stringify(page)});
         const actual = document.documentElement.dataset.theme;
         if (actual !== ${JSON.stringify(theme)}) throw new Error('Theme did not apply');
         const reach = async (element, label) => {
@@ -166,10 +172,15 @@ async function main() {
         const named = (name, scope = document) => [...scope.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === name);
         const actions = [];
         if (${width} === 800 && ${JSON.stringify(page)} === '讨论') {
-          const toggle = document.querySelector('.controls-toggle'); await reach(toggle, 'host controls toggle'); toggle.click(); await new Promise(resolve => setTimeout(resolve, 30));
-          // D098: run controls replace 开始协作 in the composer while a Run is live; idle, the composer offers 开始协作.
-          await reach(named('开始协作', document.querySelector('.composer')), '开始协作'); await reach(document.querySelector('#host-controls h2'), 'host panel');
-          await reach(toggle, 'host controls collapse'); toggle.click(); actions.push('host controls expanded, reached, collapsed');
+          // D098: idle, the composer offers 开始讨论 in the slot run controls take while a Run is live.
+          await reach(named('开始讨论', document.querySelector('.composer')), '开始讨论');
+          const menu = byName('打开导航'); await reach(menu, 'navigation drawer button'); menu.click(); await pause(); await pause(); await pause(); // the drawer slides in for 180ms
+          await reach(document.querySelector('.drawer.is-left .sidebar'), 'navigation drawer');
+          await reach(byName('关闭导航'), 'close navigation'); byName('关闭导航').click(); await pause();
+          const panel = byName('本场信息'); await reach(panel, '本场信息 button'); panel.click(); await pause(); await pause(); await pause();
+          await reach(document.querySelector('.drawer.is-right .run-panel h2'), '本场信息 drawer');
+          await reach(byName('关闭本场信息'), 'close 本场信息'); byName('关闭本场信息').click(); await pause();
+          actions.push('navigation and 本场信息 drawers opened, reached, closed');
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '房间与成员') {
           for (const action of ['新建房间','新增成员']) {

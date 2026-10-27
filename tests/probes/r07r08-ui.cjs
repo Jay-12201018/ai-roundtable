@@ -14,6 +14,11 @@ async function page(stage, saved) {
   const visible = element => element && !element.closest('[hidden]') && element.getClientRects().length > 0;
   const findButton = name => [...document.querySelectorAll('button')].find(element => visible(element)
     && (element.getAttribute('aria-label') === name || element.textContent.trim() === name));
+  // R16: rooms and discussions also appear in the sidebar; clickIn picks the one inside a given area.
+  const clickIn = async (scope, name) => {
+    const element = await wait(() => [...document.querySelectorAll(scope + ' button')].find(element => visible(element) && element.textContent.trim() === name), element => element && !element.disabled, 'Unavailable button in ' + scope + ': ' + name);
+    element.click(); await sleep();
+  };
   const click = async name => {
     const element = await wait(() => findButton(name), element => element && !element.disabled, 'Unavailable button: ' + name);
     element.click(); await sleep();
@@ -31,7 +36,8 @@ async function page(stage, saved) {
     const element = await wait(() => field(name), element => element && !element.disabled, 'Unavailable checkbox: ' + name);
     if (element.checked !== value) element.click(); await sleep();
   };
-  const text = () => [...document.querySelectorAll('.message p:not([class])')].map(element => element.textContent);
+  // R16: one .thread-item per slot; a member's text is its Markdown body, the host's is its bubble.
+  const text = () => [...document.querySelectorAll('.thread-item')].map(item => item.querySelector('.msg-body .md, .bubble')?.textContent ?? '');
   // R12: the timeline shows one entry per message slot (its effective version); other versions stay one click away.
   const effective = snapshot => { if (!snapshot.versions) return snapshot.messages.map(message => message.content);
     const slots = new Map(); for (const message of snapshot.messages) { const version = snapshot.versions.find(item => item.messageId === message.id); if (!version) continue;
@@ -39,10 +45,10 @@ async function page(stage, saved) {
     return [...slots.values()].map(group => { group.sort((a, b) => a.versionNumber - b.versionNumber); return (group.find(version => version.active) ?? group.at(-1)).content; }); };
   // Steps back through a slot's earlier versions in the real UI, checks each against Main, then returns to the effective one.
   const history = async (snapshot, slotIndex) => {
-    const article = () => document.querySelectorAll('.message')[slotIndex]; const version = snapshot.versions.find(item => item.messageId === snapshot.messages[0].id);
+    const article = () => document.querySelectorAll('.thread-item')[slotIndex]; const version = snapshot.versions.find(item => item.messageId === snapshot.messages[0].id);
     const versions = snapshot.versions.filter(item => item.slotId === version.slotId).sort((a, b) => a.versionNumber - b.versionNumber);
     const contentOf = id => snapshot.messages.find(message => message.id === id).content;
-    const shown = () => article().querySelector('p:not([class])').textContent; const step = label => article().querySelector('button[aria-label="' + label + '"]').click();
+    const shown = () => article().querySelector('.msg-body .md').textContent; const step = label => article().querySelector('button[aria-label="' + label + '"]').click();
     check(article().textContent.includes('版本 ' + versions.length + '/' + versions.length), 'Version count missing');
     for (let index = versions.length - 2; index >= 0; index--) { step('查看上一个版本'); await sleep(); check(shown() === contentOf(versions[index].messageId), 'Earlier version not reachable'); }
     for (let index = 1; index < versions.length; index++) { step('查看下一个版本'); await sleep(); }
@@ -53,8 +59,9 @@ async function page(stage, saved) {
   const api = window.roundtable;
   const snapshots = {};
   await wait(() => document.querySelector('.app-shell'), Boolean, 'Production App absent');
-  const settle = (runId, status, count) => wait(() => api.run.getSnapshot(runId), snapshot => snapshot.status === status
-    && (count === undefined || snapshot.turns.length === count) && JSON.stringify(text()) === JSON.stringify(effective(snapshot)), 'Run/DOM did not settle: ' + status);
+  let lastSeen;
+  const settle = (runId, status, count) => wait(() => api.run.getSnapshot(runId), snapshot => { lastSeen = { status: snapshot.status, turns: snapshot.turns.length, dom: text(), main: effective(snapshot) }; return snapshot.status === status
+    && (count === undefined || snapshot.turns.length === count) && JSON.stringify(text()) === JSON.stringify(effective(snapshot)); }, 'Run/DOM did not settle: ' + status + ' ' + JSON.stringify(lastSeen ?? {}));
   const roomList = () => api.rooms.listRooms({ includeArchived: true });
   const providerList = () => api.settings.listProviderSummaries();
   const noKey = value => {
@@ -64,8 +71,8 @@ async function page(stage, saved) {
     return value;
   };
   if (stage === 'first') {
-    check(!findButton('开始协作') || findButton('开始协作').disabled, 'Empty room must not start a legacy demo');
-    await click('模型设置');
+    check(!findButton('开始讨论') || findButton('开始讨论').disabled, 'Empty room must not start a legacy demo');
+    await click('设置');
     await click('新增 Provider'); await fill('Provider 名称', 'Smoke Mock'); await fill('Provider 类型', 'mock');
     await click('保存配置');
     const mock = await wait(providerList, providers => providers.some(provider => provider.name === 'Smoke Mock'), 'Mock Provider not saved');
@@ -107,7 +114,7 @@ async function page(stage, saved) {
     await wait(() => document.body.innerText, value => value.includes('鉴权测试：当前目标或模型缺少已确认的能力、计数或预算信息。'), 'Real Provider reported false network success');
     noKey(await api.settings.listProviderSummaries()); noKey(await api.settings.getProviderConfiguration({ id: saved.realProviderId }));
     noKey(await keyState()); noKey(replacement);
-    await click('返回讨论'); await click('房间与成员');
+    await click('返回讨论'); await click('管理房间与成员');
     async function createRoom(name) {
       await click('新建房间'); await fill('房间名称', name); await fill('房间目标', name + ' public goal'); await click('保存房间');
       const rooms = await wait(roomList, values => values.some(value => value.name === name), 'Room not saved: ' + name);
@@ -128,8 +135,9 @@ async function page(stage, saved) {
     saved.agents = await api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false });
     check(saved.agents.every(agent => agent.providerId === saved.mockProviderId && agent.modelId === 'mock'), 'Members are not all explicit Mock');
     saved.otherRoomId = await createRoom('Smoke Disposable');
-    await click('Smoke Roundtable'); await click('讨论'); await fill('任务目标', 'R78 public three Agent collaboration');
-    await click('开始协作'); saved.runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run not selected');
+    // The sidebar room opens a new discussion in it.
+    await click('Smoke Roundtable'); await fill('讨论目标', 'R78 public three Agent collaboration');
+    await click('开始讨论'); saved.runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run not selected');
     await wait(text, values => values[0]?.length > 0, 'Partial message not projected');
     await click('暂停'); snapshots.paused = await settle(saved.runId, 'paused', 1);
     check(snapshots.paused.execution.membersSnapshot.length === 3, 'Frozen members missing');
@@ -144,54 +152,55 @@ async function page(stage, saved) {
     await click('下一步'); snapshots.stepped = await settle(saved.runId, 'paused', 2);
     await click('继续'); snapshots.completed = await settle(saved.runId, 'completed', 3);
     check(snapshots.completed.attempts.length === 3 && new Set(snapshots.completed.attempts.map(attempt => attempt.requestId)).size === 3, 'Three request identities missing');
-    await fill('任务目标', 'R78 cancellation and explicit repeat'); await click('开始协作');
+    await fill('讨论目标', 'R78 cancellation and explicit repeat'); await click('开始讨论');
     const repeatRunId = await wait(() => localStorage.getItem('roundtable.runId'), id => id && id !== saved.runId, 'Repeat scenario Run absent');
-    await wait(text, values => values[0]?.length > 0, 'Stop partial output absent'); await click('停止'); await click('确认停止');
+    await wait(text, values => values[0]?.length > 0, 'Stop partial output absent'); await click('停止'); await click('停止讨论');
     snapshots.stopped = await settle(repeatRunId, 'cancelled', 1); snapshots.repeats = [];
     for (const name of ['重试当前回合', '续写部分回复']) {
       const before = snapshots.repeats.at(-1) ?? snapshots.stopped;
       await click(name);
       await wait(() => api.run.getSnapshot(repeatRunId), snapshot => snapshot.messages.length === before.messages.length + 1 && snapshot.messages.at(-1).content.length > 0 && JSON.stringify(text()) === JSON.stringify(effective(snapshot)), 'Explicit repeat output absent');
-      await click('停止'); await click('确认停止'); const repeated = await settle(repeatRunId, 'cancelled', 1);
+      await click('停止'); await click('停止讨论'); const repeated = await settle(repeatRunId, 'cancelled', 1);
       check(JSON.stringify(repeated.messages[0]) === JSON.stringify(snapshots.stopped.messages[0]), 'Repeat changed original partial');
       check(JSON.stringify(repeated.attempts[0]) === JSON.stringify(snapshots.stopped.attempts[0]), 'Repeat changed original request evidence');
       snapshots.repeats.push(repeated);
     }
     check(await history(snapshots.repeats.at(-1), 0) === 3, 'Original, retry and continuation versions must all stay reachable');
     saved.repeatRunId = repeatRunId;
-    await click('房间与成员'); await click('Smoke Disposable'); await click('讨论');
+    await click('Smoke Disposable');
     check(localStorage.getItem('roundtable.runId') === null && text().length === 0, 'Room switch kept old Run/messages');
-    await click('房间与成员'); await click('Smoke Roundtable');
+    await click('管理房间与成员'); await clickIn('.rooms-feature', 'Smoke Roundtable');
     await click('编辑 Smoke Drafter'); await fill('成员名称', 'Smoke Current Renamed'); await fill('成员角色', 'New Current Role'); await click('保存成员');
     await wait(() => document.querySelector('dialog[open]'), value => !value, 'Member edit did not close');
     await click('删除 Smoke Current Renamed'); await click('确认删除');
     await wait(() => document.querySelector('dialog[open] [role="alert"]')?.textContent, value => value?.includes('受保护'), 'Historical member deletion not protected');
     await click('取消');
-    await click('历史记录'); await click('R78 public three Agent collaboration');
+    await click('历史记录'); await clickIn('.rooms-feature', 'R78 public three Agent collaboration');
     await settle(saved.runId, 'completed', 3);
-    check(document.querySelector('.message strong').textContent === 'Smoke Drafter', 'Historical name replaced by current member');
-    check(document.querySelector('.message-identity').textContent.includes('Drafter') && !document.querySelector('.message-identity').textContent.includes('New Current Role'), 'Historical role replaced');
-    await click('房间与成员'); await click('删除房间'); await click('确认删除');
+    check(document.querySelector('.thread-item .msg-name').textContent === 'Smoke Drafter', 'Historical name replaced by current member');
+    document.querySelector('.thread-item button[aria-label="请求详情"]').click(); await sleep();
+    check(document.querySelector('.msg-details').textContent.includes('Drafter') && !document.querySelector('.msg-details').textContent.includes('New Current Role'), 'Historical role replaced');
+    await click('管理房间与成员'); await click('删除房间'); await click('确认删除');
     await wait(() => document.querySelector('dialog[open] [role="alert"]')?.textContent, value => value?.includes('受保护'), 'Historical room deletion not protected');
     await click('取消'); await click('归档房间'); await click('确认归档');
     await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Disposable', 'Archive did not switch to remaining room');
     await click('删除房间'); await click('确认删除');
     await wait(() => document.querySelector('.rooms-empty h2')?.textContent, value => value === '你的下一场圆桌', 'Last visible room deletion did not clear');
-    await click('讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && findButton('开始协作').disabled, 'Last-room clear kept old projection/start');
-    await click('房间与成员'); await toggle('显示归档房间', true);
+    await click('返回讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && findButton('开始讨论').disabled, 'Last-room clear kept old projection/start');
+    await click('管理房间与成员'); await toggle('显示归档房间', true);
     await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Roundtable', 'Archived room unavailable');
-    await click('历史记录'); await click('R78 public three Agent collaboration'); await settle(saved.runId, 'completed', 3);
-    await click('房间与成员'); await toggle('显示归档房间', false);
+    await click('历史记录'); await clickIn('.rooms-feature', 'R78 public three Agent collaboration'); await settle(saved.runId, 'completed', 3);
+    await click('管理房间与成员'); await toggle('显示归档房间', false);
     await wait(() => document.querySelector('.rooms-empty h2')?.textContent, value => value === '你的下一场圆桌', 'Filter did not remove last selection');
-    await click('讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null, 'Filter retained Run projection');
-    await click('房间与成员'); await toggle('显示归档房间', true);
+    await click('返回讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null, 'Filter retained Run projection');
+    await click('管理房间与成员'); await toggle('显示归档房间', true);
     await wait(() => findButton('恢复房间'), Boolean, 'Archived selected room missing'); await click('恢复房间');
     await wait(() => findButton('归档房间'), Boolean, 'Room restore failed');
     await click('成员配置'); await click('归档 Smoke Current Renamed'); await click('确认归档');
     await wait(() => document.querySelector('dialog[open]'), value => !value, 'Member archive did not finish');
     await toggle('显示归档成员', true); await wait(() => findButton('恢复 Smoke Current Renamed'), Boolean, 'Archived member not visible');
     await click('恢复 Smoke Current Renamed'); await wait(() => findButton('归档 Smoke Current Renamed'), Boolean, 'Member restore failed');
-    await click('历史记录'); await click('R78 public three Agent collaboration'); snapshots.final = await settle(saved.runId, 'completed', 3);
+    await click('历史记录'); await clickIn('.rooms-feature', 'R78 public three Agent collaboration'); snapshots.final = await settle(saved.runId, 'completed', 3);
     noKey(snapshots.final); noKey(Object.fromEntries(Object.entries(localStorage)));
     return { saved, checks: ['refresh preserved paused evidence', 'step/resume/three members', 'stop/explicit retry/continue retained original partial and request', 'cross-room projection clear', 'frozen name/role/provider/model', 'member/room history deletion guards', 'archive/delete last room clear', 'archive filter clear', 'room/member restore'], snapshots };
   }
@@ -204,9 +213,9 @@ async function page(stage, saved) {
   const keyState = noKey(await api.settings.getProviderKeyState({ providerId: saved.realProviderId }));
   check(keyState.state === 'configured' && keyState.keyReference.id === saved.keyReference.id, 'Fake secure Key did not survive restart');
   check((await api.settings.getProviderKeyState({ providerId: saved.otherProviderId })).state === 'missing', 'Cross-provider isolation lost on restart');
-  await click('房间与成员'); await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Roundtable', 'Restart room selection missing');
+  await click('管理房间与成员'); await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Roundtable', 'Restart room selection missing');
   await click('成员配置'); await wait(() => findButton('编辑 Smoke Current Renamed'), Boolean, 'Edited configuration not restored');
-  await click('模型设置'); await wait(() => document.querySelector('.settings-feature'), Boolean, 'Settings not mounted after restart');
+  await click('设置'); await wait(() => document.querySelector('.settings-feature'), Boolean, 'Settings not mounted after restart');
   return { saved, checks: ['restart actual Main/Renderer configuration/history', 'fake secure Key persistence and owner isolation', 'edited member restored'], snapshots };
 }
 

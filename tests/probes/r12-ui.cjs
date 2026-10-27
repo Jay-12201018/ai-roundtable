@@ -6,6 +6,7 @@ async function page(stage, saved = {}) {
   const wait = async (read, accepts, message) => { const deadline = Date.now() + 90000; for (;;) { const value = await read(); if (accepts(value)) return value; if (Date.now() > deadline) throw new Error(message); await sleep(); } };
   const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
   const buttons = name => [...document.querySelectorAll('button')].filter(e => visible(e) && (e.getAttribute('aria-label') === name || e.textContent.trim() === name));
+  const clickIn = async (scope, name) => { const button = await wait(() => [...document.querySelectorAll(scope + ' button')].find(e => visible(e) && e.textContent.trim() === name), b => b && !b.disabled, 'Unavailable button in ' + scope + ': ' + name); button.click(); await sleep(); };
   const click = async (name, pick = list => list[0]) => { const button = await wait(() => pick(buttons(name)), b => b && !b.disabled, 'Unavailable button: ' + name); button.click(); await sleep(); };
   const field = name => [...document.querySelectorAll('input,select,textarea')].find(e => visible(e) && (e.getAttribute('aria-label') === name || e.closest('label')?.firstChild?.textContent?.trim() === name));
   const fill = async (name, value) => {
@@ -42,7 +43,7 @@ async function page(stage, saved = {}) {
     await wait(text, value => value.includes(saved.editedText), 'Edited effective version not rendered after restart');
     check(text().includes('主持人点名') && text().includes('主持人插话'), 'Host attribution lost in UI');
     check(buttons('查看上一个版本').length === saved.multiVersionSlots, 'Version navigation lost');
-    check(document.querySelectorAll('.host-affected').length === saved.affectedNotes, 'Affected marks differ after restart');
+    check([...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length === saved.affectedNotes, 'Affected marks differ after restart');
     await sleep(1500);
     const later = summary(await api.run.getSnapshot(saved.runId));
     check(JSON.stringify(later.attempts) === JSON.stringify(saved.summary.attempts) && later.sequence === saved.summary.sequence, 'Request started after restart');
@@ -51,18 +52,23 @@ async function page(stage, saved = {}) {
 
   // A demo room has three legacy Mock members (Drafter, Critic, Synthesizer); no Provider or Key is involved.
   const { roomId } = await api.room.createDemo('R12 probe room'); saved.roomId = roomId;
-  await click('房间与成员'); await click('刷新房间'); await click('Mock 圆桌'); await click('讨论');
-  await fill('任务目标', 'R12 主持人探针任务'); await click('开始协作');
+  // R16: opening the room list refreshes the sidebar; the sidebar room opens a new discussion in it.
+  await click('管理房间与成员'); await clickIn('.sidebar', 'Mock 圆桌');
+  await fill('讨论目标', 'R12 主持人探针任务'); await click('开始讨论');
   const runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run absent'); saved.runId = runId;
   await wait(() => api.run.getSnapshot(runId), run => run.messages[0]?.content, 'No streamed output');
   const synthesizer = `${roomId}-agent-synthesizer`;
-  await click('点名 综合者');
+  // D4: typing @ in the interjection box names the next speaker; with no other words only the override is sent.
+  await fill('主持人插话', '@综合者'); await click('发送插话');
+  await wait(() => api.run.getSnapshot(runId), run => run.host.override, 'Override not recorded');
   const queued = await api.run.getSnapshot(runId);
   check(queued.host.override?.agentId === synthesizer, 'Override not queued');
   check(queued.turns.length === 1 && queued.turns[0].status === 'running', 'Override was not queued while the first Turn was running');
   await wait(text, value => value.includes('下一位：综合者（主持人点名'), 'Next speaker not shown');
   await wait(() => api.run.getSnapshot(runId), run => run.turns.length === 2, 'Override Turn absent');
   await fill('主持人插话', 'R12 主持人插话：请关注风险'); await click('发送插话');
+  // 本场信息 › 指令 adds a standing instruction at any time (the box's 设为持续指令 only while the Run is live).
+  const tab = await wait(() => [...document.querySelectorAll('[role=tab]')].find(e => visible(e) && e.textContent.startsWith('指令')), Boolean, 'Instructions tab absent'); tab.click(); await sleep();
   await fill('新增持续指令', '请用编号列出要点'); await click('添加持续指令');
   const finished = await wait(() => api.run.getSnapshot(runId), run => run.status === 'completed' || run.status === 'error', 'Run did not finish');
   check(finished.status === 'completed', 'Run failed');
@@ -81,7 +87,7 @@ async function page(stage, saved = {}) {
   check(edited.messages.some(m => m.id === finished.turns[0].messageId && m.content === finished.messages.find(x => x.id === finished.turns[0].messageId).content), 'Original text overwritten');
   check(first.messageId !== finished.turns[0].messageId, 'Effective version unchanged');
   check(edited.versions.filter(v => v.affectedBy.length).length === 2, 'Downstream affected marks missing');
-  await wait(() => document.querySelectorAll('.host-affected').length, n => n === 2, 'Affected marks not rendered');
+  await wait(() => [...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length, n => n === 2, 'Affected marks not rendered');
 
   // Regenerate the last answer as a version job in the completed Run.
   await click('重新生成', list => list.at(-1));
@@ -110,7 +116,7 @@ async function page(stage, saved = {}) {
   saved.summary = summary(final);
   await wait(() => buttons('查看上一个版本').length, n => n === 2, 'Version navigation not rendered');
   saved.multiVersionSlots = buttons('查看上一个版本').length;
-  saved.affectedNotes = document.querySelectorAll('.host-affected').length;
+  saved.affectedNotes = [...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length;
   check(saved.affectedNotes === final.versions.filter(v => v.active && v.affectedBy.length).length, 'Rendered affected marks differ from Main');
   return { saved, assertions, requests: final.attempts.length };
 }

@@ -143,12 +143,14 @@ async function main() {
     const deadline = Date.now() + timeout;
     for (;;) { const value = await js(code); if (value) return value; if (Date.now() > deadline) throw new Error('Timed out: ' + message); await sleep(50); }
   };
+  // The content size set above settles asynchronously; aim the first click only once the layout has it.
+  await until(`window.innerWidth === 1440 && window.innerHeight === 900`, 'window size applied'); await sleep(300);
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r13a = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
     const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
     let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
-    if (o.slot !== undefined) { const slot = document.querySelectorAll('.message')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
+    if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
     const e = o.which === 'last' ? list.at(-1) : list[o.which || 0];
     if (!e) return null;
@@ -190,7 +192,7 @@ async function main() {
   };
   let shot = restarting ? fs.readdirSync(screens).filter(file => /^\d\d-.*\.png$/u.test(file)).length : 0;
   const capture = async (name, caption, focus) => {
-    if (typeof focus === 'number') await js(`document.querySelectorAll('.message')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
+    if (typeof focus === 'number') await js(`document.querySelectorAll('.thread-item')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
     else if (focus) await js(`document.querySelector(${JSON.stringify(focus)})?.scrollIntoView({ block: 'center' }); true`);
     await sleep(350);
     const file = `${String(++shot).padStart(2, '0')}-${name}.png`;
@@ -206,7 +208,7 @@ async function main() {
   const type = text => send('Input.insertText', { text }).then(() => sleep(120));
   const snapshot = () => js(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'))`);
 
-  const status = () => js(`document.querySelector('.timeline .status').textContent`);
+  const status = () => js(`document.querySelector('[role=status][aria-label=运行状态]').textContent`);
   const keyField = `document.querySelector('input[type=password]')`;
 
   const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/u;
@@ -214,7 +216,7 @@ async function main() {
     // Step R1: startup cleared every stored copy and said so without the value.
     check(result.mainLog.includes('已清除 3 处疑似 API Key 的模型 ID'), 'Main logged only the count of cleared places');
     check(!dbBytes().includes(Buffer.from(pastedKey)), 'After startup the plaintext is gone from the database file, WAL and SHM');
-    await click('房间与成员');
+    await click('管理房间与成员');
     await until(`document.body.innerText.includes('校园跑腿讨论') && document.body.innerText.includes('审查者')`, 'rooms loaded');
     const roomText = await text();
     check(roomText.includes('Model 未配置：请编辑成员，填写模型 ID 后才能参与运行'), 'The member left without a model is told to fill one in');
@@ -224,21 +226,23 @@ async function main() {
     await field('Model'); await type('deepseek-flash'); await click('保存成员');
     await until(`!document.querySelector('dialog[open], .rooms-dialog') && !document.body.innerText.includes('Model 未配置')`, 'reviewer model filled in again');
     await capture('purged-member-fixed', '点"编辑"给审查者重新填 deepseek-flash 并保存：提示消失，成员恢复可用。', '.rooms-feature');
-    await click('模型设置');
+    await click('设置');
     await until(`document.body.innerText.includes('编辑 Provider')`, 'provider editor');
     check(await js(`document.querySelector('[aria-describedby=settings-default-model-help]').value`) === '', 'The default model is empty after the purge');
     check(!(await text()).includes(pastedKey) && !(await text()).includes('已隐藏'), 'Nothing key-like is left to hide');
     await capture('purged-provider', '"模型设置"里 DeepSeek 直连的默认模型 ID 已被清空（只剩示例"例如 deepseek-flash"），自定义模型里那条疑似 Key 的条目已删除，只剩 deepseek-flash；页面上没有任何密钥文本。', '#settings-default-model-help');
     // Step R2: the earlier Run's members are named by their Provider, never by its UUID.
     await click('返回讨论');
-    await until(`document.querySelectorAll('.message-identity').length > 0`, 'earlier run shown');
-    const lines = await js(`[...document.querySelectorAll('.message-identity')].map(node => node.textContent)`);
-    check(lines.length > 0 && lines.every(line => line.includes('Provider：DeepSeek 直连') && !uuidPattern.test(line)), 'Identity lines name the Provider, not its UUID');
+    // R16: the identity line names the model; the service is in each message's 请求详情.
+    await until(`document.querySelectorAll('.thread-item [aria-label=请求详情]').length > 0`, 'earlier run shown');
+    await js(`document.querySelectorAll('.thread-item [aria-label=请求详情]').forEach(button => button.click()); true`);
+    const lines = await until(`(() => { const lines = [...document.querySelectorAll('.msg-details')].map(node => node.textContent); return lines.length ? lines : null; })()`, 'request details');
+    check(lines.every(line => line.includes('服务DeepSeek 直连') && !uuidPattern.test(line)), 'Request details name the Provider, not its UUID');
     check(!uuidPattern.test(await text()), 'No UUID anywhere on the discussion page');
     await capture('provider-name', '重启后打开上一次运行（成员快照冻结的是 Provider ID）：每条消息的身份行显示"Drafter · Provider：DeepSeek 直连 · Model：deepseek-flash"，不再显示 UUID。Provider 找不到时显示"Provider 已删除"（单元测试覆盖）。', 0);
   } else {
   // Step 1: a pasted API Key in the model ID field is flagged at once and cannot be saved.
-  await click('模型设置'); await click('新增 Provider');
+  await click('设置'); await click('新增 Provider');
   await field('Provider 名称'); await ime('deepseek', 'DeepSeek 直连');
   check(await choose('Provider 类型', 'openai-compatible') === 'openai-compatible', 'Provider type OpenAI-Compatible');
   await field('Base URL'); await type('https://api.deepseek.com');
@@ -283,7 +287,7 @@ async function main() {
   await capture('session-confirmed', '点“目标无误，确认本次会话”：接入进度三项都变为完成——配置已保存、API Key 已配置、本次会话目标已确认，并写明“已就绪：房间成员可以向此 Provider 发送真实请求（仍受模型审核和运行预算限制）”。整个“新增 Provider → 填 Key → 确认会话目标”在一屏内完成。', '.settings-progress');
 
   // Step 5: a room with three DeepSeek members.
-  await click('返回讨论'); await click('房间与成员'); await click('新建房间');
+  await click('返回讨论'); await click('管理房间与成员'); await click('新建房间');
   await field('房间名称'); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存房间');
   await until(`document.body.innerText.includes('新增成员')`, 'room saved');
   for (const [index, [pinyin, name, role]] of [['qicao', '起草者', 'Drafter'], ['shencha', '审查者', 'Critic'], ['zonghe', '综合者', 'Synthesizer']].entries()) {
@@ -298,26 +302,29 @@ async function main() {
   }
   await capture('members', '新建房间“校园跑腿讨论”，添加“起草者（Drafter）”“审查者（Critic）”“综合者（Synthesizer）”三个成员，Provider 均为“DeepSeek 直连”，Model 自动带出 deepseek-flash。', '.rooms-feature');
 
-  // Step 6: start, then pause without moving the pointer: 开始协作 turns into 暂停 at the same spot.
-  await click('讨论');
-  await field('任务目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
-  await field('本次运行预算（元）'); await selectAll(); await type('0.05');
-  check(!(await js(`document.querySelector('.composer-step input').checked`)), 'Step-by-step is off by default');
+  // Step 6: start, then pause without moving the pointer: 开始讨论 turns into 暂停 at the same spot.
+  await click('返回讨论');
+  await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
+  // R16: the budget is in the settings popover beside the goal (opened from 更多设置 or the budget chip).
+  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.05');
+  check(!(await js(`document.querySelector('label.chip-check input').checked`)), 'Step-by-step is off by default');
   holdNext = true;
-  // Where the host's pointer rests after clicking 开始协作; measured without scrolling, never re-aimed afterwards.
-  const startAt = await js(`(() => { const r = [...document.querySelectorAll('.composer-actions button')].find(b => b.textContent === '开始协作').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  // Where the host's pointer rests after clicking 开始讨论; measured without scrolling, never re-aimed afterwards.
+  const startAt = await js(`(() => { const r = document.querySelector('.composer .controls .slot').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '开始讨论', 'The slot under the pointer is 开始讨论');
   await clickAt(startAt);
-  await until(`document.querySelector('.timeline .status').textContent.includes('运行中') && document.querySelectorAll('.message').length === 1`, 'first reply streaming');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('运行中') && document.querySelectorAll('.thread-item').length === 1`, 'first reply streaming');
   check(requests.length === 1 && held.length === 1, 'The first request is in flight');
-  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '暂停', 'Under the unmoved pointer, 开始协作 has become 暂停');
-  check(await js(`[...document.querySelector('[aria-label=运行控制]').querySelectorAll('button')].map(b => b.textContent).join('|')`) === '暂停|下一步|停止', 'The in-place bar is 暂停, 下一步, then 停止 at the end');
-  check(await js(`![...document.querySelectorAll('#host-controls button')].some(b => ['暂停', '继续', '下一步', '停止'].includes(b.textContent))`), 'The side panel has no second set of run buttons');
+  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '暂停', 'Under the unmoved pointer, 开始讨论 has become 暂停');
+  // R16 design: 停止 first, red and set apart; then 下一步 and the 暂停/继续 slot where the host just clicked.
+  check(await js(`[...document.querySelector('[aria-label=运行控制]').querySelectorAll('button')].map(b => b.textContent).join('|')`) === '停止|下一步|暂停', 'The in-place bar is 停止 (apart), 下一步, then 暂停 in the start slot');
+  check(await js(`![...document.querySelectorAll('.run-panel button')].some(b => ['暂停', '继续', '下一步', '停止'].includes(b.textContent))`), 'The side panel has no second set of run buttons');
   await clickAt(startAt);
-  await until(`document.querySelector('.timeline .status').textContent.includes('正在暂停')`, 'pausing');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('正在暂停')`, 'pausing');
   check(!(await js(`Boolean(document.querySelector('[aria-label=确认停止运行]'))`)), 'Pause never opens the Stop confirmation');
-  await capture('pause-in-place', '点“开始协作”后鼠标不动，第一位成员开始输出时在原位置再点一下：那里已经原地变成“暂停”，页头变为“正在暂停”，当前回合继续说完。控制条依次是 暂停、下一步、停止；停止在末尾、与前两个隔开、红色描边。右侧主持人面板不再有第二套运行按钮。', '.app-navigation');
+  await capture('pause-in-place', '点“开始讨论”后鼠标不动，第一位成员开始输出时在原位置再点一下：那里已经原地变成“暂停”，页头变为“正在暂停”，当前回合继续说完。控制条依次是 暂停、下一步、停止；停止在末尾、与前两个隔开、红色描边。右侧主持人面板不再有第二套运行按钮。', '.topbar');
   held.shift()();
-  await until(`document.querySelector('.timeline .status').textContent.includes('已暂停')`, 'paused');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已暂停')`, 'paused');
   const paused = await snapshot();
   check(paused.status === 'paused' && paused.charges.length === 1 && paused.charges[0].state === 'settled', 'Pause finished the turn and settled its request; nothing was stopped');
   check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '继续', 'Paused, the same spot offers 继续');
@@ -325,42 +332,44 @@ async function main() {
   // Step 7: continue from the same spot; while the reviewer is speaking, Stop asks first without covering Pause.
   holdNext = true;
   await clickAt(startAt);
-  await until(`document.querySelectorAll('.message').length === 2 && document.querySelector('.timeline .status').textContent.includes('运行中')`, 'second reply streaming');
+  await until(`document.querySelectorAll('.thread-item').length === 2 && document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('运行中')`, 'second reply streaming');
   await click('停止');
   const confirmText = await js(`document.querySelector('[aria-label=确认停止运行]')?.textContent ?? ''`);
   check(confirmText.includes('已生成的部分文字会保留') && confirmText.includes('可能已经计费'), 'The confirmation explains partial output and possible charges');
   check((await snapshot()).status === 'running', 'The first click on Stop sends nothing');
   check(await js(`document.activeElement?.textContent === '不停止'`), 'Focus rests on the safe choice');
   check(await js(`!document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.disabled && document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent === '暂停'`), 'The confirmation does not cover or disable 暂停');
-  await capture('stop-confirm', '“继续”同样在原位置；审查者输出中点控制条末尾的“停止”：控制条下方出现轻量确认——“停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。”以及“确认停止”“不停止”（焦点在“不停止”）。“暂停”仍在原处可用，运行仍是“运行中”。', '.composer');
+  await capture('stop-confirm', '“继续”同样在原位置；审查者输出中点控制条末尾的“停止”：控制条下方出现轻量确认——“停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。”以及“停止讨论”“不停止”（焦点在“不停止”）。“暂停”仍在原处可用，运行仍是“运行中”。', '.composer');
   await click('不停止');
   check(!(await js(`Boolean(document.querySelector('[aria-label=确认停止运行]'))`)) && (await status()).includes('运行中'), '不停止 keeps the Run going');
-  await click('停止'); await click('确认停止');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已停止')`, 'stopped');
+  await click('停止'); await click('停止讨论');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已停止')`, 'stopped');
   const stopped = await snapshot();
   check((await text()).includes('重试和续写会重新发送请求，可能再次计费。'), 'Retry and continue warn that they may bill again');
   check(stopped.status === 'cancelled' && stopped.messages[1].status === 'aborted' && stopped.messages[1].content.length > 0, 'Stop kept the partial reply');
   check(stopped.charges.find(c => c.requestId === stopped.attempts.find(a => a.messageId === stopped.messages[1].id).requestId).state === 'unknown', 'The stopped request is recorded as an unknown charge, not zero');
-  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '开始协作', 'Settled, the slot is 开始协作 again');
-  await capture('stopped', '点“不停止”后运行继续；再点“停止”并“确认停止”：页头“已停止”，审查者已输出的部分文字保留并标为“已中止”，这次请求在预算栏按未知费用（预留上限）计入、不记为 0。输入区原位置变回“开始协作”；右侧“重试当前回合”“续写部分回复”下方提示“重试和续写会重新发送请求，可能再次计费。”', '.app-navigation');
+  // Settled: no run controls; the slot offers 新讨论 (the box still takes an interjection for a retry).
+  check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '新讨论', 'Settled, the slot offers 新讨论');
+  await capture('stopped', '点“不停止”后运行继续；再点“停止”并“停止讨论”：页头“已停止”，审查者已输出的部分文字保留并标为“已中止”，这次请求在预算栏按未知费用（预留上限）计入、不记为 0。输入区原位置变回“开始讨论”；右侧“重试当前回合”“续写部分回复”下方提示“重试和续写会重新发送请求，可能再次计费。”', '.topbar');
   const reviewer = requests[1].messages;
 
   // Step 8: step-by-step from the start — pause after each turn, interject, then 下一步.
-  await click('每个回合结束后暂停，方便插话或点名', { selector: 'input[type=checkbox]' });
-  check(await js(`document.querySelector('.composer-step input').checked`), 'Step-by-step checked');
-  await field('任务目标'); await selectAll(); await ime('dingjia', '讨论跑腿平台的定价');
+  await click('新讨论', { scope: '.controls' });
+  await click('每回合后暂停', { selector: 'input[type=checkbox]' });
+  check(await js(`document.querySelector('label.chip-check input').checked`), 'Step-by-step checked');
+  await field('讨论目标'); await selectAll(); await ime('dingjia', '讨论跑腿平台的定价');
   await capture('step-option', '开始前在输入区勾选“每个回合结束后暂停，方便插话或点名”（默认不勾选，勾选后会记住），任务改为“讨论跑腿平台的定价”（输入法输入）。', '.composer');
   const before = requests.length;
   await clickAt(startAt);
-  await until(`document.querySelector('.timeline .status').textContent.includes('已暂停') && document.querySelectorAll('.message').length === 1`, 'auto-paused after the first turn');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已暂停') && document.querySelectorAll('.thread-item').length === 1`, 'auto-paused after the first turn');
   const stepRun = await snapshot();
   check(requests.length === before + 1 && stepRun.status === 'paused' && stepRun.turns.length === 1, 'Exactly one turn ran, then the Run paused by itself');
   await field('主持人插话'); await ime('qingzhongdian', '请重点比较按距离计价和固定价');
   await click('发送插话');
-  await until(`document.querySelectorAll('.message').length === 2`, 'interjection shown');
-  await capture('step-paused-interject', '开始后第一位成员（起草者）说完，运行自动暂停（页头“已暂停”），没有和模型抢时间；在右侧“插话”里用输入法输入“请重点比较按距离计价和固定价”并发送，插话出现在时间线上。输入区提示：可以在“主持人控制”里插话或点名，然后点“下一步”让下一位发言，或点“继续”自动运行。', '.app-navigation');
+  await until(`document.querySelectorAll('.thread-item').length === 2`, 'interjection shown');
+  await capture('step-paused-interject', '开始后第一位成员（起草者）说完，运行自动暂停（页头“已暂停”），没有和模型抢时间；在右侧“插话”里用输入法输入“请重点比较按距离计价和固定价”并发送，插话出现在时间线上。输入区提示：可以在“主持人控制”里插话或点名，然后点“下一步”让下一位发言，或点“继续”自动运行。', '.topbar');
   await click('下一步');
-  await until(`document.querySelectorAll('.message').length === 3 && document.querySelector('.timeline .status').textContent.includes('已暂停')`, 'stepped once');
+  await until(`document.querySelectorAll('.thread-item').length === 3 && document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已暂停')`, 'stepped once');
   check(requests.length === before + 2, 'One step sends exactly one request');
   check(requests.at(-1).messages.at(-1).content.includes('【主持人插话】\n> 请重点比较按距离计价和固定价'), 'The next speaker received the interjection as a host entry');
   await capture('step-next', '点“下一步”：只让下一位（审查者）发言一次，说完再次自动暂停；它收到的上下文里包含刚才的主持人插话（脚本核对了请求体）。右侧显示"下一位：综合者（按计划）"，输入区仍是 继续 / 下一步 / 停止。', 2);
@@ -368,29 +377,29 @@ async function main() {
   // Step 9 (D103): finish the step-by-step Run from the same in-place control, then set the output limit, which is
   // folded under 更多设置 next to the budget; here it becomes 2048.
   await click('继续');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'step-by-step run finished');
-  await click('每个回合结束后暂停，方便插话或点名', { selector: 'input[type=checkbox]' });
-  check(!(await js(`document.querySelector('.composer-step input').checked`)), 'Back to automatic');
-  check(!(await js(`Boolean(document.querySelector('.composer-more'))`)), '更多设置 starts folded');
-  const startSpot = await js(`(() => { const r = [...document.querySelectorAll('.composer-actions button')].find(b => b.textContent === '开始协作').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'step-by-step run finished');
+  await click('每回合后暂停', { selector: 'input[type=checkbox]' });
+  check(!(await js(`document.querySelector('label.chip-check input').checked`)), 'Back to automatic');
+  check(!(await js(`Boolean(document.querySelector('[role=group][aria-label=更多设置]'))`)), '更多设置 starts folded');
+  const startSpot = await js(`(() => { const r = document.querySelector('.composer .controls .slot').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await click('更多设置');
   await field('单次输出上限（token）'); await selectAll(); await type('2048');
-  await field('任务目标'); await selectAll(); await ime('jieduan', '比较三种跑腿定价方案');
-  check(await js(`document.elementFromPoint(${startSpot.x}, ${startSpot.y})?.closest('button')?.textContent`) === '开始协作', 'Opening 更多设置 does not move 开始协作');
-  await capture('output-limit', '开始前点输入区的"更多设置"：在控制行上方展开"单次输出上限（token）"（默认 4096，这里改为 2048），"开始协作"位置不变；并说明"每次请求按这个上限预留费用，实际按用量结算；回复写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）"。平时收起，不占常用路径。', '.composer');
+  await field('讨论目标'); await selectAll(); await ime('jieduan', '比较三种跑腿定价方案');
+  check(await js(`document.elementFromPoint(${startSpot.x}, ${startSpot.y})?.closest('button')?.textContent`) === '开始讨论', 'Opening 更多设置 does not move 开始讨论');
+  await capture('output-limit', '开始前点输入区的"更多设置"：在控制行上方展开"单次输出上限（token）"（默认 4096，这里改为 2048），"开始讨论"位置不变；并说明"每次请求按这个上限预留费用，实际按用量结算；回复写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）"。平时收起，不占常用路径。', '.composer');
 
   // Step 10 (D102): the first reply stops at the output limit; it is kept and marked, and the Run goes on.
   const beforeTruncation = requests.length;
   lengthNext = true;
-  await click('开始协作');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已完成') && document.querySelectorAll('.message').length === 3`, 'run completed after a truncated reply');
+  await click('开始讨论');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成') && document.querySelectorAll('.thread-item').length === 3`, 'run completed after a truncated reply');
   const finished = await snapshot();
   check(requests.length === beforeTruncation + 3 && requests.slice(beforeTruncation).every(r => r.maxTokens === 2048), 'Three requests, each with max_tokens 2048');
   const firstTurn = finished.turns[0];
   check(finished.turns.every(t => t.status === 'completed') && finished.attempts.find(a => a.messageId === firstTurn.messageId).finishReason === 'length', 'The truncated Turn completed and the Run went on');
   check(finished.charges.length === 3 && finished.charges.every(c => c.state === 'settled'), 'Every request, the truncated one included, settled from usage');
   check(requests[beforeTruncation + 1].messages.at(-1).content.includes('（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）'), 'The next member was told the reply is unfinished');
-  check((await js(`document.querySelectorAll('.message')[0].innerText`)).includes('已达单次输出上限，内容可能不完整。') && !(await text()).includes('运行失败'), 'The truncated reply is marked, never shown as a failure');
+  check((await js(`document.querySelectorAll('.thread-item')[0].innerText`)).includes('写到单次上限停下了') && !(await text()).includes('运行失败'), 'The truncated reply is marked, never shown as a failure');
   await capture('truncated', 'DeepSeek 夹具让起草者的回复以 finish_reason=length 结束：这条回复保留并标注"已达单次输出上限，内容可能不完整。"，下方有"续写"；运行没有失败，审查者和综合者照常发言，页头"已完成"。脚本核对了审查者收到的上下文里这条发言带有"（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）"，三次请求都按用量结算。', 0);
 
   // Step 11 (D102): 续写 continues it as a new version with its own request and charge.
@@ -412,8 +421,9 @@ async function main() {
   check(requests.every(r => r.keyMatches && r.model === 'deepseek-flash' && r.thinking?.type === 'disabled'), 'Requests carried the saved Key, the approved model and thinking disabled');
   result.reviewerMessages = reviewer;
 
-  const identityLines = await js(`[...document.querySelectorAll('.message-identity')].map(node => node.textContent)`);
-  check(identityLines.length > 0 && identityLines.every(line => line.includes('Provider：DeepSeek 直连') && !uuidPattern.test(line)), 'Identity lines name the Provider, not its UUID');
+  await js(`document.querySelectorAll('.thread-item [aria-label=请求详情]').forEach(button => button.click()); true`);
+  const identityLines = await until(`(() => { const lines = [...document.querySelectorAll('.msg-details')].map(node => node.textContent); return lines.length ? lines : null; })()`, 'request details');
+  check(identityLines.every(line => line.includes('服务DeepSeek 直连') && !uuidPattern.test(line)), 'Request details name the Provider, not its UUID');
   fs.writeFileSync(manifestPath, JSON.stringify({ status: 'PASS' }) + '\n', { mode: 0o600 });
   }
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);

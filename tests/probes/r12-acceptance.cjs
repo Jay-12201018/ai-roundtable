@@ -94,12 +94,14 @@ async function main() {
     const deadline = Date.now() + timeout;
     for (;;) { const value = await js(code); if (value) return value; if (Date.now() > deadline) throw new Error('Timed out: ' + message); await sleep(50); }
   };
+  // The content size set above settles asynchronously; aim the first click only once the layout has it.
+  await until(`window.innerWidth === 1440 && window.innerHeight === 900`, 'window size applied'); await sleep(300);
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r12 = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
     const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || e.textContent.trim();
     let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
-    if (o.slot !== undefined) { const slot = document.querySelectorAll('.host-slot')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
+    if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
     const e = o.which === 'last' ? list.at(-1) : list[o.which || 0];
     if (!e) return null;
@@ -145,7 +147,7 @@ async function main() {
   };
   let shot = 0;
   const capture = async (name, caption, focus) => {
-    if (typeof focus === 'number') await js(`document.querySelectorAll('.host-slot')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
+    if (typeof focus === 'number') await js(`document.querySelectorAll('.thread-item')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
     else if (focus) await js(`document.querySelector(${JSON.stringify(focus)})?.scrollIntoView({ block: 'center' }); true`);
     await sleep(350);
     const file = `${String(++shot).padStart(2, '0')}-${name}.png`;
@@ -154,7 +156,7 @@ async function main() {
   };
   result.screens = [];
   const snapshot = () => js(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'))`);
-  const status = () => js(`document.querySelector('.timeline .status').textContent`);
+  const status = () => js(`document.querySelector('[role=status][aria-label=运行状态]').textContent`);
   const text = () => js('document.body.innerText');
   const Sqlite = require('better-sqlite3');
   const inputsOf = runId => { const db = new Sqlite(join(paths.userData, 'ai-roundtable.db'), { readonly: true }); try {
@@ -163,20 +165,23 @@ async function main() {
 
   // Setup only: a demo room with three Mock members (room management itself is R07, not under test here).
   const { roomId } = await js(`window.roundtable.room.createDemo('R12 实操验收')`);
-  await click('房间与成员'); await click('刷新房间'); await click('Mock 圆桌'); await click('讨论');
+  // R16: opening the room list refreshes the sidebar; the sidebar room opens a new discussion in it.
+  await click('管理房间与成员'); await click('Mock 圆桌', { scope: '.sidebar' });
 
   // Path 1: @Override the next speaker while the first Turn is streaming.
-  await field('任务目标'); await selectAll(); await ime('sheji', '设计一个校园二手书交换平台');
-  await click('开始协作');
-  await until(`document.querySelector('.host-slot p')?.textContent.length > 0`, 'first Turn streaming');
+  await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园二手书交换平台');
+  // 本场信息 › 成员 offers 点名 per member (the box's @ is covered by the R16 probe); open it before the fast Mock Run starts.
+  await click('成员', { selector: '[role=tab]' });
+  await click('开始讨论');
+  await until(`document.querySelector('.thread-item .md')?.textContent.length > 0`, 'first Turn streaming');
   await click('点名 综合者');
   const queued = await snapshot();
   await click('暂停');
   check(queued.turns.length === 1 && queued.turns[0].status === 'running' && queued.host.override, 'Override queued while the first Turn was still streaming');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已暂停')`, 'paused after the current Turn');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已暂停')`, 'paused after the current Turn');
   check((await snapshot()).turns.length === 1 && (await snapshot()).turns[0].status === 'completed', 'The streaming Turn finished normally; the named member has not started yet');
   await until(`document.body.innerText.includes('下一位：综合者（主持人点名')`, 'next speaker prompt');
-  check((await status()).includes('下一位：综合者（主持人点名）'), 'The header status names the next speaker and that the host chose them');
+  check((await js(`document.querySelector('[aria-label=下一位]').textContent`)).includes('下一位：综合者（主持人点名'), 'The line above the box names the next speaker and that the host chose them');
   await capture('override-queued', '起草者生成过程中点名"综合者"（随后暂停）：起草者的回合正常完成未被打断；右侧"下一位发言"显示"综合者（主持人点名，排在下一回合…）"，页头状态显示"已暂停 · 下一位：综合者（主持人点名）"，"点名 综合者"按钮为选中态，可"取消点名"。', 'header');
 
   // Path 2: interjection with IME — Enter during composition must not send; Shift+Enter is a new line.
@@ -203,18 +208,19 @@ async function main() {
   await capture('interjection-sent', '回车发送后，插话以"主持人 · 主持人插话"出现在公共时间线（保留两行原文），输入框清空，并提示"插话已加入公共历史，从下一回合起可见"。', '.host-slot.is-host');
 
   // Path 3: standing instruction — set, revise, (later) clear.
+  await click('指令', { selector: '[role=tab]' });
   await field('新增持续指令'); await ime('suoyou', '所有回答使用中文并编号'); await click('添加持续指令');
-  await until(`document.body.innerText.includes('生效中 · 第 1 版')`, 'instruction active');
+  await until(`document.body.innerText.includes('第 1 版 · 从下一次发言起生效')`, 'instruction active');
   await capture('instruction-active', '新增持续指令后显示为"生效中 · 第 1 版 · 仅影响之后开始的请求"，并提供"修改""清除"。', '.host-instructions');
-  await click('修改', { scope: '.host-instructions' });
+  await click('修改', { scope: '.instr' });
   check(await js(`document.activeElement?.getAttribute('aria-label') === '修改持续指令'`), 'Clicking 修改 moves keyboard focus into the instruction editor');
   check(await js(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '保存修改').disabled`), 'Saving an unchanged instruction is not offered');
   await selectAll(); await ime('suoyou', '所有回答使用中文、编号，并控制在五点以内'); await click('保存修改');
-  await until(`document.body.innerText.includes('生效中 · 第 2 版')`, 'instruction revised');
+  await until(`document.body.innerText.includes('第 2 版 · 从下一次发言起生效')`, 'instruction revised');
   await capture('instruction-revised', '修改持续指令后，内容更新为新文本，状态变为"第 2 版"（旧版本保留在主持人记录中）。', '.host-instructions');
 
   await click('下一步');
-  await until(`(() => { const s = document.querySelector('.timeline .status').textContent; return s.includes('已暂停') && document.querySelectorAll('.host-slot').length >= 3; })()`, 'named member spoke');
+  await until(`(() => { const s = document.querySelector('[role=status][aria-label=运行状态]').textContent; return s.includes('已暂停') && document.querySelectorAll('.thread-item').length >= 3; })()`, 'named member spoke');
   const afterStep = await snapshot();
   check(afterStep.turns[1].agentId.endsWith('-agent-synthesizer') && afterStep.turns[1].overrideActionId, 'The named member (综合者) spoke next as a host-directed Turn');
   const stepInputs = inputsOf(afterStep.runId);
@@ -223,13 +229,14 @@ async function main() {
   check(second.includes('再列出三个最关键的问题') && !JSON.stringify(stepInputs[0].input.messages).includes('再列出三个最关键的问题'), 'The interjection reached the next request but not the one already started');
   await capture('override-spoke', '点"下一步"后，被点名的"综合者"发言，消息带"主持人点名"标记；"下一位"恢复为按计划的"审查者"。', 2);
 
-  await click('清除', { scope: '.host-instructions' });
+  await click('清除', { scope: '.instr' });
   await until(`document.body.innerText.includes('没有生效中的持续指令')`, 'instruction cleared');
   await capture('instruction-cleared', '清除后显示"没有生效中的持续指令"和"已清除 1 条指令；历史版本保留在主持人记录中"。', '.host-panel h3:nth-of-type(3)');
   await click('继续');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'run completed');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'run completed');
   const done = await snapshot();
-  check((await text()).includes('运行已完成，不能再插话'), 'A completed Run explains why interjection is unavailable instead of showing a dead input');
+  // R16: a completed Run takes no interjection; the box becomes the goal box for the next discussion.
+  check(await js(`!document.querySelector('[aria-label=主持人插话]') && !!document.querySelector('[aria-label=讨论目标]')`), 'A completed Run offers the goal box instead of a dead interjection input');
   check(done.turns.map(t => t.agentId.split('-agent-')[1]).join() === 'drafter,synthesizer,critic', 'Order: 起草者 → 被点名的综合者 → 按计划的审查者');
   const third = JSON.stringify(inputsOf(done.runId)[2].input.messages);
   check(!third.includes('所有回答使用中文'), 'The request after clearing carried no standing instruction');
@@ -238,10 +245,10 @@ async function main() {
   await click('修改', { slot: 0 });
   check(await js(`document.activeElement?.getAttribute('aria-label') === '修改消息内容'`), 'Clicking 修改 moves keyboard focus into the message editor');
   await selectAll(); await ime('kaichang', '主持人修订：先做校内试点，再考虑跨校'); await click('保存为新版本');
-  await until(`document.body.innerText.includes('主持人修订：先做校内试点') && document.querySelectorAll('.host-affected').length === 2`, 'edit applied');
-  await capture('edited-affected', '修改第一条已完成消息：显示新内容、"主持人修改 · 当前有效"和"版本 2/2"；后面两条 Agent 回复出现"受影响"说明（它们基于旧版本生成）。', '.host-slot');
+  await until(`document.body.innerText.includes('主持人修订：先做校内试点') && [...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length === 2`, 'edit applied');
+  await capture('edited-affected', '修改第一条已完成消息：显示新内容、"主持人修改 · 当前有效"和"版本 2/2"；后面两条 Agent 回复出现"受影响"说明（它们基于旧版本生成）。', '.thread-item');
   await click('重新生成', { slot: 2 });
-  await until(`document.querySelectorAll('.host-slot')[2].querySelectorAll('button[aria-label="查看上一个版本"]').length === 1 && !document.body.innerText.includes('正在重新生成')`, 'regeneration finished');
+  await until(`document.querySelectorAll('.thread-item')[2].querySelectorAll('button[aria-label="查看上一个版本"]').length === 1 && !document.body.innerText.includes('正在重新生成')`, 'regeneration finished');
   const regenerated = await snapshot();
   check(regenerated.status === 'completed' && regenerated.versions.filter(v => v.slotId === done.turns[1].turnId).length === 2, 'Regeneration added a version without changing the completed Run');
   const regenInput = JSON.stringify(inputsOf(done.runId).at(-1).input.messages);
@@ -249,21 +256,21 @@ async function main() {
     'Regeneration used the revised opening and the earlier interjection, but not the later 审查者 message');
   await capture('regenerated', '对"综合者"的回复点"重新生成"：生成新的版本 2/2（重新生成），依据修订后的开场；第一条修改后的版本仍保留"主持人修改"标记。', 2);
   await click('查看上一个版本', { slot: 2 });
-  await until(`document.querySelectorAll('.host-slot')[2].innerText.includes('未生效的历史版本')`, 'old version shown');
+  await until(`document.querySelectorAll('.thread-item')[2].innerText.includes('未生效的历史版本')`, 'old version shown');
   await capture('old-version', '点"‹"查看"综合者"的旧版本：标为"原始 · 未生效的历史版本"，原文完整保留，并提供"设为当前版本"。', 2);
 
   // Path 5a (D102): a tiny output limit no longer fails the Run. Each reply is kept and marked as truncated, the Run
   // goes on to the next member, and once it has finished a truncated reply can be continued as a new version.
-  await click('工作流');
+  await click('讨论方式：按顺序轮流 · 3 回合');
   await field('单次输出上限（Token）'); await selectAll(); await send('Input.insertText', { text: '3' });
   await click('验证并预览'); await until(`document.body.innerText.includes('已验证的计划预览')`, 'workflow preview');
-  await click('应用配置'); await click('讨论');
-  await field('任务目标'); await selectAll(); await ime('jieduan', '演示截断与续写'); await click('开始协作');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'run completed despite truncation');
+  await click('应用配置'); await click('返回讨论');
+  await field('讨论目标'); await selectAll(); await ime('jieduan', '演示截断与续写'); await click('开始讨论');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'run completed despite truncation');
   const truncated = await snapshot();
   check(truncated.turns.length > 1 && truncated.turns.every(t => t.status === 'completed'), 'Every Turn completed and the Run went on to the next member');
   check(truncated.attempts.every(a => a.status === 'completed' && a.finishReason === 'length'), 'Each reply was kept as complete-but-truncated, none failed');
-  check((await text()).includes('已达单次输出上限，内容可能不完整。') && !(await text()).includes('运行失败'), 'The timeline marks truncation and never says the Run failed');
+  check((await text()).includes('写到单次上限停下了') && !(await text()).includes('运行失败'), 'The timeline marks truncation and never says the Run failed');
   await capture('truncated', '单次输出上限设为 3 后开始：每条回复写到上限都被保留并标注"已达单次输出上限，内容可能不完整。"，运行没有失败，依次轮到下一位直到"已完成"；每条下方提供"续写"。', 0);
   const truncatedSlot = truncated.turns[0].turnId;
   await click('续写', { slot: 0 });
@@ -284,28 +291,30 @@ async function main() {
     return s.status === 'cancelled' ? (s.turns.length === 1 ? 'first' : 'later') : s.status === 'completed' ? 'completed' : document.querySelector('[aria-label=确认停止运行]') ? 'confirm' : ''; })()`;
   for (result.stopAttempts = 1; ; result.stopAttempts++) {
     check(result.stopAttempts <= 3, 'Stop landed in the first turn within three Runs');
-    await field('任务目标'); await selectAll(); await ime('tingzhi', '演示停止后重试'); await click('开始协作');
-    await until(`document.querySelectorAll('.host-slot').length === 1 && document.querySelector('.host-slot p')?.textContent.length > 6 || document.querySelector('.timeline .status').textContent.includes('已完成')`, 'streaming before stop');
+    // After a later-turn stop the box still interjects; 新讨论 brings back the goal box.
+    if (await js(`!document.querySelector('[aria-label=讨论目标]')`)) await click('新讨论', { scope: '.controls' });
+    await field('讨论目标'); await selectAll(); await ime('tingzhi', '演示停止后重试'); await click('开始讨论');
+    await until(`document.querySelectorAll('.thread-item').length === 1 && document.querySelector('.thread-item .md')?.textContent.length > 6 || document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'streaming before stop');
     if ((await status()).includes('已完成')) continue;
     await click('停止');
     if (await until(stopState, 'stop confirmation or Run end') !== 'confirm') continue;
     // Clicked where it is right now, without waiting for it: if the Run ended meanwhile, the confirmation is gone.
-    const confirmAt = await js(`(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent === '确认停止'); if (!b) return null;
+    const confirmAt = await js(`(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent === '停止讨论'); if (!b) return null;
       const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
     if (!confirmAt) continue;
     for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: confirmAt.x, y: confirmAt.y, button: 'left', clickCount: 1 });
     const outcome = await until(stopState.replace("'confirm'", "''"), 'stopped');
     if (outcome === 'first') break;
   }
-  await until(`document.querySelector('.timeline .status').textContent.includes('已停止')`, 'stopped');
-  await capture('stopped-partial', '生成中点"停止"：状态"已停止"，已输出的部分文字保留并标为"已中止"。', '.host-slot');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已停止')`, 'stopped');
+  await capture('stopped-partial', '生成中点"停止"：状态"已停止"，已输出的部分文字保留并标为"已中止"。', '.thread-item');
   await click('重试当前回合');
-  await until(`document.querySelector('.timeline .status').textContent.includes('已完成')`, 'retry succeeded');
+  await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'retry succeeded');
   const recovered = await snapshot();
   const firstSlot = recovered.versions.filter(v => v.slotId === recovered.turns[0].turnId);
   check(firstSlot.length === 2 && firstSlot[0].active === false && firstSlot[1].active === true, 'The stopped attempt stays as version 1; the retry is the effective version 2');
   check(recovered.messages.find(m => m.id === firstSlot[0].messageId).status === 'aborted', 'Partial text of the stopped attempt kept as aborted');
-  await capture('retry-succeeded', '"重试当前回合"后新请求成功并继续完成运行；第一条显示"重试 · 当前有效 · 版本 2/2"，被停止的部分输出作为版本 1 保留。', '.host-slot');
+  await capture('retry-succeeded', '"重试当前回合"后新请求成功并继续完成运行；第一条显示"重试 · 当前有效 · 版本 2/2"，被停止的部分输出作为版本 1 保留。', '.thread-item');
 
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);
   cdp.detach();
