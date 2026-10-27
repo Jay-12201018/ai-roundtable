@@ -378,6 +378,8 @@ async function main() {
   // folded under 更多设置 next to the budget; here it becomes 2048.
   await click('继续');
   await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'step-by-step run finished');
+  // D111: a finished discussion is continued from its box; a new one is the explicit 新讨论 button.
+  await click('新讨论', { scope: '.controls' });
   await click('每回合后暂停', { selector: 'input[type=checkbox]' });
   check(!(await js(`document.querySelector('label.chip-check input').checked`)), 'Back to automatic');
   check(!(await js(`Boolean(document.querySelector('[role=group][aria-label=更多设置]'))`)), '更多设置 starts folded');

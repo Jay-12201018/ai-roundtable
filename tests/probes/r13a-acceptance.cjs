@@ -250,7 +250,8 @@ async function main() {
   check(requests.length === 3 && requests.every(r => r.keyMatches && r.thinking?.type === 'disabled' && r.maxTokens === 4096), 'Requests carried the saved Key, max_tokens and thinking disabled');
   await capture('run-usage', '输入任务（输入法）并把"本次预算（元）"改为 0.05 后点"开始讨论"：三条 DeepSeek 回复下方各显示"输入 300 / 输出 6 tokens · 花费 ¥0.000648"；页头下方的预算栏显示"预算 ¥0.0500 · 累计花费 ¥0.0019 · 剩余额度 ¥0.0481"。', '.run-budget');
 
-  // Step 5: an invalid budget is explained and cannot start.
+  // Step 5: an invalid budget is explained and cannot start. D111: a new discussion is the explicit 新讨论 button.
+  await click('新讨论', { scope: '.controls' });
   await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('abc');
   check(await js(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '开始讨论').disabled`), 'An invalid budget disables 开始讨论');
   check((await text()).includes('请输入 0.000001 到 1000 之间的金额'), 'Invalid budget explained inline');

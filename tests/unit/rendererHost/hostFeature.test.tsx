@@ -5,7 +5,7 @@ import { DiscussionTimeline, type ProviderNames } from '../../../src/renderer/fe
 import { RunPanel, type PanelTab } from '../../../src/renderer/features/runPanel/RunPanel';
 import { HostComposer, interjectionBoxFor } from '../../../src/renderer/features/composer/Composer';
 import { HostTextArea } from '../../../src/renderer/features/host/HostTextArea';
-import { nextSpeaker, overrideCandidates, timelineSlots } from '../../../src/renderer/features/host/model';
+import { nextSpeaker, nextSpeakerText, overrideCandidates, timelineSlots } from '../../../src/renderer/features/host/model';
 import { compileWorkflow } from '../../../src/main/workflow';
 import type { HostApiContract } from '../../../src/shared/contracts/app';
 import type { RunSnapshot } from '../../../src/shared/types/run';
@@ -60,8 +60,21 @@ describe('R12 host projection model', () => {
     expect(timelineSlots(snapshot)!.map(slot => [slot.slotId, slot.active.messageId, slot.versions.length])).toEqual([['t1', 'm1b', 2], ['h1', 'h1', 1], ['t2', 'm2', 1]]);
     expect(nextSpeaker(snapshot)).toEqual({ agentId: 'c', name: '成员 c', source: 'plan' });
     const overridden = pausedSnapshot({ host: { instructions: [], actions: [], override: { actionId: 'o', agentId: 'a', status: 'pending', createdAt: time } } });
-    expect(nextSpeaker(overridden)).toEqual({ agentId: 'a', name: '成员 a', source: 'override' });
+    // D110: the named member is inserted, and the plan's next speaker follows.
+    expect(nextSpeaker(overridden)).toEqual({ agentId: 'a', name: '成员 a', source: 'override', then: { agentId: 'c', name: '成员 c', source: 'plan' } });
     expect(timelineSlots({ ...snapshot, versions: undefined })).toBeNull();
+  });
+
+  it('D110/D111: says who follows an inserted Turn, and that a continued discussion ends after its answers', () => {
+    const overridden = pausedSnapshot({ execution: { ...pausedSnapshot().execution!, maxTurns: 2 },
+      host: { instructions: [], actions: [], override: { actionId: 'o', agentId: 'b', status: 'pending', createdAt: time } } });
+    expect(nextSpeaker(overridden)).toEqual({ agentId: 'b', name: '成员 b', source: 'override', then: 'end' });
+    expect(nextSpeakerText(nextSpeaker(overridden)!)).toEqual({ name: '成员 b', source: '主持人点名，插入一轮，不打断正在进行的发言', then: '之后讨论结束' });
+    const base = pausedSnapshot();
+    const continued = pausedSnapshot({ status: 'running', continuations: [{ actionId: 'k', messageId: 'h1', agentIds: ['c', 'a'], createdAt: time }],
+      turns: [...base.turns, { turnId: 't3', runId: 'run', agentId: 'c', turnIndex: 2, status: 'completed', overrideActionId: 'k' }] });
+    expect(nextSpeaker(continued)).toEqual({ agentId: 'a', name: '成员 a', source: 'continuation' });
+    expect(nextSpeaker({ ...continued, turns: [...continued.turns, { turnId: 't4', runId: 'run', agentId: 'a', turnIndex: 3, status: 'running', overrideActionId: 'k' }] })).toBeUndefined();
   });
 
   it('offers only current-stage members during a workflow', () => {
@@ -168,7 +181,7 @@ describe('R12 host UI', () => {
     expect(screen.getByRole('button', { name: '中止重新生成' })).toBeTruthy();
   });
 
-  it('offers no interjection box once the Run is completed, and labels an unfinished current version', () => {
+  it('continues a completed Run in place instead of opening a new discussion, and labels an unfinished current version', () => {
     const base = pausedSnapshot();
     const failed = pausedSnapshot({ status: 'error', messages: base.messages.map(m => m.id === 'm2' ? { ...m, status: 'failed' as const } : m),
       turns: base.turns.map(t => t.turnId === 't2' ? { ...t, status: 'failed' as const } : t),
@@ -180,11 +193,11 @@ describe('R12 host UI', () => {
     expect(screen.getByText(/重试 · 当前版本（未完成）/)).toBeTruthy();
     unmount();
     render(<Harness snapshot={pausedSnapshot({ status: 'completed' })} api={hostApi()} />);
-    // A finished Run takes no interjection: the dock offers the goal box for a new discussion instead (App).
-    expect(screen.queryByLabelText('主持人插话')).toBeNull();
-    expect(interjectionBoxFor(pausedSnapshot({ status: 'completed' }), false)).toBe(false);
+    // D111: a finished Run is continued from the same box (App gives it the continuation API); a new discussion is
+    // only the explicit 新讨论 button.
+    expect(interjectionBoxFor(pausedSnapshot({ status: 'completed' }), false)).toBe(true);
     expect(interjectionBoxFor(failed, false)).toBe(true);
-    expect(screen.getByText('下一位：无（运行已完成）')).toBeTruthy();
+    expect(screen.getByText(/讨论已结束。可以在下方输入框里继续/)).toBeTruthy();
   });
 });
 

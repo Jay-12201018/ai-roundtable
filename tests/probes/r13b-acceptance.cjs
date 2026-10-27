@@ -285,6 +285,8 @@ async function main() {
 
   // Step 6 (D105): an answer without usage is unknown at the cap; the host writes it off from the console amount.
   mode = 'no-usage';
+  // D111: a finished discussion is continued from its box; a new one is the explicit 新讨论 button.
+  await click('新讨论', { scope: '.controls' });
   await field('讨论目标'); await selectAll(); await ime('dingjia', '再讨论一次定价');
   await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('1');
   await click('每回合后暂停', { selector: 'input[type=checkbox]' });

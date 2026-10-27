@@ -28,6 +28,8 @@ describe('run state machine', () => {
     ['paused', 'running'],
     ['error', 'running'],
     ['interrupted', 'running'],
+    // D111: a finished discussion continues in the same Run.
+    ['completed', 'running'],
   ];
 
   it.each(cases)('allows %s -> %s', (from, to) => {
@@ -38,7 +40,7 @@ describe('run state machine', () => {
   it.each([
     ['idle', 'paused'],
     ['cancelled', 'completed'],
-    ['completed', 'running'],
+    ['completed', 'paused'],
     ['error', 'completed'],
     ['interrupted', 'completed'],
   ] as Array<[RunStatus, RunStatus]>)('rejects %s -> %s', (from, to) => {

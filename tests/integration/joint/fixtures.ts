@@ -34,6 +34,7 @@ export function apiFor(service:RunService):RunSessionApiContract {
     previewWorkflow: async input => service.previewWorkflow(input), start:input=>service.start(input),getSnapshot:async id=>service.getSnapshot(id),subscribe:async(id,cursor)=>service.subscribe(id,cursor),onEvent:listener=>service.onEvent(listener),
     pause:async id=>service.pause(id),stop:id=>service.stop(id),step:id=>service.step(id),resumeRun:id=>service.resumeRun(id),retryTurn:(id,turn)=>service.retryTurn(id,turn),continueMessage:(id,message)=>service.continueMessage(id,message),recoverInterruptedRun:(id,decision)=>service.recoverInterruptedRun(id,decision),
     addBudget:async input=>service.addBudget(input),resumeAfterBudget:async id=>service.resumeAfterBudget(id),
+    previewContinuation:async input=>service.previewContinuation(input),continueDiscussion:async input=>service.continueDiscussion(input),
   }};
 }
 

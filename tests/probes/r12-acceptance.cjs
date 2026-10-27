@@ -235,9 +235,10 @@ async function main() {
   await click('继续');
   await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'run completed');
   const done = await snapshot();
-  // R16: a completed Run takes no interjection; the box becomes the goal box for the next discussion.
-  check(await js(`!document.querySelector('[aria-label=主持人插话]') && !!document.querySelector('[aria-label=讨论目标]')`), 'A completed Run offers the goal box instead of a dead interjection input');
-  check(done.turns.map(t => t.agentId.split('-agent-')[1]).join() === 'drafter,synthesizer,critic', 'Order: 起草者 → 被点名的综合者 → 按计划的审查者');
+  // D111: a completed Run is continued from the same box; a new discussion is the explicit 新讨论 button.
+  check(await js(`!!document.querySelector('[aria-label=继续讨论]') && !document.querySelector('[aria-label=讨论目标]')`), 'A completed Run offers to continue in place, not a new-goal box');
+  // D110: the named member is inserted; the plan's critic and synthesizer still speak.
+  check(done.turns.map(t => t.agentId.split('-agent-')[1]).join() === 'drafter,synthesizer,critic,synthesizer', 'Order: 起草者 → 被点名的综合者（插入）→ 按计划的审查者 → 按计划的综合者');
   const third = JSON.stringify(inputsOf(done.runId)[2].input.messages);
   check(!third.includes('所有回答使用中文'), 'The request after clearing carried no standing instruction');
 
@@ -245,8 +246,8 @@ async function main() {
   await click('修改', { slot: 0 });
   check(await js(`document.activeElement?.getAttribute('aria-label') === '修改消息内容'`), 'Clicking 修改 moves keyboard focus into the message editor');
   await selectAll(); await ime('kaichang', '主持人修订：先做校内试点，再考虑跨校'); await click('保存为新版本');
-  await until(`document.body.innerText.includes('主持人修订：先做校内试点') && [...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length === 2`, 'edit applied');
-  await capture('edited-affected', '修改第一条已完成消息：显示新内容、"主持人修改 · 当前有效"和"版本 2/2"；后面两条 Agent 回复出现"受影响"说明（它们基于旧版本生成）。', '.thread-item');
+  await until(`document.body.innerText.includes('主持人修订：先做校内试点') && [...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length === 3`, 'edit applied');
+  await capture('edited-affected', '修改第一条已完成消息：显示新内容、"主持人修改 · 当前有效"和"版本 2/2"；后面三条 Agent 回复出现"受影响"说明（它们基于旧版本生成）。', '.thread-item');
   await click('重新生成', { slot: 2 });
   await until(`document.querySelectorAll('.thread-item')[2].querySelectorAll('button[aria-label="查看上一个版本"]').length === 1 && !document.body.innerText.includes('正在重新生成')`, 'regeneration finished');
   const regenerated = await snapshot();
@@ -261,6 +262,7 @@ async function main() {
 
   // Path 5a (D102): a tiny output limit no longer fails the Run. Each reply is kept and marked as truncated, the Run
   // goes on to the next member, and once it has finished a truncated reply can be continued as a new version.
+  await click('新讨论', { scope: '.controls' });
   await click('讨论方式：按顺序轮流 · 3 回合');
   await field('单次输出上限（Token）'); await selectAll(); await send('Input.insertText', { text: '3' });
   await click('验证并预览'); await until(`document.body.innerText.includes('已验证的计划预览')`, 'workflow preview');

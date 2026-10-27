@@ -22,9 +22,10 @@ describe('R12 trusted host @Override', () => {
     await f.run.waitForIdle(run.runId);
     const done = f.run.getSnapshot(run.runId);
     expect(done.status).toBe('completed');
-    // a finished first; the Override inserted c; the plan position then continues with b, not c.
-    expect(done.turns.map(turn => turn.agentId)).toEqual(['a', 'c', 'b']);
-    expect(done.turns.map(turn => turn.overrideActionId)).toEqual([undefined, result.actionId, undefined]);
+    // D110: a finished first; the Override inserted c as an extra Turn; the plan then goes on with b and c, so the
+    // planned synthesizer still speaks (it used to be replaced, ending the discussion without a synthesis).
+    expect(done.turns.map(turn => turn.agentId)).toEqual(['a', 'c', 'b', 'c']);
+    expect(done.turns.map(turn => turn.overrideActionId)).toEqual([undefined, result.actionId, undefined, undefined]);
     expect(done.turns[0].status).toBe('completed');
     expect(done.host?.override).toBeUndefined();
     expect(done.host?.actions.find(action => action.actionId === result.actionId)).toMatchObject({ status: 'consumed', turnId: done.turns[1].turnId });

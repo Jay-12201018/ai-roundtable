@@ -174,8 +174,8 @@ async function probe() {
       && [...Object.values(api.summary), ...Object.values(api.usage)].every(value => typeof value === 'function'), 'Unexpected summary/usage API');
     check(JSON.stringify(Object.keys(api.room).sort()) === JSON.stringify(['createDemo', 'getMessages']), 'Unexpected room API');
     // R11 added previewWorkflow (a bounded preview that neither reads a Key nor sends a request).
-    // R13B added addBudget and resumeAfterBudget (D104).
-    const expected = ['addBudget', 'continueMessage', 'getSnapshot', 'onEvent', 'pause', 'previewWorkflow', 'recoverInterruptedRun', 'resumeAfterBudget', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
+    // R13B added addBudget and resumeAfterBudget (D104); discussion continuity added previewContinuation and continueDiscussion (D111).
+    const expected = ['addBudget', 'continueDiscussion', 'continueMessage', 'getSnapshot', 'onEvent', 'pause', 'previewContinuation', 'previewWorkflow', 'recoverInterruptedRun', 'resumeAfterBudget', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
     check(JSON.stringify(Object.keys(api.run).sort()) === JSON.stringify(expected), 'Unexpected run API');
     const configurationKeys = {
       rooms: ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'],

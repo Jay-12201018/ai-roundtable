@@ -72,8 +72,9 @@ async function page(stage, saved = {}) {
   await fill('新增持续指令', '请用编号列出要点'); await click('添加持续指令');
   const finished = await wait(() => api.run.getSnapshot(runId), run => run.status === 'completed' || run.status === 'error', 'Run did not finish');
   check(finished.status === 'completed', 'Run failed');
-  check(JSON.stringify(finished.turns.map(t => t.agentId.split('-agent-')[1])) === JSON.stringify(['drafter', 'synthesizer', 'critic']), 'Override order wrong: ' + finished.turns.map(t => t.agentId));
-  check(finished.turns[0].status === 'completed' && finished.turns[1].overrideActionId && !finished.turns[2].overrideActionId, 'Override Turn identity wrong');
+  // D110: the Override inserts the synthesizer; the plan then goes on with the critic and the synthesizer, nobody is skipped.
+  check(JSON.stringify(finished.turns.map(t => t.agentId.split('-agent-')[1])) === JSON.stringify(['drafter', 'synthesizer', 'critic', 'synthesizer']), 'Override order wrong: ' + finished.turns.map(t => t.agentId));
+  check(finished.turns[0].status === 'completed' && finished.turns[1].overrideActionId && !finished.turns[2].overrideActionId && !finished.turns[3].overrideActionId, 'Override Turn identity wrong');
   check(finished.host.actions.some(a => a.kind === 'setOverride' && a.status === 'consumed' && a.turnId === finished.turns[1].turnId), 'Override not consumed by its Turn');
   check(finished.messages.some(m => m.senderName === '主持人' && m.content === 'R12 主持人插话：请关注风险'), 'Interjection not in history');
   check(finished.host.instructions.some(i => i.status === 'active' && i.content === '请用编号列出要点'), 'Instruction not active');
@@ -86,16 +87,16 @@ async function page(stage, saved = {}) {
   const first = edited.turns[0];
   check(edited.messages.some(m => m.id === finished.turns[0].messageId && m.content === finished.messages.find(x => x.id === finished.turns[0].messageId).content), 'Original text overwritten');
   check(first.messageId !== finished.turns[0].messageId, 'Effective version unchanged');
-  check(edited.versions.filter(v => v.affectedBy.length).length === 2, 'Downstream affected marks missing');
-  await wait(() => [...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length, n => n === 2, 'Affected marks not rendered');
+  check(edited.versions.filter(v => v.affectedBy.length).length === 3, 'Downstream affected marks missing');
+  await wait(() => [...document.querySelectorAll('.thread-item .note')].filter(note => note.textContent.includes('受影响')).length, n => n === 3, 'Affected marks not rendered');
 
   // Regenerate the last answer as a version job in the completed Run.
   await click('重新生成', list => list.at(-1));
   const regenerated = await wait(() => api.run.getSnapshot(runId), run => run.versions.some(v => v.origin === 'regenerate' && v.active) && !run.host.generation, 'Regeneration did not finish');
   check(regenerated.status === 'completed', 'Version job changed Run status');
   const job = regenerated.versions.find(v => v.origin === 'regenerate');
-  check(job.parentMessageId === finished.turns[2].messageId && job.slotId === finished.turns[2].turnId, 'Regenerated version chain wrong');
-  check(new Set(regenerated.attempts.map(a => a.requestId)).size === regenerated.attempts.length && regenerated.attempts.length === 4, 'Request identity reused');
+  check(job.parentMessageId === finished.turns[3].messageId && job.slotId === finished.turns[3].turnId, 'Regenerated version chain wrong');
+  check(new Set(regenerated.attempts.map(a => a.requestId)).size === regenerated.attempts.length && regenerated.attempts.length === 5, 'Request identity reused');
 
   // Duplicate delivery through the real IPC is idempotent.
   const delivery = { runId, clientRequestId: 'r12-probe-duplicate', kind: 'setInstruction', content: '重复投递只记录一次' };
@@ -104,7 +105,7 @@ async function page(stage, saved = {}) {
   check(once.duplicate === false && twice.duplicate === true && twice.actionId === once.actionId, 'Duplicate delivery not idempotent');
   const conflicting = await api.host.command({ ...delivery, content: '不同内容' }).catch(e => e.message);
   check(String(conflicting).includes('invalid_input'), 'Reused client request identity accepted different content');
-  // A completed Run accepts no Override or interjection; refusals are structured and record nothing.
+  // A completed Run accepts no Override or plain interjection (continuing it is run.continueDiscussion, D111); refusals are structured and record nothing.
   const refused = await api.host.command({ runId, clientRequestId: 'r12-probe-refused', kind: 'setOverride', agentId: synthesizer }).catch(e => e.message);
   check(String(refused).includes('invalid_state'), 'Completed Run accepted an Override');
   const refusedText = await api.host.command({ runId, clientRequestId: 'r12-probe-refused-2', kind: 'interject', content: 'x' }).catch(e => e.message);

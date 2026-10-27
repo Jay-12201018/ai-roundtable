@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { buildPublicContext } from '../../../src/main/context/buildPublicContext';
-import { agentBriefText, builtInRoleGuides, discussionRulesText, isAssistantEntry, quoteText, renderEntry } from '../../../src/main/context/transcript';
+import { agentBriefText, builtInRoleGuides, discussionRulesText, isAssistantEntry, quoteText, renderEntry, revisionRuleText } from '../../../src/main/context/transcript';
 import { buildAnthropicMessages } from '../../../src/main/providers/anthropic/messages';
 import { buildGeminiContents } from '../../../src/main/providers/gemini/GeminiProvider';
 import { countDeepSeekInputUpperBound } from '../../../src/main/providers/modelPolicies/deepseek';
@@ -150,16 +150,30 @@ describe('D095 host edits and affected replies', () => {
   });
 
   it('tells the model to follow host edits and drop conclusions built on replaced versions', () => {
-    expect(discussionRulesText).toContain('标注“已由主持人修改”的发言，以修改后的内容为准');
-    expect(discussionRulesText).toContain('标注“写于前序修改之前”的发言，其中依赖旧内容的结论可能已经失效：不要沿用');
+    expect(discussionRulesText(true)).toContain('3. 标注“已由主持人修改”的发言，以修改后的内容为准');
+    expect(discussionRulesText(true)).toContain('标注“写于前序修改之前”的发言，其中依赖旧内容的结论可能已经失效：不要沿用');
+    // D112: the rule goes out only with a request whose context carries such a note.
+    expect(build(versioned()).messages[1]).toEqual({ role: 'system', content: discussionRulesText(true) });
+    const edited = sequence(['a', 'host'], 'c');
+    edited.snapshot.versions = edited.snapshot.messages.map((m, i) => ({ messageId: m.id, slotId: i === 0 ? 't0' : m.id, versionNumber: 1, active: true, origin: i === 1 ? 'edit' as const : 'original' as const, affected: false }));
+    expect(build(edited).messages[1].content).toContain(revisionRuleText);
+  });
+
+  it('sends no revision rule when nothing was revised, and keeps the other rules numbered in order (D112)', () => {
+    const result = build(sequence(['a', 'b', 'host'], 'c'));
+    const body = JSON.stringify(result.messages);
+    expect(body).not.toContain('写于前序修改之前');
+    expect(body).not.toContain('已由主持人修改');
+    expect(result.messages[1].content).toBe(discussionRulesText(false));
+    expect(discussionRulesText(false).split('\n')).toEqual(['发言要求：', expect.stringMatching(/^1\. 不要复述/u), expect.stringMatching(/^2\. 同意已有结论/u), expect.stringMatching(/^3\. 以你自己的身份直接发言/u)]);
   });
 });
 
 describe('D095 contribution rules and built-in role guidance', () => {
   it('asks every member for a new contribution instead of a restatement', () => {
     const result = build(sequence(['a', 'b'], 'c'));
-    expect(result.messages[1]).toEqual({ role: 'system', content: discussionRulesText });
-    expect(discussionRulesText).toContain('不要复述、照抄或逐段改写别人的发言');
+    expect(result.messages[1]).toEqual({ role: 'system', content: discussionRulesText(false) });
+    expect(discussionRulesText(false)).toContain('不要复述、照抄或逐段改写别人的发言');
     expect(parseDiscussion(result.messages).cue).toContain('给出你这一角色新增的贡献，不要复述他人的发言');
   });
 

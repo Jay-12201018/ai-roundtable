@@ -79,7 +79,7 @@ describe('R12 persistence', () => {
     expect(after.host?.instructions).toEqual(before.host?.instructions);
     expect(after.host?.override).toEqual(before.host?.override);
     expect(after.versions!.find(version => version.messageId === turns[1].messageId)!.affectedBy).toEqual([turns[0].messageId]);
-    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(9);
+    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(10);
     // Nothing resends automatically; resuming is an explicit host action that consumes the queued Override.
     await restarted.run.recoverInterruptedRun(runId, 'resume');
     const resumed = restarted.run.getSnapshot(runId);
@@ -129,9 +129,37 @@ describe('R12 persistence', () => {
     expect(snapshot.turns.map(turn => turn.messageId)).toEqual(['m2', 'm4']);
     const check = new Sqlite(path, { readonly: true });
     try {
-      expect(validateDatabase(check).schemaVersion).toBe(9);
+      expect(validateDatabase(check).schemaVersion).toBe(10);
       expect(check.prepare('SELECT id,content,status FROM messages ORDER BY sort_key').all()).toEqual(contents);
       expect(check.prepare('SELECT COUNT(*) FROM message_versions WHERE basis_json IS NOT NULL').pluck().get()).toBe(0);
     } finally { check.close(); }
+  });
+
+  it('D111: a continuation interrupted by an unclean exit resumes only by explicit decision and never resends by itself', async () => {
+    const path = tempFile();
+    const live = open(path);
+    live.db.insertRoom({ id: roomId, name: 'Restart', objective: '' });
+    for (const member of members) live.db.insertAgent({ ...member, roomId });
+    const { runId } = await live.run.start({ roomId, task: 'Continue after restart', workflowSnapshot: {}, mode: 'automatic', maxTurns: 1 });
+    await live.run.waitForIdle(runId);
+    live.provider.hold.add(2);
+    const continued = live.run.continueDiscussion({ runId, clientRequestId: 'continue-1', content: '大家再说一轮' });
+    await live.provider.started(2);
+    const restarted = open(path);
+    cleanups.push(async () => { live.provider.release(2); await live.run.shutdown().catch(() => {}); live.db.close(); });
+    cleanups.push(async () => { await restarted.run.shutdown(); restarted.db.close(); });
+    const after = restarted.run.getSnapshot(runId);
+    expect(after.status).toBe('interrupted');
+    expect(after.continuations).toEqual([{ actionId: continued.actionId, messageId: continued.messageId, agentIds: ['a', 'b', 'c'], createdAt: expect.any(String) }]);
+    expect(after.turns.map(turn => [turn.agentId, turn.status])).toEqual([['a', 'completed'], ['a', 'completed'], ['b', 'interrupted']]);
+    expect(restarted.provider.inputs).toEqual([]);
+    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(10);
+    // The interrupted answer needs an explicit retry; the rest of the round then follows, and nothing else is sent.
+    await expect(restarted.run.recoverInterruptedRun(runId, 'resume')).rejects.toMatchObject({ code: 'invalid_state' });
+    await restarted.run.recoverInterruptedRun(runId, 'retry');
+    const done = restarted.run.getSnapshot(runId);
+    expect(done.status).toBe('completed');
+    expect(done.turns.map(turn => turn.agentId)).toEqual(['a', 'a', 'b', 'c']);
+    expect(restarted.provider.inputs).toHaveLength(2);
   });
 });

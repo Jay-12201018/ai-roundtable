@@ -43,8 +43,8 @@ it('upgrades v6 once with a verified v6 backup, giving every existing Run the ¥
   } finally { db.close(); }
   const raw = new Sqlite(path, { readonly: true });
   try {
-    expect(validateDatabase(raw).schemaVersion).toBe(9);
-    expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(validateDatabase(raw).schemaVersion).toBe(10);
+    expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(raw.prepare('SELECT version FROM schema_backups').pluck().all()).toEqual([6]);
   } finally { raw.close(); }
 });

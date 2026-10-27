@@ -280,7 +280,7 @@ it('validation rejects a finish reason on a request that did not complete, and t
   raw.exec('DROP TRIGGER request_attempt_finish_once');
   expect(() => raw.prepare("UPDATE request_attempts SET finish_reason='truncated'").run()).toThrow(/CHECK/u);
   raw.exec(migration8.slice(migration8.indexOf('CREATE TRIGGER')));
-  expect(validateDatabase(raw).schemaVersion).toBe(9);
+  expect(validateDatabase(raw).schemaVersion).toBe(10);
   raw.prepare("UPDATE request_attempts SET status='failed'").run();
   expect(() => validateDatabase(raw)).toThrow(/finish reason/u);
 });
@@ -298,4 +298,32 @@ it('defaults to a 4096-token output limit, reserves for it, and refuses a limit 
   const { runId: largest } = await f.run.start({ roomId: 'room', task: 'x', workflowSnapshot: {}, maxTurns: 1, outputTokenLimit: 32768 });
   await f.run.waitForIdle(largest);
   expect(f.bodies.at(-1)).toMatchObject({ max_tokens: 32768 });
+});
+
+it('D111: a continuation reserves and settles each answer like any request, its estimate covers them, and a first answer that cannot fit refuses before anything is recorded', async () => {
+  const f = await fixture({ members: 2 });
+  const { runId } = await start(f, { maxTurns: 1, budgetMicroCny: 20000 }); await f.run.waitForIdle(runId);
+  expect(f.run.getSnapshot(runId).status).toBe('completed');
+  const preview = f.run.previewContinuation({ runId, content: '再各说一句' });
+  expect(preview).toMatchObject({ available: true, agentIds: ['a0', 'a1'], cost: { kind: 'priced' } });
+  const long = '很'.repeat(5000);
+  expect(f.run.previewContinuation({ runId, content: long })).toMatchObject({ available: false, reason: 'budget_insufficient' });
+  let refused: unknown;
+  try { f.run.continueDiscussion({ runId, clientRequestId: 'too-much', content: long }); } catch (error) { refused = error; }
+  expect(refused).toMatchObject({ code: 'budget_exceeded' });
+  expect(f.db.listContinuations(runId)).toEqual([]);
+  expect(f.db.listHostActions(runId)).toEqual([]);
+  expect(f.transport).toHaveBeenCalledTimes(1);
+  f.run.continueDiscussion({ runId, clientRequestId: 'go-on', content: '再各说一句' });
+  await f.run.waitForIdle(runId);
+  const snapshot = f.run.getSnapshot(runId);
+  expect(snapshot.status).toBe('completed');
+  expect(f.transport).toHaveBeenCalledTimes(3);
+  const answers = snapshot.charges!.slice(1);
+  expect(answers.map(charge => charge.state)).toEqual(['settled', 'settled']);
+  if (preview.cost.kind !== 'priced') throw new Error('expected a priced estimate');
+  expect(preview.cost.firstMicro).toBeGreaterThanOrEqual(answers[0].reservedMicro);
+  expect(preview.cost.maxMicro).toBeGreaterThanOrEqual(answers[0].reservedMicro + answers[1].reservedMicro);
+  // The second answer read the host's words and the first answer, in the D095 format.
+  expect(parseDiscussion(f.bodies[2].messages as ProviderMessage[]).entries.map(entry => entry.speaker)).toEqual(['成员0', '主持人', '成员0']);
 });

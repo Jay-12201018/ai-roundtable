@@ -95,7 +95,7 @@ describe('interjection box: Enter sends, Shift+Enter adds a line, an IME Enter o
     fireEvent.change(box, { target: { value: '@' } });
     const menu = screen.getByRole('listbox', { name: '点名下一位' });
     expect(within(menu).getAllByRole('option').map(option => option.querySelector('.grow')!.textContent)).toEqual([
-      '起草者点名后排在下一回合发言', '审查者不在当前阶段，按讨论方式现在不能点名', '综合者不在当前阶段，按讨论方式现在不能点名']);
+      '起草者按计划本来就是下一位', '审查者不在当前阶段，按讨论方式现在不能点名', '综合者不在当前阶段，按讨论方式现在不能点名']);
     expect(within(menu).getAllByRole('option')[1].getAttribute('aria-disabled')).toBe('true');
     fireEvent.keyDown(box, { key: 'ArrowDown' });
     expect(within(menu).getAllByRole('option')[1].getAttribute('aria-selected')).toBe('true');
@@ -168,5 +168,59 @@ describe('D098 controls in the composer', () => {
     rerender(<Host snapshot={paused()} api={hostApi()} run={controls('paused', run)} />);
     expect(within(screen.getByRole('group', { name: '运行控制' })).getAllByRole('button').map(button => button.textContent)).toEqual(['停止', '下一步', '继续']);
     await act(async () => {});
+  });
+});
+
+describe('D111 continuing a finished discussion from the same box', () => {
+  const finished = (overrides: Partial<RunSnapshot> = {}) => paused({ status: 'completed', ...overrides });
+  const runApi = (cost: Record<string, unknown> = { kind: 'priced', maxMicro: 30000, firstMicro: 9000, remainingMicro: 900000 }) => ({
+    previewContinuation: vi.fn(async (input: { runId: string; agentId?: string }) => ({ runId: input.runId, available: true, agentIds: input.agentId ? [input.agentId] : ['a', 'b', 'c'], cost })),
+    continueDiscussion: vi.fn(async (input: { runId: string; agentId?: string }) => ({ runId: input.runId, actionId: 'act', messageId: 'msg', agentIds: input.agentId ? [input.agentId] : ['a', 'b', 'c'], duplicate: false })),
+  });
+  function Continue({ snapshot, run, onApplied = () => {} }: { snapshot: RunSnapshot; run: ReturnType<typeof runApi>; onApplied?: () => void }) {
+    const commands = useHostCommands(hostApi(), snapshot.runId, () => {});
+    return <HostComposer snapshot={snapshot} commands={commands} instructionsWritable continueApi={run as never} onContinued={onApplied} settledSlot={<button type="button">新讨论</button>} />;
+  }
+
+  it('says who will answer and the most it may cost before sending, then continues the same Run', async () => {
+    const run = runApi();
+    const applied = vi.fn();
+    render(<Continue snapshot={finished()} run={run} onApplied={applied} />);
+    const box = screen.getByLabelText('继续讨论') as HTMLTextAreaElement;
+    expect(box.placeholder).toContain('所有成员按顺序各回应一次');
+    await waitFor(() => expect(screen.getByRole('status', { name: '继续后谁回应' }).textContent).toContain('起草者 → 审查者 → 综合者 各发言一次 · 预计最高约 ¥0.0300（按写满单次上限、高峰价预留，实际按用量结算，通常低得多），剩余预算 ¥0.9000'));
+    fireEvent.change(box, { target: { value: '@综合者 请总结' } });
+    await waitFor(() => expect(run.previewContinuation).toHaveBeenLastCalledWith({ runId: 'run', content: '@综合者 请总结', agentId: 'c' }));
+    await waitFor(() => expect(screen.getByRole('status', { name: '继续后谁回应' }).textContent).toContain('只由综合者回应一次'));
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(run.continueDiscussion).toHaveBeenCalledTimes(1));
+    expect(run.continueDiscussion.mock.calls[0][0]).toMatchObject({ runId: 'run', content: '@综合者 请总结', agentId: 'c' });
+    await waitFor(() => expect(box.value).toBe(''));
+    expect(applied).toHaveBeenCalled();
+    expect(screen.getByText(/已在这场讨论里继续：综合者会回应你这段话/)).toBeTruthy();
+    // A new discussion stays an explicit button beside the box.
+    expect(screen.getByRole('button', { name: '新讨论' })).toBeTruthy();
+  });
+
+  it('refuses two names at once and keeps the text', async () => {
+    const run = runApi({ kind: 'free' });
+    render(<Continue snapshot={finished()} run={run} />);
+    const box = screen.getByLabelText('继续讨论') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: '@起草者 @审查者 一起看看' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(await screen.findByText(/一次只能让一位成员回应/)).toBeTruthy();
+    expect(run.continueDiscussion).not.toHaveBeenCalled();
+    expect(box.value).toBe('@起草者 @审查者 一起看看');
+  });
+
+  it('points to the budget before sending when the first answer cannot fit', async () => {
+    const run = runApi();
+    run.previewContinuation.mockResolvedValue({ runId: 'run', available: false, reason: 'budget_insufficient', agentIds: ['a', 'b', 'c'],
+      cost: { kind: 'priced', maxMicro: 30000, firstMicro: 9000, remainingMicro: 2000 } } as never);
+    render(<Continue snapshot={finished()} run={run} />);
+    const strip = await screen.findByText(/剩余预算不够第一次发言/);
+    expect(strip).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('继续讨论'), { target: { value: '继续' } });
+    expect((screen.getByRole('button', { name: '发送并继续讨论' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -72,6 +72,16 @@ describe('R16 long history: a bounded DOM for 1000+ messages', () => {
     expect(screen.getByText('消息 1200')).toBeTruthy();
   });
 
+  it('goes to the latest output when the host sends a message, even after reading older ones (D111)', () => {
+    const view = render(<Timeline viewKey="host" label="讨论时间线" items={items(1200)} contentVersion={0} latestFromHost="h1" />);
+    act(() => { scroller().scrollTop = 40_000; fireEvent.scroll(scroller()); });
+    view.rerender(<Timeline viewKey="host" label="讨论时间线" items={items(1201)} contentVersion={1} latestFromHost="h1" />);
+    expect(atBottom()).toBe(false);
+    view.rerender(<Timeline viewKey="host" label="讨论时间线" items={items(1202)} contentVersion={2} latestFromHost="h2" />);
+    expect(atBottom()).toBe(true);
+    expect(screen.getByText('消息 1201')).toBeTruthy();
+  });
+
   it('does not follow while a message holds the view (an older version, an edit), even at the bottom', () => {
     function Holding() { useTimelineHold(true); return <p>正在看旧版本</p>; }
     const withHold = (count: number, version: number) => <Timeline viewKey="hold" label="讨论时间线" contentVersion={version}

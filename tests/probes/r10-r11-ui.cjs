@@ -52,6 +52,8 @@ async function page(stage, saved = {}) {
   await click('管理房间与成员'); await clickIn('.sidebar', 'R10R11 fixture workflows');
   const runs = [];
   for (const template of ['free-chat', 'two-model-dialogue', 'review-revision', 'deep-debate']) {
+    // D111: a finished discussion is continued from its box; the next one starts from the explicit 新讨论 button.
+    if (!field('讨论目标')) { await clickIn('.controls', '新讨论'); await wait(() => field('讨论目标'), Boolean, 'Goal box absent after 新讨论'); }
     await openWorkflow(); await fill('工作流模板', template); await fill('最大回合数', '32'); await fill('累计时长上限（毫秒）', '60000'); await fill('单次输出上限（Token）', '128');
     await click('验证并预览'); await wait(() => document.body.innerText, text => text.includes('已验证的计划预览'), 'Main preview did not appear');
     check(saved.runIds.length === runs.length, 'Preview unexpectedly created a Run');
@@ -73,7 +75,8 @@ async function page(stage, saved = {}) {
     check(run.attempts.length === run.turns.length && run.attempts.every(attempt => attempt.status === 'completed'), 'Attempt persistence inconsistent');
     check(new Set(run.attempts.map(attempt => attempt.requestId)).size === run.attempts.length, 'Duplicate request identity');
     check(!JSON.stringify(run).includes('r10r11-fake'), 'Key in history');
-    await openWorkflow(); await wait(() => document.body.innerText, text => text.includes('已完成'), 'Actual Main progress UI absent');
+    // D111: a finished discussion keeps its continue box; its 讨论方式 opens from 本场信息 › 进度 «查看».
+    await click('查看讨论方式'); await wait(() => document.body.innerText, text => text.includes('已完成'), 'Actual Main progress UI absent');
     check(!document.body.innerText.includes('进度尚未接入'), 'Placeholder progress');
     check(run.execution.membersSnapshot.every(member => members.some(current => current.id === member.agentId && current.providerId === member.providerId)), 'Frozen Provider identity lost');
     runs.push(run); await click('返回讨论');

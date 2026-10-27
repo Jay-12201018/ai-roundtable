@@ -140,7 +140,8 @@ async function main() {
   await click('继续');
   await statusHas('已完成', 30000);
   snap = await runSnapshot();
-  check(snap.turns.map(turn => agents.findIndex(agent => agent.id === turn.agentId)).join() === '0,2,1', 'Order: 起草者, 综合者 (named), 审查者');
+  // D110: the named 综合者 is inserted; the plan's 审查者 and 综合者 still speak.
+  check(snap.turns.map(turn => agents.findIndex(agent => agent.id === turn.agentId)).join() === '0,2,1,2', 'Order: 起草者, 综合者 (named, inserted), 审查者, 综合者');
   check(await js(`window.__pwned === undefined && !document.querySelector('a[href^="javascript"]') && !document.querySelector('.md script, .md img')`), 'Model HTML and javascript: links are never executed or loaded');
   await capture('completed-light', '已完成', '.codeblock');
 

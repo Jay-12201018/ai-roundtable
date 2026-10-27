@@ -84,7 +84,7 @@ describe('budget top-ups (D104)', () => {
     expect(() => raw(f).prepare('DELETE FROM run_budget_topups').run()).toThrow(/append-only/u);
     expect(() => raw(f).prepare("INSERT INTO run_budget_topups VALUES('x',?, 'c', 1, 'now')").run(runId)).toThrow(/Invalid budget top-up/u);
     expect(() => raw(f).prepare('UPDATE run_budgets SET limit_micro=1').run()).toThrow(/immutable/u);
-    expect(validateDatabase(raw(f)).schemaVersion).toBe(9);
+    expect(validateDatabase(raw(f)).schemaVersion).toBe(10);
   });
 });
 

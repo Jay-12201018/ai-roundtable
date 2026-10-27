@@ -14,7 +14,7 @@ describe('public context boundary and history', () => {
     // D095: other members are quoted discussion on the user side; only the current member's own replies are assistant.
     expect(result.messages.map(m => m.role)).toEqual(['system', 'system', 'system', 'system', 'system', 'user']);
     expect(result.messages[0].content).toBe(boundaryText);
-    expect(result.messages[1].content).toBe(discussionRulesText);
+    expect(result.messages[1].content).toBe(discussionRulesText(false));
     expect(result.messages[2].content).toBe('Respect application policy');
     expect(result.messages[3].content).toBe('Compare the proposals');
     expect(result.messages[4].content).toBe(agentBriefText(contextInput().run.membersSnapshot![2], contextInput().run.membersSnapshot!));

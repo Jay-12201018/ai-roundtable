@@ -53,7 +53,7 @@ describe('Renderer run synchronization', () => {
       run: { previewWorkflow: vi.fn(async () => { throw new Error('Workflow preview not configured in fixture'); }), subscribe, start, getSnapshot: vi.fn().mockImplementation(async (id) => snapshot(id)),
         onEvent: vi.fn((handler) => { listener = handler; return unsubscribe; }),
         pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn(),
-        addBudget: vi.fn(), resumeAfterBudget: vi.fn(),
+        addBudget: vi.fn(), resumeAfterBudget: vi.fn(), previewContinuation: vi.fn(), continueDiscussion: vi.fn(),
       },
     };
   });
@@ -148,7 +148,7 @@ describe('Renderer run synchronization', () => {
     subscribe.mockResolvedValue({ snapshot: saved, events: [], nextCursor: 4, resyncRequired: false });
     render(<App />);
     await waitFor(() => expect(runStatus()).toContain('已完成'));
-    expect(screen.getByText('讨论已完成')).toBeTruthy();
+    expect(screen.getByText(/^讨论已完成 · 可以在下方继续这场讨论/)).toBeTruthy();
     // A finished message carries no status line; an unfinished one says so in Chinese.
     expect(screen.queryByText('completed')).toBeNull();
   });
@@ -164,7 +164,7 @@ describe('Renderer task identity and command feedback', () => {
     window.roundtable = {
       ...configurationApis(),
       room: { createDemo: vi.fn(), getMessages: vi.fn() },
-      run: { previewWorkflow: vi.fn(async () => { throw new Error('Workflow preview not configured in fixture'); }), subscribe, getSnapshot: vi.fn(), start: vi.fn(), onEvent: vi.fn(handler => { events.add(handler); return () => { events.delete(handler); }; }), pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn(), addBudget: vi.fn(), resumeAfterBudget: vi.fn() },
+      run: { previewWorkflow: vi.fn(async () => { throw new Error('Workflow preview not configured in fixture'); }), subscribe, getSnapshot: vi.fn(), start: vi.fn(), onEvent: vi.fn(handler => { events.add(handler); return () => { events.delete(handler); }; }), pause: vi.fn(), stop: vi.fn(), step: vi.fn(), resumeRun: vi.fn(), retryTurn: vi.fn(), continueMessage: vi.fn(), recoverInterruptedRun: vi.fn(), addBudget: vi.fn(), resumeAfterBudget: vi.fn(), previewContinuation: vi.fn(), continueDiscussion: vi.fn() },
     };
     return { subscribe, events };
   }
