@@ -54,16 +54,20 @@ export function useContinuation(api: Pick<RunApiContract, 'previewContinuation' 
 /** One line on who will answer and what it may cost, said before sending. */
 export function continuationSummary(preview: ContinuationPreview | undefined, names: (agentId: string) => string): { text: string; warn?: string } | undefined {
   if (!preview) return undefined;
-  const who = preview.agentIds.length === 1 ? `只由${names(preview.agentIds[0])}回应一次` : `${preview.agentIds.map(names).join(' → ')} 各发言一次`;
+  const who = preview.agentIds.length === 1 ? `只由${names(preview.agentIds[0])}回应一次` : `${preview.agentIds.map(names).join(' → ')} 各回应一次`;
   if (preview.reason === 'member_unavailable') return { text: '没有可以回应的成员。', warn: '点名的成员（或全部成员）已在房间里停用或归档，不能回应。改点其他成员，或去「管理房间与成员」重新启用。' };
-  if (preview.reason === 'context_exceeds') return { text: `发送后：${who}`, warn: '讨论已经太长，放不进成员模型的上下文：先在「本场信息 › 进度」生成讨论摘要，再继续。' };
-  if (preview.reason === 'unsupported') return { text: `发送后：${who}`, warn: '有成员的模型现在不能使用（例如价格未审核或服务商已删除），暂时不能继续。' };
+  if (preview.reason === 'context_exceeds') return { text: who, warn: '讨论已经太长，放不进成员模型的上下文：先在「本场信息 › 进度」生成讨论摘要，再继续。' };
+  if (preview.reason === 'unsupported') return { text: who, warn: '有成员的模型现在不能使用（例如价格未审核或服务商已删除），暂时不能继续。' };
   if (preview.reason === 'busy' || preview.reason === 'not_finished') return { text: '等当前请求结束后，可以在这场讨论里继续。' };
   const cost = preview.cost;
-  if (cost.kind === 'free') return { text: `发送后：${who} · 不产生费用` };
-  if (cost.kind === 'unavailable') return { text: `发送后：${who}` };
-  const money = `预计最高约 ${formatYuan(cost.maxMicro)}（按写满单次上限、高峰价预留，实际按用量结算，通常低得多），剩余预算 ${formatYuan(cost.remainingMicro)}`;
-  if (preview.reason === 'budget_insufficient') return { text: `发送后：${who} · ${money}`, warn: `剩余预算不够第一次发言（最多约 ${formatYuan(cost.firstMicro)}）：先追加预算，再继续。` };
-  return { text: `发送后：${who} · ${money}`,
-    ...(cost.maxMicro > cost.remainingMicro ? { warn: '剩余预算可能不够这一整轮：花到上限就会停下，已有发言都保留，可以追加后继续。' } : {}) };
+  if (cost.kind === 'free') return { text: `${who} · 不产生费用` };
+  if (cost.kind === 'unavailable') return { text: who };
+  // Upper bounds, not a forecast: one answer, and the whole round when several answer; one short clause says so.
+  const bound = preview.agentIds.length === 1 ? `最多 ${formatYuan(cost.maxMicro)}`
+    : `单次最多约 ${formatYuan(cost.firstMicro)}，整轮最多 ${formatYuan(cost.maxMicro)}`;
+  // One line at the usual width: the remaining budget is on the budget chip above, and in the warning when it falls short.
+  const money = `${bound}（按上限预留，实际按用量结算）`;
+  if (preview.reason === 'budget_insufficient') return { text: `${who} · ${money}`, warn: `剩余预算 ${formatYuan(cost.remainingMicro)} 不够第一次发言（最多约 ${formatYuan(cost.firstMicro)}）：先追加预算，再继续。` };
+  return { text: `${who} · ${money}`,
+    ...(cost.maxMicro > cost.remainingMicro ? { warn: `剩余预算 ${formatYuan(cost.remainingMicro)} 可能不够这一整轮：花到上限就会停下，已有发言都保留，可以追加后继续。` } : {}) };
 }

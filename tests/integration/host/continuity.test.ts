@@ -104,6 +104,15 @@ describe('D111 continuing a finished discussion in the same Run', () => {
     expect(f.run.previewContinuation({ runId: run.runId }).available).toBe(true);
   });
 
+  it('treats a Turn the host edited as settled, like the Renderer does', async () => {
+    const f = hostFixture();
+    const run = await startFree(f, { mode: 'automatic', maxTurns: 2 });
+    await f.run.waitForIdle(run.runId);
+    const last = f.run.getSnapshot(run.runId).turns.at(-1)!;
+    await f.command({ runId: run.runId, kind: 'editMessage', messageId: last.messageId!, content: '主持人修改过的结论' });
+    expect(f.run.previewContinuation({ runId: run.runId })).toMatchObject({ available: true, agentIds: ['a', 'b', 'c'] });
+  });
+
   it('refuses while the discussion is still going, and leaves nothing behind', async () => {
     const f = hostFixture();
     const run = await startFree(f, { mode: 'step', maxTurns: 3 });

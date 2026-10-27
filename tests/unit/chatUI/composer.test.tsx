@@ -188,10 +188,10 @@ describe('D111 continuing a finished discussion from the same box', () => {
     render(<Continue snapshot={finished()} run={run} onApplied={applied} />);
     const box = screen.getByLabelText('继续讨论') as HTMLTextAreaElement;
     expect(box.placeholder).toContain('所有成员按顺序各回应一次');
-    await waitFor(() => expect(screen.getByRole('status', { name: '继续后谁回应' }).textContent).toContain('起草者 → 审查者 → 综合者 各发言一次 · 预计最高约 ¥0.0300（按写满单次上限、高峰价预留，实际按用量结算，通常低得多），剩余预算 ¥0.9000'));
+    await waitFor(() => expect(screen.getByRole('status', { name: '继续后谁回应' }).textContent).toContain('起草者 → 审查者 → 综合者 各回应一次 · 单次最多约 ¥0.0090，整轮最多 ¥0.0300（按上限预留，实际按用量结算）'));
     fireEvent.change(box, { target: { value: '@综合者 请总结' } });
     await waitFor(() => expect(run.previewContinuation).toHaveBeenLastCalledWith({ runId: 'run', content: '@综合者 请总结', agentId: 'c' }));
-    await waitFor(() => expect(screen.getByRole('status', { name: '继续后谁回应' }).textContent).toContain('只由综合者回应一次'));
+    await waitFor(() => expect(screen.getByRole('status', { name: '继续后谁回应' }).textContent).toContain('只由综合者回应一次 · 最多 ¥0.0300（按上限预留，实际按用量结算）'));
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(run.continueDiscussion).toHaveBeenCalledTimes(1));
     expect(run.continueDiscussion.mock.calls[0][0]).toMatchObject({ runId: 'run', content: '@综合者 请总结', agentId: 'c' });
@@ -218,7 +218,7 @@ describe('D111 continuing a finished discussion from the same box', () => {
     run.previewContinuation.mockResolvedValue({ runId: 'run', available: false, reason: 'budget_insufficient', agentIds: ['a', 'b', 'c'],
       cost: { kind: 'priced', maxMicro: 30000, firstMicro: 9000, remainingMicro: 2000 } } as never);
     render(<Continue snapshot={finished()} run={run} />);
-    const strip = await screen.findByText(/剩余预算不够第一次发言/);
+    const strip = await screen.findByText(/剩余预算 ¥0.0020 不够第一次发言/);
     expect(strip).toBeTruthy();
     fireEvent.change(screen.getByLabelText('继续讨论'), { target: { value: '继续' } });
     expect((screen.getByRole('button', { name: '发送并继续讨论' }) as HTMLButtonElement).disabled).toBe(true);

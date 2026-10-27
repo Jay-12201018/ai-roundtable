@@ -85,8 +85,9 @@ async function main() {
   // ── Path 2: after it ended, "@综合者 请总结" continues the same discussion ─────────────
   const runId = snap.runId;
   check(await js(`document.querySelector('[aria-label="继续讨论"]') !== null && document.querySelector('[aria-label="讨论目标"]') === null`), 'D111: the box continues this discussion; it is not a new-goal box');
-  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('各发言一次 · 预计最高约 ¥')`, 'round preview');
-  check((await strip('继续后谁回应')).includes('起草者 → 审查者 → 综合者 各发言一次'), 'Without @ everyone answers once, in order');
+  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('各回应一次 · 单次最多约 ¥')`, 'round preview');
+  check((await strip('继续后谁回应')).includes('起草者 → 审查者 → 综合者 各回应一次'), 'Without @ everyone answers once, in order');
+  check(await js(`document.querySelector('[role=status][aria-label="继续后谁回应"] > span').getBoundingClientRect().height <= 22`), 'At 1440 wide the who-and-cost line fits on one line');
   check((await js(`document.querySelector('[aria-label="继续讨论"]').placeholder`)).includes('所有成员按顺序各回应一次'), 'Placeholder explains continuing');
   check(Boolean(await ui.find('新讨论')), '新讨论 stays an explicit button');
   await capture('completed-continue-box', '讨论结束后：输入框默认在这场讨论里继续，旁边是「新讨论」');
@@ -95,7 +96,7 @@ async function main() {
   await capture('continue-mention', '继续时的 @：只让一位成员回应');
   await key('ArrowDown'); await key('ArrowDown'); await key('Enter');
   await ime('qingzongjie', '请总结一下最终方案。', { enterWhileComposing: true });
-  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('只由综合者回应一次 · 预计最高约 ¥')`, 'single preview');
+  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('只由综合者回应一次 · 最多 ¥')`, 'single preview');
   const requestsBefore = fixture.requests.length;
   check(requestsBefore === 4, 'Nothing was sent while typing');
   await capture('continue-at-synth', '带 @：只由综合者回应一次，发送前显示预计最高花费');
@@ -114,7 +115,7 @@ async function main() {
   // ── Path 3: without @, everyone answers once ─────────────
   await field('继续讨论');
   await ime('zaige', '再各说一句：试点最大的风险是什么？');
-  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('起草者 → 审查者 → 综合者 各发言一次')`, 'round preview again');
+  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('起草者 → 审查者 → 综合者 各回应一次')`, 'round preview again');
   await capture('continue-round', '不带 @：所有成员按顺序各回应一次');
   await key('Enter');
   await statusHas('已完成', 90000);
@@ -136,7 +137,7 @@ async function main() {
 
   // Dark theme for the continue box.
   await click('设置', { selector: '.sb-item' }); await click('深色', { scope: '.seg' }); await click('返回讨论');
-  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('预计最高')`, 'dark preview');
+  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('整轮最多')`, 'dark preview');
   await capture('continue-box-dark', '深色：继续讨论的输入框与预计花费');
   await click('设置', { selector: '.sb-item' }); await click('浅色', { scope: '.seg' }); await click('返回讨论');
 

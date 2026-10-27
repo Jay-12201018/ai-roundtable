@@ -5,7 +5,7 @@ import { DiscussionTimeline, type ProviderNames } from '../../../src/renderer/fe
 import { RunPanel, type PanelTab } from '../../../src/renderer/features/runPanel/RunPanel';
 import { HostComposer, interjectionBoxFor } from '../../../src/renderer/features/composer/Composer';
 import { HostTextArea } from '../../../src/renderer/features/host/HostTextArea';
-import { nextSpeaker, nextSpeakerText, overrideCandidates, timelineSlots } from '../../../src/renderer/features/host/model';
+import { canContinueRun, nextSpeaker, nextSpeakerText, overrideCandidates, timelineSlots, turnSettled } from '../../../src/renderer/features/host/model';
 import { compileWorkflow } from '../../../src/main/workflow';
 import type { HostApiContract } from '../../../src/shared/contracts/app';
 import type { RunSnapshot } from '../../../src/shared/types/run';
@@ -52,6 +52,7 @@ function Harness({ snapshot, api, onApplied = () => {}, tab = 'members', provide
     {interjectionBoxFor(snapshot, ['running', 'pausing', 'paused', 'cancelling'].includes(snapshot.status)) && <HostComposer snapshot={snapshot} commands={commands} instructionsWritable />}
   </>;
 }
+const budgetFixture = { currency: 'CNY' as const, limitMicro: 10, settledMicro: 9, unknownMicro: 0, reservedMicro: 0, remainingMicro: 1, overrunMicro: 0 };
 const hostApi = (implementation?: HostApiContract['command']) => ({ command: vi.fn(implementation ?? (async input => ({ runId: input.runId, actionId: 'action', kind: input.kind, duplicate: false }))) });
 
 describe('R12 host projection model', () => {
@@ -75,6 +76,29 @@ describe('R12 host projection model', () => {
       turns: [...base.turns, { turnId: 't3', runId: 'run', agentId: 'c', turnIndex: 2, status: 'completed', overrideActionId: 'k' }] });
     expect(nextSpeaker(continued)).toEqual({ agentId: 'a', name: '成员 a', source: 'continuation' });
     expect(nextSpeaker({ ...continued, turns: [...continued.turns, { turnId: 't4', runId: 'run', agentId: 'a', turnIndex: 3, status: 'running', overrideActionId: 'k' }] })).toBeUndefined();
+  });
+
+  it('D111: decides whether a finished discussion can continue by the same settled-Turn rule as Main', () => {
+    const base = pausedSnapshot();
+    expect(canContinueRun(pausedSnapshot({ status: 'completed' }))).toBe(true);
+    expect(canContinueRun(pausedSnapshot({ status: 'cancelled' }))).toBe(true);
+    expect(canContinueRun(base)).toBe(false); // paused: still going
+    // The Turn says completed, but its effective version came from a request that did not complete.
+    const brokenAttempt = pausedSnapshot({ status: 'cancelled', attempts: base.attempts!.map(a => a.requestId === 'r3' ? { ...a, status: 'failed' as const } : a) });
+    expect(turnSettled(brokenAttempt, brokenAttempt.turns[1])).toBe(false);
+    expect(canContinueRun(brokenAttempt)).toBe(false);
+    // A host edit is a settled version without its own request.
+    const edited = pausedSnapshot({ status: 'cancelled',
+      messages: [...base.messages, { id: 'm2e', senderName: '成员 b', content: '主持人改过', status: 'completed' }],
+      versions: [...base.versions!.map(v => v.slotId === 't2' ? { ...v, active: false } : v),
+        { messageId: 'm2e', slotId: 't2', turnId: 't2', author: 'agent', versionNumber: 2, origin: 'edit', active: true, parentMessageId: 'm2', affectedBy: [] }] });
+    expect(canContinueRun(edited)).toBe(true);
+    // A stopped Turn stays unsettled: it is retried or continued, not continued past.
+    const stopped = pausedSnapshot({ status: 'cancelled', turns: base.turns.map(t => t.turnId === 't2' ? { ...t, status: 'aborted' as const } : t) });
+    expect(canContinueRun(stopped)).toBe(false);
+    // A budget stop has its own path (top up and resume).
+    expect(canContinueRun(pausedSnapshot({ status: 'error', budget: { ...budgetFixture, blocked: { reason: 'insufficient', requiredMicro: 2, remainingMicro: 1, at: time } } }))).toBe(false);
+    expect(canContinueRun(pausedSnapshot({ status: 'error' }))).toBe(true);
   });
 
   it('offers only current-stage members during a workflow', () => {

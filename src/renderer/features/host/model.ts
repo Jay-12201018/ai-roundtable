@@ -134,12 +134,26 @@ export function overrideCandidates(snapshot: RunSnapshot | undefined): Array<{ a
 
 export const canDirectRun = (snapshot: RunSnapshot | undefined) => !!snapshot && ['running', 'pausing', 'paused', 'error', 'cancelled', 'interrupted'].includes(snapshot.status);
 /**
+ * The same rule as Main's `turnSettled`: the Turn completed, and its effective version is a completed message whose
+ * own request completed, or a host edit. A failed Turn stays unsettled even after the host edits it (it is retried).
+ */
+export function turnSettled(snapshot: RunSnapshot, turn: RunSnapshot['turns'][number]): boolean {
+  if (turn.status !== 'completed') return false;
+  const active = snapshot.versions?.find(version => version.turnId === turn.turnId && version.active);
+  const messageId = active?.messageId ?? snapshot.attempts?.filter(attempt => attempt.turnId === turn.turnId).at(-1)?.messageId ?? turn.messageId;
+  const message = snapshot.messages.find(item => item.id === messageId);
+  if (!message || message.status !== 'completed') return false;
+  const attempt = snapshot.attempts?.find(item => item.messageId === message.id);
+  // A legacy snapshot without attempts or versions has nothing more to check than the Turn and its message.
+  return attempt ? attempt.status === 'completed' : !snapshot.attempts || active?.origin === 'edit';
+}
+/**
  * D111: a finished discussion continues in place — completed, or stopped with every Turn settled (a stopped Turn is
  * retried or continued instead; a budget stop is topped up and resumed). Display only; Main rechecks every condition.
  */
 export const canContinueRun = (snapshot: RunSnapshot | undefined) => !!snapshot?.execution && runIdle(snapshot)
-  && (snapshot.status === 'completed' || (snapshot.status === 'cancelled' || snapshot.status === 'error' && !snapshot.budget?.blocked)
-    && snapshot.turns.every(turn => turn.status === 'completed'));
+  && ['completed', 'cancelled', 'error'].includes(snapshot.status) && !(snapshot.status === 'error' && snapshot.budget?.blocked)
+  && snapshot.turns.every(turn => turnSettled(snapshot, turn));
 /** Version edits/regenerations wait for the in-flight request; Main rechecks every condition. */
 export const runIdle = (snapshot: RunSnapshot | undefined) => !!snapshot && !snapshot.currentTurnId && !snapshot.host?.generation
   && !snapshot.messages.some(message => message.status === 'streaming');
