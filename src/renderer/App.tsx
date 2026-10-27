@@ -372,7 +372,7 @@ export function App() {
     onClose={() => { if (layout === 'wide') { setPanelPinned(false); remember('roundtable.panelOpen', false); } else setPanelDrawer(false); }}
     onSummarize={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setPage('workflow'); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'} />;
 
-  return <div className="app" data-layout={layout}>
+  return <div className="app app-shell" data-layout={layout}>
     {sidebarInline && <div className="app-side" inert={anyDrawer || undefined}>{sidebar(false)}</div>}
     <main className="app-main" inert={anyDrawer || undefined}>
       {page === 'discussion' ? <>

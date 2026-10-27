@@ -79,8 +79,8 @@ export function Sidebar({ rooms, runs, failed, onRetry, roomId, runId, page, rea
       })}</ul>
     </div>
     <div className="sb-foot">
-      <button type="button" className="sb-item" aria-current={page === 'usage' ? 'page' : undefined} aria-describedby={monthSpend ? 'sb-month' : undefined} onClick={onOpenUsage}><ChartColumn aria-hidden size={16} /><span className="t">用量</span>{monthSpend && <span className="meta" id="sb-month" aria-hidden>本月 {monthSpend}</span>}</button>
-      <button type="button" className="sb-item" aria-current={page === 'settings' ? 'page' : undefined} aria-describedby={noRealProvider ? 'sb-no-model' : undefined} onClick={onOpenSettings}><Settings2 aria-hidden size={16} /><span className="t">设置</span>{noRealProvider && <span className="meta warn-text" id="sb-no-model" aria-hidden>未连接模型</span>}</button>
+      <button type="button" className="sb-item" aria-current={page === 'usage' ? 'page' : undefined} aria-label="用量" aria-describedby={monthSpend ? 'sb-month' : undefined} onClick={onOpenUsage}><ChartColumn aria-hidden size={16} /><span className="t">用量</span>{monthSpend && <span className="meta" id="sb-month" aria-hidden>本月 {monthSpend}</span>}</button>
+      <button type="button" className="sb-item" aria-current={page === 'settings' ? 'page' : undefined} aria-label="设置" aria-describedby={noRealProvider ? 'sb-no-model' : undefined} onClick={onOpenSettings}><Settings2 aria-hidden size={16} /><span className="t">设置</span>{noRealProvider && <span className="meta warn-text" id="sb-no-model" aria-hidden>未连接模型</span>}</button>
     </div>
   </nav>;
 }

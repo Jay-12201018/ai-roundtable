@@ -21,6 +21,8 @@ export function useHostCommands(api: HostApiContract | undefined, runId: string 
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { setError(undefined); setNotice(undefined); }, [runId]);
+  // A confirmation is read once; it should not linger above the box after the moment has passed. Errors stay.
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => { if (alive.current) setNotice(undefined); }, 8000); return () => clearTimeout(timer); }, [notice]);
   /** Sends one command and reports the outcome; `quiet` leaves the shared notice/error to the caller (D4). */
   const request = useCallback(async (key: string, command: CommandInput, options: { success?: string; quiet?: boolean } = {}): Promise<CommandOutcome> => {
     if (!api || !runId) return { ok: false, message: '这次讨论还没有开始，暂时不能发送。' };

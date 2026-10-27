@@ -11,7 +11,7 @@ const options: MentionOption[] = [
 type Step = (command: CommandInput) => CommandOutcome;
 const requester = (step: Step = () => ({ ok: true, duplicate: false })) => {
   const calls: CommandInput[] = [];
-  const request = vi.fn(async (_key: string, command: CommandInput) => { calls.push(command); return step(command); });
+  const request = vi.fn(async (_key: string, command: CommandInput, _options: { quiet: true }) => { calls.push(command); return step(command); });
   return { request, calls };
 };
 
@@ -20,7 +20,7 @@ describe('D4: @ in an interjection = setOverride, then interject', () => {
     const { request, calls } = requester();
     const result = await sendInterjection('@审查者 先看成本', options, undefined, request);
     expect(calls).toEqual([{ kind: 'setOverride', agentId: 'b' }, { kind: 'interject', content: '@审查者 先看成本' }]);
-    expect(request.mock.calls.every(call => (call[2] as { quiet: boolean }).quiet)).toBe(true);
+    expect(request.mock.calls.every(call => call[2].quiet)).toBe(true);
     expect(result).toMatchObject({ clear: true, steps: { override: 'sent', interject: 'sent' } });
     expect(result.notice).toContain('已点名审查者并发送插话');
   });
