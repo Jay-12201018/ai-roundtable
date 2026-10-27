@@ -166,6 +166,13 @@ describe('summary requests are budgeted and settled like Turns (D107)', () => {
     expect(report.byRun.find(row => row.runId === runId)).toMatchObject({ roomName: '用量房间', settled: { count: 1 }, unknown: { count: 1 } });
     expect(report.byModel).toEqual([expect.objectContaining({ providerName: 'DeepSeek 直连', modelId: 'deepseek-flash', requests: 3 })]);
     expect(report.unknownCharges).toHaveLength(2);
+    // D117: a range over when each request was sent; outside it nothing counts, around it everything does.
+    const usage = new UsageService(f.db, 'Asia/Shanghai');
+    expect(usage.getReport({ since: '2000-01-01T00:00:00.000Z', until: '2999-01-01T00:00:00.000Z' }).totals).toEqual(report.totals);
+    expect(usage.getReport({ since: '2999-01-01T00:00:00.000Z' })).toMatchObject({ totals: { requests: 0, totalMicro: 0 }, byRun: [], byModel: [], byDate: [], unknownCharges: [] });
+    expect(usage.getReport({ until: '2000-01-01T00:00:00.000Z' }).totals.requests).toBe(0);
+    expect(usage.csv({ since: '2999-01-01T00:00:00.000Z' }).rows).toBe(0);
+    expect(() => usage.getReport({ since: '2026-02-01T00:00:00.000Z', until: '2026-01-01T00:00:00.000Z' })).toThrowError(expect.objectContaining({ code: 'invalid_input' }));
   });
 
   it('leaves an interrupted summary request unknown and never resends it after a restart', async () => {

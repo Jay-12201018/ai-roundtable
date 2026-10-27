@@ -110,11 +110,11 @@ function createAppWindow(): void {
     const createdWindow = createMainWindow();
     window = createdWindow;
     const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService, host: hostService, usage: {
-      getReport: () => usage.getReport(),
-      exportCsv: owner => usage.exportCsv(async defaultName => {
+      getReport: range => usage.getReport(range),
+      exportCsv: (owner, range) => usage.exportCsv(async defaultName => {
         const result = await dialog.showSaveDialog(owner, { title: '导出用量明细', defaultPath: join(app.getPath('documents'), defaultName), filters: [{ name: 'CSV', extensions: ['csv'] }] });
         return result.canceled || !result.filePath ? undefined : result.filePath;
-      }),
+      }, range),
     }, network: networkSettings, lifecycle: { relaunch: () => {
       // A restart stops nothing silently: refuse while a discussion or the controlled trial is still running.
       if (runService?.hasActiveRuns() || controlledTrial?.isBusy()) throw new ContractError('invalid_state');

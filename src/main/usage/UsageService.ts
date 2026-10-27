@@ -1,7 +1,8 @@
 import { writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { Database, LedgerRow } from '../database/Database';
-import { usageReportSchema, type UsageBucket, type UsageExportResult, type UsageReport } from '../../shared/schemas/usage';
+import { usageReportInputSchema, usageReportSchema, type UsageBucket, type UsageExportResult, type UsageRange, type UsageReport } from '../../shared/schemas/usage';
+import { ContractError } from '../../shared/contracts/errors';
 import type { RequestCharge } from '../../shared/schemas/budget';
 
 const emptyBucket = (): UsageBucket => ({
@@ -62,8 +63,12 @@ export class UsageService {
     return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`;
   }
 
-  private load() {
-    const ledger = this.database.listLedger();
+  private load(range: UsageRange = {}) {
+    const parsed = usageReportInputSchema.safeParse(range);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    // D117: a request belongs to the range by when it was sent.
+    const since = parsed.data.since ? Date.parse(parsed.data.since) : -Infinity; const until = parsed.data.until ? Date.parse(parsed.data.until) : Infinity;
+    const ledger = this.database.listLedger().filter(row => { const sent = Date.parse(row.charge.createdAt); return sent >= since && sent < until; });
     const labels = this.database.listLedgerLabels();
     const runs = new Map(labels.runs.map(run => [run.runId, run]));
     const providers = new Map(labels.providers.map(provider => [provider.id, provider.name]));
@@ -71,8 +76,8 @@ export class UsageService {
     return { ledger, runs, providers, speaker };
   }
 
-  getReport(): UsageReport {
-    const { ledger, runs, providers, speaker } = this.load();
+  getReport(range?: UsageRange): UsageReport {
+    const { ledger, runs, providers, speaker } = this.load(range);
     const totals = emptyBucket();
     const byRun = new Map<string, UsageBucket>(); const byModel = new Map<string, UsageBucket>(); const byDate = new Map<string, UsageBucket>();
     const bucketOf = (map: Map<string, UsageBucket>, key: string) => { let bucket = map.get(key); if (!bucket) map.set(key, bucket = emptyBucket()); return bucket; };
@@ -102,8 +107,8 @@ export class UsageService {
   }
 
   /** One row per ledger entry; the amounts are the ones the budgets and the report count. */
-  csv(): { text: string; rows: number } {
-    const { ledger, runs, providers, speaker } = this.load();
+  csv(range?: UsageRange): { text: string; rows: number } {
+    const { ledger, runs, providers, speaker } = this.load(range);
     const header = ['请求ID', '类型', '运行ID', '房间', '任务', '成员', 'Provider', '模型', `发出时间（${this.timeZone}）`, '状态', '输入tokens', '其中缓存命中tokens', '输出tokens',
       '计价时段', '计价开始（北京时间）', '计价结束（北京时间）', '缓存命中单价（元/百万）', '缓存未命中单价（元/百万）', '输出单价（元/百万）', '预留上限（元）', '按高峰价计（元）',
       '计入金额（元）', '核销金额（元）', '核销依据', '核销时间'];
@@ -125,8 +130,8 @@ export class UsageService {
   }
 
   /** Main writes the file the user chose in the native save dialog; the Renderer never gets file system access. */
-  async exportCsv(choosePath: (defaultName: string) => Promise<string | undefined>): Promise<UsageExportResult> {
-    const { text, rows } = this.csv();
+  async exportCsv(choosePath: (defaultName: string) => Promise<string | undefined>, range?: UsageRange): Promise<UsageExportResult> {
+    const { text, rows } = this.csv(range);
     const path = await choosePath(`AI圆桌用量-${this.dateOf(new Date().toISOString())}.csv`);
     if (!path) return { saved: false, rows };
     // A byte-order mark lets spreadsheet apps read the Chinese headers as UTF-8.
