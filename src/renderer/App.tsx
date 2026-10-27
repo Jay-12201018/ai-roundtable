@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
-import { ArrowLeft, Check, Lock, Plus, TriangleAlert } from 'lucide-react';
+import { Check, Lock, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
 import { RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
 import { DEFAULT_MODE_LABEL, WorkflowDialog, draftProblems, readRoomWorkflow, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
   writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft, type WorkflowMember } from './features/workflows';
 import { errorCodeSchema } from '../shared/schemas/error';
-import { SettingsPage, isUserAddress, useReadiness, type SettingsSection } from './features/settings';
+import { ConnectWizard, SettingsPage, isUserAddress, useReadiness, type ConnectedRoom, type SettingsSection } from './features/settings';
+import { Welcome, startDemo } from './features/onboarding';
+import type { ProviderConfiguration, ProviderReadiness } from '../shared/contracts/configuration';
 import { useHostCommands, useSummaryCommands } from './features/host';
 import { UsagePage, chargeOfMessage, parseBudgetYuan, useLedgerCommands } from './features/usage';
 import { DiscussionTimeline, RunNotices, SummaryDialog, providerNamesFrom } from './features/timeline';
@@ -51,6 +53,9 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('services');
   const [bootReady, setBootReady] = useState(false);
   const [roomDialog, setRoomDialog] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [demo, setDemo] = useState<{ busy: boolean; error?: string }>({ busy: false });
+  const [starterRoom, setStarterRoom] = useState<string>();
   const layout = useLayout();
   const [theme, setTheme] = useTheme();
   const [navOpen, setNavOpen] = useState(false);
@@ -194,11 +199,11 @@ export function App() {
   const selectRun = useCallback((id: string) => { setPage('discussion'); setNavOpen(false); void session.selectRun(id); }, [session]);
   const openSettings = useCallback((section: SettingsSection = 'services') => { setSettingsSection(section); setPage('settings'); setNavOpen(false); }, []);
   const openRoom = (id: string) => { if (id !== roomId || snapshot) session.selectRoom(id); setPage('rooms'); setNavOpen(false); };
-  const newDiscussion = (id = roomId) => {
+  const newDiscussion = (id = roomId, knownObjective?: string) => {
     if (id && (id !== roomId || snapshot)) session.selectRoom(id);
     // A room's default goal pre-fills an empty box; the host can change it before starting.
-    const objective = [...(directory.rooms ?? []), ...directory.archived].find(room => room.id === id)?.objective.trim();
-    if (objective && !session.store.getState().draft.trim()) session.store.getState().setDraft(objective);
+    const objective = (knownObjective ?? [...(directory.rooms ?? []), ...directory.archived].find(room => room.id === id)?.objective)?.trim();
+    if (objective && (knownObjective !== undefined || !session.store.getState().draft.trim())) session.store.getState().setDraft(objective);
     setPage('discussion'); setNavOpen(false);
   };
 
@@ -390,7 +395,27 @@ export function App() {
 
   const pageTopbar = (name: Exclude<Page, 'discussion'>) => <Topbar title={pageTitles[name]} onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined}
     onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined}
-    actions={name === 'settings' ? undefined : <Button variant="quiet" icon={ArrowLeft} onClick={goDiscussion}>返回讨论</Button>} />;
+    />;
+  // D6-A: the first real service gets a room of its own; the demo gets 演示房间. Both open ready to start.
+  const createFirstRoom = async ({ provider, firstReal, readiness: row }: { provider: ProviderConfiguration; firstReal: boolean; readiness: ProviderReadiness | undefined }): Promise<ConnectedRoom | undefined> => {
+    await reloadProviders();
+    if (!firstReal) return undefined;
+    const model = row?.models.find(item => item.modelId === provider.defaultModelId);
+    const usable = model?.usable ? { providerId: provider.id, modelId: model.modelId } : undefined;
+    const created = await createStarterRoom(api.rooms, { name: '我的第一场讨论' }, usable);
+    setStarterRoom(created.id); void directory.reload();
+    return { roomName: created.name, memberNames: ['起草者', '审查者', '综合者'], modelName: usable ? provider.customModels.find(item => item.id === usable.modelId)?.name ?? usable.modelId : null };
+  };
+  const tryDemo = async () => {
+    setDemo({ busy: true });
+    try {
+      const created = await startDemo(settingsApi, api.rooms, providers);
+      await reloadProviders(); await directory.reload();
+      setDemo({ busy: false }); newDiscussion(created.id, created.objective);
+    } catch { setDemo({ busy: false, error: '没能建好演示房间，请重试。' }); }
+  };
+  // First use: no service and no room yet. Rooms without a service (an older demo room) still open normally.
+  const firstUse = providerLoadState === 'ready' && providers.length === 0 && directory.rooms?.length === 0 && directory.archived.length === 0 && !snapshot && !runId && page === 'discussion';
   const modeDetail = stored.draft ? (() => {
     const names = (ids: string[]) => ids.map(id => modeMembers.find(member => member.id === id)?.name ?? '已不在房间').join('、');
     const limit = `最多 ${stored.draft.turnLimit} 回合 · ${stored.draft.durationMinutes} 分钟`;
@@ -408,6 +433,7 @@ export function App() {
 
   const sidebar = (drawer: boolean) => <Sidebar rooms={directory.rooms} archived={directory.archived} counts={directory.counts} runs={directory.runs} failed={directory.failed} onRetry={() => void directory.reload()}
     roomId={roomId} runId={snapshot?.runId ?? runId} page={page} ready={bootReady} monthSpend={monthSpend}
+    emptyText={providers.length === 0 ? '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。' : undefined}
     noRealProvider={providerLoadState === 'ready' && !providers.some(provider => provider.kind !== 'mock' && provider.kind !== null && provider.enabled)}
     onOpenRoom={openRoom} onSelectRun={selectRun} onNewDiscussion={() => newDiscussion()} onNewRoom={() => { setNavOpen(false); setRoomDialog(true); }}
     onOpenUsage={() => { setPage('usage'); setNavOpen(false); }} onOpenSettings={() => openSettings()}
@@ -419,7 +445,10 @@ export function App() {
   return <div className="app app-shell" data-layout={layout}>
     {sidebarInline && <div className="app-side" inert={anyDrawer || undefined}>{sidebar(false)}</div>}
     <main className="app-main" inert={anyDrawer || undefined}>
-      {page === 'discussion' ? <>
+      {firstUse ? <>
+        {layout === 'narrow' && <Topbar title="AI 圆桌" onMenu={() => setNavOpen(true)} />}
+        <Welcome onConnect={() => setConnectOpen(true)} onDemo={() => void tryDemo()} demoBusy={demo.busy} demoError={demo.error} />
+      </> : page === 'discussion' ? <>
         <Topbar title={snapshot ? title : roomId ? '新讨论' : 'AI 圆桌'} status={statusPill ?? (roomName ? <span>{roomName}</span> : undefined)}
           detail={statusDetail || (!snapshot && enabledMembers ? `${roomName ? '· ' : ''}${enabledMembers.length} 位成员` : undefined)}
           budget={budgetChip} members={layout === 'narrow' ? undefined : runMembers}
@@ -430,19 +459,22 @@ export function App() {
       </> : page === 'settings' ? <>
         {(layout === 'narrow' || sidebarCollapsed) && pageTopbar('settings')}
         <SettingsPage api={settingsApi} network={api.network} lifecycle={api.app} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
-          theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onStart={roomId ? () => newDiscussion(roomId) : goDiscussion} />
+          theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onConnected={createFirstRoom}
+          onStart={() => { const target = starterRoom ?? roomId; if (target) newDiscussion(target); else goDiscussion(); }} />
       </> : page === 'rooms' ? <>
         <Topbar title={room?.name ?? '房间'} detail={room ? `房间设置 · ${directory.counts.get(room.id) ?? 0} 位成员 · ${directory.runs.length} 次讨论` : undefined}
           members={layout === 'narrow' ? undefined : modeMembers.filter(member => member.enabled).map(member => member.name)}
           onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined} onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined} />
         {pageBody.rooms()}
-      </> : <>{pageTopbar(page)}<div className="page legacy">{pageBody[page]()}</div></>}
+      </> : <>{(layout === 'narrow' || sidebarCollapsed) && pageTopbar(page)}{pageBody[page]()}</>}
     </main>
     {panelInline && <div className="app-context" id="run-panel" inert={anyDrawer || undefined}>{panel}</div>}
     <Drawer side="left" label="应用导航" open={navOpen && layout === 'narrow'} onClose={() => setNavOpen(false)}>{sidebar(true)}</Drawer>
     <Drawer side="right" label="本场信息" open={panelDrawer && panelAvailable && layout !== 'wide'} onClose={() => setPanelDrawer(false)}><div id="run-panel" style={{ height: '100%' }}>{panel}</div></Drawer>
     {workflowOpen && roomId && <WorkflowDialog key={`${roomId}:${workflowVersion}`} roomName={roomName ?? '这个房间'} members={modeMembers} initial={stored.draft}
       onCheck={checkWorkflow} onSave={saveWorkflow} onClose={() => setWorkflowOpen(false)} />}
+    {connectOpen && <ConnectWizard api={settingsApi} providers={providers} onClose={() => { setConnectOpen(false); void reloadProviders(); void readiness.reload(); }}
+      onConnected={createFirstRoom} onStart={() => { const target = starterRoom ?? roomId; if (target) newDiscussion(target); }} />}
     {roomDialog && <RoomDialog note="新房间会带好三位成员：起草者、审查者、综合者，都可以再改。" onClose={() => setRoomDialog(false)} onSave={async value => {
       const created = await createStarterRoom(api.rooms, value, defaultModelFor(providers, readiness.rows));
       setRoomDialog(false); void directory.reload(); openRoom(created.id);

@@ -29,11 +29,13 @@ function completed(runId = 'saved', roomId = 'r2'): RunSnapshot {
 /** R16: a room opens from its name in the sidebar. */
 async function openRoom(name: string) { fireEvent.click(await within(screen.getByRole('navigation', { name: '应用导航' })).findByRole('button', { name: new RegExp(`^${name}`, 'u') })); }
 
-it('keeps start disabled with no room and never creates an implicit Demo', async () => {
+it('with no service and no room shows the welcome page and never creates an implicit Demo', async () => {
   const f = fixture(); render(<App />);
-  await waitFor(() => expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(true));
-  fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
+  // D6-A: the demo is created only by 开始试玩, never implicitly.
+  await screen.findByRole('heading', { name: '让几位 AI 围坐一桌，替你把问题讨论透' });
+  expect(screen.queryByRole('button', { name: '开始讨论' })).toBeNull();
   expect(f.api.room.createDemo).not.toHaveBeenCalled(); expect(f.api.run.start).not.toHaveBeenCalled();
+  expect(await f.api.settings.listProviderSummaries()).toEqual([]); expect(await f.api.rooms.listRooms({})).toEqual([]);
   const session = createRendererSession(f.api, undefined, { requireRoom: true }); const dispose = session.mount();
   await session.startRun();
   expect(f.api.room.createDemo).not.toHaveBeenCalled(); expect(f.api.run.start).not.toHaveBeenCalled(); dispose();
@@ -134,11 +136,11 @@ it.each(['archive', 'delete'] as const)('clears restored messages and rejects la
   await screen.findByText('持久历史正文'); await openRoom('唯一房间');
   await screen.findAllByRole('heading', { name: '唯一房间' });
   if (action === 'archive') { fireEvent.click(screen.getByRole('button', { name: '归档' })); await screen.findByRole('button', { name: '恢复房间' }); }
-  else { fireEvent.click(screen.getByRole('button', { name: '删除…' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '删除' })); await screen.findByRole('heading', { name: '先建一个房间' }); }
+  else { fireEvent.click(screen.getByRole('button', { name: '删除…' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '删除' })); await screen.findByRole('heading', { name: '让几位 AI 围坐一桌，替你把问题讨论透' }); }
   act(() => f.emit({ version: 1, runId: 'saved', turnId: 'saved-turn', requestId: 'saved-request', sequence: 5, type: 'text_delta', timestamp: time, payload: { turnId: 'saved-turn', messageId: 'saved-message', senderName: '起草者', text: '旧选择的迟到内容' } }));
   expect(screen.queryByText('持久历史正文')).toBeNull(); expect(screen.queryByText('旧选择的迟到内容')).toBeNull();
   expect(localStorage.getItem('roundtable.runId')).toBeNull();
-  if (action === 'delete') expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(true);
+  if (action === 'delete') expect(screen.queryByRole('button', { name: '开始讨论' })).toBeNull();
 });
 
 it('shows unrecorded metadata for old Runs without using live member configuration', async () => {

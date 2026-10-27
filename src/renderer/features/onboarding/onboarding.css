@@ -1,0 +1,18 @@
+/* 首次使用: centered, two start cards (connect is the main path), three steps and one line on data and Keys. */
+.welcome { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; padding: 40px 32px; }
+.welcome-inner { width: min(680px, 100%); text-align: center; }
+.welcome-logo { display: inline-grid; place-items: center; width: 52px; height: 52px; color: var(--accent); margin: 0 auto 16px; }
+.welcome-logo svg, .welcome-logo .logo { width: 52px; height: 52px; }
+.welcome h1 { margin: 0; font-size: 26px; line-height: 36px; font-weight: 600; }
+.welcome-sub { margin: 8px auto 28px; color: var(--text-2); font-size: 15px; line-height: 24px; max-width: 520px; }
+.start-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; text-align: left; }
+.start-card { display: flex; flex-direction: column; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.start-card h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+.start-card p { margin: 0 0 6px; color: var(--text-2); font-size: 13px; line-height: 20px; flex: 1; }
+.start-card.is-primary { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.three-steps { display: flex; justify-content: center; gap: 10px 22px; flex-wrap: wrap; list-style: none; margin: 28px 0 18px; padding: 0; font-size: 13px; color: var(--text-2); }
+.three-steps li { display: inline-flex; align-items: center; gap: 8px; }
+.three-steps i { font-style: normal; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--surface-3); color: var(--text); font-size: 12px; font-weight: 600; }
+.trust { display: inline-flex; gap: 8px; align-items: center; margin: 0; font-size: 13px; color: var(--text-3); }
+[data-layout="narrow"] .start-cards { grid-template-columns: 1fr; }
+[data-layout="narrow"] .welcome { padding: 24px 20px; }

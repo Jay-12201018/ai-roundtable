@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BudgetStopNotice, UsagePage, parseAmountYuan, type LedgerCommands } from '../../../src/renderer/features/usage';
+import { BudgetStopNotice, UsagePage, parseAmountYuan, rangeOf, type LedgerCommands } from '../../../src/renderer/features/usage';
 import type { SummaryCommands } from '../../../src/renderer/features/host';
 import { ContextHint, SummaryDialog } from '../../../src/renderer/features/timeline';
 import { RequestDetails } from '../../../src/renderer/features/timeline/MessageItem';
@@ -114,9 +114,20 @@ describe('usage page (D108)', () => {
     expect(screen.getByRole('table').textContent).toContain('DeepSeek 直连');
     fireEvent.click(screen.getByRole('tab', { name: '按日期' }));
     expect(screen.getByRole('table').textContent).toContain('2026-10-23');
-    expect(screen.getByRole('region', { name: '未知费用' }).textContent).toContain('审查者');
+    expect(screen.getByRole('region', { name: '待核对的未知费用' }).textContent).toContain('审查者');
+    // D117: the page asks for this month by default and for everything on request.
+    expect(api.usage.getReport).toHaveBeenLastCalledWith({ since: expect.any(String), until: expect.any(String) });
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: 'all' } });
+    await waitFor(() => expect(api.usage.getReport).toHaveBeenLastCalledWith({}));
     fireEvent.click(screen.getByRole('button', { name: '导出 CSV' }));
     expect(await screen.findByText('已导出 3 条记录到“用量.csv”。')).toBeTruthy();
+    expect(api.usage.exportCsv).toHaveBeenLastCalledWith({});
+  });
+  it('turns 本月 and 上月 into calendar months in this computer’s time zone', () => {
+    const now = new Date(2026, 0, 15, 12);
+    expect(rangeOf('this-month', now)).toEqual({ since: new Date(2026, 0, 1).toISOString(), until: new Date(2026, 1, 1).toISOString() });
+    expect(rangeOf('last-month', now)).toEqual({ since: new Date(2025, 11, 1).toISOString(), until: new Date(2026, 0, 1).toISOString() });
+    expect(rangeOf('all', now)).toEqual({});
   });
 });
 
