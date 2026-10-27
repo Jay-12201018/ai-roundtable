@@ -94,6 +94,8 @@ const api: RoundtableApiContract = {
     recoverInterruptedRun: (runId, decision) => invoke('run.recoverInterruptedRun', { runId, decision }),
     addBudget: (input) => invoke('run.addBudget', input),
     resumeAfterBudget: (runId) => invoke('run.resumeAfterBudget', runId),
+    previewContinuation: (input) => invoke('run.previewContinuation', input),
+    continueDiscussion: (input) => invoke('run.continueDiscussion', input),
     onEvent: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, value: unknown) => {
         const parsed = runEventSchema.safeParse(value);

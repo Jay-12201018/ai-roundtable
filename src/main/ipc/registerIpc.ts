@@ -54,6 +54,8 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'host.command': (input) => host.command(input),
     'run.addBudget': (input) => service.addBudget(input),
     'run.resumeAfterBudget': (runId) => service.resumeAfterBudget(runId),
+    'run.previewContinuation': (input) => service.previewContinuation(input),
+    'run.continueDiscussion': (input) => service.continueDiscussion(input),
     'usage.getReport': () => usage.getReport(),
     'usage.writeOff': (input) => service.writeOffCharge(input),
     'usage.exportCsv': () => usage.exportCsv(window),
@@ -106,7 +108,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         ensureSender(event);
         return response;
       })();
-      if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.addBudget'
+      if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.addBudget' || channel === 'run.continueDiscussion'
         || channel === 'usage.writeOff' || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
