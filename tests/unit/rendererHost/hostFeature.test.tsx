@@ -5,7 +5,8 @@ import { DiscussionTimeline, type ProviderNames } from '../../../src/renderer/fe
 import { RunPanel, type PanelTab } from '../../../src/renderer/features/runPanel/RunPanel';
 import { HostComposer, interjectionBoxFor } from '../../../src/renderer/features/composer/Composer';
 import { HostTextArea } from '../../../src/renderer/features/host/HostTextArea';
-import { canContinueRun, nextSpeaker, nextSpeakerText, overrideCandidates, timelineSlots, turnSettled } from '../../../src/renderer/features/host/model';
+import { canContinueRun, nextSpeaker, nextSpeakerText, overrideCandidates, scheduledNext, timelineSlots, turnSettled } from '../../../src/renderer/features/host/model';
+import { mentionOptions } from '../../../src/renderer/features/composer/mention';
 import { compileWorkflow } from '../../../src/main/workflow';
 import type { HostApiContract } from '../../../src/shared/contracts/app';
 import type { RunSnapshot } from '../../../src/shared/types/run';
@@ -101,6 +102,32 @@ describe('R12 host projection model', () => {
     expect(canContinueRun(pausedSnapshot({ status: 'error' }))).toBe(true);
   });
 
+  it('D110: knows who the schedule has next, in a free discussion and in a workflow, so @ does not insert them twice', () => {
+    // Free discussion: b spoke last, c is next by plan; a member is named → nobody is "scheduled" any more.
+    expect(scheduledNext(pausedSnapshot())).toBe('c');
+    expect(scheduledNext(pausedSnapshot({ host: { instructions: [], actions: [], override: { actionId: 'o', agentId: 'a', status: 'pending', createdAt: time } } }))).toBeUndefined();
+    expect(scheduledNext(pausedSnapshot({ status: 'completed' }))).toBeUndefined();
+    // c is speaking now: it is not next, so @c still inserts a Turn after the current one; a is next by plan.
+    const base = pausedSnapshot();
+    const speaking = pausedSnapshot({ status: 'running', currentTurnId: 't3', activeAgentId: 'c',
+      turns: [...base.turns, { turnId: 't3', runId: 'run', agentId: 'c', turnIndex: 2, status: 'running' }] });
+    expect(scheduledNext(speaking)).toBe('a');
+    expect(mentionOptions(speaking).map(option => [option.agentId, option.reason])).toEqual([
+      ['a', '按计划就是下一位：只发插话，不多插一轮'], ['b', '点名后插入下一回合发言'], ['c', '点名后插入下一回合发言']]);
+    // Workflow 审查修订链 at its first step: the drafter is next; the mention menu says so and the panel offers no 点名 for it.
+    const plan = compileWorkflow(config('review-revision'), roomId, members.map(item => ({ ...item, modelId: 'mock' })));
+    const workflow = pausedSnapshot({ workflowSnapshot: plan as unknown as RunSnapshot['workflowSnapshot'], turns: [], messages: [], attempts: [], versions: [] });
+    expect(scheduledNext(workflow)).toBe(plan.steps[0].agentId);
+    expect(mentionOptions(workflow).find(option => option.agentId === plan.steps[0].agentId)?.reason).toBe('按计划就是下一位：只发插话，不多插一轮');
+  });
+
+  it('D110: the members tab offers no 点名 for the member the schedule already has next', () => {
+    render(<Harness snapshot={pausedSnapshot()} api={hostApi()} tab="members" />);
+    expect(screen.queryByRole('button', { name: '点名 成员 c' })).toBeNull();
+    expect(screen.getByRole('button', { name: '点名 成员 a' })).toBeTruthy();
+    expect(screen.getByText(/按计划的下一位不用点名，直接在下方插话即可/)).toBeTruthy();
+  });
+
   it('offers only current-stage members during a workflow', () => {
     const plan = compileWorkflow(config('review-revision'), roomId, members.map(item => ({ ...item, modelId: 'mock' })));
     const snapshot = pausedSnapshot({ workflowSnapshot: plan as unknown as RunSnapshot['workflowSnapshot'], turns: pausedSnapshot().turns.slice(0, 1) });
@@ -145,15 +172,15 @@ describe('R12 host UI', () => {
     const api = hostApi(input => new Promise(resolve => { finish = () => resolve({ runId: input.runId, actionId: 'o', kind: input.kind, duplicate: false }); }));
     const onApplied = vi.fn();
     render(<Harness snapshot={pausedSnapshot()} api={api} onApplied={onApplied} />);
-    const button = screen.getByRole('button', { name: '点名 成员 c' });
+    const button = screen.getByRole('button', { name: '点名 成员 a' });
     fireEvent.click(button); fireEvent.click(button);
     expect(api.command).toHaveBeenCalledTimes(1);
-    expect(api.command.mock.calls[0][0]).toMatchObject({ runId: 'run', kind: 'setOverride', agentId: 'c', clientRequestId: expect.any(String) });
+    expect(api.command.mock.calls[0][0]).toMatchObject({ runId: 'run', kind: 'setOverride', agentId: 'a', clientRequestId: expect.any(String) });
     expect(screen.getByText('正在发送，等待主进程确认…')).toBeTruthy();
     await act(async () => { finish(); });
     expect(onApplied).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('已点名成员 c，将在下一回合发言。')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '点名 成员 c' }));
+    expect(screen.getByText('已点名成员 a，将在下一回合发言。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '点名 成员 a' }));
     await waitFor(() => expect(api.command).toHaveBeenCalledTimes(2));
     expect(api.command.mock.calls[1][0].clientRequestId).not.toBe(api.command.mock.calls[0][0].clientRequestId);
   });

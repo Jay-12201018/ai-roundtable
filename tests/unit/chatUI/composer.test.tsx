@@ -95,7 +95,7 @@ describe('interjection box: Enter sends, Shift+Enter adds a line, an IME Enter o
     fireEvent.change(box, { target: { value: '@' } });
     const menu = screen.getByRole('listbox', { name: '点名下一位' });
     expect(within(menu).getAllByRole('option').map(option => option.querySelector('.grow')!.textContent)).toEqual([
-      '起草者按计划本来就是下一位', '审查者不在当前阶段，按讨论方式现在不能点名', '综合者不在当前阶段，按讨论方式现在不能点名']);
+      '起草者按计划就是下一位：只发插话，不多插一轮', '审查者不在当前阶段，按讨论方式现在不能点名', '综合者不在当前阶段，按讨论方式现在不能点名']);
     expect(within(menu).getAllByRole('option')[1].getAttribute('aria-disabled')).toBe('true');
     fireEvent.keyDown(box, { key: 'ArrowDown' });
     expect(within(menu).getAllByRole('option')[1].getAttribute('aria-selected')).toBe('true');

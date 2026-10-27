@@ -1,5 +1,5 @@
 import type { RunSnapshot } from '../../../shared/types/run';
-import { nextSpeaker, overrideCandidates } from '../host/model';
+import { overrideCandidates, scheduledNext } from '../host/model';
 
 export type MentionOption = { agentId: string; name: string; available: boolean; reason: string };
 
@@ -8,11 +8,11 @@ export function mentionOptions(snapshot: RunSnapshot | undefined): MentionOption
   const members = snapshot?.execution?.membersSnapshot ?? [];
   const allowed = new Set(overrideCandidates(snapshot).map(member => member.agentId));
   const current = snapshot?.host?.override?.agentId;
-  const planned = current ? undefined : nextSpeaker(snapshot)?.agentId;
+  const planned = scheduledNext(snapshot);
   return members.map(member => ({
     agentId: member.agentId, name: member.displayName, available: allowed.has(member.agentId),
     reason: current === member.agentId ? '已点名，排在下一回合' : !allowed.has(member.agentId) ? '不在当前阶段，按讨论方式现在不能点名'
-      : planned === member.agentId ? '按计划本来就是下一位' : '点名后排在下一回合发言',
+      : planned === member.agentId ? '按计划就是下一位：只发插话，不多插一轮' : '点名后插入下一回合发言',
   }));
 }
 

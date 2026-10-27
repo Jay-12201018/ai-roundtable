@@ -81,3 +81,27 @@ describe('mentions are parsed only from what the host typed', () => {
     expect(mentionQuery('a@b', 3)).toBeUndefined();
   });
 });
+
+describe('D110: @ the member the schedule already has next sends only the words', () => {
+  it('does not insert a Turn for the planned next speaker; they read the words when they speak', async () => {
+    const { request, calls } = requester();
+    const result = await sendInterjection('@审查者 先核一下预算数字', options, undefined, request, 'b');
+    expect(calls).toEqual([{ kind: 'interject', content: '@审查者 先核一下预算数字' }]);
+    expect(result).toMatchObject({ clear: true, steps: { override: 'scheduled', interject: 'sent' } });
+    expect(result.notice).toBe('审查者按计划就是下一位，会在发言时看到你这段话（没有多插一轮）。');
+    const bare = requester();
+    expect(await sendInterjection('@审查者', options, undefined, bare.request, 'b')).toMatchObject({ steps: { override: 'scheduled', interject: 'none' }, notice: '审查者按计划就是下一位，不用点名。' });
+    expect(bare.calls).toEqual([]);
+  });
+
+  it('still inserts a Turn for anyone else, such as the member speaking now, or when another member is already named', async () => {
+    // 审查者 is speaking; 审查 is next by plan: naming 审查者 inserts a Turn after the current one.
+    let probe = requester();
+    await sendInterjection('@审查者 再说说', options, undefined, probe.request, 'a');
+    expect(probe.calls).toEqual([{ kind: 'setOverride', agentId: 'b' }, { kind: 'interject', content: '@审查者 再说说' }]);
+    // With 审查 already named, the schedule is not what decides; naming 审查者 replaces that choice as before.
+    probe = requester();
+    await sendInterjection('@审查者 换你', options, 'a', probe.request, 'b');
+    expect(probe.calls[0]).toEqual({ kind: 'setOverride', agentId: 'b' });
+  });
+});

@@ -108,6 +108,17 @@ export function nextSpeaker(snapshot: RunSnapshot | undefined): (SpeakerProjecti
   return after === 'end' ? undefined : after;
 }
 
+/**
+ * D110: the member the schedule already has next (by plan, or answering a continuation) while nobody is named.
+ * Naming that member would only make them speak twice, so the box sends just the words and the panel offers no 点名.
+ * A projection: if Main has meanwhile started that member's Turn, the words reach the members after it instead.
+ */
+export function scheduledNext(snapshot: RunSnapshot | undefined): string | undefined {
+  if (!snapshot || snapshot.host?.override || !['running', 'pausing', 'paused'].includes(snapshot.status)) return;
+  const next = nextSpeaker(snapshot);
+  return next && next.source !== 'override' ? next.agentId : undefined;
+}
+
 /** Plain words for where a speaker comes from, as the composer strip and the members tab say it. */
 export const speakerSourceText: Record<SpeakerProjection['source'], string> = {
   override: '主持人点名，插入一轮，不打断正在进行的发言',

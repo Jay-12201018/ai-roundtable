@@ -147,6 +147,33 @@ async function main() {
   check(fixture.requests.length === 8, 'Opening 新讨论 sent nothing');
   check(!(await status()).includes('已完成') && (await status()).includes('校园跑腿讨论'), 'No Run selected after 新讨论: the top bar names the room');
   await capture('new-discussion', '点「新讨论」才开一场新的讨论；上一场在侧栏里');
+
+  // ── Path 4 (D110): while 起草者 speaks, @审查者 — already next by plan — sends only the words ─────────────
+  await field('讨论目标'); await ui.selectAll();
+  await ime('pinggu', '评估一下试点的风险。');
+  if (await js(`document.querySelector('label.chip-check input')?.checked`)) await click('每回合后暂停', { selector: 'label' });
+  fixture.mode = 'hang';
+  await click('开始讨论');
+  await until(`document.querySelector('.thread-item .md')?.textContent.length > 0 && document.querySelector('[aria-label="主持人插话"]')`, 'drafter streaming');
+  check((await strip('下一位')).includes('下一位：审查者（按计划）'), 'While 起草者 speaks, 审查者 is next by plan');
+  await click('点名', { selector: '.chip' });
+  await until(`document.querySelector('[role=listbox][aria-label="点名下一位"]')`, 'mention menu');
+  check((await js(`document.querySelector('[role=listbox][aria-label="点名下一位"]').innerText`)).replace(/\s+/gu, '').includes('审查者按计划就是下一位：只发插话，不多插一轮'), 'The menu says naming 审查者 only sends the words');
+  await key('ArrowDown'); await key('Enter');
+  await ime('xianhe', '先核一下预算数字。', { enterWhileComposing: true });
+  await key('Enter');
+  await until(`document.body.innerText.includes('审查者按计划就是下一位，会在发言时看到你这段话（没有多插一轮）。')`, 'scheduled notice');
+  snap = await runSnapshot();
+  check(!snap.host.override && !snap.host.actions.some(action => action.kind === 'setOverride'), 'No Override was sent for the planned next speaker');
+  check(snap.messages.some(message => message.content === '@审查者 先核一下预算数字。'), 'The words reached the public history');
+  await capture('at-planned-next', '起草者发言时 @审查者（按计划就是下一位）：只发插话，提示“审查者按计划就是下一位，会在发言时看到你这段话（没有多插一轮）”');
+  fixture.mode = 'ok'; fixture.release();
+  await statusHas('已完成', 60000);
+  snap = await runSnapshot();
+  check(JSON.stringify(speakers(snap)) === JSON.stringify(['起草者', '审查者', '综合者']) && snap.turns.every(turn => !turn.overrideActionId), 'Order 起草者 → 审查者 → 综合者, nobody twice');
+  const critic = fixture.requests.slice(8).find(request => request.messages.at(-1).content.includes('现在由你（成员「审查者」'));
+  check(Boolean(critic) && JSON.stringify(critic.messages).includes('先核一下预算数字'), "审查者's own planned request carried the words");
+  await capture('at-planned-next-done', '结束：起草者 → 审查者 → 综合者，审查者只说一次，回应了这段话', '.thread-item:last-child');
   await ui.finish();
 }
 

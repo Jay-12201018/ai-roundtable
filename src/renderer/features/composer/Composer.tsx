@@ -3,7 +3,7 @@ import { ArrowUp, AtSign, Check, ChevronDown, Clock, Ellipsis, JapaneseYen, Paus
 import type { RunSnapshot } from '../../../shared/types/run';
 import { Avatar, Button, IconButton, cx, useDismiss } from '../../components/ui';
 import type { RunApiContract } from '../../../shared/contracts/run';
-import { canContinueRun, canDirectRun, nextSpeaker, nextSpeakerText } from '../host/model';
+import { canContinueRun, canDirectRun, nextSpeaker, nextSpeakerText, scheduledNext } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
 import { sendInterjection } from './interject';
 import { mentionedMembers, mentionOptions, mentionQuery, type MentionOption } from './mention';
@@ -149,7 +149,7 @@ function MentionMenu({ id, options, query, active, onPick, onHover, continuing }
       <Avatar name={option.name} size="sm" /><span className="grow">{option.name}<small>{option.reason}</small></span>{option.reason.startsWith('已点名') && <Check aria-hidden size={14} />}
     </button>)}
     <p className="pop-foot">{continuing ? '带 @ 时只有这位成员回应你这段话；不带 @ 时，所有成员按顺序各回应一次。'
-      : '被点名的成员插入一轮发言，之后回到原计划，原计划的成员不会被跳过。按讨论方式进行时，只能点名当前阶段的成员。发送时，带 @ 的插话会先点名、再插话。'}</p>
+      : '被点名的成员插入一轮发言，之后回到原计划，原计划的成员不会被跳过；@ 按计划的下一位只发插话，不多插一轮。按讨论方式进行时，只能点名当前阶段的成员。'}</p>
   </div>;
 }
 
@@ -226,7 +226,7 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
       setText('');
       return;
     }
-    const result = await sendInterjection(text, options, override?.agentId, commands.request);
+    const result = await sendInterjection(text, options, override?.agentId, commands.request, scheduledNext(snapshot));
     commands.report({ notice: result.notice, error: result.error });
     if (result.clear) setText('');
   };

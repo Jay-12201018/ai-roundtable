@@ -5,7 +5,7 @@ import { formatYuan } from '../../../shared/schemas/budget';
 import { Avatar, Button, IconButton, Pill, Tabs, cx } from '../../components/ui';
 import { statusLabels } from '../../locales/zhCN';
 import { HostTextArea } from '../host/HostTextArea';
-import { canContinueRun, canDirectRun, isContinuationTurn, nextSpeaker, nextSpeakerText, overrideCandidates, planTurnCount, summaryWritable, timelineSlots, usedSummary } from '../host/model';
+import { canContinueRun, canDirectRun, isContinuationTurn, nextSpeaker, nextSpeakerText, overrideCandidates, planTurnCount, scheduledNext, summaryWritable, timelineSlots, usedSummary } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
 import { parseBudgetYuan, yuanShort, type LedgerCommands } from '../usage';
 import { workflowProgressForFeature, workflowTemplateLabels } from '../workflows/productionAdapter';
@@ -107,6 +107,8 @@ function MembersTab({ snapshot, commands, providers }: { snapshot: RunSnapshot; 
   const next = ['running', 'pausing', 'paused'].includes(snapshot.status) || override ? nextSpeaker(snapshot) : undefined;
   const nextText = next ? nextSpeakerText(next) : undefined;
   const speaking = snapshot.turns.find(turn => turn.turnId === snapshot.currentTurnId)?.agentId;
+  // D110: the member the schedule already has next gets no 点名 (it would only make them speak twice); its row says 下一位.
+  const scheduled = scheduledNext(snapshot);
   const disabled = !commands.available || commands.pending !== undefined;
   return <section className="ctx-sec"><h3>本场成员</h3>
     <p className="small ctx-lead">{nextText ? `下一位：${nextText.name}（${nextText.source}）${nextText.then ? ` · ${nextText.then}` : ''}`
@@ -116,12 +118,12 @@ function MembersTab({ snapshot, commands, providers }: { snapshot: RunSnapshot; 
       return <div key={member.agentId} className="member-row"><Avatar name={member.displayName} />
         <div className="info"><b>{member.displayName}</b><small>角色：{member.roleTemplateId || '未记录'} · {modelLabel(member, providers)}</small></div>
         {state && <Pill tone={state === '正在发言' ? 'live' : 'neutral'}>{state}</Pill>}
-        {directable && candidates.has(member.agentId) && override?.agentId !== member.agentId && <Button size="sm" variant="quiet" disabled={disabled} aria-label={`点名 ${member.displayName}`}
+        {directable && candidates.has(member.agentId) && override?.agentId !== member.agentId && scheduled !== member.agentId && <Button size="sm" variant="quiet" disabled={disabled} aria-label={`点名 ${member.displayName}`}
           onClick={() => void commands.send('override', { kind: 'setOverride', agentId: member.agentId }, `已点名${member.displayName}，将在下一回合发言。`)}>点名</Button>}
       </div>;
     })}
     {override && directable && <Button size="sm" disabled={disabled} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名，恢复按计划发言。')}>取消点名</Button>}
-    {directable && <p className="small muted">点名是在下一回合插入一轮：不占用计划的回合{snapshot.workflow ? '和步骤' : ''}，之后回到原计划，原计划的成员不会被跳过。{snapshot.workflow ? '按讨论方式进行时只能点名当前阶段的成员。' : ''}</p>}
+    {directable && <p className="small muted">点名是在下一回合插入一轮：不占用计划的回合{snapshot.workflow ? '和步骤' : ''}，之后回到原计划，原计划的成员不会被跳过。按计划的下一位不用点名，直接在下方插话即可。{snapshot.workflow ? '按讨论方式进行时只能点名当前阶段的成员。' : ''}</p>}
     <p className="small muted">成员名单在讨论开始时固定；在「房间」里改成员，只影响之后的讨论。也可以在下方输入框里输入 @ 点名。</p>
   </section>;
 }
