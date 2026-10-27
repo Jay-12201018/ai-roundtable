@@ -29,7 +29,7 @@ describe('shared configuration migration 3', () => {
   it.each([1, 2])('upgrades v%i once, preserving original-version backup, partial output and unknown metadata', async version => {
     const f = legacy(version); const db = new Database(f.path); let raw: Sqlite.Database | undefined;
     try { await db.initialize(); await db.initialize(); raw = new Sqlite(f.path, { readonly: true });
-      expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1,2,3,4,5,6,7,8,9,10]);
+      expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1,2,3,4,5,6,7,8,9,10,11]);
       expect(db.getRun('run')).toMatchObject({ task: null, membersSnapshot: null, elapsedExecutionMs: null });
       expect(db.getMessage('m')?.content).toBe('partial'); expect(db.rawKeyRecord('key-ref')?.encryptedValue).toBe('opaque-ciphertext');
       expect(db.getProviderConfiguration('p')).toMatchObject({ id: 'p', keyReference: { id: 'key-ref' }, customModels: [], isDefault: false });

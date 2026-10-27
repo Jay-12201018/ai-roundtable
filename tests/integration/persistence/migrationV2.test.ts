@@ -39,7 +39,7 @@ describe('R03 migration 2 integration',()=>{
       expect(db.getRun('run')).toMatchObject({task:null,membersSnapshot:null,nextTurnIndex:null,elapsedExecutionMs:null});
       expect(db.getAttempt('request')).toMatchObject({inputSnapshot:null,createdAt:null,startedAt:null,finishedAt:null});
       raw=new Sqlite(f.path,{readonly:true});
-      expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1,2,3,4,5,6,7,8,9,10]);
+      expect(raw.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all()).toEqual([1,2,3,4,5,6,7,8,9,10,11]);
       const receipt=raw.prepare('SELECT id,version,sha256,byte_count,verified_at FROM schema_backups').get() as {id:number;version:number;sha256:string;byte_count:number;verified_at:string};
       expect(receipt.version).toBe(1);expect(receipt.sha256).toMatch(/^[a-f0-9]{64}$/);expect(receipt.byte_count).toBeGreaterThan(0);expect(receipt.verified_at).toMatch(/^2026-/);
       const restored=await db.prepareRegisteredRestore(receipt.id);
@@ -81,7 +81,7 @@ describe('R03 migration 2 integration',()=>{
     } finally {backup?.close();db.close();reader.exec('ROLLBACK');reader.close();writer.close();f.dispose();}
   });
 
-  it.each([{versions:[1,3]},{versions:[1,2,3,4,5,6,7,8,9,10,11]}])('refuses a gap or newer ledger $versions before altering the original database',({versions})=>{
+  it.each([{versions:[1,3]},{versions:[1,2,3,4,5,6,7,8,9,10,11,12]}])('refuses a gap or newer ledger $versions before altering the original database',({versions})=>{
     const f=fixture();let raw=new Sqlite(f.path);raw.prepare('INSERT INTO schema_migrations VALUES(?,?)').run(versions.at(-1),'2026-10-13T00:00:00.000Z');
     for (const v of versions.slice(1,-1)) raw.prepare('INSERT INTO schema_migrations VALUES(?,?)').run(v,'2026-10-13T00:00:00.000Z');raw.close();
     const before=readFileSync(f.path);const db=new Database(f.path);

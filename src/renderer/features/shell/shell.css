@@ -1,8 +1,8 @@
 /* Shell: navigation | discussion | 本场信息. ≥1280 all three; 1024–1279 the panel is a drawer; <1024 both are drawers. */
 .app { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; height: 100dvh; background: var(--bg); color: var(--text); }
-.app-side { width: 256px; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--sidebar); }
-.app-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.app-context { width: 320px; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); }
+.app-side { grid-column: 1; width: 256px; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--sidebar); }
+.app-main { grid-column: 2; position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.app-context { grid-column: 3; width: 320px; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); }
 .drawer .sidebar { height: 100%; background: var(--sidebar); }
 .drawer .run-panel { background: var(--bg); }
 
@@ -63,7 +63,7 @@
 
 /* Pages that are not redesigned yet (rooms, workflow, usage, settings): new tokens, own scroll, a way back. */
 .page { flex: 1; min-height: 0; overflow: auto; }
-.page-inner { max-width: 1080px; margin: 0 auto; padding: 0 0 48px; }
+.legacy .page-inner { max-width: 1080px; margin: 0 auto; padding: 0 0 48px; }
 .appearance { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; max-width: 1080px; margin: 0 auto; padding: 20px 24px 0; }
 .appearance h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
 .appearance p { margin: 2px 0 0; color: var(--text-2); font-size: 13px; }

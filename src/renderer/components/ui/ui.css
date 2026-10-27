@@ -81,6 +81,7 @@
 /* Fields */
 .field { display: grid; gap: 6px; align-content: start; }
 .field > span, .field > label { font-weight: 500; }
+.field-optional { font-weight: 400; margin-left: 6px; }
 .field-help { font-size: 13px; line-height: 19px; color: var(--text-2); margin: 0; }
 .field-error { font-size: 13px; line-height: 19px; color: var(--danger); margin: 0; }
 .input, .select, .textarea { width: 100%; min-width: 0; min-height: 36px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--text); }
@@ -111,6 +112,7 @@ dialog.modal::backdrop { background: var(--scrim); }
 .modal-head > div { flex: 1; min-width: 0; }
 .modal-head h2 { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
 .modal-head p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
+.modal-below { padding: 0 24px; }
 .modal-body { padding: 16px 24px 20px; }
 .modal-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 24px 20px; border-top: 1px solid var(--line); }
 .modal-foot .is-left { margin-right: auto; font-size: 13px; color: var(--text-2); }

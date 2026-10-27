@@ -98,9 +98,11 @@ it('refreshes member Provider summaries when a settings mutation settles after l
   const gate = deferred<void>(); const update = f.api.settings.updateProvider.bind(f.api.settings);
   vi.spyOn(f.api.settings, 'updateProvider').mockImplementation(async input => { await gate.promise; return update(input); });
   render(<App />); fireEvent.click(screen.getByRole('button', { name: '设置' }));
-  await screen.findByLabelText('Provider 名称'); fireEvent.change(screen.getByLabelText('Provider 名称'), { target: { value: '新 Provider' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
-  fireEvent.click(screen.getByRole('button', { name: '返回讨论' })); openRooms();
+  fireEvent.click(await screen.findByRole('button', { name: '展开 旧 Provider' }));
+  fireEvent.click(await screen.findByText('高级与删除'));
+  fireEvent.change(await screen.findByLabelText('服务名称'), { target: { value: '新 Provider' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存名称' }));
+  openRooms();
   fireEvent.click(await screen.findByRole('button', { name: '编辑 成员' }));
   expect(within(screen.getByRole('dialog')).getByRole('option', { name: '旧 Provider · Mock' })).toBeTruthy();
   await act(async () => gate.resolve());
@@ -110,12 +112,12 @@ it('refreshes member Provider summaries when a settings mutation settles after l
 it('persists explicit theme preference and can return to following the system', async () => {
   fixture(); const view = render(<App />);
   await act(async () => {});
-  // R16: 外观 lives in 设置.
-  fireEvent.click(screen.getByRole('button', { name: '设置' }));
+  // R16: 外观 lives in 设置 › 外观.
+  fireEvent.click(screen.getByRole('button', { name: '设置' })); fireEvent.click(screen.getByRole('button', { name: '外观' }));
   fireEvent.click(within(screen.getByRole('group', { name: '外观' })).getByRole('button', { name: '深色' }));
   expect(document.documentElement.dataset.theme).toBe('dark'); view.unmount();
   render(<App />); await act(async () => {});
-  fireEvent.click(screen.getByRole('button', { name: '设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '设置' })); fireEvent.click(screen.getByRole('button', { name: '外观' }));
   expect(within(screen.getByRole('group', { name: '外观' })).getByRole('button', { name: '深色' }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.click(within(screen.getByRole('group', { name: '外观' })).getByRole('button', { name: '跟随系统' }));
   expect(document.documentElement.dataset.theme).toBe('system');
@@ -165,25 +167,28 @@ it.each(['createProvider', 'deleteProvider', 'setKey', 'deleteKey'] as const)('r
     : operation === 'setKey' ? vi.spyOn(f.api.settings, 'setKey').mockImplementation(async input => { await gate.promise; return original.setKey(input); })
     : vi.spyOn(f.api.settings, 'deleteKey').mockImplementation(async input => { await gate.promise; return original.deleteKey(input); });
   render(<App />); fireEvent.click(screen.getByRole('button', { name: '设置' }));
-  await screen.findByLabelText('Provider 名称');
   if (operation === 'createProvider') {
-    fireEvent.click(screen.getByRole('button', { name: '新增 Provider' }));
-    fireEvent.change(screen.getByLabelText('Provider 名称'), { target: { value: '新增 Provider' } });
-    fireEvent.change(screen.getByLabelText('Provider 类型'), { target: { value: 'mock' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
+    fireEvent.click(await screen.findByRole('button', { name: '添加服务' }));
+    fireEvent.click(screen.getByRole('button', { name: /^演示（Mock）/u })); fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加演示服务' }));
   } else if (operation === 'deleteProvider') {
-    fireEvent.click(screen.getByRole('button', { name: '删除 Provider' })); fireEvent.click(screen.getByRole('button', { name: '确认删除 Provider' }));
+    fireEvent.click(await screen.findByRole('button', { name: '展开 原 Provider' })); fireEvent.click(await screen.findByText('高级与删除'));
+    fireEvent.click(screen.getByRole('button', { name: '删除服务…' })); fireEvent.click(screen.getByRole('button', { name: '确认删除服务' }));
+  } else if (operation === 'setKey') {
+    fireEvent.click(await screen.findByRole('button', { name: '展开 原 Provider' }));
+    fireEvent.click(await screen.findByRole('button', { name: '填写 Key' }));
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'fixture-key' } }); fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
   } else {
-    fireEvent.click(screen.getByLabelText('我已核对请求目标'));
-    if (operation === 'setKey') { fireEvent.change(screen.getByLabelText('API Key', { selector: 'input' }), { target: { value: 'fixture-key' } }); fireEvent.submit(screen.getByLabelText('API Key', { selector: 'input' }).closest('form')!); }
-    else { fireEvent.click(screen.getByRole('button', { name: '删除 Key' })); fireEvent.click(screen.getByRole('button', { name: '确认删除 Key' })); }
+    fireEvent.click(await screen.findByRole('button', { name: '展开 原 Provider' })); fireEvent.click(await screen.findByText('高级与删除'));
+    fireEvent.click(await screen.findByRole('button', { name: '删除 Key…' })); fireEvent.click(screen.getByRole('button', { name: '确认删除 Key' }));
   }
   await waitFor(() => expect(mutation).toHaveBeenCalledOnce());
-  fireEvent.click(screen.getByRole('button', { name: '返回讨论' }));
+  // Leave settings before the mutation settles.
+  fireEvent.click(screen.getByRole('button', { name: '用量' }));
   const callsBeforeSettling = summaries.mock.calls.length;
   await act(async () => gate.resolve());
   await waitFor(() => expect(summaries.mock.calls.length).toBeGreaterThan(callsBeforeSettling));
-  if (operation === 'createProvider') expect((await f.api.settings.listProviderSummaries()).some(p => p.name === '新增 Provider')).toBe(true);
+  if (operation === 'createProvider') expect((await f.api.settings.listProviderSummaries()).some(p => p.name === '演示（Mock）')).toBe(true);
   if (operation === 'deleteProvider') expect(f.db.getProviderConfiguration('p')).toBeUndefined();
   if (operation === 'setKey' || operation === 'deleteKey') expect((await f.api.settings.getProviderKeyState({ providerId: 'p' })).state).toBe(operation === 'setKey' ? 'session' : 'missing');
 });

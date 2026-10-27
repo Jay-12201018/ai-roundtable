@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
-import { ArrowLeft, Check, Plus, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Check, Lock, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
 import { RoomsFeature } from './features/rooms/RoomsFeature';
 import { WorkflowFeature, type WorkflowDraft, type WorkflowPreviewResult } from './features/workflows';
 import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressForFeature, workflowTemplateLabels } from './features/workflows/productionAdapter';
 import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
-import { SettingsFeature } from './features/settings/SettingsFeature';
+import { SettingsPage, isUserAddress, useReadiness, type SettingsSection } from './features/settings';
 import { useHostCommands, useSummaryCommands } from './features/host';
 import { UsagePage, chargeOfMessage, parseBudgetYuan, useLedgerCommands } from './features/usage';
 import { DiscussionTimeline, RunNotices, SummaryDialog, providerNamesFrom } from './features/timeline';
@@ -15,7 +15,7 @@ import { RunPanel, type PanelTab } from './features/runPanel/RunPanel';
 import { Sidebar, useRoomDirectory } from './features/shell/Sidebar';
 import { Topbar } from './features/shell/Topbar';
 import { Avatar, Button, Drawer, Pill } from './components/ui';
-import { useLayout, useTheme, themeLabels, type Theme } from './theme/useTheme';
+import { useLayout, useTheme } from './theme/useTheme';
 import { statusLabels } from './locales/zhCN';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT } from '../shared/schemas/run';
 import { formatYuan } from '../shared/schemas/budget';
@@ -40,6 +40,7 @@ export function App() {
   const [api] = useState(() => window.roundtable);
   const [session] = useState(() => createRendererSession(api, localStorage, { requireRoom: true }));
   const [page, setPage] = useState<Page>('discussion');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('services');
   const [bootReady, setBootReady] = useState(false);
   const [roomsReady, setRoomsReady] = useState(false);
   const [roomsKey, setRoomsKey] = useState(0);
@@ -108,6 +109,7 @@ export function App() {
       getKeyStorageStatus: () => api.settings.getKeyStorageStatus(),
       listModels: input => api.settings.listModels(input),
       testConnection: input => api.settings.testConnection(input),
+      ...(api.settings.listModelReadiness ? { listModelReadiness: () => api.settings.listModelReadiness!() } : {}),
     };
   }, [api, reloadProviders]);
   useEffect(() => {
@@ -179,11 +181,13 @@ export function App() {
   const selectRoom = useCallback((id: string) => session.selectRoom(id), [session]);
   const clearRoom = useCallback(() => session.selectRoom(undefined), [session]);
   const selectRun = useCallback((id: string) => { setPage('discussion'); setNavOpen(false); void session.selectRun(id); }, [session]);
-  const openSettings = useCallback(() => { setPage('settings'); setNavOpen(false); }, []);
+  const openSettings = useCallback((section: SettingsSection = 'services') => { setSettingsSection(section); setPage('settings'); setNavOpen(false); }, []);
   const openRooms = () => { setRoomsReady(true); setRoomsKey(value => value + 1); setPage('rooms'); setNavOpen(false); };
   const newDiscussion = (id = roomId) => { if (id) session.selectRoom(id); setPage('discussion'); setNavOpen(false); };
 
   const providerNames = useMemo(() => providerNamesFrom(providers, providerLoadState), [providers, providerLoadState]);
+  // D114: what Main would decide for each configured model now; D113: where each confirmed Key goes.
+  const readiness = useReadiness(settingsApi, providers);
   const synchronizeHost = useCallback(() => { void session.synchronize(); }, [session]);
   const hostCommands = useHostCommands(api.host, snapshot?.runId, synchronizeHost);
   // R13B: budget top-ups, write-offs and summaries of the selected Run (D104/D105/D107).
@@ -292,7 +296,13 @@ export function App() {
     step: { enabled: stepEnabled, run: () => void session.control('step') }, stop: { enabled: stopEnabled, run: () => void session.control('stop') },
   } : undefined;
   const syncNotices = <>{syncStatus === 'syncing' && !snapshot && <p role="status" className="muted">正在同步运行状态…</p>}</>;
-  const taskNotices = (error && !snapshot && syncStatus !== 'error') || workflowInvalidated || workflowMembersError || otherLive ? <div className="composer-alerts">
+  // D113 (R16 D1-B): a service whose address the host typed says once, before the start, where this discussion goes.
+  const userTargets = [...new Set((enabledMembers ?? []).map(member => providers.find(provider => provider.id === member.providerId))
+    .filter((provider): provider is ProviderSummary => Boolean(provider) && isUserAddress({ kind: provider!.kind, baseUrl: readiness.rows?.find(row => row.providerId === provider!.id)?.confirmedBaseUrl ?? '' }))
+    .map(provider => readiness.rows?.find(row => row.providerId === provider.id)?.confirmedBaseUrl).filter((url): url is string => Boolean(url)))];
+  const targetNotice = !snapshot && userTargets.length > 0 ? <p className="composer-target" role="note"><Lock aria-hidden size={14} />这场讨论的目标和发言将发往 {userTargets.join('、')}（你在设置里填写并确认过的地址）。</p> : undefined;
+  const taskNotices = (error && !snapshot && syncStatus !== 'error') || workflowInvalidated || workflowMembersError || otherLive || targetNotice ? <div className="composer-alerts">
+    {targetNotice}
     {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始或继续别的讨论。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}
     {error && !snapshot && syncStatus !== 'error' && !otherLive && <p role="alert" className="field-error">{error}</p>}
     {workflowInvalidated && <p role="alert" className="field-error">房间成员已变化，请重新选择讨论方式后再开始。</p>}
@@ -347,7 +357,7 @@ export function App() {
     actions={name === 'settings' ? undefined : <Button variant="quiet" icon={ArrowLeft} onClick={goDiscussion}>返回讨论</Button>} />;
   const pageBody: Record<Exclude<Page, 'discussion'>, () => ReactNode> = {
     rooms: () => roomsReady ? <RoomsFeature key={roomsKey} api={api.rooms} initialRoomId={roomId} providers={providers} providerLoadState={providerLoadState} onReloadProviders={reloadProviders}
-      onSelectRoom={selectRoom} onClearRoom={clearRoom} onSelectRun={selectRun} onOpenSettings={openSettings} /> : <p role="status" className="page-inner">正在读取…</p>,
+      onSelectRoom={selectRoom} onClearRoom={clearRoom} onSelectRun={selectRun} onOpenSettings={() => openSettings()} /> : <p role="status" className="page-inner">正在读取…</p>,
     workflow: () => <div className="page-inner">
       {appliedWorkflow && <p role="status" className="appearance">下次开始将使用「{workflowTemplateLabels[appliedWorkflow.config.templateId]}」，此配置尚未启动。</p>}
       {workflowMembersError && <p role="alert" className="appearance">无法加载工作流成员，请返回讨论后重试。</p>}
@@ -356,18 +366,14 @@ export function App() {
         theme={theme} onPreview={previewWorkflow} onApply={applyWorkflow} progress={workflowProgressForFeature(snapshot)} />
         : <p role="status" className="appearance">正在加载工作流成员…</p>}</div>,
     usage: () => <UsagePage api={api} onOpenRun={selectRun} />,
-    settings: () => <>
-      <section className="appearance" aria-label="外观"><div><h2>外观</h2><p>跟随系统，或固定用浅色、深色；切换立即生效，并记在这台电脑上。</p></div>
-        <div className="seg" role="group" aria-label="外观">{(['system', 'light', 'dark'] as Theme[]).map(value =>
-          <button key={value} type="button" aria-pressed={theme === value} onClick={() => setTheme(value)}>{themeLabels[value]}</button>)}</div></section>
-      <SettingsFeature api={settingsApi} onClose={goDiscussion} /></>,
+    settings: () => null,
   };
 
   const sidebar = (drawer: boolean) => <Sidebar rooms={directory.rooms} runs={directory.runs} failed={directory.failed} onRetry={() => void directory.reload()}
     roomId={roomId} runId={snapshot?.runId ?? runId} page={page} ready={bootReady} monthSpend={monthSpend}
     noRealProvider={providerLoadState === 'ready' && !providers.some(provider => provider.kind !== 'mock' && provider.kind !== null && provider.enabled)}
     onSelectRoom={id => newDiscussion(id)} onSelectRun={selectRun} onNewDiscussion={() => newDiscussion()} onManageRooms={openRooms}
-    onOpenUsage={() => { setPage('usage'); setNavOpen(false); }} onOpenSettings={openSettings}
+    onOpenUsage={() => { setPage('usage'); setNavOpen(false); }} onOpenSettings={() => openSettings()}
     onCollapse={drawer ? undefined : () => collapseSidebar(true)} onClose={drawer ? () => setNavOpen(false) : undefined} />;
   const panel = <RunPanel snapshot={snapshot} commands={hostCommands} ledger={ledger} providers={providerNames} tab={panelTab} onTab={setPanelTab}
     onClose={() => { if (layout === 'wide') { setPanelPinned(false); remember('roundtable.panelOpen', false); } else setPanelDrawer(false); }}
@@ -384,6 +390,10 @@ export function App() {
           onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined} onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined} />
         {discussionBody}
         {composer}
+      </> : page === 'settings' ? <>
+        {(layout === 'narrow' || sidebarCollapsed) && pageTopbar('settings')}
+        <SettingsPage api={settingsApi} network={api.network} lifecycle={api.app} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
+          theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onStart={roomId ? () => newDiscussion(roomId) : goDiscussion} />
       </> : <>{pageTopbar(page)}<div className="page legacy">{pageBody[page]()}</div></>}
     </main>
     {panelInline && <div className="app-context" id="run-panel" inert={anyDrawer || undefined}>{panel}</div>}

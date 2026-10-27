@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useId, useRef, type ButtonHTMLAttributes, type ComponentType, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import './ui.css';
+import './page.css';
 
 type IconType = ComponentType<{ 'aria-hidden'?: boolean; size?: number; strokeWidth?: number }>;
 const cx = (...names: Array<string | false | undefined | null>) => names.filter(Boolean).join(' ');
@@ -90,7 +91,7 @@ export function Drawer({ side, label, open, onClose, children, className }: { si
 }
 
 /** A modal dialog with title, optional description and footer; Esc closes unless busy; focus returns on close. */
-export function Modal({ title, description, onClose, busy, children, footer, wide }: { title: string; description?: ReactNode; onClose: () => void; busy?: boolean; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+export function Modal({ title, description, onClose, busy, children, footer, wide, below, className }: { title: string; description?: ReactNode; onClose: () => void; busy?: boolean; children: ReactNode; footer?: ReactNode; wide?: boolean; below?: ReactNode; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null); const titleId = useId();
   useReturnFocus(true);
   useEffect(() => {
@@ -98,10 +99,11 @@ export function Modal({ title, description, onClose, busy, children, footer, wid
     if (typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal(); } else dialog.setAttribute('open', '');
     return () => { if (typeof dialog.close === 'function' && dialog.open) dialog.close(); };
   }, []);
-  return <dialog ref={ref} className="modal" style={wide ? { width: 'min(760px, calc(100vw - 32px))' } : undefined} aria-modal="true" aria-labelledby={titleId}
+  return <dialog ref={ref} className={cx('modal', className)} style={wide ? { width: 'min(760px, calc(100vw - 32px))' } : undefined} aria-modal="true" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <div className="modal-head"><div><h2 id={titleId}>{title}</h2>{description && <p>{description}</p>}</div>
       <IconButton label="关闭" icon={X} disabled={busy} onClick={onClose} /></div>
+    {below && <div className="modal-below">{below}</div>}
     <div className="modal-body">{children}</div>
     {footer && <div className="modal-foot">{footer}</div>}
   </dialog>;
@@ -141,6 +143,36 @@ export async function copyText(text: string): Promise<boolean> {
       document.body.appendChild(area); area.select(); const ok = document.execCommand('copy'); area.remove(); return ok;
     } catch { return false; }
   }
+}
+
+/** A labelled form field: the label names only the control; help and errors are linked as its description. */
+export function Field({ label, help, error, optional, className, children }: { label: ReactNode; help?: ReactNode; error?: ReactNode; optional?: boolean; className?: string; children: (props: { id: string; 'aria-describedby'?: string }) => ReactNode }) {
+  const id = useId(); const helpId = `${id}-help`;
+  return <div className={cx('field', className)}>
+    <label htmlFor={id}>{label}{optional && <span className="muted small field-optional">可选</span>}</label>
+    {children({ id, ...(help || error ? { 'aria-describedby': helpId } : {}) })}
+    {(error || help) && <span className={error ? 'field-error' : 'field-help'} id={helpId} role={error ? 'alert' : undefined}>{error || help}</span>}
+  </div>;
+}
+
+/** An on/off switch that always says what it switches, for screen readers and as a hover hint. */
+export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (value: boolean) => void; label: string; disabled?: boolean }) {
+  return <button type="button" role="switch" className="switch" aria-checked={checked} aria-label={label} title={label} disabled={disabled} onClick={() => onChange(!checked)} />;
+}
+
+/** A numbered step indicator: finished steps show a check, the current one is emphasised. */
+export function Stepper({ steps, current, label }: { steps: string[]; current: number; label: string }) {
+  return <ol className="stepper" aria-label={label}>{steps.map((step, index) => <li key={step} className={cx('s', index < current && 'done', index === current && 'now')} aria-current={index === current ? 'step' : undefined}>
+    <span className="n" aria-hidden>{index < current ? <Check size={12} strokeWidth={2.4} /> : index + 1}</span>{step}{index < current && <span className="sr-only">（已完成）</span>}
+    {index < steps.length - 1 && <span className="line" aria-hidden />}
+  </li>)}</ol>;
+}
+
+/** A selectable card in a grid of choices (services, role templates, discussion modes). */
+export function Choice({ selected, onSelect, title, children, badge, disabled, icon }: { selected: boolean; onSelect: () => void; title: ReactNode; children?: ReactNode; badge?: ReactNode; disabled?: boolean; icon?: ReactNode }) {
+  return <button type="button" className="choice" aria-pressed={selected} disabled={disabled} onClick={onSelect}>
+    <b>{icon}{title}</b>{children && <small>{children}</small>}{badge && <span className="badge">{badge}</span>}
+  </button>;
 }
 
 export { cx };

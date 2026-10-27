@@ -59,3 +59,5 @@
 }
 .composer-blocked { padding: 8px 12px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--text); border-left: 3px solid var(--warn); }
 .composer-blocked .link-btn { margin-left: 6px; }
+.composer-target { display: flex; gap: 6px; align-items: flex-start; margin: 0; font-size: 13px; line-height: 20px; color: var(--text-2); overflow-wrap: anywhere; }
+.composer-target svg { flex: none; margin-top: 3px; }
