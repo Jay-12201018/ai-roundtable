@@ -10,7 +10,8 @@ const runTransitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   paused: ['running', 'cancelling', 'interrupted'],
   cancelling: ['cancelled', 'interrupted'],
   cancelled: ['running'],
-  completed: [],
+  // D111: a finished discussion continues in the same Run, only through the trusted continueDiscussion command.
+  completed: ['running'],
   error: ['running'],
   interrupted: ['running', 'cancelled'],
 };

@@ -160,7 +160,9 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       assertNoRows(db, "SELECT 1 FROM message_slots s WHERE NOT EXISTS(SELECT 1 FROM message_versions v WHERE v.message_id=s.active_message_id AND v.slot_id=s.slot_id) LIMIT 1", 'Invalid active message version');
       assertNoRows(db, `SELECT 1 FROM host_actions a WHERE (a.message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM messages m WHERE m.id=a.message_id AND m.run_id=a.run_id))
         OR (a.turn_id IS NOT NULL AND (a.kind<>'setOverride' OR a.status<>'consumed' OR NOT EXISTS(SELECT 1 FROM turns t WHERE t.id=a.turn_id AND t.run_id=a.run_id AND t.override_action_id=a.id))) LIMIT 1`, 'Invalid host action identity');
-      assertNoRows(db, "SELECT 1 FROM turns t LEFT JOIN host_actions a ON a.id=t.override_action_id WHERE t.override_action_id IS NOT NULL AND (a.id IS NULL OR a.run_id<>t.run_id OR a.turn_id IS NOT t.id OR a.agent_id<>t.agent_id) LIMIT 1", 'Invalid override Turn');
+      // D111 (v10): a continuation answer references its continuation's interjection instead of a consumed Override.
+      const continuation = (versions.at(-1) ?? 0) >= 10 ? ' AND NOT EXISTS(SELECT 1 FROM run_continuations c WHERE c.action_id=t.override_action_id AND c.run_id=t.run_id)' : '';
+      assertNoRows(db, `SELECT 1 FROM turns t LEFT JOIN host_actions a ON a.id=t.override_action_id WHERE t.override_action_id IS NOT NULL${continuation} AND (a.id IS NULL OR a.run_id<>t.run_id OR a.turn_id IS NOT t.id OR a.agent_id<>t.agent_id) LIMIT 1`, 'Invalid override Turn');
       assertNoRows(db, "SELECT 1 FROM host_instruction_revisions r JOIN host_actions a ON a.id=r.action_id WHERE a.run_id<>r.run_id OR a.kind NOT IN ('setInstruction','clearInstruction') LIMIT 1", 'Invalid instruction revision');
     }
     if ((versions.at(-1) ?? 0) >= 8) {
@@ -215,6 +217,17 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         const chargedMicro = row.state === 'settled' ? row.accountedMicro : row.state === 'not_sent' ? 0 : row.reservedMicro;
         if (!requestChargeSchema.safeParse({ ...row, chargedMicro, kind: 'summary' }).success) throw new Error('Invalid charge evidence');
       }
+    }
+    if ((versions.at(-1) ?? 0) >= 10) {
+      if (!tables.includes('run_continuations')) throw new Error('Recovery v10 schema is incomplete');
+      for (const name of ['run_continuation_insert', 'run_continuation_immutable', 'run_continuation_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing continuation protection');
+      }
+      assertNoRows(db, `SELECT 1 FROM run_continuations c LEFT JOIN host_actions a ON a.id=c.action_id
+        WHERE a.id IS NULL OR a.run_id<>c.run_id OR a.kind<>'interject' LIMIT 1`, 'Invalid continuation identity');
+      assertNoRows(db, `SELECT 1 FROM turns t JOIN run_continuations c ON c.action_id=t.override_action_id
+        WHERE c.run_id<>t.run_id OR NOT EXISTS(SELECT 1 FROM json_each(c.agent_ids_json) j WHERE j.value=t.agent_id)
+          OR (SELECT COUNT(*) FROM turns u WHERE u.override_action_id=c.action_id) > json_array_length(c.agent_ids_json) LIMIT 1`, 'Invalid continuation Turn');
     }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {

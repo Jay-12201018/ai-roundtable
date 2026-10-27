@@ -11,6 +11,7 @@ import { migration6 } from './migrations/v6';
 import { migration7 } from './migrations/v7';
 import { migration8 } from './migrations/v8';
 import { migration9 } from './migrations/v9';
+import { migration10 } from './migrations/v10';
 import { budgetBlockSchema, effectiveChargeMicro, requestChargeSchema, runBudgetInputSchema, settlementAmountMicro, writeOffBasisSchema, DEFAULT_RUN_BUDGET_MICRO_CNY, MAX_RUN_BUDGET_MICRO_CNY,
   type BudgetBlock, type BudgetTopUp, type ChargeSettlement, type ChargeWriteOff, type PricePeriod, type RequestCharge, type RunBudget } from '../../shared/schemas/budget';
 import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
@@ -72,6 +73,8 @@ export type HostActionRecord = {
   id: string; runId: string; clientRequestId: string; kind: string; status: string; fingerprint: string;
   agentId?: string; messageId?: string; resultMessageId?: string; instructionId?: string; turnId?: string; createdAt: string; updatedAt: string;
 };
+/** D111: a finished discussion continued in the same Run: the host's interjection and who answers it, in order. */
+export type ContinuationRecord = { actionId: string; runId: string; agentIds: string[]; elapsedBaseMs: number; createdAt: string };
 export type InstructionRevisionRecord = { id: string; runId: string; instructionId: string; revision: number; content: string | null; actionId: string; createdAt: string };
 /** D106: the actual price of a settled request; Main computes it from the reviewed policy and the request times. */
 export type ChargePricingInput = { period: PricePeriod; startedAt: string; finishedAt: string; cacheHitTokens: number | null;
@@ -210,6 +213,7 @@ const migrations = [
   migration7,
   migration8,
   migration9,
+  migration10,
 ];
 
 export class Database {
@@ -697,18 +701,28 @@ export class Database {
     return result;
   }
 
-  insertTurn(turn: { id: string; runId: string; agentId: string; status: string; requestId: string; turnIndex: number; overrideActionId?: string }): void {
+  /**
+   * A host-directed Turn references its host action: a pending Override, consumed here, or the latest continuation
+   * (D111), whose next answering member it must be. Either way it is not a plan Turn.
+   */
+  insertTurn(turn: { id: string; runId: string; agentId: string; status: string; requestId: string; turnIndex: number; overrideActionId?: string; continuationId?: string }): void {
     this.assertInitialized();
     const timestamp = now();
     this.db.transaction(() => {
       const run = this.getRun(turn.runId);
       const agent = this.db.prepare('SELECT room_id FROM agents WHERE id=?').get(turn.agentId) as { room_id: string } | undefined;
-      if (!run || agent?.room_id !== run.roomId || run.nextTurnIndex !== null && run.nextTurnIndex !== turn.turnIndex) throw new Error('Invalid Turn allocation');
+      if (!run || agent?.room_id !== run.roomId || run.nextTurnIndex !== null && run.nextTurnIndex !== turn.turnIndex
+        || turn.overrideActionId !== undefined && turn.continuationId !== undefined) throw new Error('Invalid Turn allocation');
       if (turn.overrideActionId !== undefined) {
         const action = this.getHostAction(turn.overrideActionId);
         if (!action || action.runId !== turn.runId || action.kind !== 'setOverride' || action.status !== 'pending' || action.agentId !== turn.agentId) throw new Error('Invalid Turn allocation');
       }
-      this.db.prepare('INSERT INTO turns(id, run_id, agent_id, status, request_id, turn_index, created_at, updated_at, override_action_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(turn.id, turn.runId, turn.agentId, turn.status, turn.requestId, turn.turnIndex, timestamp, timestamp, turn.overrideActionId ?? null);
+      if (turn.continuationId !== undefined) {
+        const continuation = this.listContinuations(turn.runId).at(-1);
+        const answered = continuation ? (this.db.prepare('SELECT COUNT(*) FROM turns WHERE run_id=? AND override_action_id=?').pluck().get(turn.runId, continuation.actionId) as number) : 0;
+        if (!continuation || continuation.actionId !== turn.continuationId || continuation.agentIds[answered] !== turn.agentId) throw new Error('Invalid Turn allocation');
+      }
+      this.db.prepare('INSERT INTO turns(id, run_id, agent_id, status, request_id, turn_index, created_at, updated_at, override_action_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(turn.id, turn.runId, turn.agentId, turn.status, turn.requestId, turn.turnIndex, timestamp, timestamp, turn.overrideActionId ?? turn.continuationId ?? null);
       if (turn.overrideActionId !== undefined) this.db.prepare("UPDATE host_actions SET status='consumed',turn_id=?,updated_at=? WHERE id=?").run(turn.id, timestamp, turn.overrideActionId);
       if (run.nextTurnIndex !== null) this.db.prepare('UPDATE workflow_runs SET next_turn_index=next_turn_index+1,updated_at=? WHERE id=?').run(timestamp, turn.runId);
     }).immediate();
@@ -793,6 +807,25 @@ export class Database {
   listHostActions(runId: string): HostActionRecord[] {
     this.requireRun(runId);
     return (this.db.prepare(`${hostActionSelect} WHERE run_id=? ORDER BY rowid`).all(runId) as RawHostAction[]).map(hostActionFromRow);
+  }
+
+  /** D111: continuations of a Run, oldest first; only the latest one can still have members to answer. */
+  listContinuations(runId: string): ContinuationRecord[] {
+    this.requireRun(runId);
+    const rows = this.db.prepare('SELECT action_id AS actionId,run_id AS runId,agent_ids_json AS agentIds,elapsed_base_ms AS elapsedBaseMs,created_at AS createdAt FROM run_continuations WHERE run_id=? ORDER BY created_at,rowid')
+      .all(runId) as Array<Omit<ContinuationRecord, 'agentIds'> & { agentIds: string }>;
+    return rows.map(row => ({ ...row, agentIds: z.array(idSchema).min(1).max(64).parse(JSON.parse(row.agentIds)) }));
+  }
+
+  insertContinuation(continuation: Omit<ContinuationRecord, 'createdAt'>): ContinuationRecord {
+    this.assertInitialized();
+    const value = z.object({ actionId: idSchema, runId: idSchema, agentIds: z.array(idSchema).min(1).max(64), elapsedBaseMs: sequenceSchema }).strict().parse(continuation);
+    return this.transaction(() => {
+      this.requireRun(value.runId);
+      this.db.prepare('INSERT INTO run_continuations(action_id,run_id,agent_ids_json,elapsed_base_ms,created_at) VALUES(?,?,?,?,?)')
+        .run(value.actionId, value.runId, JSON.stringify(value.agentIds), value.elapsedBaseMs, now());
+      return this.listContinuations(value.runId).find(item => item.actionId === value.actionId)!;
+    });
   }
 
   getPendingOverride(runId: string): HostActionRecord | undefined {
@@ -922,7 +955,7 @@ export class Database {
       const ids = this.db.prepare('SELECT id FROM messages WHERE run_id=? ORDER BY sort_key').pluck().all(runId) as string[];
       return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
         versions:this.listVersions(runId),hostActions:this.listHostActions(runId),instructions:this.listInstructionRevisions(runId),
-        charges:this.listCharges(runId),budget:this.getRunBudget(runId),summaries:this.listSummaries(runId)};
+        charges:this.listCharges(runId),budget:this.getRunBudget(runId),summaries:this.listSummaries(runId),continuations:this.listContinuations(runId)};
     });
   }
 
