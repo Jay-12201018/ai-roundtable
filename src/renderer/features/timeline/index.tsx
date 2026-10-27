@@ -41,7 +41,8 @@ export function DiscussionTimeline({ snapshot, commands, providers, ledger, summ
   }, [snapshot, commands, providers, ledger, summaries, onRegenerateSummary]);
   const last = snapshot.messages.at(-1);
   return <Timeline viewKey={snapshot.runId} label="讨论时间线" items={items} header={header} footer={footer}
-    contentVersion={`${snapshot.sequence}:${snapshot.messages.length}:${last?.content.length ?? 0}`} />;
+    contentVersion={`${snapshot.sequence}:${snapshot.messages.length}:${last?.content.length ?? 0}`}
+    latestFromHost={[...snapshot.messages].reverse().find(message => message.senderName === '主持人')?.id} />;
 }
 
 /** Builds without version data keep a flat rendering. */

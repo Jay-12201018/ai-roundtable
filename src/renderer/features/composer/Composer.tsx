@@ -2,20 +2,23 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { ArrowUp, AtSign, Check, ChevronDown, Clock, Ellipsis, JapaneseYen, Pause, Pin, Play, Square, StepForward, Workflow } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { Avatar, Button, IconButton, cx, useDismiss } from '../../components/ui';
-import { canDirectRun, nextSpeaker } from '../host/model';
+import type { RunApiContract } from '../../../shared/contracts/run';
+import { canContinueRun, canDirectRun, nextSpeaker, nextSpeakerText } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
 import { sendInterjection } from './interject';
-import { mentionOptions, mentionQuery, type MentionOption } from './mention';
+import { mentionedMembers, mentionOptions, mentionQuery, type MentionOption } from './mention';
+import { continuationSummary, useContinuation } from './continuation';
 import './composer.css';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/u.test(navigator.platform || navigator.userAgent);
 const modifier = isMac ? '⌘' : 'Ctrl';
 /**
- * Which box the dock shows: live Runs and stopped ones Main can still direct get the interjection box; a finished
- * Run (or none) gets the goal box for the next discussion.
+ * Which box the dock shows: live Runs, stopped ones Main can still direct and finished ones (D111: continued in
+ * place) get the host box; only a new discussion (no Run selected) gets the goal box. A new discussion is always the
+ * explicit 新讨论 button, never what the box does by itself.
  */
 export const interjectionBoxFor = (snapshot: RunSnapshot | undefined, live: boolean) =>
-  !!snapshot && (live || ['error', 'cancelled', 'interrupted'].includes(snapshot.status) && canDirectRun(snapshot));
+  !!snapshot && (live || ['error', 'cancelled', 'interrupted'].includes(snapshot.status) && canDirectRun(snapshot) || canContinueRun(snapshot));
 /** Unsent interjections are kept per discussion while the window is open. */
 const interjectionDrafts = new Map<string, string>();
 
@@ -136,16 +139,17 @@ function LiveControls({ controls }: { controls: RunControls }) {
   </div>;
 }
 
-function MentionMenu({ id, options, query, active, onPick, onHover }: { id: string; options: MentionOption[]; query: string; active: number; onPick: (option: MentionOption) => void; onHover: (index: number) => void }) {
-  return <div id={id} className="popover mention-pop" role="listbox" aria-label="点名下一位">
-    <h4>点名下一位发言</h4>
+function MentionMenu({ id, options, query, active, onPick, onHover, continuing }: { id: string; options: MentionOption[]; query: string; active: number; onPick: (option: MentionOption) => void; onHover: (index: number) => void; continuing: boolean }) {
+  return <div id={id} className="popover mention-pop" role="listbox" aria-label={continuing ? '只让一位成员回应' : '点名下一位'}>
+    <h4>{continuing ? '只让一位成员回应' : '点名下一位发言'}</h4>
     {options.length === 0 && <p className="mention-empty">没有名字以“{query}”开头的成员。</p>}
     {options.map((option, index) => <button key={option.agentId} id={`${id}-${index}`} type="button" role="option" aria-selected={index === active} aria-disabled={!option.available}
       className={cx('mention-item', index === active && 'is-active', !option.available && 'is-off')}
       onMouseDown={event => event.preventDefault()} onMouseEnter={() => onHover(index)} onClick={() => { if (option.available) onPick(option); }}>
       <Avatar name={option.name} size="sm" /><span className="grow">{option.name}<small>{option.reason}</small></span>{option.reason.startsWith('已点名') && <Check aria-hidden size={14} />}
     </button>)}
-    <p className="pop-foot">被点名的成员排在下一回合发言，不会打断正在进行的发言。按讨论方式进行时，只能点名当前阶段的成员。发送时，带 @ 的插话会先点名、再插话。</p>
+    <p className="pop-foot">{continuing ? '带 @ 时只有这位成员回应你这段话；不带 @ 时，所有成员按顺序各回应一次。'
+      : '被点名的成员插入一轮发言，之后回到原计划，原计划的成员不会被跳过。按讨论方式进行时，只能点名当前阶段的成员。发送时，带 @ 的插话会先点名、再插话。'}</p>
   </div>;
 }
 
@@ -153,10 +157,12 @@ function MentionMenu({ id, options, query, active, onPick, onHover }: { id: stri
  * 运行中: the box is the interjection box. Enter sends, Shift+Enter adds a line, `@` names the next speaker (D4),
  * and 设为持续指令 turns the text into a standing instruction. The run controls sit at its right.
  */
-export function HostComposer({ snapshot, commands, controls, settledSlot, notices, instructionsWritable }: {
+export function HostComposer({ snapshot, commands, controls, settledSlot, notices, instructionsWritable, continueApi, onContinued, onOpenBudget }: {
   snapshot: RunSnapshot; commands: HostCommands; controls?: RunControls;
   /** For a Run that is no longer live: what sits in the primary slot instead of the run controls. */
   settledSlot?: ReactNode; notices?: ReactNode; instructionsWritable: boolean;
+  /** D111: with these, a finished discussion is continued in place from this box. */
+  continueApi?: Pick<RunApiContract, 'previewContinuation' | 'continueDiscussion'>; onContinued?: () => void; onOpenBudget?: () => void;
 }) {
   const key = snapshot.runId;
   const [text, setTextState] = useState(() => interjectionDrafts.get(key) ?? '');
@@ -169,13 +175,25 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
   const menuId = useId();
   const dockRef = useRef<HTMLDivElement>(null);
   useAutosize(area, text);
-  const options = mentionOptions(snapshot);
+  const continuing = Boolean(continueApi) && canContinueRun(snapshot);
+  const members = snapshot.execution?.membersSnapshot ?? [];
+  const memberName = (agentId: string) => members.find(member => member.agentId === agentId)?.displayName ?? '成员';
+  // Continuing, anyone in the roster may be asked to answer; Main says if one can no longer speak.
+  const options = continuing ? members.map(member => ({ agentId: member.agentId, name: member.displayName, available: true, reason: '只让这位成员回应' })) : mentionOptions(snapshot);
   const filtered = menu ? options.filter(option => option.name.startsWith(menu.query)) : [];
   const closeMenu = useCallback(() => setMenu(undefined), []);
   useDismiss(menu !== undefined, closeMenu, [dockRef]);
-  const busy = commands.pending !== undefined;
+  const named = continuing ? mentionedMembers(text, options) : [];
+  const noop = useCallback(() => {}, []);
+  const continuation = useContinuation(continueApi, snapshot.runId, continuing, { content: text, ...(named.length === 1 ? { agentId: named[0].agentId } : {}) }, onContinued ?? noop);
+  const busy = commands.pending !== undefined || continuation.sending;
+  // When the discussion ends, what was said about the live Run (who was named, what comes next) no longer applies.
+  const { report } = commands;
+  useEffect(() => { if (continuing) report({}); }, [continuing, report]);
   const status = snapshot.status;
   const next = ['running', 'pausing', 'paused'].includes(status) || snapshot.host?.override ? nextSpeaker(snapshot) : undefined;
+  const nextText = next ? nextSpeakerText(next) : undefined;
+  const plan = continuing ? continuationSummary(continuation.preview, memberName) : undefined;
   const override = snapshot.host?.override;
   const overrideName = override ? options.find(option => option.agentId === override.agentId)?.name ?? '成员' : undefined;
 
@@ -200,6 +218,14 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
   };
   const send = async () => {
     if (!text.trim() || busy || !commands.available) return;
+    if (continuing) {
+      if (named.length > 1) { commands.report({ error: `一次只能让一位成员回应（这里点了${named.map(item => `@${item.name}`).join('、')}）。请只留一个；不带 @ 时所有成员各回应一次。` }); return; }
+      const result = await continuation.send({ content: text, ...(named.length === 1 ? { agentId: named[0].agentId } : {}) });
+      if (!result.ok) { commands.report({ error: `没有继续：${result.message}内容保留在输入框里。` }); return; }
+      commands.report({ notice: `已在这场讨论里继续：${result.agentIds.length === 1 ? `${memberName(result.agentIds[0])}会回应你这段话` : `${result.agentIds.map(memberName).join('、')}会按顺序各回应一次`}，每位都能看到前面的全部讨论。` });
+      setText('');
+      return;
+    }
     const result = await sendInterjection(text, options, override?.agentId, commands.request);
     commands.report({ notice: result.notice, error: result.error });
     if (result.clear) setText('');
@@ -224,7 +250,8 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
     if (event.key !== 'Enter' || event.shiftKey || isComposing(event, composing.current)) return;
     event.preventDefault(); void send();
   };
-  const placeholder = status === 'error' && snapshot.budget?.blocked ? '仍然可以插话；追加预算后，下一位会看到'
+  const placeholder = continuing ? '在这场讨论里继续：写下你的问题或要求，所有成员按顺序各回应一次；输入 @ 只让一位成员回应…'
+    : status === 'error' && snapshot.budget?.blocked ? '仍然可以插话；追加预算后，下一位会看到'
     : ['error', 'cancelled', 'interrupted'].includes(status) ? '插话会在重试或恢复后被成员看到；要讨论新问题，点「新讨论」'
     : '插话，所有成员从下一回合起可见；输入 @ 点名下一位…';
   const hint = status === 'paused' ? <><span><span className="kbd">Enter</span> 发送插话</span><span aria-hidden>·</span><span>下一步：只让下一位说一次</span><span aria-hidden>·</span><span>继续：恢复自动轮流</span></>
@@ -232,14 +259,21 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
     : status === 'cancelling' ? <span>等待当前请求中止，已生成的文字会保留</span>
     : status === 'running' ? <><span>暂停会等{controls?.speaker ?? '当前成员'}说完再停</span><span aria-hidden>·</span><span>停止会立即中止当前发言</span></>
     : snapshot.budget?.blocked && status === 'error' ? <span>预算不足：在上方追加预算后继续；已有发言都保留</span>
+    : continuing ? <><span><span className="kbd">Enter</span> 发送并继续讨论</span><span aria-hidden>·</span><span><span className="kbd">Shift</span> <span className="kbd">Enter</span> 换行</span><span aria-hidden>·</span><span>讨论新问题，点「新讨论」</span></>
     : <><span><span className="kbd">Enter</span> 发送</span><span aria-hidden>·</span><span><span className="kbd">Shift</span> <span className="kbd">Enter</span> 换行</span></>;
   return <div className="dock">
     <div className="dock-inner" ref={dockRef}>
       {notices}
-      {menu && <MentionMenu id={menuId} options={filtered} query={menu.query} active={active} onPick={pick} onHover={setActive} />}
-      {(next || override) && <div className="next-strip" role="status" aria-label="下一位">
+      {menu && <MentionMenu id={menuId} options={filtered} query={menu.query} active={active} onPick={pick} onHover={setActive} continuing={continuing} />}
+      {continuing && <div className="next-strip" role="status" aria-label="继续后谁回应">
         <Clock aria-hidden size={14} />
-        <span>{status === 'paused' ? '已暂停，等你决定 · ' : ''}{next ? <>下一位：<b>{next.name}</b>{next.source === 'override' ? '（主持人点名，排在下一回合，不打断正在进行的发言）' : '（按计划）'}</> : `已点名${overrideName}`}</span>
+        <span>{plan ? <>{plan.text}{plan.warn && <span className="strip-warn">{plan.warn}</span>}</> : continuation.previewFailed ? '没有读到预计花费；发送前每次发言仍按预算预留。' : '正在估算谁回应、最多花多少…'}</span>
+        {plan?.warn && onOpenBudget && continuation.preview?.cost.kind === 'priced' && (continuation.preview.reason === 'budget_insufficient' || continuation.preview.cost.maxMicro > continuation.preview.cost.remainingMicro)
+          && <button type="button" className="link-btn" onClick={onOpenBudget}>追加预算</button>}
+      </div>}
+      {!continuing && (next || override) && <div className="next-strip" role="status" aria-label="下一位">
+        <Clock aria-hidden size={14} />
+        <span>{status === 'paused' ? '已暂停，等你决定 · ' : ''}{nextText ? <>下一位：<b>{nextText.name}</b>（{nextText.source}）{nextText.then ? ` · ${nextText.then}` : ''}</> : `已点名${overrideName}`}</span>
         {override && <button type="button" className="link-btn" disabled={busy} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名，恢复按计划发言。')}>取消点名</button>}
       </div>}
       {(commands.pending || commands.notice || commands.error) && <div className="composer-feedback">
@@ -249,12 +283,13 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
       </div>}
       <div className="composer">
         <div className="composer-text">
-          <textarea ref={area} aria-label="主持人插话" value={text} rows={2} placeholder={placeholder}
+          <textarea ref={area} aria-label={continuing ? '继续讨论' : '主持人插话'} value={text} rows={2} placeholder={placeholder}
             aria-controls={menu ? menuId : undefined} aria-expanded={menu ? true : undefined} aria-activedescendant={menu && filtered[active] ? `${menuId}-${active}` : undefined}
             onChange={event => { setText(event.target.value); syncMenu(event.target.value, event.target.selectionStart ?? event.target.value.length); }}
             onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
             onKeyDown={onKeyDown} />
-          <IconButton icon={ArrowUp} label="发送插话" className="send" disabled={!text.trim() || busy || !commands.available} onClick={() => void send()} />
+          <IconButton icon={ArrowUp} label={continuing ? '发送并继续讨论' : '发送插话'} className="send" disabled={!text.trim() || busy || !commands.available
+            || continuing && (continuation.preview?.available === false && continuation.preview.reason !== 'busy')} onClick={() => void send()} />
         </div>
         <div className="composer-row">
           <div className="chips">

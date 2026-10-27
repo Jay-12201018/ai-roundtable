@@ -16,6 +16,8 @@ type Props = {
   /** Changes whenever content may have grown (sequence, streamed text); drives following and the new-content pill. */
   contentVersion: string | number;
   header?: ReactNode; footer?: ReactNode; label: string;
+  /** The host's latest message; when the host sends a new one, the view goes to the latest output to show the answer. */
+  latestFromHost?: string;
 };
 
 /**
@@ -23,7 +25,7 @@ type Props = {
  * or looking at an older version stops following, and a 「有新消息 · 回到最新」 pill appears instead of jumping.
  * Long histories are windowed with measured heights keyed by slotId, so the DOM stays bounded.
  */
-export function Timeline({ viewKey, items, contentVersion, header, footer, label }: Props) {
+export function Timeline({ viewKey, items, contentVersion, header, footer, label, latestFromHost }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -53,6 +55,15 @@ export function Timeline({ viewKey, items, contentVersion, header, footer, label
     else { element.scrollTop = saved; atBottom.current = element.scrollHeight - saved - element.clientHeight < BOTTOM_SLACK; }
     setScrollTop(element.scrollTop); setViewport(element.clientHeight); setFresh(false);
   }, [viewKey, stick]);
+
+  // The host just said something (an interjection or a continuation): show the conversation from there on.
+  // Switching to another discussion keeps its remembered position instead.
+  const lastHost = useRef({ viewKey, id: latestFromHost });
+  useLayoutEffect(() => {
+    const previous = lastHost.current;
+    lastHost.current = { viewKey, id: latestFromHost };
+    if (previous.viewKey === viewKey && latestFromHost !== undefined && latestFromHost !== previous.id && holds.current === 0) stick();
+  }, [viewKey, latestFromHost, stick]);
 
   // New content: follow when reading at the bottom, otherwise offer a way back without moving the page.
   useLayoutEffect(() => {

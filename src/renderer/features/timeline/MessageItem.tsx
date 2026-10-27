@@ -4,7 +4,7 @@ import type { RunSnapshot } from '../../../shared/types/run';
 import type { RequestCharge } from '../../../shared/schemas/budget';
 import { Avatar, Button, IconButton, Note, Tag, copyText, cx } from '../../components/ui';
 import { HostTextArea } from '../host/HostTextArea';
-import { originLabels, type TimelineSlot } from '../host/model';
+import { isContinuationTurn, originLabels, type TimelineSlot } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
 import { WriteOffForm, chargeOfMessage, type LedgerCommands } from '../usage';
 import { Markdown } from './Markdown';
@@ -95,7 +95,9 @@ export function AgentMessage({ slot, snapshot, commands, providers, ledger, cove
   return <article className={cx('msg', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · ${name}`}>
     <div className="msg-head">
       <Avatar name={name} /><span className="msg-name">{name}</span><span className="msg-meta">{modelLabel(member, providers)}</span>
-      {can.turn?.overrideActionId && <Tag tone="accent">主持人点名</Tag>}
+      {can.turn?.overrideActionId && (isContinuationTurn(snapshot, can.turn.overrideActionId)
+        ? <Tag title="讨论结束后，主持人在这场讨论里继续；这一轮回应主持人的话">继续讨论</Tag>
+        : <Tag tone="accent" title="主持人点名插入的一轮，不占用计划的回合">主持人点名</Tag>)}
       {replaced && <Tag title="原文保留；之后的请求用已确认的讨论摘要代替它">已由摘要代替</Tag>}
       {coveredBy && revisedAfterSummary && <Tag tone="accent" title="摘要生成后修改过，所以这条会照常发给之后的成员，紧跟在摘要后面">摘要后已修改 · 照常发送</Tag>}
       {slot.number !== undefined && <span className="msg-num" aria-hidden>#{slot.number}</span>}
@@ -144,7 +146,7 @@ export function HostMessage({ slot, snapshot, commands, coveredBy, revisedAfterS
   const save = (content: string) => void commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content }, '已保存为新版本。')
     .then(ok => { if (ok) { setEditing(false); setViewing(undefined); } });
   return <article className={cx('msg', 'is-host', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · 主持人`}>
-    <div className="host-label"><span>主持人插话</span><span aria-hidden>·</span><span>#{slot.number}</span>
+    <div className="host-label"><span>{snapshot.continuations?.some(item => item.messageId === slot.slotId) ? '主持人 · 继续讨论' : '主持人插话'}</span><span aria-hidden>·</span><span>#{slot.number}</span>
       {replaced && <Tag title="原文保留；之后的请求用已确认的讨论摘要代替它">已由摘要代替</Tag>}
       {coveredBy && revisedAfterSummary && <Tag tone="accent" title="摘要生成后修改过，所以这条会照常发给之后的成员">摘要后已修改 · 照常发送</Tag>}</div>
     {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />

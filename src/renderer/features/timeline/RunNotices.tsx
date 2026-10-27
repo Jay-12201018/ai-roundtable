@@ -1,7 +1,7 @@
 import { CircleStop, History, Layers, RefreshCw, TriangleAlert } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { Button, Note, NoticeCard } from '../../components/ui';
-import { summaryWritable } from '../host/model';
+import { canContinueRun, summaryWritable } from '../host/model';
 import { BudgetStopNotice, type LedgerCommands } from '../usage';
 import { repeatCost } from './model';
 
@@ -57,7 +57,7 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, budgetSto
       {repeatButtons}
     </NoticeCard>}
     {snapshot.status === 'cancelled' && <NoticeCard tone="info" icon={CircleStop} title="已停止 · 已生成的文字都保留" role="status">
-      <p>后续回合不会再进行，也不会自动继续。</p>{repeatButtons}
+      <p>后续回合不会再进行，也不会自动继续。{canContinueRun(snapshot) ? '要接着讨论，在下方输入框写下你的话：所有成员各回应一次，或用 @ 只让一位回应。' : ''}</p>{repeatButtons}
     </NoticeCard>}
     {snapshot.status === 'error' && !budgetStopped && <NoticeCard tone="danger" icon={TriangleAlert} title="运行失败">
       <p>{error ?? '运行失败，历史输出已保留。'}</p>{repeatButtons}
@@ -65,6 +65,6 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, budgetSto
     {budgetStopped && <BudgetStopNotice snapshot={snapshot} ledger={ledger} />}
     {error && !budgetStopped && snapshot.status !== 'error' && <p className="run-error" role="alert">{error}</p>}
     {!summaryOpen && <ContextHint snapshot={snapshot} onSummarize={onSummarize} />}
-    {snapshot.status === 'completed' && <div className="sys-line">讨论已完成{snapshot.workflow?.limitReason ? ` · ${snapshot.workflow.limitReason === 'max_turns' ? '回合数到限' : '累计时长到限'}` : ''}</div>}
+    {snapshot.status === 'completed' && <div className="sys-line">讨论已完成{snapshot.workflow?.limitReason ? ` · ${snapshot.workflow.limitReason === 'max_turns' ? '回合数到限' : '累计时长到限'}` : ''} · 可以在下方继续这场讨论，或开始新讨论</div>}
   </div>;
 }

@@ -62,20 +62,63 @@ const frozenPlan = (snapshot: RunSnapshot) => {
   return parsed.success ? parsed.data : undefined;
 };
 
-/** A display-only projection of who speaks next; Main decides and the snapshot confirms. */
-export function nextSpeaker(snapshot: RunSnapshot | undefined): { agentId: string; name: string; source: 'override' | 'plan' } | undefined {
+export type SpeakerProjection = { agentId: string; name: string; source: 'override' | 'continuation' | 'plan' };
+/** Turns that are not inserted by the host: an @Override (D110) or a continuation answer (D111) is not a plan Turn. */
+export const planTurnCount = (snapshot: RunSnapshot) => snapshot.turns.filter(turn => !turn.overrideActionId).length;
+/** D111: the latest continuation, if this discussion was continued, and who still has to answer it. */
+export function openContinuation(snapshot: RunSnapshot | undefined) {
+  const latest = snapshot?.continuations?.at(-1);
+  if (!snapshot || !latest) return undefined;
+  const answered = snapshot.turns.filter(turn => turn.overrideActionId === latest.actionId).length;
+  return { continuation: latest, remaining: latest.agentIds.slice(answered) };
+}
+/** Whether a Turn was inserted by a continuation of the discussion rather than by an @Override. */
+export const isContinuationTurn = (snapshot: RunSnapshot | undefined, overrideActionId: string | undefined) =>
+  !!overrideActionId && !!snapshot?.continuations?.some(item => item.actionId === overrideActionId);
+
+/** Who the schedule names after the current Turn when nobody is named by the host; 'end' when the discussion ends. */
+function scheduled(snapshot: RunSnapshot, name: (agentId: string) => string): SpeakerProjection | 'end' {
+  const open = openContinuation(snapshot);
+  // A continued discussion answers the continuation and then ends; it never goes back to the original plan.
+  if (open) return open.remaining.length ? { agentId: open.remaining[0], name: name(open.remaining[0]), source: 'continuation' } : 'end';
+  const members = snapshot.execution!.membersSnapshot ?? [];
+  const position = planTurnCount(snapshot);
+  if (position >= snapshot.execution!.maxTurns || !members.length) return 'end';
+  const plan = frozenPlan(snapshot);
+  if (plan) {
+    const step = plan.steps[position];
+    return step ? { agentId: step.agentId, name: name(step.agentId), source: 'plan' } : 'end';
+  }
+  if (snapshot.workflow) return 'end';
+  const member = members[position % members.length];
+  return { agentId: member.agentId, name: member.displayName, source: 'plan' };
+}
+
+/**
+ * A display-only projection of who speaks next and, when the host named someone, who follows once that inserted
+ * Turn is done (D110: the plan continues where it was). Main decides and the snapshot confirms.
+ */
+export function nextSpeaker(snapshot: RunSnapshot | undefined): (SpeakerProjection & { then?: SpeakerProjection | 'end' }) | undefined {
   if (!snapshot?.execution || ['completed', 'cancelling'].includes(snapshot.status)) return;
   const members = snapshot.execution.membersSnapshot ?? [];
   const name = (agentId: string) => members.find(member => member.agentId === agentId)?.displayName ?? agentId;
+  const after = scheduled(snapshot, name);
   const override = snapshot.host?.override;
-  if (override) return { agentId: override.agentId, name: name(override.agentId), source: 'override' };
-  const turns = snapshot.turns.length;
-  if (turns >= snapshot.execution.maxTurns) return;
-  if (snapshot.workflow) return snapshot.workflow.nextStep ? { agentId: snapshot.workflow.nextStep.agentId, name: name(snapshot.workflow.nextStep.agentId), source: 'plan' } : undefined;
-  if (frozenPlan(snapshot) || !members.length) return;
-  const position = snapshot.turns.filter(turn => !turn.overrideActionId).length;
-  const member = members[position % members.length];
-  return { agentId: member.agentId, name: member.displayName, source: 'plan' };
+  if (override) return { agentId: override.agentId, name: name(override.agentId), source: 'override', then: after };
+  return after === 'end' ? undefined : after;
+}
+
+/** Plain words for where a speaker comes from, as the composer strip and the members tab say it. */
+export const speakerSourceText: Record<SpeakerProjection['source'], string> = {
+  override: '主持人点名，插入一轮，不打断正在进行的发言',
+  continuation: '继续讨论，回应你的话',
+  plan: '按计划',
+};
+/** "下一位：B（…）· 之后：C（按计划）" — the inserted Turn does not replace who the plan had next (D110). */
+export function nextSpeakerText(next: NonNullable<ReturnType<typeof nextSpeaker>>): { name: string; source: string; then?: string } {
+  const then = next.then === undefined ? undefined : next.then === 'end' ? '之后讨论结束'
+    : next.then.source === 'plan' ? `之后回到原计划：${next.then.name}` : `之后：${next.then.name}（继续讨论）`;
+  return { name: next.name, source: speakerSourceText[next.source], ...(then ? { then } : {}) };
 }
 
 /** Members that Main would accept for @Override: the frozen roster, limited to the current stage in a workflow. */
@@ -83,13 +126,20 @@ export function overrideCandidates(snapshot: RunSnapshot | undefined): Array<{ a
   const members = snapshot?.execution?.membersSnapshot ?? [];
   const plan = snapshot ? frozenPlan(snapshot) : undefined;
   if (!plan) return members.map(member => ({ agentId: member.agentId, name: member.displayName }));
-  const planTurns = snapshot!.turns.filter(turn => !turn.overrideActionId).length;
+  const planTurns = planTurnCount(snapshot!);
   const stageId = (plan.steps[planTurns] ?? plan.steps.at(-1))?.stageId;
   const allowed = plan.config.stages.find(stage => stage.id === stageId)?.memberIds ?? [];
   return members.filter(member => allowed.includes(member.agentId)).map(member => ({ agentId: member.agentId, name: member.displayName }));
 }
 
 export const canDirectRun = (snapshot: RunSnapshot | undefined) => !!snapshot && ['running', 'pausing', 'paused', 'error', 'cancelled', 'interrupted'].includes(snapshot.status);
+/**
+ * D111: a finished discussion continues in place — completed, or stopped with every Turn settled (a stopped Turn is
+ * retried or continued instead; a budget stop is topped up and resumed). Display only; Main rechecks every condition.
+ */
+export const canContinueRun = (snapshot: RunSnapshot | undefined) => !!snapshot?.execution && runIdle(snapshot)
+  && (snapshot.status === 'completed' || (snapshot.status === 'cancelled' || snapshot.status === 'error' && !snapshot.budget?.blocked)
+    && snapshot.turns.every(turn => turn.status === 'completed'));
 /** Version edits/regenerations wait for the in-flight request; Main rechecks every condition. */
 export const runIdle = (snapshot: RunSnapshot | undefined) => !!snapshot && !snapshot.currentTurnId && !snapshot.host?.generation
   && !snapshot.messages.some(message => message.status === 'streaming');

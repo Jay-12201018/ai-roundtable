@@ -293,7 +293,7 @@ export function App() {
   } : undefined;
   const syncNotices = <>{syncStatus === 'syncing' && !snapshot && <p role="status" className="muted">正在同步运行状态…</p>}</>;
   const taskNotices = (error && !snapshot && syncStatus !== 'error') || workflowInvalidated || workflowMembersError || otherLive ? <div className="composer-alerts">
-    {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始新的。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}
+    {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始或继续别的讨论。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}
     {error && !snapshot && syncStatus !== 'error' && !otherLive && <p role="alert" className="field-error">{error}</p>}
     {workflowInvalidated && <p role="alert" className="field-error">房间成员已变化，请重新选择讨论方式后再开始。</p>}
     {workflowMembersError && <p role="alert" className="field-error">没有读出这个房间的成员，请稍后重试。</p>}
@@ -302,7 +302,8 @@ export function App() {
   const composer = (() => {
     if (page !== 'discussion') return null;
     if (snapshot && interjectionBoxFor(snapshot, runActive)) return <HostComposer key={snapshot.runId} snapshot={snapshot} commands={hostCommands} controls={controls}
-      instructionsWritable={snapshot.status !== 'idle' && snapshot.status !== 'cancelling'} notices={syncNotices}
+      instructionsWritable={snapshot.status !== 'idle' && snapshot.status !== 'cancelling'} notices={<>{syncNotices}{otherLive && !runActive ? taskNotices : undefined}</>}
+      continueApi={api.run} onContinued={synchronizeHost} onOpenBudget={() => showPanel('progress')}
       settledSlot={budgetStopped ? <Button variant="primary" className="slot" disabled title="预算不足，先在上方追加预算">继续</Button>
         : <Button className="slot" icon={Plus} disabled={!bootReady} onClick={() => newDiscussion(snapshot.roomId)}>新讨论</Button>} />;
     return <TaskComposer draft={draft} setDraft={value => session.store.getState().setDraft(value)}

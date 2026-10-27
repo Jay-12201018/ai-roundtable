@@ -5,7 +5,7 @@ import { formatYuan } from '../../../shared/schemas/budget';
 import { Avatar, Button, IconButton, Pill, Tabs, cx } from '../../components/ui';
 import { statusLabels } from '../../locales/zhCN';
 import { HostTextArea } from '../host/HostTextArea';
-import { canDirectRun, nextSpeaker, overrideCandidates, summaryWritable, timelineSlots, usedSummary } from '../host/model';
+import { canContinueRun, canDirectRun, isContinuationTurn, nextSpeaker, nextSpeakerText, overrideCandidates, planTurnCount, summaryWritable, timelineSlots, usedSummary } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
 import { parseBudgetYuan, yuanShort, type LedgerCommands } from '../usage';
 import { workflowProgressForFeature, workflowTemplateLabels } from '../workflows/productionAdapter';
@@ -59,6 +59,15 @@ export function BudgetCard({ snapshot, ledger }: { snapshot: RunSnapshot; ledger
   </section>;
 }
 
+/** D110/D111: Turns the host inserted (named or asked to continue) are counted apart from the plan's turns. */
+function insertedText(snapshot: RunSnapshot): string {
+  const inserted = snapshot.turns.filter(turn => turn.overrideActionId);
+  if (!inserted.length) return '';
+  const continued = inserted.filter(turn => isContinuationTurn(snapshot, turn.overrideActionId)).length;
+  const named = inserted.length - continued;
+  return ` · 另有 ${inserted.length} 轮插入（${[named ? `点名 ${named}` : '', continued ? `继续讨论 ${continued}` : ''].filter(Boolean).join('、')}）`;
+}
+
 function ProgressTab({ snapshot, ledger, onSummarize, onOpenWorkflow }: { snapshot: RunSnapshot; ledger?: LedgerCommands; onSummarize?: () => void; onOpenWorkflow?: () => void }) {
   const progress = workflowProgressForFeature(snapshot);
   const workflow = snapshot.workflow;
@@ -72,14 +81,14 @@ function ProgressTab({ snapshot, ledger, onSummarize, onOpenWorkflow }: { snapsh
     </section>
     <section className="ctx-sec"><h3>讨论方式{onOpenWorkflow && <button type="button" className="link-btn" aria-label="查看讨论方式" onClick={onOpenWorkflow}>查看</button>}</h3>
       {progress && workflow ? <>
-        <p className="small muted ctx-lead">{workflowTemplateLabels[workflow.templateId]} · 第 {Math.min(progress.completedTurns + (snapshot.currentTurnId ? 1 : 0), progress.totalTurns)} / {progress.totalTurns} 步 · 用时 {duration(progress.elapsedMs)}{progress.limitReason ? ` · ${progress.limitReason}` : ''}</p>
+        <p className="small muted ctx-lead">{workflowTemplateLabels[workflow.templateId]} · 第 {Math.min(progress.completedTurns + (snapshot.turns.some(turn => turn.turnId === snapshot.currentTurnId && !turn.overrideActionId) ? 1 : 0), progress.totalTurns)} / {progress.totalTurns} 步 · 用时 {duration(progress.elapsedMs)}{progress.limitReason ? ` · ${progress.limitReason}` : ''}{insertedText(snapshot)}</p>
         <ol className="steps">{progress.stages.map(stage => {
           const state = stage.status === '已完成' ? 'done' : stage.status === '执行中' ? 'now' : '';
           return <li key={stage.id} className={state}><span className="mark" aria-hidden>{state === 'done' && <Check size={11} strokeWidth={3} />}</span>
             <span><span className="t">{stage.label}</span><span className="s">{stage.status} · {stage.completedTurns}/{stage.totalTurns} 回合</span></span></li>;
         })}</ol>
         <p className="small muted">下一步：{progress.nextStep}</p>
-      </> : <p className="small muted ctx-lead">成员按顺序轮流发言 · 第 {snapshot.turns.length} / {snapshot.execution?.maxTurns ?? '—'} 回合{snapshot.execution?.elapsedExecutionMs ? ` · 用时 ${duration(snapshot.execution.elapsedExecutionMs)}` : ''}</p>}
+      </> : <p className="small muted ctx-lead">成员按顺序轮流发言 · 计划 {Math.min(planTurnCount(snapshot), snapshot.execution?.maxTurns ?? 0)} / {snapshot.execution?.maxTurns ?? '—'} 回合{insertedText(snapshot)}{snapshot.execution?.elapsedExecutionMs ? ` · 用时 ${duration(snapshot.execution.elapsedExecutionMs)}` : ''}</p>}
     </section>
     {onSummarize && <section className="ctx-sec"><h3>讨论摘要</h3>
       <p className="small muted">{used ? `之后的发言正在用摘要代替第 1–${used.lastNumber} 条原文。讨论再变长时，可以在此基础上续写摘要。`
@@ -96,11 +105,12 @@ function MembersTab({ snapshot, commands, providers }: { snapshot: RunSnapshot; 
   const directable = canDirectRun(snapshot);
   const override = snapshot.host?.override;
   const next = ['running', 'pausing', 'paused'].includes(snapshot.status) || override ? nextSpeaker(snapshot) : undefined;
+  const nextText = next ? nextSpeakerText(next) : undefined;
   const speaking = snapshot.turns.find(turn => turn.turnId === snapshot.currentTurnId)?.agentId;
   const disabled = !commands.available || commands.pending !== undefined;
   return <section className="ctx-sec"><h3>本场成员</h3>
-    <p className="small ctx-lead">{next ? `下一位：${next.name}${next.source === 'override' ? '（主持人点名，排在下一回合，不打断正在进行的发言）' : '（按计划）'}`
-      : snapshot.status === 'completed' ? '下一位：无（运行已完成）' : '下一位：暂无（运行未在进行，或已达回合上限）'}</p>
+    <p className="small ctx-lead">{nextText ? `下一位：${nextText.name}（${nextText.source}）${nextText.then ? ` · ${nextText.then}` : ''}`
+      : canContinueRun(snapshot) ? '讨论已结束。可以在下方输入框里继续：所有成员各回应一次，或用 @ 只让一位回应。' : '下一位：暂无（运行未在进行，或计划的回合已用完）'}</p>
     {members.map(member => {
       const state = member.agentId === speaking ? '正在发言' : override?.agentId === member.agentId ? '已点名' : next?.agentId === member.agentId ? '下一位' : undefined;
       return <div key={member.agentId} className="member-row"><Avatar name={member.displayName} />
@@ -111,7 +121,7 @@ function MembersTab({ snapshot, commands, providers }: { snapshot: RunSnapshot; 
       </div>;
     })}
     {override && directable && <Button size="sm" disabled={disabled} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名，恢复按计划发言。')}>取消点名</Button>}
-    {snapshot.workflow && directable && <p className="small muted">按讨论方式进行时只能点名当前阶段的成员；点名回合是计划外插入，不占用计划步骤，但计入回合上限。</p>}
+    {directable && <p className="small muted">点名是在下一回合插入一轮：不占用计划的回合{snapshot.workflow ? '和步骤' : ''}，之后回到原计划，原计划的成员不会被跳过。{snapshot.workflow ? '按讨论方式进行时只能点名当前阶段的成员。' : ''}</p>}
     <p className="small muted">成员名单在讨论开始时固定；在「房间」里改成员，只影响之后的讨论。也可以在下方输入框里输入 @ 点名。</p>
   </section>;
 }
