@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setImmediate as drainReadyCallbacks } from 'node:timers/promises';
 import type { RunEvent, RunSnapshot, RunSubscription, RunStatus, TurnStatus } from '../../shared/types/run';
 import { assertRunCommand, canRetryTurn, transitionRun, transitionTurn } from '../orchestrator/stateMachine';
@@ -28,6 +28,8 @@ import { activeSummary, buildSummaryMessages, publicSlots, revisedCoveredSlots, 
 import { measureContext, type ModelBudget } from '../context/wirePublicContext';
 import { countModelTokens } from '../context/buildPublicContext';
 import { mockModelBudget } from '../providers/mock/tokenBudget';
+import { continuationPreviewInputSchema, continueDiscussionInputSchema, type ContinuationPreview, type ContinuationPreviewInput,
+  type ContinueDiscussionInput, type ContinueDiscussionResult, type RunContinuation } from '../../shared/schemas/continuation';
 
 type RunContext = {
   runId: string;
@@ -68,6 +70,7 @@ type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; 
 type Snapshot = ReturnType<Database['readRunSnapshot']>;
 const continuePrompt = 'Continue the previous response from where it stopped.';
 const summarySenderName = '讨论摘要';
+const hostSenderName = '主持人';
 // A member whose role reads as a synthesizer writes summaries by default (same vocabulary as the built-in role guide).
 const summarizerPattern = /综合|总结|汇总|整合|归纳|synth|summar|integrat/iu;
 const excerpt = (text: string) => { const flat = text.replace(/\s+/gu, ' ').trim(); return flat.length > 60 ? `${flat.slice(0, 60)}…` : flat; };
@@ -87,6 +90,18 @@ export function turnSettled(snapshot: Snapshot, turn: TurnRecord): boolean {
   return attempt ? attempt.status === 'completed' : snapshot.versions.find(version => version.messageId === message.id)?.origin === 'edit';
 }
 const planTurnsOf = (turns: readonly TurnRecord[]) => [...turns].sort((a, b) => a.turnIndex - b.turnIndex).filter(turn => turn.overrideActionId === undefined);
+/** A host-directed Turn: an @Override (D110) or one answer of a continuation (D111). Neither is a plan Turn. */
+type Directed = { kind: 'override' | 'continuation'; actionId: string };
+type Speaker = { member: MemberSnapshot | undefined; directed?: Directed };
+/** D111: the latest continuation and the members still to answer it, in order. */
+function openContinuation(continuations: Snapshot['continuations'], turns: readonly TurnRecord[]) {
+  const latest = continuations.at(-1);
+  if (!latest) return undefined;
+  const answered = turns.filter(turn => turn.overrideActionId === latest.actionId).length;
+  return { continuation: latest, remaining: latest.agentIds.slice(answered) };
+}
+/** Input bounds count UTF-8 bytes (byte-level BPE never makes more tokens); a message's label and notes stay under 64. */
+const tokenBound = (text: string) => Buffer.byteLength(text, 'utf8') + 64;
 
 // Compare persisted DTO identity by fields; JSON property insertion order is not identity.
 const memberIdentity = (member: MemberSnapshot) => JSON.stringify([member.agentId, member.displayName, member.roleTemplateId,
@@ -225,6 +240,10 @@ export class RunService {
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
         versions, host: this.hostView(data), budget: data.budget, charges: data.charges,
         ...(data.summaries.length ? { summaries: this.summaryView(data) } : {}),
+        ...(data.continuations.length ? { continuations: data.continuations.map((item): RunContinuation => {
+          const message = data.hostActions.find(action => action.id === item.actionId)?.resultMessageId;
+          return { actionId: item.actionId, agentIds: item.agentIds, createdAt: item.createdAt, ...(message ? { messageId: message } : {}) };
+        }) } : {}),
         ...this.pressureView(data),
       });
   }
@@ -321,8 +340,9 @@ export class RunService {
     }
     const context = this.contexts.get(run.id);
     const elapsedMs = context?.executing ? this.elapsed(context) : run.elapsedExecutionMs ?? 0;
-    const limitReason = completedTurns < plan.steps.length ? (elapsedMs >= Math.min(run.maxDurationMs, plan.config.limits.maxDurationMs) ? 'max_duration'
-      : (run.nextTurnIndex ?? 0) >= Math.min(run.maxTurns, plan.config.limits.maxTurns) ? 'max_turns' : undefined) : undefined;
+    // D110: only plan Turns count toward the turn limit; D111: a continued Run's duration counts from its continuation.
+    const limitReason = completedTurns < plan.steps.length ? (elapsedMs >= this.durationLimit(data, plan) ? 'max_duration'
+      : planTurns.length >= Math.min(run.maxTurns, plan.config.limits.maxTurns) ? 'max_turns' : undefined) : undefined;
     const nextStep = !limitReason && settled && completedTurns === planTurns.length ? plan.steps[completedTurns] : undefined;
     const currentStage = (planTurns.length > completedTurns ? plan.steps[planTurns.length - 1] : nextStep ?? plan.steps.at(-1))?.stageId;
     return { templateId: plan.config.templateId, completedTurns, totalTurns: plan.steps.length, elapsedMs, currentStage, nextStep, limitReason,
@@ -523,6 +543,106 @@ export class RunService {
       this.database.setRunBudgetBlock(runId, null);
       this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' });
     });
+  }
+
+  /** D111: who would answer a continuation of this finished discussion, and what it may cost. Sends and records nothing. */
+  previewContinuation(input: ContinuationPreviewInput): ContinuationPreview {
+    const parsed = continuationPreviewInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    const plan = this.planContinuation(this.requireRun(parsed.data.runId), parsed.data.agentId, parsed.data.content ?? '');
+    return { runId: parsed.data.runId, available: plan.reason === undefined, ...(plan.reason ? { reason: plan.reason } : {}), agentIds: plan.agentIds, cost: plan.cost };
+  }
+
+  /**
+   * D111: continue a finished discussion (completed, or stopped — not by the budget — with every Turn settled) in the
+   * same Run. The host's words become a public interjection, recorded with its continuation and the Run's return to
+   * running in one transaction; then the named member answers once, or every available member once in roster order.
+   * Each request is still reserved and settled on its own (D090). Repeating a delivery returns the original
+   * continuation. Does not wait.
+   */
+  continueDiscussion(input: ContinueDiscussionInput): ContinueDiscussionResult {
+    const parsed = continueDiscussionInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input', parsed.error.issues[0]?.path[0] === 'content' ? 'content' : undefined);
+    input = parsed.data;
+    const run = this.requireRun(input.runId);
+    const fingerprint = createHash('sha256').update(JSON.stringify(['continueDiscussion', input.runId, input.content, input.agentId ?? null])).digest('hex');
+    const previous = this.database.findHostAction(run.id, input.clientRequestId);
+    if (previous) {
+      const continuation = this.database.listContinuations(run.id).find(item => item.actionId === previous.id);
+      if (previous.fingerprint !== fingerprint || !continuation || !previous.resultMessageId) throw new ContractError('invalid_input', 'clientRequestId');
+      return { runId: run.id, actionId: previous.id, messageId: previous.resultMessageId, agentIds: continuation.agentIds, duplicate: true };
+    }
+    const plan = this.planContinuation(run, input.agentId, input.content);
+    if (plan.reason === 'budget_insufficient') throw new ContractError('budget_exceeded');
+    if (plan.reason === 'unsupported') throw new ContractError('unsupported');
+    if (plan.reason === 'context_exceeds') throw new ContractError('invalid_input', 'content');
+    if (plan.reason) throw new ContractError('invalid_state');
+    const context = this.contextFrom(run);
+    const elapsedBaseMs = run.elapsedExecutionMs!;
+    context.maxDurationMs = this.durationLimit({ run, continuations: [{ actionId: '', runId: run.id, agentIds: plan.agentIds, elapsedBaseMs, createdAt: '' }] }, this.workflowPlan(run));
+    const actionId = randomUUID();
+    const messageId = randomUUID();
+    this.schedule(context, () => {
+      // An Override left from before the stop is replaced by what the host asks for now.
+      const pending = this.database.getPendingOverride(run.id);
+      if (pending) this.database.settleHostAction(pending.id, 'superseded');
+      this.database.insertMessage({ id: messageId, roomId: run.roomId, runId: run.id, senderType: 'user', senderName: hostSenderName, content: input.content, status: 'completed' });
+      this.database.insertHostAction({ id: actionId, runId: run.id, clientRequestId: input.clientRequestId, kind: 'interject', status: 'applied', fingerprint, resultMessageId: messageId });
+      this.database.insertContinuation({ actionId, runId: run.id, agentIds: plan.agentIds, elapsedBaseMs });
+      this.appendEvent(run.id, 'host_updated', { actionId, kind: 'interject' });
+      this.setRunState(run.id, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' });
+    });
+    return { runId: run.id, actionId, messageId, agentIds: plan.agentIds, duplicate: false };
+  }
+
+  /**
+   * D111: a continuation's answering members and its cost bound. Only a completed or stopped Run with every Turn
+   * settled and nothing in flight continues; a budget stop is resumed after a top-up instead. Members are the frozen
+   * roster, limited to those still enabled.
+   */
+  private planContinuation(run: RunRecord, agentId: string | undefined, content: string) {
+    type Plan = { agentIds: string[]; cost: ContinuationPreview['cost']; reason?: NonNullable<ContinuationPreview['reason']> };
+    const roster = [...(run.membersSnapshot ?? [])].sort((a, b) => a.displayOrder - b.displayOrder);
+    if (agentId !== undefined && !roster.some(member => member.agentId === agentId)) throw new ContractError('not_found');
+    const available = roster.filter(member => {
+      const agent = this.database.getAgentConfiguration(member.agentId);
+      return agent && agent.roomId === run.roomId && agent.enabled && agent.archivedAt === null;
+    });
+    const answering = agentId === undefined ? available : available.filter(member => member.agentId === agentId);
+    const plan: Plan = { agentIds: answering.map(member => member.agentId).slice(0, 64), cost: { kind: 'unavailable' } };
+    if (run.task === null || !roster.length || run.nextTurnIndex === null || run.elapsedExecutionMs === null) return { ...plan, reason: 'unsupported' as const };
+    const snapshot = this.database.readRunSnapshot(run.id);
+    // A budget stop keeps its own path (top up and resume); any other stop with nothing left to retry can continue.
+    if (!['completed', 'cancelled', 'error'].includes(run.status) || run.status === 'error' && snapshot.budget.blocked) return { ...plan, reason: 'not_finished' as const };
+    if (this.isExecuting(run.id) || this.contexts.get(run.id)?.job || snapshot.messages.some(message => message.status === 'streaming')
+      || snapshot.turns.some(turn => !turnSettled(snapshot, turn))) return { ...plan, reason: 'busy' as const };
+    if (!answering.length) return { ...plan, reason: 'member_unavailable' as const };
+    // Each answer is quoted as it would be sent now, plus what it will also read: the interjection and the earlier
+    // answers of this continuation. Input bounds count UTF-8 bytes; an earlier answer written to the output limit is
+    // taken as 6 bytes per token (Chinese runs about 5), quoting included.
+    const outputTokenLimit = this.contextFrom(run).outputTokenLimit;
+    let maxMicro = 0; let firstMicro = 0; let priced = false;
+    for (const [index, member] of answering.entries()) {
+      if (!member.providerId || !this.registry) continue;
+      let quote: RequestQuote | undefined;
+      try {
+        const current = { turnId: randomUUID(), requestId: randomUUID(), messageId: randomUUID(), agentId: member.agentId, turnIndex: run.nextTurnIndex };
+        const messages = this.buildMessages(run, member, run.nextTurnIndex, { snapshot, current });
+        quote = this.registry.quoteRequest(member.providerId, streamChatInputSchema.parse({ requestId: current.requestId, modelId: member.modelId ?? 'mock',
+          messages, outputTokenLimit, agentRole: member.roleTemplateId, turnIndex: run.nextTurnIndex }));
+      } catch (error) {
+        return { ...plan, reason: toPublicError(error).code === 'invalid_input' ? 'context_exceeds' as const : 'unsupported' as const };
+      }
+      if (!quote || quote.currency !== 'CNY') continue;
+      priced = true;
+      const extra = (tokenBound(content) + index * (6 * outputTokenLimit + 64)) * quote.inputMicroPerToken;
+      if (index === 0) firstMicro = quote.reservedMicro + tokenBound(content) * quote.inputMicroPerToken;
+      maxMicro += quote.reservedMicro + extra;
+    }
+    if (!priced) return { ...plan, cost: { kind: 'free' as const } };
+    const remainingMicro = this.database.getRunBudget(run.id).remainingMicro;
+    plan.cost = { kind: 'priced', maxMicro, firstMicro, remainingMicro };
+    return firstMicro > remainingMicro ? { ...plan, reason: 'budget_insufficient' as const } : plan;
   }
 
   /** D107: what a summary would cover, who would write it and its maximum cost. Sends and records nothing. */
@@ -767,8 +887,9 @@ export class RunService {
     if (!run.membersSnapshot?.some(member => member.agentId === agentId)) throw new ContractError('not_found');
     const agent = this.database.getAgentConfiguration(agentId);
     if (!agent || agent.roomId !== run.roomId || !agent.enabled || agent.archivedAt !== null) throw new ContractError('invalid_state');
+    // D110: an Override is inserted outside the plan, so a Run whose plan Turns are used up can still take one.
     const limits = this.contexts.get(runId) ?? this.contextFrom(run);
-    if (run.nextTurnIndex! >= limits.maxTurns || run.elapsedExecutionMs! >= limits.maxDurationMs) throw new ContractError('invalid_state');
+    if (run.elapsedExecutionMs! >= limits.maxDurationMs) throw new ContractError('invalid_state');
     const plan = this.workflowPlan(run);
     if (!plan) return;
     const stage = plan.steps[planTurnsOf(this.database.listTurns(runId)).length] ?? plan.steps.at(-1)!;
@@ -906,9 +1027,15 @@ export class RunService {
     const plan = this.workflowPlan(run);
     return { runId: run.id, roomId: run.roomId, members: run.membersSnapshot,
       mode: run.mode, maxTurns: Math.min(run.maxTurns, plan?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
-      maxDurationMs: Math.min(run.maxDurationMs, plan?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
+      maxDurationMs: this.durationLimit({ run, continuations: this.database.listContinuations(run.id) }, plan),
       outputTokenLimit: Math.min(run.outputTokenLimit, plan?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: run.elapsedExecutionMs, executing: false };
+  }
+
+  /** The duration limit; a continued Run (D111) gets its full allowance again from the moment it was continued. */
+  private durationLimit(data: Pick<Snapshot, 'run' | 'continuations'>, plan: WorkflowSnapshot | undefined): number {
+    const base = Math.min(data.run.maxDurationMs, plan?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER);
+    return Math.min(Number.MAX_SAFE_INTEGER, base + (data.continuations.at(-1)?.elapsedBaseMs ?? 0));
   }
 
   private hasWorkflowPlan(value: RunRecord['workflowSnapshot']): boolean {
@@ -923,7 +1050,7 @@ export class RunService {
     return plan;
   }
 
-  private assertRequestEvidence(context: RunContext, snapshot: ReturnType<Database['readRunSnapshot']>, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, overrideId?: string): WorkflowStep | undefined {
+  private assertRequestEvidence(context: RunContext, snapshot: ReturnType<Database['readRunSnapshot']>, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, directed?: Directed): WorkflowStep | undefined {
     if (repeat?.kind === 'regenerate' && repeat.job) return this.assertJobEvidence(context, snapshot, member, repeat);
     const { run, turns, attempts, messages } = snapshot;
     if (this.contexts.get(context.runId) !== context || !context.executing || !this.activeRooms.has(context.roomId)
@@ -945,14 +1072,20 @@ export class RunService {
     if (repeat) {
       if (!ordered.length || repeat.turn.turnIndex !== turnIndex || repeat.turn.agentId !== member.agentId
         || turnIndex !== ordered.length - 1 || repeat.modelId !== member.modelId) throw new ContractError('invalid_state');
-      return plan ? stageStep(plan.steps[planTurns.filter(turn => turn.turnIndex < turnIndex).length]) : undefined;
+      return this.stageOf(snapshot, plan, repeat.turn);
     }
     if (turnIndex !== run.nextTurnIndex) throw new ContractError('invalid_state');
-    if (overrideId !== undefined) {
-      // The pending Override is consumed in this transaction; its Turn takes no plan step.
-      const action = snapshot.hostActions.find(item => item.id === overrideId);
-      if (!action || action.kind !== 'setOverride' || action.status !== 'pending' || action.agentId !== member.agentId
-        || turnIndex >= context.maxTurns) throw new ContractError('invalid_state');
+    if (directed?.kind === 'continuation') {
+      // D111: the next answer of the latest continuation; it is outside the plan and carries no stage requirement.
+      const open = openContinuation(snapshot.continuations, ordered);
+      if (open?.continuation.actionId !== directed.actionId || open.remaining[0] !== member.agentId) throw new ContractError('invalid_state');
+      if (this.elapsed(context) >= context.maxDurationMs && this.deadlineReached(context)) throw new ContractError('timeout');
+      return;
+    }
+    if (directed !== undefined) {
+      // The pending Override is consumed in this transaction; its Turn takes no plan step and no plan turn (D110).
+      const action = snapshot.hostActions.find(item => item.id === directed.actionId);
+      if (!action || action.kind !== 'setOverride' || action.status !== 'pending' || action.agentId !== member.agentId) throw new ContractError('invalid_state');
       if (!plan) return;
       const stage = stageStep(plan.steps[planTurns.length]);
       if (!plan.config.stages.find(item => item.id === stage?.stageId)?.memberIds.includes(member.agentId)) throw new ContractError('invalid_state');
@@ -980,8 +1113,13 @@ export class RunService {
     const turn = turns.find(item => item.id === job.turn.id);
     if (!turn || !turnSettled(snapshot, turn) || turn.agentId !== member.agentId || turn.turnIndex !== job.turn.turnIndex
       || snapshot.versions.find(version => version.messageId === job.sourceMessageId)?.slotId !== turn.id) throw new ContractError('invalid_state');
-    const plan = this.workflowPlan(run);
-    return plan ? plan.steps[planTurnsOf(turns).filter(item => item.turnIndex < turn.turnIndex).length] ?? plan.steps.at(-1) : undefined;
+    return this.stageOf(snapshot, this.workflowPlan(run), turn);
+  }
+
+  /** The workflow stage an existing Turn belongs to; a continuation answer (D111) belongs to none. */
+  private stageOf(snapshot: Snapshot, plan: WorkflowSnapshot | undefined, turn: TurnRecord): WorkflowStep | undefined {
+    if (!plan || snapshot.continuations.some(item => item.actionId === turn.overrideActionId)) return;
+    return plan.steps[planTurnsOf(snapshot.turns).filter(item => item.turnIndex < turn.turnIndex).length] ?? plan.steps.at(-1);
   }
 
   private assertSettled(runId: string): void {
@@ -990,7 +1128,7 @@ export class RunService {
   }
 
   private assertBudget(run: RunRecord): void {
-    if (run.elapsedExecutionMs !== null && run.elapsedExecutionMs >= run.maxDurationMs) throw new ContractError('timeout');
+    if (run.elapsedExecutionMs !== null && run.elapsedExecutionMs >= this.durationLimit({ run, continuations: this.database.listContinuations(run.id) }, undefined)) throw new ContractError('timeout');
   }
 
   private assertAvailable(context?: RunContext): void {
@@ -1070,7 +1208,7 @@ export class RunService {
         const repeatedAgentId = repeat?.turn.agentId;
         const member = repeat ? context.members.find(a => a.agentId === repeatedAgentId) : next?.member;
         if (!member) throw new ContractError('invalid_state');
-        await this.executeTurn(context, member, turnIndex, repeat, next?.overrideId);
+        await this.executeTurn(context, member, turnIndex, repeat, next?.directed);
         repeat = undefined;
         if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
         if (context.budgetBlock) { this.finishRun(context, 'error', undefined, context.failureReason); return; }
@@ -1087,15 +1225,22 @@ export class RunService {
   }
 
   /**
-   * The next speaker: a pending host Override first (an inserted Turn that takes no plan step), then the
-   * frozen workflow step or round-robin position counted over plan Turns only. maxTurns bounds all Turns.
+   * The next speaker: a pending host Override first (D110: a Turn inserted outside the plan), then the open
+   * continuation's next member (D111), then the frozen workflow step or round-robin position. maxTurns bounds plan
+   * Turns only; every inserted Turn comes from one explicit host action. A continued Run never returns to its plan.
    */
-  private nextSpeaker(context: RunContext, run: RunRecord): 'complete' | { member: MemberSnapshot | undefined; overrideId?: string } {
-    if (run.nextTurnIndex! >= context.maxTurns) return 'complete';
+  private nextSpeaker(context: RunContext, run: RunRecord): 'complete' | Speaker {
     const override = this.database.getPendingOverride(run.id);
-    if (override) return { member: context.members.find(member => member.agentId === override.agentId), overrideId: override.id };
+    if (override) return { member: context.members.find(member => member.agentId === override.agentId), directed: { kind: 'override', actionId: override.id } };
+    const turns = this.database.listTurns(run.id);
+    const open = openContinuation(this.database.listContinuations(run.id), turns);
+    if (open) {
+      if (!open.remaining.length) return 'complete';
+      return { member: context.members.find(member => member.agentId === open.remaining[0]), directed: { kind: 'continuation', actionId: open.continuation.actionId } };
+    }
     const plan = this.workflowPlan(run);
-    const planIndex = planTurnsOf(this.database.listTurns(run.id)).length;
+    const planIndex = planTurnsOf(turns).length;
+    if (planIndex >= context.maxTurns) return 'complete';
     if (plan && planIndex >= plan.steps.length) return 'complete';
     const agentId = plan?.steps[planIndex].agentId;
     return { member: plan ? context.members.find(member => member.agentId === agentId) : context.members[planIndex % context.members.length] };
@@ -1121,7 +1266,7 @@ export class RunService {
     });
   }
 
-  private async executeTurn(context: RunContext, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, overrideId?: string): Promise<void> {
+  private async executeTurn(context: RunContext, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, directed?: Directed): Promise<void> {
     const turnId = repeat?.turn.id ?? randomUUID();
     const messageId = randomUUID();
     const requestId = randomUUID();
@@ -1130,7 +1275,7 @@ export class RunService {
     let quote: RequestQuote | undefined;
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
-      const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, overrideId);
+      const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, directed);
       const preparation:RequestPreparation={snapshot,workflowStep,current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
         repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}
           :extend?{messages:extend.messages,sourceRequestId:repeat!.sourceRequestId,kind:'continue'}:undefined,
@@ -1154,7 +1299,8 @@ export class RunService {
       if(context.abortController.signal.aborted)throw new ContractError('cancelled');
       if (job) context.job = { requestId };
       else if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
-      else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex, ...(overrideId ? { overrideActionId: overrideId } : {}) });
+      else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex,
+        ...(directed?.kind === 'override' ? { overrideActionId: directed.actionId } : directed ? { continuationId: directed.actionId } : {}) });
       this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: extend?.prefix ?? '', status: 'streaming' }, version);
       const attemptIndex = snapshot.attempts.filter(a => a.turnId === turnId).length;
       this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
