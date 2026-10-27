@@ -18,6 +18,12 @@ assert.ok(fs.lstatSync(directory).isDirectory() && !fs.lstatSync(directory).isSy
 assert.equal(fs.statSync(directory).uid, process.getuid());
 const manifestPath = join(directory, 'r09-manifest.json');
 assert.equal(restarting ? resolve(args[1]) : manifestPath, manifestPath);
+// --restart needs the first phase's manifest; without it (the first phase failed), fail with a non-zero exit instead
+// of letting Electron report a load error and exit 0.
+if (restarting && !fs.existsSync(manifestPath)) {
+  console.error('R09_PRODUCTION_FAIL ' + JSON.stringify({ error: 'Missing first-phase manifest: ' + manifestPath }));
+  process.exit(1);
+}
 const ownerPath = join(directory, 'r09-owner.json');
 if (!restarting) fs.writeFileSync(ownerPath, JSON.stringify({ probe: 'R09 production smoke', uid: process.getuid(), directory }), { mode: 0o600, flag: 'wx' });
 const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));

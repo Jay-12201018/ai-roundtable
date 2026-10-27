@@ -13,18 +13,21 @@ async function page(stage, saved, endpoint) {
   const toggle=async(name,value)=>{const e=await wait(()=>field(name),e=>e&&!e.disabled,'Unavailable checkbox '+name);if(e.checked!==value)e.click();await sleep();};
   const api=window.roundtable;
   const noKey=value=>{check(!JSON.stringify(value).includes('r09-fake-key-'),'Plain Key leaked');return value;};
-  const text=()=>[...document.querySelectorAll('.thread-item')].map(item=>item.querySelector('.msg-body .md, .bubble')?.textContent??'');
+  // R16 renders replies as Markdown, which drops trailing whitespace (a reply stopped right after a space ends in one);
+  // the DOM and Main are compared without it. Everything else must match exactly.
+  const visibleText=value=>value.trimEnd();
+  const text=()=>[...document.querySelectorAll('.thread-item')].map(item=>visibleText(item.querySelector('.msg-body .md, .bubble')?.textContent??''));
   // R12: the timeline shows one entry per message slot (its effective version); other versions stay one click away.
-  const effective = snapshot => { if (!snapshot.versions) return snapshot.messages.map(message => message.content);
+  const effective = snapshot => { if (!snapshot.versions) return snapshot.messages.map(message => visibleText(message.content));
     const slots = new Map(); for (const message of snapshot.messages) { const version = snapshot.versions.find(item => item.messageId === message.id); if (!version) continue;
       const group = slots.get(version.slotId) ?? []; group.push({ ...version, content: message.content }); slots.set(version.slotId, group); }
-    return [...slots.values()].map(group => { group.sort((a, b) => a.versionNumber - b.versionNumber); return (group.find(version => version.active) ?? group.at(-1)).content; }); };
+    return [...slots.values()].map(group => { group.sort((a, b) => a.versionNumber - b.versionNumber); return visibleText((group.find(version => version.active) ?? group.at(-1)).content); }); };
   // Steps back through a slot's earlier versions in the real UI, checks each against Main, then returns to the effective one.
   const history = async (snapshot, slotIndex) => {
     const article = () => document.querySelectorAll('.thread-item')[slotIndex]; const version = snapshot.versions.find(item => item.messageId === snapshot.messages[0].id);
     const versions = snapshot.versions.filter(item => item.slotId === version.slotId).sort((a, b) => a.versionNumber - b.versionNumber);
-    const contentOf = id => snapshot.messages.find(message => message.id === id).content;
-    const shown = () => article().querySelector('.msg-body .md').textContent; const step = label => article().querySelector('button[aria-label="' + label + '"]').click();
+    const contentOf = id => visibleText(snapshot.messages.find(message => message.id === id).content);
+    const shown = () => visibleText(article().querySelector('.msg-body .md').textContent); const step = label => article().querySelector('button[aria-label="' + label + '"]').click();
     check(article().textContent.includes('版本 ' + versions.length + '/' + versions.length), 'Version count missing');
     for (let index = versions.length - 2; index >= 0; index--) { step('查看上一个版本'); await sleep(); check(shown() === contentOf(versions[index].messageId), 'Earlier version not reachable'); }
     for (let index = 1; index < versions.length; index++) { step('查看下一个版本'); await sleep(); }
@@ -69,6 +72,9 @@ async function page(stage, saved, endpoint) {
     return {saved,snapshots,assertions};
   }
   if(stage==='stop'){
+    // D111: the previous Run completed, so its box continues it; a new discussion is the explicit 新讨论 button.
+    await wait(()=>field('继续讨论'),Boolean,'Completed Run did not offer to continue in place');check(!field('讨论目标'),'Completed Run offered a new-goal box');
+    await clickIn('.controls','新讨论');
     await fill('讨论目标','R09 hanging HTTP output');await click('开始讨论');saved.stopRunId=await wait(()=>localStorage.getItem('roundtable.runId'),id=>id&&id!==saved.runId,'Stop Run absent');
     await wait(text,ts=>ts[0]?.length>0,'No partial before Stop');await click('停止'); await click('停止讨论');snapshots.stopped=await settle(saved.stopRunId,'cancelled');check(snapshots.stopped.messages[0].content.length>0,'Stop lost partial');check(snapshots.stopped.attempts[0].status==='aborted','Attempt not aborted');
     for(const name of ['重试当前回合','续写部分回复']){
@@ -82,8 +88,14 @@ async function page(stage, saved, endpoint) {
     await click('管理房间与成员');await clickIn('.rooms-feature','R09 fixture Room');await click('历史记录');await clickIn('.rooms-feature','R09 three Agent public context');snapshots.restarted=await settle(saved.runId,'completed');check(snapshots.restarted.attempts.length===3,'History lost on restart');
     for(const id of [saved.openai,saved['openai-compatible']])check((await api.settings.getProviderKeyState({providerId:id})).state==='configured','Fake secure Key not restored');
     // An explicit click must fail closed after restart until Main target confirmation is renewed.
+    // The reopened Run completed (D111: its box continues it); a new discussion starts from 新讨论, which leaves the
+    // history selection. A refused start must create and select no Run.
+    await wait(()=>field('继续讨论'),Boolean,'Completed Run did not offer to continue in place');check(!field('讨论目标'),'Completed Run offered a new-goal box');
+    const runsBefore=(await api.rooms.listRoomRuns({roomId:saved.roomId})).items.map(r=>r.id);
+    await clickIn('.controls','新讨论');
     await fill('讨论目标','R09 unconfirmed restart');await click('开始讨论');await wait(()=>document.querySelector('[role="alert"]')?.textContent,Boolean,'Missing target refusal feedback');
-    check(localStorage.getItem('roundtable.runId')===saved.runId,'Rejected start replaced history');noKey(snapshots.restarted);return {saved,snapshots,assertions};
+    check(localStorage.getItem('roundtable.runId')===null,'Rejected start selected a Run');
+    check(JSON.stringify((await api.rooms.listRoomRuns({roomId:saved.roomId})).items.map(r=>r.id))===JSON.stringify(runsBefore),'Rejected start created a Run');noKey(snapshots.restarted);return {saved,snapshots,assertions};
   }
   throw new Error('Unknown UI stage');
 }

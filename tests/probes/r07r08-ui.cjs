@@ -37,18 +37,21 @@ async function page(stage, saved) {
     if (element.checked !== value) element.click(); await sleep();
   };
   // R16: one .thread-item per slot; a member's text is its Markdown body, the host's is its bubble.
-  const text = () => [...document.querySelectorAll('.thread-item')].map(item => item.querySelector('.msg-body .md, .bubble')?.textContent ?? '');
+  // R16 renders replies as Markdown, which drops trailing whitespace (a reply stopped right after a space ends in one);
+  // the DOM and Main are compared without it. Everything else must match exactly.
+  const visibleText = value => value.trimEnd();
+  const text = () => [...document.querySelectorAll('.thread-item')].map(item => visibleText(item.querySelector('.msg-body .md, .bubble')?.textContent ?? ''));
   // R12: the timeline shows one entry per message slot (its effective version); other versions stay one click away.
-  const effective = snapshot => { if (!snapshot.versions) return snapshot.messages.map(message => message.content);
+  const effective = snapshot => { if (!snapshot.versions) return snapshot.messages.map(message => visibleText(message.content));
     const slots = new Map(); for (const message of snapshot.messages) { const version = snapshot.versions.find(item => item.messageId === message.id); if (!version) continue;
       const group = slots.get(version.slotId) ?? []; group.push({ ...version, content: message.content }); slots.set(version.slotId, group); }
-    return [...slots.values()].map(group => { group.sort((a, b) => a.versionNumber - b.versionNumber); return (group.find(version => version.active) ?? group.at(-1)).content; }); };
+    return [...slots.values()].map(group => { group.sort((a, b) => a.versionNumber - b.versionNumber); return visibleText((group.find(version => version.active) ?? group.at(-1)).content); }); };
   // Steps back through a slot's earlier versions in the real UI, checks each against Main, then returns to the effective one.
   const history = async (snapshot, slotIndex) => {
     const article = () => document.querySelectorAll('.thread-item')[slotIndex]; const version = snapshot.versions.find(item => item.messageId === snapshot.messages[0].id);
     const versions = snapshot.versions.filter(item => item.slotId === version.slotId).sort((a, b) => a.versionNumber - b.versionNumber);
-    const contentOf = id => snapshot.messages.find(message => message.id === id).content;
-    const shown = () => article().querySelector('.msg-body .md').textContent; const step = label => article().querySelector('button[aria-label="' + label + '"]').click();
+    const contentOf = id => visibleText(snapshot.messages.find(message => message.id === id).content);
+    const shown = () => visibleText(article().querySelector('.msg-body .md').textContent); const step = label => article().querySelector('button[aria-label="' + label + '"]').click();
     check(article().textContent.includes('版本 ' + versions.length + '/' + versions.length), 'Version count missing');
     for (let index = versions.length - 2; index >= 0; index--) { step('查看上一个版本'); await sleep(); check(shown() === contentOf(versions[index].messageId), 'Earlier version not reachable'); }
     for (let index = 1; index < versions.length; index++) { step('查看下一个版本'); await sleep(); }
@@ -61,7 +64,9 @@ async function page(stage, saved) {
   await wait(() => document.querySelector('.app-shell'), Boolean, 'Production App absent');
   let lastSeen;
   const settle = (runId, status, count) => wait(() => api.run.getSnapshot(runId), snapshot => { lastSeen = { status: snapshot.status, turns: snapshot.turns.length, dom: text(), main: effective(snapshot) }; return snapshot.status === status
-    && (count === undefined || snapshot.turns.length === count) && JSON.stringify(text()) === JSON.stringify(effective(snapshot)); }, 'Run/DOM did not settle: ' + status + ' ' + JSON.stringify(lastSeen ?? {}));
+    && (count === undefined || snapshot.turns.length === count) && JSON.stringify(text()) === JSON.stringify(effective(snapshot)); }, 'Run/DOM did not settle')
+    // Report the state seen last, not the one before waiting started.
+    .catch(error => { throw new Error(error.message + ': ' + status + ' ' + JSON.stringify(lastSeen ?? {})); });
   const roomList = () => api.rooms.listRooms({ includeArchived: true });
   const providerList = () => api.settings.listProviderSummaries();
   const noKey = value => {
@@ -152,6 +157,10 @@ async function page(stage, saved) {
     await click('下一步'); snapshots.stepped = await settle(saved.runId, 'paused', 2);
     await click('继续'); snapshots.completed = await settle(saved.runId, 'completed', 3);
     check(snapshots.completed.attempts.length === 3 && new Set(snapshots.completed.attempts.map(attempt => attempt.requestId)).size === 3, 'Three request identities missing');
+    // D111: a finished discussion keeps a box that continues it; a new discussion is the explicit 新讨论 button.
+    await wait(() => field('继续讨论'), Boolean, 'Completed Run did not offer to continue in place');
+    check(!field('讨论目标'), 'Completed Run offered a new-goal box');
+    await clickIn('.controls', '新讨论');
     await fill('讨论目标', 'R78 cancellation and explicit repeat'); await click('开始讨论');
     const repeatRunId = await wait(() => localStorage.getItem('roundtable.runId'), id => id && id !== saved.runId, 'Repeat scenario Run absent');
     await wait(text, values => values[0]?.length > 0, 'Stop partial output absent'); await click('停止'); await click('停止讨论');

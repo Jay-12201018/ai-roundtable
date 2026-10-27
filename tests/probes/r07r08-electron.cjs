@@ -18,6 +18,12 @@ assert.ok(fs.lstatSync(directory).isDirectory() && !fs.lstatSync(directory).isSy
 assert.equal(fs.statSync(directory).uid, process.getuid());
 const manifestPath = join(directory, 'r78-manifest.json');
 assert.equal(restarting ? resolve(args[1]) : manifestPath, manifestPath);
+// --restart needs the first phase's manifest; without it (the first phase failed), fail with a non-zero exit instead
+// of letting Electron report a load error and exit 0.
+if (restarting && !fs.existsSync(manifestPath)) {
+  console.error('R78_PRODUCTION_FAIL ' + JSON.stringify({ error: 'Missing first-phase manifest: ' + manifestPath }));
+  process.exit(1);
+}
 const ownerPath = join(directory, 'r78-owner.json');
 if (!restarting) fs.writeFileSync(ownerPath, JSON.stringify({ probe: 'R78 production smoke', uid: process.getuid(), directory }), { mode: 0o600, flag: 'wx' });
 const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
@@ -172,8 +178,11 @@ async function main() {
         const named = (name, scope = document) => [...scope.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === name);
         const actions = [];
         if (${width} === 800 && ${JSON.stringify(page)} === '讨论') {
-          // D098: idle, the composer offers 开始讨论 in the slot run controls take while a Run is live.
-          await reach(named('开始讨论', document.querySelector('.composer')), '开始讨论');
+          // D098: idle, the composer offers 开始讨论 in the slot run controls take while a Run is live. D111: with a
+          // finished Run selected (as here), the box continues it and that slot is the explicit 新讨论.
+          const continuing = document.querySelector('.composer textarea[aria-label="继续讨论"]');
+          if (continuing) { await reach(continuing, '继续讨论 box'); await reach(named('新讨论', document.querySelector('.composer')), '新讨论'); }
+          else await reach(named('开始讨论', document.querySelector('.composer')), '开始讨论');
           const menu = byName('打开导航'); await reach(menu, 'navigation drawer button'); menu.click(); await pause(); await pause(); await pause(); // the drawer slides in for 180ms
           await reach(document.querySelector('.drawer.is-left .sidebar'), 'navigation drawer');
           await reach(byName('关闭导航'), 'close navigation'); byName('关闭导航').click(); await pause();
