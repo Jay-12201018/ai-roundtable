@@ -23,5 +23,9 @@ export interface RunApiContract {
   addBudget(input: import('../schemas/budget').AddRunBudgetInput): Promise<import('../schemas/budget').AddRunBudgetResult>;
   /** R13B (D104): continue a Run the budget stopped, when what is left (e.g. after a write-off) now covers it. */
   resumeAfterBudget(runId: string): Promise<void>;
+  /** D111: who would answer a continuation of a finished discussion and its maximum cost; sends nothing. */
+  previewContinuation(input: import('../schemas/continuation').ContinuationPreviewInput): Promise<import('../schemas/continuation').ContinuationPreview>;
+  /** D111: continue a finished discussion in the same Run; idempotent per clientRequestId. */
+  continueDiscussion(input: import('../schemas/continuation').ContinueDiscussionInput): Promise<import('../schemas/continuation').ContinueDiscussionResult>;
   onEvent(listener: (event: RunEvent) => void): () => void;
 }

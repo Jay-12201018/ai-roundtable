@@ -11,6 +11,7 @@ import { hostCommandResultSchema, hostCommandSchema } from '../schemas/host';
 import { addRunBudgetInputSchema, addRunBudgetResultSchema, writeOffChargeInputSchema, writeOffChargeResultSchema } from '../schemas/budget';
 import { summaryCommandResultSchema, summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, summaryPreviewSchema } from '../schemas/summary';
 import { usageExportResultSchema, usageReportInputSchema, usageReportSchema } from '../schemas/usage';
+import { continuationPreviewInputSchema, continuationPreviewSchema, continueDiscussionInputSchema, continueDiscussionResultSchema } from '../schemas/continuation';
 
 export function ipcResponseSchema<T extends z.ZodType>(data: T) {
   return z.discriminatedUnion('ok', [
@@ -36,6 +37,9 @@ export const ipcContracts = {
   // R13B: trusted budget, ledger and summary commands; each write is idempotent per clientRequestId.
   'run.addBudget': { input: addRunBudgetInputSchema, output: addRunBudgetResultSchema },
   'run.resumeAfterBudget': { input: idSchema, output: z.undefined() },
+  // D111: continue a finished discussion in the same Run; the preview sends and records nothing.
+  'run.previewContinuation': { input: continuationPreviewInputSchema, output: continuationPreviewSchema },
+  'run.continueDiscussion': { input: continueDiscussionInputSchema, output: continueDiscussionResultSchema },
   'usage.getReport': { input: usageReportInputSchema, output: usageReportSchema },
   'usage.writeOff': { input: writeOffChargeInputSchema, output: writeOffChargeResultSchema },
   'usage.exportCsv': { input: usageReportInputSchema, output: usageExportResultSchema },
@@ -100,7 +104,12 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
     const request = input as IpcInput<'host.command'>;
     matches = result.runId === request.runId && result.kind === request.kind;
   }
-  if (channel === 'run.addBudget' || channel === 'summary.preview' || channel === 'summary.generate' || channel === 'summary.confirm') {
+  if (channel === 'run.continueDiscussion') {
+    const result = data as IpcOutput<'run.continueDiscussion'>;
+    const request = input as IpcInput<'run.continueDiscussion'>;
+    matches = result.runId === request.runId && (request.agentId === undefined || result.agentIds.length === 1 && result.agentIds[0] === request.agentId);
+  }
+  if (channel === 'run.addBudget' || channel === 'run.previewContinuation' || channel === 'summary.preview' || channel === 'summary.generate' || channel === 'summary.confirm') {
     matches = (data as { runId: string }).runId === (input as { runId: string }).runId;
   }
   if (channel === 'usage.writeOff') {

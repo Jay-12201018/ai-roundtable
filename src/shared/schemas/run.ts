@@ -8,6 +8,7 @@ import { workflowConfigSchema, workflowProgressSchema } from './workflow';
 import { hostStateSchema, hostUpdatedPayloadSchema, messageVersionSchema } from './host';
 import { requestChargeSchema, runBudgetInputSchema, runBudgetSchema } from './budget';
 import { contextPressureSchema, contextSummarySchema, summaryRequestStatusValues } from './summary';
+import { runContinuationSchema } from './continuation';
 
 /** D103: the default single-output limit; a detailed Chinese review easily exceeds the former 1024 tokens. */
 export const DEFAULT_OUTPUT_TOKEN_LIMIT = 4096;
@@ -30,7 +31,8 @@ export const turnSnapshotSchema = z.object({
   turnId: idSchema, runId: idSchema, agentId: idSchema, turnIndex: sequenceSchema.optional(), status: z.enum(turnStatusValues),
   requestId: idSchema.optional(), messageId: idSchema.optional(), outputText: z.string().optional(),
   startedAt: timestampSchema.optional(), completedAt: timestampSchema.optional(),
-  // R12: present only for a host-directed (@Override) Turn, which does not consume a workflow step.
+  // R12: present only for a host-directed Turn — an @Override (D110) or an answer in a continuation (D111). Such a
+  // Turn is inserted outside the plan: it takes no workflow step and does not count toward the plan's turn limit.
   overrideActionId: idSchema.optional(),
 }).strict();
 export const messageSnapshotSchema = z.object({
@@ -46,6 +48,8 @@ export const runSnapshotSchema = z.object({
   budget: runBudgetSchema.optional(), charges: z.array(requestChargeSchema).optional(),
   // R13B (D107): conversation summaries and how full the next request's context is.
   summaries: z.array(contextSummarySchema).max(256).optional(), contextPressure: contextPressureSchema.optional(),
+  // D111: continuations of a finished discussion, oldest first.
+  continuations: z.array(runContinuationSchema).max(4096).optional(),
 }).strict().superRefine((snapshot, ctx) => {
   const summaryRequests = new Map((snapshot.summaries ?? []).flatMap(summary => summary.requests.map(request => [request.requestId, request.messageId] as const)));
   const current = snapshot.turns.find((turn) => turn.turnId === snapshot.currentTurnId);
@@ -59,7 +63,8 @@ export const runSnapshotSchema = z.object({
     || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))
     || new Set(snapshot.charges?.map(c=>c.requestId)).size !== (snapshot.charges?.length ?? 0)
     || snapshot.charges?.some(c=>c.kind==='summary' ? !summaryRequests.has(c.requestId) : !snapshot.attempts?.some(a=>a.requestId===c.requestId))
-    || [...summaryRequests.values()].some(messageId => !snapshot.messages.some(message => message.id === messageId))) {
+    || [...summaryRequests.values()].some(messageId => !snapshot.messages.some(message => message.id === messageId))
+    || snapshot.continuations?.some(item => item.messageId !== undefined && !snapshot.messages.some(message => message.id === item.messageId))) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent snapshot identities' });
   }
   if (snapshot.versions && !versionsConsistent(snapshot)) ctx.addIssue({ code: 'custom', message: 'Inconsistent message versions' });

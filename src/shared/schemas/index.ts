@@ -7,3 +7,4 @@ export * from './persistence';
 export * from './configuration';
 export * from './workflow';
 export * from './host';
+export * from './continuation';
