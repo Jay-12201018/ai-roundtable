@@ -12,6 +12,7 @@ import { migration7 } from './migrations/v7';
 import { migration8 } from './migrations/v8';
 import { migration9 } from './migrations/v9';
 import { migration10 } from './migrations/v10';
+import { migration11 } from './migrations/v11';
 import { budgetBlockSchema, effectiveChargeMicro, requestChargeSchema, runBudgetInputSchema, settlementAmountMicro, writeOffBasisSchema, DEFAULT_RUN_BUDGET_MICRO_CNY, MAX_RUN_BUDGET_MICRO_CNY,
   type BudgetBlock, type BudgetTopUp, type ChargeSettlement, type ChargeWriteOff, type PricePeriod, type RequestCharge, type RunBudget } from '../../shared/schemas/budget';
 import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
@@ -214,6 +215,7 @@ const migrations = [
   migration8,
   migration9,
   migration10,
+  migration11,
 ];
 
 export class Database {
@@ -1196,6 +1198,7 @@ export class Database {
       if (targetChanged) {
         this.db.prepare('UPDATE providers SET api_key_reference=NULL,key_revision=? WHERE id=?').run(randomUUID(),provider.id);
         this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(provider.id);
+        this.db.prepare('DELETE FROM provider_target_approvals WHERE provider_id=?').run(provider.id);
       }
       return this.getProviderConfiguration(provider.id)!;
     });
@@ -1252,6 +1255,7 @@ export class Database {
       if (this.db.prepare('SELECT 1 FROM agents WHERE provider_id=? LIMIT 1').get(id)
         || this.db.prepare("SELECT 1 FROM workflow_runs r WHERE EXISTS(SELECT 1 FROM json_each(r.members_snapshot) m WHERE json_extract(m.value,'$.providerId')=?) LIMIT 1").get(id)) throw new ContractError('invalid_state');
       this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(id);
+      this.db.prepare('DELETE FROM provider_target_approvals WHERE provider_id=?').run(id);
       this.db.prepare('DELETE FROM providers WHERE id=?').run(id);
     });
   }
@@ -1271,7 +1275,27 @@ export class Database {
       if (record) this.storeKeyRecord(record);
       this.db.prepare('UPDATE providers SET api_key_reference=?,updated_at=?,key_revision=? WHERE id=?').run(record?.id ?? null, now(), randomUUID(), providerId);
       this.db.prepare('DELETE FROM key_records WHERE provider_id=? AND id<>?').run(providerId, record?.id ?? '');
+      // D113: a confirmation names one Key revision; replacing or deleting the Key withdraws it at once.
+      this.db.prepare('DELETE FROM provider_target_approvals WHERE provider_id=?').run(providerId);
     });
+  }
+
+  /** D113: remembers that the host confirmed sending this Provider's current Key to `baseUrl` as `kind`. */
+  saveTargetApproval(providerId: string, approval: { kind: string; baseUrl: string; revision: string }): void {
+    this.transaction(() => {
+      const provider = this.getProviderConfiguration(providerId);
+      if (!provider) throw new ContractError('not_found');
+      if (provider.kind === 'mock' || provider.kind !== approval.kind || this.getProviderKeyRevision(providerId) !== approval.revision) throw new ContractError('invalid_state');
+      this.db.prepare(`INSERT INTO provider_target_approvals(provider_id,kind,base_url,key_revision,confirmed_at) VALUES(?,?,?,?,?)
+        ON CONFLICT(provider_id) DO UPDATE SET kind=excluded.kind,base_url=excluded.base_url,key_revision=excluded.key_revision,confirmed_at=excluded.confirmed_at`)
+        .run(providerId, approval.kind, approval.baseUrl, approval.revision, now());
+    });
+  }
+
+  getTargetApproval(providerId: string): { kind: string; baseUrl: string; revision: string } | undefined {
+    this.assertInitialized(); configurationInput(idSchema, providerId);
+    const row = this.db.prepare('SELECT kind,base_url AS baseUrl,key_revision AS revision FROM provider_target_approvals WHERE provider_id=?').get(providerId) as { kind: string; baseUrl: string; revision: string } | undefined;
+    return row ? { ...row } : undefined;
   }
 
   listRoomMessages(input: RoomMessagePageInput): RoomMessagePage {

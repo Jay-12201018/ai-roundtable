@@ -229,6 +229,12 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         WHERE c.run_id<>t.run_id OR NOT EXISTS(SELECT 1 FROM json_each(c.agent_ids_json) j WHERE j.value=t.agent_id)
           OR (SELECT COUNT(*) FROM turns u WHERE u.override_action_id=c.action_id) > json_array_length(c.agent_ids_json) LIMIT 1`, 'Invalid continuation Turn');
     }
+    if ((versions.at(-1) ?? 0) >= 11) {
+      if (!tables.includes('provider_target_approvals')) throw new Error('Recovery v11 schema is incomplete');
+      // D113: an approval names an existing real Provider of the same kind; a stale Key revision is harmless (unused).
+      assertNoRows(db, `SELECT 1 FROM provider_target_approvals a LEFT JOIN providers p ON p.id=a.provider_id
+        WHERE p.id IS NULL OR p.type<>a.kind OR a.kind='mock' LIMIT 1`, 'Invalid target approval');
+    }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {
       hash.update(JSON.stringify(table));
