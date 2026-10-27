@@ -64,8 +64,8 @@ type RegistryCapabilities = Omit<ChatCompletionCapabilities, 'outputTokenParamet
 const nativeTargets = { anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' } as const;
 
 // Main owns approvals and reviewed model evidence. Renderer/model names cannot supply either.
+// D113: an approval is persisted with the Key revision it names, so it survives a restart but not a new Key or target.
 export class ProviderRegistry {
-  private readonly approvals = new Map<string, Approval>();
   constructor(private readonly database: Database, private readonly keys: KeyService, private readonly options: Options = {}) {}
 
   private configuration(id: string): ProviderConfiguration {
@@ -95,16 +95,16 @@ export class ProviderRegistry {
     if (configuration.kind === 'mock') throw new ContractError('invalid_input');
     const baseUrl = this.target(configuration);
     if (new URL(parsed.data.baseUrl).toString().replace(/\/+$/u, '') !== baseUrl) throw new ContractError('forbidden');
-    this.approvals.set(configuration.id, { kind: configuration.kind, baseUrl, revision: this.database.getProviderKeyRevision(configuration.id) });
+    this.database.saveTargetApproval(configuration.id, { kind: configuration.kind, baseUrl, revision: this.database.getProviderKeyRevision(configuration.id) });
     return { providerId: configuration.id };
   }
-  /** Whether a send would pass the session target check now: same kind, target and Key revision as confirmed. */
+  /** Whether a send would pass the target check now: same kind, target and Key revision as confirmed (D113). */
   isTargetConfirmed(id: string): boolean {
     try { this.trusted(id); return true; } catch { return false; }
   }
   private trusted(id: string): Approval {
     const configuration = this.configuration(id);
-    const approved = this.approvals.get(id);
+    const approved = this.database.getTargetApproval(id);
     if (!approved || approved.kind !== configuration.kind || approved.baseUrl !== this.target(configuration)
       || approved.revision !== this.database.getProviderKeyRevision(id)) throw new ContractError('forbidden');
     return approved;
@@ -135,6 +135,10 @@ export class ProviderRegistry {
     const configuration = this.database.validateModelSelection(providerId, modelId);
     if (configuration.kind === 'mock') return;
     this.trusted(providerId);
+    if (!this.approvedPolicy(configuration, modelId)) throw new ContractError('unsupported');
+  }
+  /** D114: the model's reviewed policy when it is complete and current, exactly as assertSelection requires it. */
+  approvedPolicy(configuration: ProviderConfiguration, modelId: string): ApprovedModelPolicy | undefined {
     const policy = this.resolveModelPolicy(configuration, modelId);
     if (!policy || !policy.evidence.trim() || policy.counter.modelId !== modelId || !policy.counter.method.trim()
       || !['exact','upper_bound'].includes(policy.counter.kind)
@@ -146,7 +150,12 @@ export class ProviderRegistry {
       || (configuration.kind === 'anthropic' || configuration.kind === 'gemini') && (!validReviewWindow(policy.price)
         || !policy.nativeInputCounter?.evidence.trim() || typeof policy.nativeInputCounter.countNativeWire !== 'function'
         || policy.nativeInputCounter.protocol !== (configuration.kind === 'anthropic' ? 'anthropic-messages-v1' : 'gemini-generate-content-v1'))
-      || !policy.outputTokenParameter || this.resolveCapabilities(configuration).outputTokenParameter !== policy.outputTokenParameter) throw new ContractError('unsupported');
+      || !policy.outputTokenParameter || this.resolveCapabilities(configuration).outputTokenParameter !== policy.outputTokenParameter) return undefined;
+    return policy;
+  }
+  /** D114: the confirmed target that a send would use now, or undefined when none is valid. */
+  confirmedTarget(id: string): string | undefined {
+    try { return this.trusted(id).baseUrl; } catch { return undefined; }
   }
   budget(providerId: string, modelId: string) {
     this.assertSelection(providerId, modelId);

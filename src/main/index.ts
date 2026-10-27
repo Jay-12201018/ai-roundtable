@@ -4,7 +4,7 @@ import { Database } from './database/Database';
 import { createElectronKeyBackend } from './security/electronSafeStorage';
 import { KeyService } from './security/KeyService';
 import { ProviderRegistry } from './providers/ProviderRegistry';
-import { readLoopbackProxy } from './providers/loopbackProxy';
+import { NetworkSettingsService } from './settings/NetworkSettings';
 import { deepSeekModelPolicy } from './providers/modelPolicies/deepseek';
 export { ProviderRegistry };
 import { mockModelBudget } from './providers/mock/tokenBudget';
@@ -34,6 +34,7 @@ let settingsService: ProviderSettingsService | undefined;
 let runService: RunService | undefined;
 let hostService: HostService | undefined;
 let usageService: UsageService | undefined;
+let networkSettings: NetworkSettingsService | undefined;
 let controlledTrial: ControlledTrialService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
@@ -71,8 +72,10 @@ if (!hasLock) {
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
+      // D115: the launch-time proxy comes from the environment or, when that is unset, the settings page.
+      networkSettings = new NetworkSettingsService(app.getPath('userData'), process.env);
       // R13A: the reviewed DeepSeek direct policy is the only approved real-model policy (D089).
-      const providers = new ProviderRegistry(database, keyService, { proxy: readLoopbackProxy(process.env), policyResolver: deepSeekModelPolicy });
+      const providers = new ProviderRegistry(database, keyService, { proxy: networkSettings.proxy, policyResolver: deepSeekModelPolicy });
       settingsService = new ProviderSettingsService(database, keyService, providers);
       const modelBudget = (modelId: string | null, member: { providerId: string | null }) =>
         member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined;
@@ -112,7 +115,11 @@ function createAppWindow(): void {
         const result = await dialog.showSaveDialog(owner, { title: '导出用量明细', defaultPath: join(app.getPath('documents'), defaultName), filters: [{ name: 'CSV', extensions: ['csv'] }] });
         return result.canceled || !result.filePath ? undefined : result.filePath;
       }),
-    } });
+    }, network: networkSettings, lifecycle: { relaunch: () => {
+      // A restart stops nothing silently: refuse while a discussion or the controlled trial is still running.
+      if (runService?.hasActiveRuns() || controlledTrial?.isBusy()) throw new ContractError('invalid_state');
+      app.relaunch(); app.quit();
+    } } });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
       if (shutdownRequested || (!runService?.hasActiveRuns() && !controlledTrial?.isBusy())) return;

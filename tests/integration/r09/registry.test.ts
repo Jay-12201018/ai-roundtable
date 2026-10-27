@@ -34,12 +34,17 @@ it('registers both actual adapters, never a kind/model-name Mock fallback', () =
   expect(()=>registry.getAdapter('future')).toThrowError(expect.objectContaining({code:'forbidden'}));
   expect(read).not.toHaveBeenCalled(); expect(sent).not.toHaveBeenCalled();
 });
-it('requires exact Main session confirmation; no persisted or inherited target approval', () => {
+it('requires an exact Main confirmation; D113 remembers it only for the same Key revision, kind and target', async () => {
   const {db,keys}=fixture(); const registry=new ProviderRegistry(db,keys);
   expect(()=>registry.getAdapter('p')).toThrowError(expect.objectContaining({code:'forbidden'}));
   expect(()=>confirm(registry,'p','http://127.0.0.1:9/v1')).toThrow();
   confirm(registry); expect(()=>registry.getAdapter('p')).not.toThrow();
-  expect(()=>new ProviderRegistry(db,keys).getAdapter('p')).toThrow();
+  // A restarted Main (a new registry over the same database) inherits the persisted confirmation …
+  expect(()=>new ProviderRegistry(db,keys).getAdapter('p')).not.toThrow();
+  // … until the Key changes: the new revision voids it at once, in every registry.
+  await keys.storeKey('p','fake-replacement');
+  expect(()=>registry.getAdapter('p')).toThrowError(expect.objectContaining({code:'forbidden'}));
+  expect(()=>new ProviderRegistry(db,keys).getAdapter('p')).toThrowError(expect.objectContaining({code:'forbidden'}));
 });
 it('invalidates previously created adapters when a key or endpoint changes, before fetch', async () => {
   const {db,keys}=fixture(); await keys.storeKey('p','fake-old');

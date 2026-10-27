@@ -9,7 +9,7 @@ import { providerSettingsContracts, type ProviderSettingsApiContract } from '../
 import * as schemas from '../../shared/schemas/configuration';
 import type {
   ConfigurationIdInput, CreateProviderInput, ProviderInput, ProviderIdInput,
-  ProviderModelsInput, ProviderConnectionTestInput, SetProviderKeyInput, ConfirmProviderTargetInput,
+  ProviderModelsInput, ProviderConnectionTestInput, SetProviderKeyInput, ConfirmProviderTargetInput, ProviderConfiguration,
 } from '../../shared/contracts/configuration';
 
 function parseInput<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -90,6 +90,34 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
       const parsed = parseInput(schemas.confirmProviderTargetInputSchema, input);
       if (!this.runtime) throw new ContractError('unsupported');
       return providerSettingsContracts.confirmTarget.output.parse(this.runtime.confirmTarget(parsed));
+    });
+  }
+
+  /** D114: for each Provider and configured model, the first reason a send would be refused now, as Main decides it. */
+  async listModelReadiness() {
+    return this.perform(async () => {
+      if (!this.runtime) throw new ContractError('unsupported');
+      const registry = this.runtime;
+      const summaries = this.database.listProviderSummaries();
+      const result = [];
+      for (const summary of summaries) {
+        let configuration: ProviderConfiguration | undefined;
+        try { configuration = this.database.getProviderConfiguration(summary.id); } catch { configuration = undefined; }
+        const mock = configuration?.kind === 'mock';
+        const ids = mock ? ['mock'] : [...new Set([configuration?.defaultModelId, ...(configuration?.customModels ?? []).map(model => model.id)].filter((id): id is string => Boolean(id)))];
+        const key = mock || !configuration ? undefined : await this.keys.getProviderKeyState(summary.id);
+        const keyUsable = key?.state === 'configured' || key?.state === 'session';
+        const confirmedBaseUrl = mock || !configuration || !summary.enabled ? undefined : registry.confirmedTarget(summary.id);
+        result.push({ providerId: summary.id, keyState: key?.state ?? 'none', targetConfirmed: confirmedBaseUrl !== undefined, confirmedBaseUrl: confirmedBaseUrl ?? null,
+          models: ids.map(modelId => {
+            const policy = configuration && !mock ? registry.approvedPolicy(configuration, modelId) : undefined;
+            const reviewedAt = policy && 'currency' in policy.price ? policy.price.reviewedAt : policy?.price.reviewedAt ?? null;
+            const blockedBy = !configuration ? 'invalid' as const : !summary.enabled ? 'disabled' as const : mock ? null : !policy ? 'price' as const
+              : !keyUsable ? 'key' as const : !confirmedBaseUrl ? 'target' as const : null;
+            return { modelId, price: mock ? 'free' as const : policy ? 'reviewed' as const : 'unreviewed' as const, priceReviewedAt: reviewedAt, usable: blockedBy === null, blockedBy };
+          }) });
+      }
+      return schemas.providerReadinessListSchema.parse(result);
     });
   }
 
