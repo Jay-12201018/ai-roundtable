@@ -6,6 +6,7 @@ import type { HostCommand, HostCommandResult } from '../schemas/host';
 import type { WriteOffChargeInput, WriteOffChargeResult } from '../schemas/budget';
 import type { SummaryCommandResult, SummaryConfirmInput, SummaryGenerateInput, SummaryPreview, SummaryPreviewInput } from '../schemas/summary';
 import type { UsageExportResult, UsageReport } from '../schemas/usage';
+import type { NetworkSettings, ProxyEndpoint, ProxySettings, ProxyTestResult } from '../schemas/network';
 
 export type RoomMessage = z.infer<typeof roomMessageSchema>;
 export type CreateDemoResult = z.infer<typeof createDemoResultSchema>;
@@ -29,6 +30,17 @@ export interface SummaryApiContract {
   generate(input: SummaryGenerateInput): Promise<SummaryCommandResult>;
   confirm(input: SummaryConfirmInput): Promise<SummaryCommandResult>;
 }
+/** D115: the local proxy settings; saved for the next launch, never applied to this one. */
+export interface NetworkApiContract {
+  getSettings(): Promise<NetworkSettings>;
+  saveSettings(input: ProxySettings): Promise<NetworkSettings>;
+  /** One CONNECT handshake to the fixed DeepSeek host through the given loopback proxy; no Key, no request body. */
+  testProxy(input: ProxyEndpoint): Promise<ProxyTestResult>;
+}
+/** D115: restart the app so saved network settings apply; refused while a discussion or trial is running. */
+export interface AppLifecycleApiContract {
+  relaunch(): Promise<void>;
+}
 export interface RoundtableApiContract {
   room: RoomApiContract;
   host: HostApiContract;
@@ -37,6 +49,9 @@ export interface RoundtableApiContract {
   run: RunApiContract;
   rooms: RoomManagementApiContract;
   settings: ProviderSettingsApiContract;
+  /** Optional (D115): Preload always provides them; a page without them hides the network settings. */
+  network?: NetworkApiContract;
+  app?: AppLifecycleApiContract;
 }
 
 export type RunSessionApiContract = Pick<RoundtableApiContract, 'room' | 'run'>;

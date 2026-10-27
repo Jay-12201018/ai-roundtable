@@ -11,6 +11,7 @@ import { hostCommandResultSchema, hostCommandSchema } from '../schemas/host';
 import { addRunBudgetInputSchema, addRunBudgetResultSchema, writeOffChargeInputSchema, writeOffChargeResultSchema } from '../schemas/budget';
 import { summaryCommandResultSchema, summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, summaryPreviewSchema } from '../schemas/summary';
 import { usageExportResultSchema, usageReportInputSchema, usageReportSchema } from '../schemas/usage';
+import { networkSettingsSchema, proxyEndpointSchema, proxySettingsSchema, proxyTestResultSchema } from '../schemas/network';
 import { continuationPreviewInputSchema, continuationPreviewSchema, continueDiscussionInputSchema, continueDiscussionResultSchema } from '../schemas/continuation';
 
 export function ipcResponseSchema<T extends z.ZodType>(data: T) {
@@ -73,6 +74,12 @@ export const ipcContracts = {
   'settings.getKeyStorageStatus': providerSettingsContracts.getKeyStorageStatus,
   'settings.listModels': providerSettingsContracts.listModels,
   'settings.testConnection': providerSettingsContracts.testConnection,
+  // D114: per-model readiness as Main decides it; D115: saved proxy settings, a keyless proxy check and a restart.
+  'settings.listModelReadiness': providerSettingsContracts.listModelReadiness,
+  'network.getSettings': { input: z.undefined(), output: networkSettingsSchema },
+  'network.saveSettings': { input: proxySettingsSchema, output: networkSettingsSchema },
+  'network.testProxy': { input: proxyEndpointSchema, output: proxyTestResultSchema },
+  'app.relaunch': { input: z.undefined(), output: z.undefined() },
 } as const;
 export type IpcChannel = keyof typeof ipcContracts;
 export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcContracts)[C]['input']>;

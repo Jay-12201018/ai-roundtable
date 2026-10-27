@@ -95,6 +95,20 @@ export const providerModelsResultSchema = providerIdInputSchema.extend({ models:
 export const providerConnectionTestInputSchema = providerIdInputSchema.extend({ level: connectionLevelSchema, modelId: modelIdSchema.optional(), allowGeneration: z.literal(true).optional() })
   .refine((input) => input.level !== 'generation' || input.modelId !== undefined, 'Generation test requires a model');
 export const providerConnectionTestResultSchema = providerIdInputSchema.extend({ result: connectionTestResultSchema });
+/**
+ * D114: whether each configured model can take part in a discussion now, decided by Main exactly as a send would be.
+ * `blockedBy` names the first reason a send would be refused: the Provider is disabled or its configuration is broken,
+ * the model's price has not been reviewed (Main refuses it as unsupported), no usable Key, or the target is unconfirmed.
+ */
+export const modelReadinessSchema = z.object({
+  modelId: idSchema, price: z.enum(['reviewed', 'unreviewed', 'free']), priceReviewedAt: timestampSchema.nullable(),
+  usable: z.boolean(), blockedBy: z.enum(['disabled', 'invalid', 'price', 'key', 'target']).nullable(),
+}).strict().refine(value => value.usable === (value.blockedBy === null), 'A model is usable exactly when nothing blocks it');
+export const providerReadinessSchema = z.object({
+  providerId: idSchema, keyState: z.enum(['missing', 'configured', 'session', 'unavailable', 'none']),
+  targetConfirmed: z.boolean(), confirmedBaseUrl: z.string().max(2048).nullable(), models: z.array(modelReadinessSchema).max(512),
+}).strict();
+export const providerReadinessListSchema = z.array(providerReadinessSchema);
 
 const pageLimitSchema = z.number().int().min(1).max(500).default(100);
 export const roomMessageCursorSchema = z.object({ roomId: idSchema, afterKey: sequenceSchema, throughKey: sequenceSchema }).strict()

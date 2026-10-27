@@ -79,6 +79,15 @@ const api: RoundtableApiContract = {
     getKeyStorageStatus: () => invoke('settings.getKeyStorageStatus', undefined),
     listModels: (input) => invoke('settings.listModels', input),
     testConnection: (input) => invoke('settings.testConnection', input),
+    listModelReadiness: () => invoke('settings.listModelReadiness', undefined),
+  },
+  network: {
+    getSettings: () => invoke('network.getSettings', undefined),
+    saveSettings: (input) => invoke('network.saveSettings', input),
+    testProxy: (input) => invoke('network.testProxy', input),
+  },
+  app: {
+    relaunch: () => invoke('app.relaunch', undefined),
   },
   run: {
     previewWorkflow: (input) => invoke('run.previewWorkflow', input),

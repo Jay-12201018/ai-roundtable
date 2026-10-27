@@ -9,6 +9,12 @@ import type { RoomManagementApiContract, ProviderSettingsApiContract } from '../
 import type { RunService } from '../services/RunService';
 import type { HostApiContract } from '../../shared/contracts/app';
 import type { UsageExportResult, UsageReport } from '../../shared/schemas/usage';
+import type { NetworkSettings, ProxyEndpoint, ProxySettings, ProxyTestResult } from '../../shared/schemas/network';
+import { ContractError } from '../../shared/contracts/errors';
+
+/** D115: saved proxy settings, a keyless proxy check and a restart; absent in tests that do not need them. */
+export type NetworkIpcService = { getSettings(): NetworkSettings; saveSettings(input: ProxySettings): NetworkSettings; testProxy(input: ProxyEndpoint): Promise<ProxyTestResult> };
+export type LifecycleIpcService = { relaunch(): void };
 
 /** R13B: the usage report and the CSV export; the export writes only the file the user picks in Main's dialog. */
 export type UsageIpcService = { getReport(): UsageReport; exportCsv(window: BrowserWindow): Promise<UsageExportResult> };
@@ -17,8 +23,10 @@ import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWind
 export type IpcDisposer = (() => void) & { drain(): Promise<void> };
 let currentDisposer: IpcDisposer | undefined;
 
-export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract; usage: UsageIpcService }): IpcDisposer {
-  const { run: service, rooms, settings, host, usage } = services;
+export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract; usage: UsageIpcService;
+  network?: NetworkIpcService; lifecycle?: LifecycleIpcService }): IpcDisposer {
+  const { run: service, rooms, settings, host, usage, network, lifecycle } = services;
+  const unsupported = (): never => { throw new ContractError('unsupported'); };
   currentDisposer?.();
   let disposed = false;
   let unsubscribe: (() => void) | undefined;
@@ -89,6 +97,11 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'settings.getKeyStorageStatus': () => settings.getKeyStorageStatus(),
     'settings.listModels': (input) => settings.listModels(input),
     'settings.testConnection': (input) => settings.testConnection(input),
+    'settings.listModelReadiness': () => settings.listModelReadiness ? settings.listModelReadiness() : unsupported(),
+    'network.getSettings': () => network ? network.getSettings() : unsupported(),
+    'network.saveSettings': (input) => network ? network.saveSettings(input) : unsupported(),
+    'network.testProxy': (input) => network ? network.testProxy(input) : unsupported(),
+    'app.relaunch': () => lifecycle ? lifecycle.relaunch() : unsupported(),
   };
   const register = <C extends IpcChannel>(channel: C) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
@@ -109,7 +122,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         return response;
       })();
       if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.addBudget' || channel === 'run.continueDiscussion'
-        || channel === 'usage.writeOff' || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm') {
+        || channel === 'usage.writeOff' || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'network.saveSettings') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
       }

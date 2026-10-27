@@ -31,6 +31,8 @@ export type ProviderModelsInput = z.input<typeof schemas.providerModelsInputSche
 export type ProviderModelsResult = z.infer<typeof schemas.providerModelsResultSchema>;
 export type ProviderConnectionTestInput = z.input<typeof schemas.providerConnectionTestInputSchema>;
 export type ProviderConnectionTestResult = z.infer<typeof schemas.providerConnectionTestResultSchema>;
+export type ModelReadiness = z.infer<typeof schemas.modelReadinessSchema>;
+export type ProviderReadiness = z.infer<typeof schemas.providerReadinessSchema>;
 export type RoomMessageCursor = z.infer<typeof schemas.roomMessageCursorSchema>;
 export type RoomMessagePageInput = z.input<typeof schemas.roomMessagePageInputSchema>;
 export type HistoryMessage = z.infer<typeof schemas.historyMessageSchema>;
@@ -72,6 +74,8 @@ export interface ProviderSettingsApiContract {
   getKeyStorageStatus(): Promise<KeyStorageStatus>;
   listModels(input: ProviderModelsInput): Promise<ProviderModelsResult>;
   testConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult>;
+  /** D114: what a send would decide for each configured model now. Optional: a page without it shows no readiness. */
+  listModelReadiness?(): Promise<ProviderReadiness[]>;
 }
 
 export interface RoomsFeatureProps {
@@ -122,4 +126,5 @@ export const providerSettingsContracts = {
   getKeyStorageStatus: { input: z.undefined(), output: schemas.keyStorageStatusSchema },
   listModels: { input: schemas.providerModelsInputSchema, output: schemas.providerModelsResultSchema },
   testConnection: { input: schemas.providerConnectionTestInputSchema, output: schemas.providerConnectionTestResultSchema },
+  listModelReadiness: { input: z.undefined(), output: schemas.providerReadinessListSchema },
 } as const;
