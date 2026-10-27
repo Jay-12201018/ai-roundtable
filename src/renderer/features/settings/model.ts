@@ -42,7 +42,8 @@ export function serviceStatus(summary: ProviderSummary, readiness: ProviderReadi
 
 /** Why a model cannot take part in a discussion now, in one short clause; empty when it can. */
 export function modelBlockText(model: Pick<ModelReadiness, 'blockedBy' | 'price'> | undefined): string {
-  switch (model?.blockedBy) {
+  if (!model) return '';
+  switch (model.blockedBy) {
     case null: return '';
     case 'disabled': return '服务已停用';
     case 'invalid': return '服务配置有问题';

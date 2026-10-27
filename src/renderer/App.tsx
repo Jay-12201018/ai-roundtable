@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useStore } from 'zustand';
 import { ArrowLeft, Check, Lock, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
-import { RoomsFeature } from './features/rooms/RoomsFeature';
-import { WorkflowFeature, type WorkflowDraft, type WorkflowPreviewResult } from './features/workflows';
-import { workflowConfigFromDraft, workflowPreviewForFeature, workflowProgressForFeature, workflowTemplateLabels } from './features/workflows/productionAdapter';
-import type { WorkflowConfig, WorkflowSnapshot } from '../shared/schemas/workflow';
+import { RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
+import { DEFAULT_MODE_LABEL, WorkflowDialog, draftProblems, readRoomWorkflow, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
+  writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft, type WorkflowMember } from './features/workflows';
+import { errorCodeSchema } from '../shared/schemas/error';
 import { SettingsPage, isUserAddress, useReadiness, type SettingsSection } from './features/settings';
 import { useHostCommands, useSummaryCommands } from './features/host';
 import { UsagePage, chargeOfMessage, parseBudgetYuan, useLedgerCommands } from './features/usage';
@@ -30,8 +30,16 @@ export function parseOutputLimit(text: string): number | undefined {
   return Number.isSafeInteger(value) && value >= 1 && value <= 65536 ? value : undefined;
 }
 
-type Page = 'discussion' | 'rooms' | 'settings' | 'workflow' | 'usage';
-const pageTitles: Record<Exclude<Page, 'discussion'>, string> = { rooms: '房间与成员', workflow: '讨论方式', usage: '用量与花费', settings: '设置' };
+type Page = 'discussion' | 'rooms' | 'settings' | 'usage';
+const pageTitles: Record<Exclude<Page, 'discussion'>, string> = { rooms: '房间', usage: '用量与花费', settings: '设置' };
+const codeOf = (error: unknown) => { const value = error && typeof error === 'object' ? error as { code?: unknown; detail?: { code?: unknown } } : undefined; const parsed = errorCodeSchema.safeParse(value?.detail?.code ?? value?.code); return parsed.success ? parsed.data : 'internal_error'; };
+/** Why Main would not compile a discussion mode for the current members, in words (D116). */
+const workflowRefusal = (error: unknown) => {
+  const code = codeOf(error);
+  return code === 'invalid_input' ? '按现在的成员和限制排不出这个流程：检查每个阶段的成员和轮数，总回合数不能超过“最多回合”。'
+    : code === 'invalid_state' || code === 'unsupported' || code === 'forbidden' ? '流程里有成员现在不能发言（还没选模型、模型价格未审核或服务地址未确认），到房间里看看成员。'
+      : code === 'not_found' ? '这个房间已经不存在。' : '没能核对讨论方式，请稍后再试。';
+};
 const remembered = (key: string, fallback: boolean) => { try { const value = localStorage.getItem(key); return value === null ? fallback : value === 'true'; } catch { return fallback; } };
 const remember = (key: string, value: boolean) => { try { localStorage.setItem(key, String(value)); } catch { /* The choice still applies to this window. */ } };
 const liveStatuses = ['running', 'pausing', 'paused', 'cancelling'];
@@ -42,8 +50,7 @@ export function App() {
   const [page, setPage] = useState<Page>('discussion');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('services');
   const [bootReady, setBootReady] = useState(false);
-  const [roomsReady, setRoomsReady] = useState(false);
-  const [roomsKey, setRoomsKey] = useState(0);
+  const [roomDialog, setRoomDialog] = useState(false);
   const layout = useLayout();
   const [theme, setTheme] = useTheme();
   const [navOpen, setNavOpen] = useState(false);
@@ -66,9 +73,12 @@ export function App() {
   const generation = useStore(session.store, state => state.generation);
   const [workflowMembers, setWorkflowMembers] = useState<{ roomId: string; members: AgentConfiguration[] }>();
   const [workflowMembersError, setWorkflowMembersError] = useState(false);
-  const [appliedWorkflow, setAppliedWorkflow] = useState<{ roomId: string; scope: string; config: WorkflowConfig; previewId: string }>();
-  const [workflowInvalidated, setWorkflowInvalidated] = useState(false);
-  const workflowPreview = useRef<{ scope: string; config: WorkflowConfig; previewId: string; snapshot: WorkflowSnapshot } | undefined>(undefined);
+  // D116 (R16 D2-B): the room's discussion mode lives in this profile; Main checks it again at every start.
+  const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [workflowVersion, setWorkflowVersion] = useState(0);
+  const [workflowNotice, setWorkflowNotice] = useState<{ roomId: string; text: string }>();
+  const [lostWorkflow, setLostWorkflow] = useState<{ roomId: string; label?: string }>();
+  const [startChecking, setStartChecking] = useState(false);
   const draft = useStore(session.store, state => state.draft);
   const title = useStore(session.store, selectTaskTitle);
   const error = useStore(session.store, state => state.error);
@@ -118,20 +128,18 @@ export function App() {
       const state = session.store.getState();
       if (state.syncStatus === 'syncing') return;
       setBootReady(true);
-      // Preserve a failed restoration until a retry or an explicit room selection.
-      if (!state.runId || state.snapshot) setRoomsReady(true);
     };
     const unsubscribe = session.store.subscribe(restore); restore();
     return () => { unsubscribe(); dispose(); };
   }, [session]);
   useEffect(() => { alive.current = true; void reloadProviders(); return () => { alive.current = false; providerRequest.current++; }; }, [reloadProviders]);
   useEffect(() => remember('roundtable.stepMode', stepMode), [stepMode]);
-  useEffect(() => { setAppliedWorkflow(undefined); setWorkflowInvalidated(false); workflowPreview.current = undefined; }, [generation]);
+  useEffect(() => { setWorkflowNotice(undefined); }, [generation]);
   // Drawers belong to a layout: leaving it closes them.
   useEffect(() => { setNavOpen(false); setPanelDrawer(false); }, [layout]);
 
-  // The room's current members: the empty state and title show them; the workflow page validates against them.
-  const roomMembersNeeded = Boolean(roomId) && (page === 'workflow' || page === 'discussion' && (!snapshot || appliedWorkflow !== undefined));
+  // The room's current members: the new-discussion screen and title show them; the discussion mode is checked against them.
+  const roomMembersNeeded = Boolean(roomId) && (page === 'rooms' || workflowOpen || page === 'discussion' && !snapshot);
   useEffect(() => {
     if (!roomId) { setWorkflowMembers(undefined); return; }
     if (!roomMembersNeeded) return;
@@ -140,36 +148,41 @@ export function App() {
       if (!cancelled) setWorkflowMembers({ roomId, members: Array.isArray(members) ? members : [] });
     }).catch(() => { if (!cancelled) { setWorkflowMembers(undefined); setWorkflowMembersError(true); } });
     return () => { cancelled = true; };
-  }, [api, roomId, page, generation, roomMembersNeeded]);
-  const workflowScope = `${generation}:${roomId ?? ''}:${workflowMembers && workflowMembers.roomId === roomId ? JSON.stringify(workflowMembers.members) : 'loading'}`;
-  const currentWorkflowScope = useRef(workflowScope); currentWorkflowScope.current = workflowScope;
-  useEffect(() => {
-    if (appliedWorkflow && appliedWorkflow.scope !== workflowScope) {
-      setAppliedWorkflow(undefined);
-      if (appliedWorkflow.scope.startsWith(`${generation}:`)) setWorkflowInvalidated(true);
+  }, [api, roomId, page, generation, roomMembersNeeded, workflowVersion]);
+  const modeMembers: WorkflowMember[] = roomId && workflowMembers?.roomId === roomId
+    ? workflowMembers.members.filter(member => !member.archivedAt).map(member => ({ id: member.id, name: member.displayName, enabled: member.enabled, role: member.roleTemplateId })) : [];
+  const stored = useMemo(() => roomId ? readRoomWorkflow(roomId) : { damaged: false }, [roomId, workflowVersion]);
+  const checkWorkflow = useCallback(async (value: WorkflowDraft): Promise<WorkflowCheck> => {
+    if (!roomId) return { ok: false, errors: ['先选一个房间。'] };
+    try {
+      const result = await api.run.previewWorkflow({ roomId, config: workflowConfigFromDraft(value) });
+      return { ok: true, summary: workflowPlanSummary(result.snapshot) };
+    } catch (cause) { return { ok: false, errors: [workflowRefusal(cause)] }; }
+  }, [api, roomId]);
+  const saveWorkflow = (value: WorkflowDraft | null) => {
+    if (!roomId || !writeRoomWorkflow(roomId, value)) return false;
+    setWorkflowVersion(version => version + 1); setWorkflowNotice(undefined); setLostWorkflow(undefined); return true;
+  };
+  const startRun = async () => {
+    if (!roomId || budgetMicroCny === undefined || outputTokenLimit === undefined || startChecking) return;
+    const task = draft.trim(); const room = roomId;
+    setWorkflowNotice(undefined);
+    let workflow: { workflowConfig: ReturnType<typeof workflowConfigFromDraft>; workflowPreviewId: string } | undefined;
+    const saved = readRoomWorkflow(room).draft;
+    if (saved) {
+      // D116: the remembered mode is checked by Main against the members as they are now; if it no longer fits, say why here.
+      const problems = draftProblems(saved, modeMembers);
+      if (problems.length) { setWorkflowNotice({ roomId: room, text: `讨论方式「${templateLabel(saved.template)}」需要调整：${problems[0]}` }); return; }
+      setStartChecking(true);
+      try {
+        const workflowConfig = workflowConfigFromDraft(saved);
+        const preview = await api.run.previewWorkflow({ roomId: room, config: workflowConfig });
+        workflow = { workflowConfig, workflowPreviewId: preview.previewId };
+      } catch (cause) { setWorkflowNotice({ roomId: room, text: `讨论方式「${templateLabel(saved.template)}」现在不能用：${workflowRefusal(cause)}` }); return; }
+      finally { setStartChecking(false); }
+      if (session.store.getState().roomId !== room) return;
     }
-    workflowPreview.current = undefined;
-  }, [workflowScope]);
-  const previewWorkflow = useCallback(async (draft: WorkflowDraft): Promise<WorkflowPreviewResult> => {
-    if (!roomId || workflowMembers?.roomId !== roomId) return { ok: false, errors: ['请先加载当前房间成员。'] };
-    const config = workflowConfigFromDraft(draft);
-    const result = await api.run.previewWorkflow({ roomId, config });
-    if (currentWorkflowScope.current !== workflowScope || result.snapshot.roomId !== roomId) return { ok: false, errors: ['房间或成员已变化，请重新验证。'] };
-    workflowPreview.current = { scope: workflowScope, config, ...result };
-    return { ok: true, preview: workflowPreviewForFeature(result.previewId, result.snapshot) };
-  }, [api, roomId, workflowScope]);
-  const applyWorkflow = useCallback(async ({ previewId, draft }: { previewId: string; draft: WorkflowDraft }) => {
-    const preview = workflowPreview.current;
-    const config = workflowConfigFromDraft(draft);
-    if (!roomId || !preview || preview.previewId !== previewId || preview.scope !== workflowScope || currentWorkflowScope.current !== workflowScope || JSON.stringify(preview.config) !== JSON.stringify(config)) throw new Error('Workflow preview expired');
-    setAppliedWorkflow({ roomId, scope: workflowScope, config, previewId }); setWorkflowInvalidated(false);
-    workflowPreview.current = undefined;
-  }, [roomId, workflowScope]);
-  const startRun = () => {
-    if (workflowInvalidated || appliedWorkflow && (appliedWorkflow.roomId !== roomId || appliedWorkflow.scope !== workflowScope)) return;
-    if (budgetMicroCny === undefined || outputTokenLimit === undefined) return;
-    const task = draft.trim();
-    void session.startRun(appliedWorkflow ? { workflowConfig: appliedWorkflow.config, workflowPreviewId: appliedWorkflow.previewId } : undefined, { budgetMicroCny, outputTokenLimit, mode: stepMode ? 'step' : 'automatic' })
+    void session.startRun(workflow, { budgetMicroCny, outputTokenLimit, mode: stepMode ? 'step' : 'automatic' })
       .then(() => {
         // Once the goal has become a Run, the box is empty for the next one, so a finished discussion is not restarted by accident.
         const state = session.store.getState();
@@ -178,12 +191,16 @@ export function App() {
   };
 
   const goDiscussion = useCallback(() => { setPage('discussion'); setNavOpen(false); }, []);
-  const selectRoom = useCallback((id: string) => session.selectRoom(id), [session]);
-  const clearRoom = useCallback(() => session.selectRoom(undefined), [session]);
   const selectRun = useCallback((id: string) => { setPage('discussion'); setNavOpen(false); void session.selectRun(id); }, [session]);
   const openSettings = useCallback((section: SettingsSection = 'services') => { setSettingsSection(section); setPage('settings'); setNavOpen(false); }, []);
-  const openRooms = () => { setRoomsReady(true); setRoomsKey(value => value + 1); setPage('rooms'); setNavOpen(false); };
-  const newDiscussion = (id = roomId) => { if (id) session.selectRoom(id); setPage('discussion'); setNavOpen(false); };
+  const openRoom = (id: string) => { if (id !== roomId || snapshot) session.selectRoom(id); setPage('rooms'); setNavOpen(false); };
+  const newDiscussion = (id = roomId) => {
+    if (id && (id !== roomId || snapshot)) session.selectRoom(id);
+    // A room's default goal pre-fills an empty box; the host can change it before starting.
+    const objective = [...(directory.rooms ?? []), ...directory.archived].find(room => room.id === id)?.objective.trim();
+    if (objective && !session.store.getState().draft.trim()) session.store.getState().setDraft(objective);
+    setPage('discussion'); setNavOpen(false);
+  };
 
   const providerNames = useMemo(() => providerNamesFrom(providers, providerLoadState), [providers, providerLoadState]);
   // D114: what Main would decide for each configured model now; D113: where each confirmed Key goes.
@@ -239,7 +256,19 @@ export function App() {
   // With nothing selected (first launch, or the selected room went away), open the first room, as the room list did.
   const firstRoom = directory.rooms?.[0]?.id;
   useEffect(() => { if (bootReady && !runId && !roomId && firstRoom && page !== 'rooms') session.selectRoom(firstRoom); }, [bootReady, runId, roomId, firstRoom, page, session]);
+  const room = [...(directory.rooms ?? []), ...directory.archived].find(item => item.id === roomId);
+  // D116: a room whose last discussion used a workflow, with nothing remembered here, lost its saved mode: say so once.
+  const latestRun = directory.runs[0]?.id;
+  useEffect(() => {
+    if (!roomId || stored.draft || stored.damaged || !latestRun) return;
+    let current = true;
+    void Promise.resolve().then(() => api.run.getSnapshot(latestRun)).then(last => {
+      if (current && last?.roomId === roomId && last.workflow) setLostWorkflow({ roomId, label: templateLabel(last.workflow.templateId) });
+    }).catch(() => {});
+    return () => { current = false; };
+  }, [api, roomId, latestRun, stored]);
   const [monthSpend, setMonthSpend] = useState<string>();
+  const [runCosts, setRunCosts] = useState<ReadonlyMap<string, string>>(new Map());
   const settledKey = liveStatuses.includes(runStatus ?? '') ? 'live' : `${snapshot?.runId ?? ''}:${runStatus ?? ''}:${page}`;
   useEffect(() => {
     let current = true;
@@ -247,6 +276,7 @@ export function App() {
       if (!current || !report?.byDate) return;
       const month = new Date().toLocaleDateString('sv-SE').slice(0, 7);
       setMonthSpend(formatYuan(report.byDate.filter(row => row.date.startsWith(month)).reduce((total, row) => total + row.totalMicro, 0)));
+      setRunCosts(new Map((report.byRun ?? []).filter(row => row.totalMicro > 0).map(row => [row.runId, formatYuan(row.totalMicro)])));
     }).catch(() => { if (current) setMonthSpend(undefined); });
     return () => { current = false; };
   }, [api, settledKey]);
@@ -264,8 +294,8 @@ export function App() {
   const collapseSidebar = (value: boolean) => { setSidebarCollapsed(value); remember('roundtable.sidebarCollapsed', value); };
   const anyDrawer = navOpen || panelDrawer && panelAvailable && layout !== 'wide';
 
-  const workflowLabel = appliedWorkflow ? workflowTemplateLabels[appliedWorkflow.config.templateId] : '按顺序轮流 · 3 回合';
-  const roomName = directory.rooms?.find(room => room.id === roomId)?.name;
+  const workflowLabel = stored.draft ? templateLabel(stored.draft.template) : DEFAULT_MODE_LABEL;
+  const roomName = room?.name;
   const enabledMembers = roomId && workflowMembers && workflowMembers.roomId === roomId ? workflowMembers.members.filter(member => member.enabled && !member.archivedAt) : undefined;
   const runMembers = snapshot?.execution?.membersSnapshot?.map(member => member.displayName) ?? enabledMembers?.map(member => member.displayName);
 
@@ -276,11 +306,14 @@ export function App() {
     const tone = ['running', 'pausing', 'cancelling'].includes(snapshot.status) ? 'live' : snapshot.status === 'completed' ? 'ok' : snapshot.status === 'error' ? 'danger' : snapshot.status === 'interrupted' ? 'warn' : 'neutral';
     return <Pill tone={tone} dot={tone !== 'ok'} icon={tone === 'ok' ? Check : undefined}>{label}</Pill>;
   })();
-  const progress = workflowProgressForFeature(snapshot);
+  // A workflow Run reads 第 3/5 步 · 修订 (the stage being spoken or next); other Runs count turns.
+  const flow = snapshot?.workflow;
+  const flowStage = flow ? flow.stages.find(stage => stage.id === flow.currentStage) : undefined;
+  const flowStep = flow ? Math.min(flow.totalTurns, flow.completedTurns + (activeTurn && !activeTurn.overrideActionId ? 1 : 0)) : 0;
   const statusDetail = [
-    activeTurn && snapshot ? `第 ${snapshot.turns.indexOf(activeTurn) + 1} 回合${speaker ? ` · ${speaker}正在发言` : ''}` : undefined,
-    !activeTurn && snapshot && progress ? `第 ${Math.min(progress.completedTurns, progress.totalTurns)} / ${progress.totalTurns} 步` : undefined,
-    snapshot?.workflow ? workflowTemplateLabels[snapshot.workflow.templateId] : undefined,
+    flow ? `第 ${Math.max(1, flowStep)}/${flow.totalTurns} 步${flowStage ? ` · ${stageLabels[flowStage.kind]}` : ''}${activeTurn && speaker ? ` · ${speaker}正在发言` : ''}`
+      : activeTurn && snapshot ? `第 ${snapshot.turns.indexOf(activeTurn) + 1} 回合${speaker ? ` · ${speaker}正在发言` : ''}` : undefined,
+    flow ? workflowTemplateLabels[flow.templateId] : undefined,
     syncStatus === 'syncing' ? '正在同步运行状态' : undefined,
     pending ? '操作已发送，等待确认' : undefined,
   ].filter(Boolean).join(' · ');
@@ -301,11 +334,14 @@ export function App() {
     .filter((provider): provider is ProviderSummary => Boolean(provider) && isUserAddress({ kind: provider!.kind, baseUrl: readiness.rows?.find(row => row.providerId === provider!.id)?.confirmedBaseUrl ?? '' }))
     .map(provider => readiness.rows?.find(row => row.providerId === provider.id)?.confirmedBaseUrl).filter((url): url is string => Boolean(url)))];
   const targetNotice = !snapshot && userTargets.length > 0 ? <p className="composer-target" role="note"><Lock aria-hidden size={14} />这场讨论的目标和发言将发往 {userTargets.join('、')}（你在设置里填写并确认过的地址）。</p> : undefined;
-  const taskNotices = (error && !snapshot && syncStatus !== 'error') || workflowInvalidated || workflowMembersError || otherLive || targetNotice ? <div className="composer-alerts">
+  const modeNotice = workflowNotice?.roomId === roomId ? workflowNotice?.text
+    : stored.damaged ? `这个房间保存的讨论方式读不出来，这次按「${DEFAULT_MODE_LABEL}」进行。`
+      : lostWorkflow?.roomId === roomId && !stored.draft ? `这台电脑上没有找到这个房间的讨论方式（例如清理过浏览器数据），已退回「${DEFAULT_MODE_LABEL}」${lostWorkflow?.label ? `；上次用的是「${lostWorkflow.label}」` : ''}。` : undefined;
+  const taskNotices = (error && !snapshot && syncStatus !== 'error') || modeNotice || workflowMembersError || otherLive || targetNotice ? <div className="composer-alerts">
     {targetNotice}
     {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始或继续别的讨论。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}
     {error && !snapshot && syncStatus !== 'error' && !otherLive && <p role="alert" className="field-error">{error}</p>}
-    {workflowInvalidated && <p role="alert" className="field-error">房间成员已变化，请重新选择讨论方式后再开始。</p>}
+    {modeNotice && <p role={workflowNotice ? 'alert' : 'note'} className={workflowNotice ? 'composer-blocked' : 'composer-target'}>{modeNotice}<button type="button" className="link-btn" onClick={() => setWorkflowOpen(true)}>更改讨论方式</button></p>}
     {workflowMembersError && <p role="alert" className="field-error">没有读出这个房间的成员，请稍后重试。</p>}
   </div> : undefined;
 
@@ -317,11 +353,11 @@ export function App() {
       settledSlot={budgetStopped ? <Button variant="primary" className="slot" disabled title="预算不足，先在上方追加预算">继续</Button>
         : <Button className="slot" icon={Plus} disabled={!bootReady} onClick={() => newDiscussion(snapshot.roomId)}>新讨论</Button>} />;
     return <TaskComposer draft={draft} setDraft={value => session.store.getState().setDraft(value)}
-      canStart={startEnabled && !otherLive && !workflowInvalidated && budgetMicroCny !== undefined && outputTokenLimit !== undefined}
-      starting={pending?.command === 'start'} onStart={startRun} notices={<>{syncNotices}{taskNotices}</>}
+      canStart={startEnabled && !otherLive && !startChecking && !room?.archivedAt && budgetMicroCny !== undefined && outputTokenLimit !== undefined}
+      starting={pending?.command === 'start' || startChecking} onStart={() => void startRun()} notices={<>{syncNotices}{taskNotices}</>}
       placeholder={snapshot ? '在这个房间开始新的讨论，写下目标和约束…' : undefined}
       settings={{ budgetText, setBudgetText, budgetValid: budgetMicroCny !== undefined, outputLimitText, setOutputLimitText, outputLimitValid: outputTokenLimit !== undefined,
-        stepMode, setStepMode, workflowLabel, onOpenWorkflow: roomId ? () => setPage('workflow') : undefined }} />;
+        stepMode, setStepMode, workflowLabel, onOpenWorkflow: roomId ? () => setWorkflowOpen(true) : undefined }} />;
   })();
 
   const recentTasks = [...new Set(directory.runs.map(run => run.task).filter((task): task is string => Boolean(task?.trim())))].slice(0, 3);
@@ -340,13 +376,13 @@ export function App() {
         onSummarize={() => {}} summaryOpen={false} /> : <p role="status">正在读取这场讨论…</p>}</div></div>;
     if (!roomId) return <div className="discussion-empty"><div className="empty-room">
       <h2>{directory.rooms?.length ? '选一个房间开始' : '先建一个房间'}</h2>
-      <p>{directory.rooms?.length ? '在左侧点一个房间，就能在里面开始新的讨论。' : '房间里放着参加讨论的 AI 成员。建好房间、选好成员和模型后，写下目标就能开始。'}</p>
-      <Button variant="primary" disabled={!bootReady} onClick={openRooms}>{directory.rooms?.length ? '打开房间列表' : '新建房间'}</Button></div></div>;
+      <p>{directory.rooms?.length ? '在左侧点一个房间，就能在里面开始新的讨论。' : '房间里放着参加讨论的 AI 成员。新建的房间会带好三位默认成员（起草者、审查者、综合者）。'}</p>
+      {!directory.rooms?.length && <Button variant="primary" icon={Plus} disabled={!bootReady} onClick={() => setRoomDialog(true)}>新建房间</Button>}</div></div>;
     return <div className="discussion-empty"><div className="empty-room">
       {enabledMembers && enabledMembers.length > 0 && <span className="avatar-stack">{enabledMembers.slice(0, 6).map(member => <Avatar key={member.id} name={member.displayName} />)}</span>}
       <h2>这场讨论要解决什么？</h2>
       <p>{enabledMembers === undefined ? '正在读取房间成员…'
-        : enabledMembers.length === 0 ? '这个房间还没有启用的成员，先去「管理房间与成员」添加，才能开始讨论。'
+        : enabledMembers.length === 0 ? <>这个房间还没有参与讨论的成员。<button type="button" className="link-btn" onClick={() => roomId && openRoom(roomId)}>去房间里添加成员</button></>
         : `${enabledMembers.map(member => member.displayName).join('、')}会按「${workflowLabel}」依次发言，不会同时生成。你随时可以暂停、插话或点名。`}</p>
       {recentTasks.length > 0 && <div className="suggest" aria-label="最近的讨论目标">{recentTasks.map(task => <button key={task} type="button" title={`填入：${task}`} onClick={() => session.store.getState().setDraft(task)}>{task}</button>)}</div>}
     </div></div>;
@@ -355,36 +391,37 @@ export function App() {
   const pageTopbar = (name: Exclude<Page, 'discussion'>) => <Topbar title={pageTitles[name]} onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined}
     onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined}
     actions={name === 'settings' ? undefined : <Button variant="quiet" icon={ArrowLeft} onClick={goDiscussion}>返回讨论</Button>} />;
-  const pageBody: Record<Exclude<Page, 'discussion'>, () => ReactNode> = {
-    rooms: () => roomsReady ? <RoomsFeature key={roomsKey} api={api.rooms} initialRoomId={roomId} providers={providers} providerLoadState={providerLoadState} onReloadProviders={reloadProviders}
-      onSelectRoom={selectRoom} onClearRoom={clearRoom} onSelectRun={selectRun} onOpenSettings={() => openSettings()} /> : <p role="status" className="page-inner">正在读取…</p>,
-    workflow: () => <div className="page-inner">
-      {appliedWorkflow && <p role="status" className="appearance">下次开始将使用「{workflowTemplateLabels[appliedWorkflow.config.templateId]}」，此配置尚未启动。</p>}
-      {workflowMembersError && <p role="alert" className="appearance">无法加载工作流成员，请返回讨论后重试。</p>}
-      {roomId && workflowMembers && workflowMembers.roomId === roomId ? <WorkflowFeature scopeKey={workflowScope}
-        members={workflowMembers.members.map(member => ({ id: member.id, name: member.displayName, enabled: member.enabled && !member.archivedAt }))}
-        theme={theme} onPreview={previewWorkflow} onApply={applyWorkflow} progress={workflowProgressForFeature(snapshot)} />
-        : <p role="status" className="appearance">正在加载工作流成员…</p>}</div>,
+  const modeDetail = stored.draft ? (() => {
+    const names = (ids: string[]) => ids.map(id => modeMembers.find(member => member.id === id)?.name ?? '已不在房间').join('、');
+    const limit = `最多 ${stored.draft.turnLimit} 回合 · ${stored.draft.durationMinutes} 分钟`;
+    return `${stored.draft.phases.map(phase => `${phase.title}：${names(phase.participants)}`).join(' → ')} · ${limit}`;
+  })() : '没有单独设置：参与讨论的成员按顺序轮流发言，共 3 回合。';
+  const pageBody: Record<Exclude<Page, 'discussion' | 'settings'>, () => ReactNode> = {
+    rooms: () => room ? <RoomPage key={room.id} api={api.rooms} room={room} providers={providers} readiness={readiness.rows} runs={directory.runs} runCosts={runCosts}
+      workflow={{ label: workflowLabel, detail: modeDetail, onChange: () => setWorkflowOpen(true) }}
+      onNewDiscussion={() => newDiscussion(room.id)} onOpenRun={selectRun} onOpenSettings={() => openSettings()}
+      onChanged={() => { void directory.reload(); setWorkflowVersion(version => version + 1); }}
+      onDeleted={() => { writeRoomWorkflow(room.id, null); setPage('discussion'); void directory.reload().then(() => session.selectRoom(undefined)); }} />
+      : <p role="status" className="page-inner muted">{directory.rooms ? '这个房间已经不存在。' : '正在读取…'}</p>,
     usage: () => <UsagePage api={api} onOpenRun={selectRun} />,
-    settings: () => null,
   };
 
-  const sidebar = (drawer: boolean) => <Sidebar rooms={directory.rooms} runs={directory.runs} failed={directory.failed} onRetry={() => void directory.reload()}
+  const sidebar = (drawer: boolean) => <Sidebar rooms={directory.rooms} archived={directory.archived} counts={directory.counts} runs={directory.runs} failed={directory.failed} onRetry={() => void directory.reload()}
     roomId={roomId} runId={snapshot?.runId ?? runId} page={page} ready={bootReady} monthSpend={monthSpend}
     noRealProvider={providerLoadState === 'ready' && !providers.some(provider => provider.kind !== 'mock' && provider.kind !== null && provider.enabled)}
-    onSelectRoom={id => newDiscussion(id)} onSelectRun={selectRun} onNewDiscussion={() => newDiscussion()} onManageRooms={openRooms}
+    onOpenRoom={openRoom} onSelectRun={selectRun} onNewDiscussion={() => newDiscussion()} onNewRoom={() => { setNavOpen(false); setRoomDialog(true); }}
     onOpenUsage={() => { setPage('usage'); setNavOpen(false); }} onOpenSettings={() => openSettings()}
     onCollapse={drawer ? undefined : () => collapseSidebar(true)} onClose={drawer ? () => setNavOpen(false) : undefined} />;
   const panel = <RunPanel snapshot={snapshot} commands={hostCommands} ledger={ledger} providers={providerNames} tab={panelTab} onTab={setPanelTab}
     onClose={() => { if (layout === 'wide') { setPanelPinned(false); remember('roundtable.panelOpen', false); } else setPanelDrawer(false); }}
-    onSummarize={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setPage('workflow'); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'} />;
+    onSummarize={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setWorkflowOpen(true); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'} />;
 
   return <div className="app app-shell" data-layout={layout}>
     {sidebarInline && <div className="app-side" inert={anyDrawer || undefined}>{sidebar(false)}</div>}
     <main className="app-main" inert={anyDrawer || undefined}>
       {page === 'discussion' ? <>
         <Topbar title={snapshot ? title : roomId ? '新讨论' : 'AI 圆桌'} status={statusPill ?? (roomName ? <span>{roomName}</span> : undefined)}
-          detail={statusDetail || (!snapshot && enabledMembers ? `${enabledMembers.length} 位成员` : undefined)}
+          detail={statusDetail || (!snapshot && enabledMembers ? `${roomName ? '· ' : ''}${enabledMembers.length} 位成员` : undefined)}
           budget={budgetChip} members={layout === 'narrow' ? undefined : runMembers}
           panel={panelAvailable ? { open: panelOpen, onToggle: togglePanel, controls: 'run-panel' } : undefined}
           onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined} onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined} />
@@ -394,11 +431,22 @@ export function App() {
         {(layout === 'narrow' || sidebarCollapsed) && pageTopbar('settings')}
         <SettingsPage api={settingsApi} network={api.network} lifecycle={api.app} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
           theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onStart={roomId ? () => newDiscussion(roomId) : goDiscussion} />
+      </> : page === 'rooms' ? <>
+        <Topbar title={room?.name ?? '房间'} detail={room ? `房间设置 · ${directory.counts.get(room.id) ?? 0} 位成员 · ${directory.runs.length} 次讨论` : undefined}
+          members={layout === 'narrow' ? undefined : modeMembers.filter(member => member.enabled).map(member => member.name)}
+          onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined} onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined} />
+        {pageBody.rooms()}
       </> : <>{pageTopbar(page)}<div className="page legacy">{pageBody[page]()}</div></>}
     </main>
     {panelInline && <div className="app-context" id="run-panel" inert={anyDrawer || undefined}>{panel}</div>}
     <Drawer side="left" label="应用导航" open={navOpen && layout === 'narrow'} onClose={() => setNavOpen(false)}>{sidebar(true)}</Drawer>
     <Drawer side="right" label="本场信息" open={panelDrawer && panelAvailable && layout !== 'wide'} onClose={() => setPanelDrawer(false)}><div id="run-panel" style={{ height: '100%' }}>{panel}</div></Drawer>
+    {workflowOpen && roomId && <WorkflowDialog key={`${roomId}:${workflowVersion}`} roomName={roomName ?? '这个房间'} members={modeMembers} initial={stored.draft}
+      onCheck={checkWorkflow} onSave={saveWorkflow} onClose={() => setWorkflowOpen(false)} />}
+    {roomDialog && <RoomDialog note="新房间会带好三位成员：起草者、审查者、综合者，都可以再改。" onClose={() => setRoomDialog(false)} onSave={async value => {
+      const created = await createStarterRoom(api.rooms, value, defaultModelFor(providers, readiness.rows));
+      setRoomDialog(false); void directory.reload(); openRoom(created.id);
+    }} />}
     {snapshot && summaryTarget && <SummaryDialog key={summaryTarget.summaryId ?? 'new'} snapshot={snapshot} summaries={summaryCommands} ledger={ledger} summaryId={summaryTarget.summaryId} onClose={() => setSummaryTarget(undefined)} />}
   </div>;
 }

@@ -108,6 +108,10 @@
 .drawer.is-right { --drawer-from: 24px; }
 dialog.modal { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; overflow: auto; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
 dialog.modal::backdrop { background: var(--scrim); }
+/* Head and footer stay put; a tall body scrolls between them. */
+dialog.modal[open] { display: flex; flex-direction: column; overflow: hidden; }
+dialog.modal .modal-head, dialog.modal .modal-below, dialog.modal .modal-foot { flex: none; }
+dialog.modal .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .modal-head { display: flex; align-items: flex-start; gap: 12px; padding: 20px 16px 0 24px; }
 .modal-head > div { flex: 1; min-width: 0; }
 .modal-head h2 { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }

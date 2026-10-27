@@ -139,7 +139,7 @@ function createProbe({ prefix, name, timeoutMs = 600000 }) {
     // Finds a visible control by accessible name (aria-label, enclosing label or own text) and scrolls it into view.
     const locator = `window.__r16 = (name, o = {}) => {
       const visible = e => e && !e.closest('[hidden]') && !e.closest('[inert]') && e.getClientRects().length > 0;
-      const label = e => (e.getAttribute('aria-label') || (e.closest('label') && e.tagName !== 'BUTTON' ? e.closest('label').textContent : '') || e.textContent || '').trim();
+      const label = e => (e.getAttribute('aria-label') || (e.tagName !== 'BUTTON' && e.labels && e.labels[0] ? e.labels[0].textContent : '') || (e.closest('label') && e.tagName !== 'BUTTON' ? e.closest('label').textContent : '') || e.textContent || '').trim();
       let list = [...document.querySelectorAll(o.selector || 'button,[role=option],summary')].filter(e => visible(e) && (o.prefix ? label(e).startsWith(name) : label(e) === name));
       if (o.scope) list = list.filter(e => e.closest(o.scope));
       if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }

@@ -133,7 +133,7 @@ describe('Renderer run synchronization', () => {
     subscribe.mockReturnValue(new Promise(() => {}));
     render(<App />);
     expect((screen.getByText('开始讨论') as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: '管理房间与成员' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '新建房间' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('开始讨论'));
     expect(start).not.toHaveBeenCalled();
     await act(async () => {});
@@ -188,16 +188,18 @@ describe('Renderer task identity and command feedback', () => {
     let finish!: (value: ReturnType<typeof room>) => void;
     vi.mocked(window.roundtable.rooms.createRoom).mockReturnValue(new Promise(resolve => { finish = resolve; }));
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: '管理房间与成员' }));
-    fireEvent.click(await within(await screen.findByRole('region', { name: '房间管理' })).findByRole('button', { name: '新建房间' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: '新建房间' }))[0]);
     fireEvent.change(screen.getByLabelText('房间名称'), { target: { value: '创建目标' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存房间' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建' }));
     fireEvent.click(screen.getByRole('button', { name: '正在保存…' }));
     expect(window.roundtable.rooms.createRoom).toHaveBeenCalledTimes(1);
     expect(window.roundtable.rooms.createRoom).toHaveBeenCalledWith({ name: '创建目标', objective: '' });
     expect(window.roundtable.run.start).not.toHaveBeenCalled();
+    vi.mocked(window.roundtable.rooms.listRooms).mockResolvedValue([room('created', '创建目标')]);
     await act(async () => finish(room('created', '创建目标')));
-    expect(screen.getByRole('heading', { name: '创建目标' })).toBeTruthy();
+    // The new room opens on its page, with the three default members created.
+    await screen.findAllByRole('heading', { name: '创建目标' });
+    expect(vi.mocked(window.roundtable.rooms.createAgent).mock.calls.map(([input]) => input.displayName)).toEqual(['起草者', '审查者', '综合者']);
   });
 
   it.each(['interrupted', 'error'] as const)('preserves partial messages and disables unavailable controls for %s', async (status) => {

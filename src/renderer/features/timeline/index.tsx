@@ -1,13 +1,14 @@
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import { Ellipsis } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
-import { Avatar, IconButton } from '../../components/ui';
+import { Avatar, IconButton, Tag } from '../../components/ui';
 import { chargeOfMessage } from '../usage';
 import { timelineSlots, usedSummary } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
 import type { SummaryCommands } from '../host/useSummaryCommands';
 import type { LedgerCommands } from '../usage';
 import { Markdown } from './Markdown';
+import { stageOfTurn } from '../workflows/productionAdapter';
 import { RequestDetails, SlotItem } from './MessageItem';
 import { SummaryCard } from './SummaryCard';
 import { Timeline, type TimelineItem } from './Timeline';
@@ -55,7 +56,8 @@ function LegacyMessage({ snapshot, messageId, providers }: { snapshot: RunSnapsh
   const member = memberOf(snapshot, turn?.agentId);
   const name = member?.displayName ?? message.senderName;
   return <article className="msg" aria-label={name}>
-    <div className="msg-head"><Avatar name={name} /><span className="msg-name">{name}</span><span className="msg-meta">{modelLabel(member, providers)}</span></div>
+    <div className="msg-head"><Avatar name={name} /><span className="msg-name">{name}</span><span className="msg-meta">{modelLabel(member, providers)}</span>
+      {stageOfTurn(snapshot, turn?.turnId) && <Tag title="讨论方式里的阶段">{stageOfTurn(snapshot, turn?.turnId)}</Tag>}</div>
     <div className="msg-body">{message.content ? <Markdown text={message.content} /> : <p className="muted small">（没有生成文字）</p>}</div>
     <div className="msg-foot">{messageStatusText[message.status] && <span>{messageStatusText[message.status]}</span>}<span className="grow" />
       <IconButton size="sm" icon={Ellipsis} label="请求详情" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails(value => !value)} /></div>

@@ -12,9 +12,7 @@
 .brand .logo { color: var(--accent); }
 .sb-new { margin: 2px 12px 10px; justify-content: flex-start; background: transparent; }
 .sb-scroll { flex: 1; overflow: auto; padding: 4px 8px 12px; }
-.sb-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 8px 6px; font-size: 12px; color: var(--text-3); font-weight: 600; letter-spacing: .04em; }
-.sb-manage { padding: 2px 6px; border: 0; border-radius: var(--r-xs); background: transparent; color: var(--text-2); font-size: 12px; font-weight: 500; letter-spacing: 0; }
-.sb-manage:hover:enabled { background: var(--surface-3); color: var(--text); }
+.sb-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px 4px 8px; font-size: 12px; color: var(--text-3); font-weight: 600; letter-spacing: .04em; }
 .sb-rooms, .sb-runs { list-style: none; margin: 0; padding: 0; }
 .sb-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 8px; border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; color: var(--text); }
 .sb-item:hover:enabled { background: var(--surface-3); }
@@ -28,6 +26,8 @@
 .sb-runs .sb-item[aria-current] { color: var(--text); }
 .sb-more { padding: 4px 8px; border: 0; background: transparent; color: var(--text-3); font-size: 12px; }
 .sb-more:hover { color: var(--text); }
+.sb-archived { margin-top: 8px; }
+.sb-label .icon-btn svg { color: var(--text-2); }
 .sb-empty { margin: 4px 8px; color: var(--text-2); font-size: 13px; line-height: 20px; }
 .run-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--line-strong); }
 .run-dot.is-live { background: var(--accent); }

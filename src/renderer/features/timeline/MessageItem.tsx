@@ -10,6 +10,7 @@ import { WriteOffForm, chargeOfMessage, type LedgerCommands } from '../usage';
 import { Markdown } from './Markdown';
 import { chargeDetail, chargeLabel, memberOf, messageStatusText, modelLabel, providerLabel, repeatCost, slotAbilities, upstream, type ProviderNames } from './model';
 import { useTimelineHold } from './hold';
+import { stageOfTurn } from '../workflows/productionAdapter';
 
 export type SlotProps = {
   slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames; ledger?: LedgerCommands;
@@ -95,6 +96,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, ledger, cove
   return <article className={cx('msg', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · ${name}`}>
     <div className="msg-head">
       <Avatar name={name} /><span className="msg-name">{name}</span><span className="msg-meta">{modelLabel(member, providers)}</span>
+      {stageOfTurn(snapshot, can.turn?.turnId) && <Tag title="讨论方式里的阶段">{stageOfTurn(snapshot, can.turn?.turnId)}</Tag>}
       {can.turn?.overrideActionId && (isContinuationTurn(snapshot, can.turn.overrideActionId)
         ? <Tag title="讨论结束后，主持人在这场讨论里继续；这一轮回应主持人的话">继续讨论</Tag>
         : <Tag tone="accent" title="主持人点名插入的一轮，不占用计划的回合">主持人点名</Tag>)}

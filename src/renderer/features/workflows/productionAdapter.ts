@@ -1,12 +1,13 @@
-import { workflowConfigSchema, type WorkflowConfig, type WorkflowSnapshot } from '../../../shared/schemas/workflow';
+import { compiledWorkflowSnapshotSchema, workflowConfigSchema, type WorkflowConfig, type WorkflowSnapshot } from '../../../shared/schemas/workflow';
 import type { RunSnapshot } from '../../../shared/types/run';
-import type { WorkflowDraft, WorkflowPreview, WorkflowProgress, WorkflowTemplate } from './WorkflowFeature';
+import { templateLabel, type WorkflowDraft, type WorkflowProgress, type WorkflowTemplate } from './model';
 import { statusLabels } from '../../locales/zhCN';
 
 export const workflowTemplateLabels: Record<WorkflowTemplate, string> = {
-  'free-chat': '自由群聊', 'two-model-dialogue': '双模型对话', 'review-revision': '审查修订链', 'deep-debate': '深度辩论',
+  'free-chat': templateLabel('free-chat'), 'two-model-dialogue': templateLabel('two-model-dialogue'),
+  'review-revision': templateLabel('review-revision'), 'deep-debate': templateLabel('deep-debate'),
 };
-const stageLabels: Record<WorkflowConfig['stages'][number]['kind'], string> = {
+export const stageLabels: Record<WorkflowConfig['stages'][number]['kind'], string> = {
   discussion: '讨论', dialogue: '对话', draft: '起草', review: '审查', revise: '修订', rereview: '复审', finalize: '定稿',
   opening: '立论', rebuttal: '交锋', closing: '总结',
 };
@@ -16,21 +17,17 @@ export function workflowConfigFromDraft(draft: WorkflowDraft): WorkflowConfig {
     stages: draft.phases.map(phase => ({ id: phase.key,
       kind: draft.template === 'free-chat' ? 'discussion' : draft.template === 'two-model-dialogue' ? 'dialogue' : phase.key,
       memberIds: phase.participants, rounds: Number(phase.repeat) })),
-    limits: { maxTurns: Number(draft.turnLimit), maxDurationMs: Number(draft.durationMs), outputTokenLimit: Number(draft.outputTokens) },
+    limits: { maxTurns: Number(draft.turnLimit), maxDurationMs: Number(draft.durationMinutes) * 60000, outputTokenLimit: Number(draft.outputTokens) },
     endCondition: draft.finishAt ? { type: 'after_stage', stageId: draft.finishAt } : { type: 'plan_complete' },
   });
 }
-export function workflowPreviewForFeature(previewId: string, snapshot: WorkflowSnapshot): WorkflowPreview {
-  const label = (id: string) => stageLabels[snapshot.config.stages.find(stage => stage.id === id)!.kind];
-  return {
-    id: previewId, totalTurns: snapshot.steps.length,
-    stages: snapshot.config.stages.map(stage => ({ id: stage.id, label: stageLabels[stage.kind],
-      turns: snapshot.steps.filter(step => step.stageId === stage.id).length,
-      memberNames: stage.memberIds.map(id => snapshot.members.find(member => member.agentId === id)!.displayName) })),
-    nextStep: label(snapshot.steps[0].stageId),
-    ending: snapshot.config.endCondition.type === 'after_stage' ? `${label(snapshot.config.endCondition.stageId)}完成后结束` : '完成计划后结束',
-    limits: `最多 ${snapshot.config.limits.maxTurns} 回合 · 累计 ${snapshot.config.limits.maxDurationMs} 毫秒 · 单次输出 ${snapshot.config.limits.outputTokenLimit} Token`,
-  };
+/** Main's compiled plan in one sentence: how many turns, where it ends, who speaks in which order. */
+export function workflowPlanSummary(snapshot: WorkflowSnapshot): string {
+  const names = snapshot.steps.map(step => snapshot.members.find(member => member.agentId === step.agentId)?.displayName ?? '成员');
+  const order = names.length > 8 ? `${names.slice(0, 8).join(' → ')} → …` : names.join(' → ');
+  const end = snapshot.config.endCondition;
+  const ending = end.type === 'after_stage' ? `（${stageLabels[snapshot.config.stages.find(stage => stage.id === end.stageId)!.kind]}后结束）` : '';
+  return `预计 ${snapshot.steps.length} 回合${ending}，${order}。成员严格依次发言，不会同时生成。`;
 }
 export function workflowProgressForFeature(snapshot?: RunSnapshot): WorkflowProgress | null {
   const progress = snapshot?.workflow;
@@ -45,4 +42,22 @@ export function workflowProgressForFeature(snapshot?: RunSnapshot): WorkflowProg
     limitReason: progress.limitReason === 'max_duration' ? '累计时长到限' : progress.limitReason === 'max_turns' ? '回合数到限' : undefined,
     stages: progress.stages.map(value => ({ ...value, label: stageLabels[value.kind], status: { pending: '待执行', running: '执行中', completed: '已完成' }[value.status] })),
   };
+}
+
+const stageCache = new WeakMap<RunSnapshot, Map<string, string>>();
+/**
+ * The workflow stage a plan Turn belongs to, from Main's frozen plan: plan Turns (not host-directed ones) take the
+ * plan's steps in order. Undefined for host-directed Turns and Runs without a workflow.
+ */
+export function stageOfTurn(snapshot: RunSnapshot, turnId: string | undefined): string | undefined {
+  if (!turnId) return undefined;
+  let map = stageCache.get(snapshot);
+  if (!map) {
+    map = new Map();
+    const plan = compiledWorkflowSnapshotSchema.safeParse(snapshot.workflowSnapshot);
+    if (plan.success) [...snapshot.turns].filter(turn => !turn.overrideActionId).sort((a, b) => (a.turnIndex ?? 0) - (b.turnIndex ?? 0))
+      .forEach((turn, index) => { const step = plan.data.steps[index]; if (step) map!.set(turn.turnId, stageLabels[step.kind]); });
+    stageCache.set(snapshot, map);
+  }
+  return map.get(turnId);
 }
