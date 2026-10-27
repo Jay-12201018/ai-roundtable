@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { join, dirname, basename, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 const Sqlite = require('better-sqlite3');
+const { quotedPosition, before, foreignAsAssistant, membersByMessage } = require('./public-context.cjs');
 assert.ok(process.versions.electron, 'Use Electron with ELECTRON_RUN_AS_NODE=1');
 assert.equal(process.argv.length, 3, 'Pass one r78-first.json or r78-restart.json');
 const resultPath = fs.realpathSync(process.argv[2]);
@@ -22,7 +23,7 @@ const database = new Sqlite(databasePath, { readonly: true, fileMustExist: true 
 try {
   assert.deepEqual(database.prepare('PRAGMA integrity_check').pluck().all(), ['ok']);
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
-  assert.deepEqual(database.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(), [1,2,3,4]);
+  assert.deepEqual(database.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(), [1,2,3,4,5,6,7,8,9,10]);
   const saved = result.saved;
   const completed = result.ui.snapshots.final ?? result.ui.snapshots.restarted;
   assert.equal(database.prepare('SELECT status FROM workflow_runs WHERE id=?').pluck().get(saved.runId), 'completed');
@@ -32,10 +33,14 @@ try {
   const mainAttempts = attempts(saved.runId); assert.equal(mainAttempts.length, 3);
   const second = JSON.parse(mainAttempts[1].input_snapshot).messages;
   const third = JSON.parse(mainAttempts[2].input_snapshot).messages;
-  assert.ok(second.some(message => message.role === 'assistant' && message.content.includes(completed.messages[0].content)), 'Second Agent lacks first public output');
-  const firstIndex = third.findIndex(message => message.role === 'assistant' && message.content.includes(completed.messages[0].content));
-  const secondIndex = third.findIndex(message => message.role === 'assistant' && message.content.includes(completed.messages[1].content));
-  assert.ok(firstIndex >= 0 && secondIndex > firstIndex, 'Third Agent lacks ordered public context');
+  // D095: earlier members' replies arrive as labelled "> " quotes on the user side, never as the next member's assistant turns.
+  const authors = membersByMessage(database, saved.runId);
+  const [firstReply, secondReply] = completed.messages;
+  assert.ok(quotedPosition(second, authors[firstReply.id], firstReply.content) && !foreignAsAssistant(second, firstReply.content), 'Second Agent lacks first public output');
+  const firstIndex = quotedPosition(third, authors[firstReply.id], firstReply.content);
+  const secondIndex = quotedPosition(third, authors[secondReply.id], secondReply.content);
+  assert.ok(firstIndex && secondIndex && before(firstIndex, secondIndex), 'Third Agent lacks ordered public context');
+  assert.ok(!foreignAsAssistant(third, firstReply.content) && !foreignAsAssistant(third, secondReply.content), 'Third Agent received another member\'s reply as its own');
   const repeats = attempts(saved.repeatRunId); assert.equal(repeats.length, 3);
   const original = JSON.parse(repeats[0].input_snapshot).messages;
   assert.deepEqual(JSON.parse(repeats[1].input_snapshot).messages, original);

@@ -85,6 +85,19 @@ save(); console.log('R78_PRODUCTION_ISOLATION ' + JSON.stringify({ directory, pa
 async function main() {
   await import(pathToFileURL(entry).href); await guarded;
   const window = await loaded; const contents = window.webContents;
+  // A hidden or covered window throttles the Renderer's timers (seconds per step, then minutes) while Main's Mock keeps
+  // streaming: clicks land after the Run has finished and steps crawl into the overall timeout. The probe checks the UI,
+  // not Chromium's background scheduling, so it keeps the page at full speed wherever the window ends up on screen.
+  contents.setBackgroundThrottling(false);
+  // Each page script has its own deadline; on expiry it names the probe step the page recorded last.
+  const bounded = async (label, milliseconds, run) => {
+    let timer;
+    const expired = new Promise((_resolve, reject) => { timer = setTimeout(async () => {
+      const step = await Promise.race([contents.executeJavaScript('window.__r78Step ?? "(none recorded)"'), new Promise(resolveStep => setTimeout(() => resolveStep('(Renderer did not answer)'), 2000))]).catch(error => '(unreadable: ' + error.message + ')');
+      reject(new Error(label + ' exceeded ' + milliseconds + ' ms; last step: ' + step));
+    }, milliseconds); });
+    try { return await Promise.race([run(), expired]); } finally { clearTimeout(timer); }
+  };
   assert.equal(contents.getURL(), pathToFileURL(renderer).href);
   const preferences = contents.getLastWebPreferences();
   assert.equal(preferences.sandbox, true); assert.equal(preferences.contextIsolation, true); assert.equal(preferences.nodeIntegration, false); assert.equal(preferences.webSecurity, true);
@@ -139,11 +152,11 @@ async function main() {
   console.log('R78_REAL_BRIDGE_ASSERTIONS ' + JSON.stringify({ cases: 2, assertions: result.bridgeErrors.checks.length, errors: result.bridgeErrors.errors }));
   const ui = require('./r07r08-ui.cjs');
   if (restarting) {
-    result.ui = await ui(contents, 'restart', prior.saved);
+    result.ui = await bounded('UI restart phase', 90000, () => ui(contents, 'restart', prior.saved));
   } else {
-    const first = await ui(contents, 'first'); result.first = first;
+    const first = await bounded('UI first phase', 90000, () => ui(contents, 'first')); result.first = first;
     const refreshed = new Promise(resolveLoad => contents.once('did-finish-load', resolveLoad)); contents.reload(); await refreshed;
-    result.ui = await ui(contents, 'resume', first.saved);
+    result.ui = await bounded('UI resume phase', 90000, () => ui(contents, 'resume', first.saved));
   }
   result.sizes = [];
   for (const [width, height] of [[800,600],[1024,768],[1280,800],[1600,1000]]) {
@@ -153,29 +166,50 @@ async function main() {
     assert.deepEqual(actualSize, [width, Math.min(height, workArea.height)], 'Window bounds differ from requested size/display work area');
     for (const theme of ['light', 'dark']) {
       for (const page of ['讨论','房间与成员','模型设置']) {
-      const layout = await contents.executeJavaScript(`(async () => {
+      const item = 'Layout ' + (result.sizes.length + 1) + ' (' + width + '×' + height + ' ' + theme + ' ' + page + ')';
+      const layout = await bounded(item, 20000, () => contents.executeJavaScript(`(async () => {
         const visible = element => !element.closest('[hidden]') && !element.closest('[inert]') && element.getClientRects().length > 0;
-        const pause = () => new Promise(resolve => setTimeout(resolve, 80));
         const byName = name => [...document.querySelectorAll('button')].find(element => visible(element) && (element.getAttribute('aria-label') === name || element.textContent.trim() === name));
-        const press = async name => { const button = byName(name); if (!button || button.disabled) throw new Error('Layout control unavailable: ' + name); button.click(); await pause(); };
+        const named = (name, scope = document) => [...scope.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === name);
+        // Each step waits for its own condition under its own deadline and records itself, so a stall names the step.
+        const item = ${JSON.stringify(item)};
+        const until = async (label, read, failure = 'timed out waiting for ' + label, milliseconds = 3000) => {
+          window.__r78Step = item + ': ' + label; const deadline = Date.now() + milliseconds;
+          for (;;) {
+            const value = read(); if (value) return value;
+            if (Date.now() > deadline) throw new Error(item + ': ' + failure + ' (' + milliseconds + ' ms)');
+            await new Promise(resolve => setTimeout(resolve, 16));
+          }
+        };
+        // A drawer is usable once its slide-in has finished (the .18s ui-drawer-in animation).
+        const settled = element => element && visible(element) && element.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity) && element;
+        const press = async name => { const button = await until('control ' + name, () => { const element = byName(name); return element && !element.disabled && element; }, 'Layout control unavailable: ' + name); button.click(); };
+        // The resize reaches the Renderer asynchronously; start once the layout has folded (or unfolded) for this width.
+        await until('layout for width ${width}', () => innerWidth === ${width}
+          && [...document.querySelectorAll('.sidebar')].some(element => visible(element) && !element.closest('.drawer')) === (${width} >= 1024), 'Layout did not follow the window width');
         // R16: pages are reached from the sidebar (a drawer below 1024px); 返回讨论 leads back.
+        const pages = { '讨论': '.composer', '房间与成员': '.rooms-feature', '模型设置': '.settings-feature' };
         const go = async target => {
-          if (target === '讨论') { if (byName('返回讨论')) await press('返回讨论'); return; }
-          if (!byName(target === '房间与成员' ? '管理房间与成员' : '设置')) await press('打开导航');
-          await press(target === '房间与成员' ? '管理房间与成员' : '设置');
+          if (target === '讨论') { if (byName('返回讨论')) await press('返回讨论'); }
+          else {
+            const entry = target === '房间与成员' ? '管理房间与成员' : '设置';
+            if (!byName(entry)) { await press('打开导航'); await until('navigation drawer settled', () => settled(document.querySelector('.drawer.is-left')), 'Navigation drawer did not open'); }
+            await press(entry);
+          }
+          await until(target + ' page shown', () => { const shown = document.querySelector(pages[target]); return shown && visible(shown) && !document.querySelector('.drawer'); }, 'Page not shown: ' + target);
         };
         // 外观 lives in 设置; it applies to every page and is remembered.
         await go('模型设置'); await press(${JSON.stringify(theme === 'light' ? '浅色' : '深色')});
+        await until('theme ${theme} applied', () => document.documentElement.dataset.theme === ${JSON.stringify(theme)}, 'Theme did not apply');
         await go(${JSON.stringify(page)});
         const actual = document.documentElement.dataset.theme;
         if (actual !== ${JSON.stringify(theme)}) throw new Error('Theme did not apply');
         const reach = async (element, label) => {
           if (!element || !visible(element)) throw new Error('Unreachable control: ' + label);
-          element.scrollIntoView({ block:'center', inline:'nearest' }); await new Promise(resolve => setTimeout(resolve, 30));
-          const rect = element.getBoundingClientRect();
-          if (rect.left < -1 || rect.right > innerWidth + 1 || rect.top < -1 || rect.bottom > innerHeight + 1) throw new Error('Control outside viewport: ' + label);
+          element.scrollIntoView({ block:'center', inline:'nearest' });
+          await until('in viewport: ' + label, () => { const rect = element.getBoundingClientRect();
+            return rect.left >= -1 && rect.right <= innerWidth + 1 && rect.top >= -1 && rect.bottom <= innerHeight + 1; }, 'Control outside viewport: ' + label, 1000);
         };
-        const named = (name, scope = document) => [...scope.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === name);
         const actions = [];
         if (${width} === 800 && ${JSON.stringify(page)} === '讨论') {
           // D098: idle, the composer offers 开始讨论 in the slot run controls take while a Run is live. D111: with a
@@ -183,35 +217,42 @@ async function main() {
           const continuing = document.querySelector('.composer textarea[aria-label="继续讨论"]');
           if (continuing) { await reach(continuing, '继续讨论 box'); await reach(named('新讨论', document.querySelector('.composer')), '新讨论'); }
           else await reach(named('开始讨论', document.querySelector('.composer')), '开始讨论');
-          const menu = byName('打开导航'); await reach(menu, 'navigation drawer button'); menu.click(); await pause(); await pause(); await pause(); // the drawer slides in for 180ms
+          const menu = byName('打开导航'); await reach(menu, 'navigation drawer button'); menu.click();
+          await until('navigation drawer settled', () => settled(document.querySelector('.drawer.is-left')), 'Navigation drawer did not open');
           await reach(document.querySelector('.drawer.is-left .sidebar'), 'navigation drawer');
-          await reach(byName('关闭导航'), 'close navigation'); byName('关闭导航').click(); await pause();
-          const panel = byName('本场信息'); await reach(panel, '本场信息 button'); panel.click(); await pause(); await pause(); await pause();
+          await reach(byName('关闭导航'), 'close navigation'); byName('关闭导航').click();
+          await until('navigation drawer closed', () => !document.querySelector('.drawer'), 'Navigation drawer did not close');
+          const panel = byName('本场信息'); await reach(panel, '本场信息 button'); panel.click();
+          await until('本场信息 drawer settled', () => settled(document.querySelector('.drawer.is-right')), '本场信息 drawer did not open');
           await reach(document.querySelector('.drawer.is-right .run-panel h2'), '本场信息 drawer');
-          await reach(byName('关闭本场信息'), 'close 本场信息'); byName('关闭本场信息').click(); await pause();
+          await reach(byName('关闭本场信息'), 'close 本场信息'); byName('关闭本场信息').click();
+          await until('本场信息 drawer closed', () => !document.querySelector('.drawer'), '本场信息 drawer did not close');
           actions.push('navigation and 本场信息 drawers opened, reached, closed');
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '房间与成员') {
           for (const action of ['新建房间','新增成员']) {
-            if (action === '新增成员') { named('成员配置').click(); await new Promise(resolve => setTimeout(resolve, 80)); }
-            const open = named(action); await reach(open, action); if (open.disabled) throw new Error('Editor unavailable'); open.click(); await new Promise(resolve => setTimeout(resolve, 80));
-            const dialog = document.querySelector('dialog[open]'); if (!dialog) throw new Error('Real modal not opened');
+            if (action === '新增成员') { (await until('成员配置 tab', () => named('成员配置'), 'Unreachable control: 成员配置')).click(); }
+            const open = await until(action + ' button', () => named(action), 'Unreachable control: ' + action); await reach(open, action);
+            if (open.disabled) throw new Error('Editor unavailable'); open.click();
+            const dialog = await until(action + ' modal open', () => document.querySelector('dialog[open]'), 'Real modal not opened');
             await reach(named(action === '新建房间' ? '保存房间' : '保存成员', dialog), 'modal save');
-            const cancel = named('取消', dialog); await reach(cancel, 'modal cancel'); cancel.click(); await new Promise(resolve => setTimeout(resolve, 40));
+            const cancel = named('取消', dialog); await reach(cancel, 'modal cancel'); cancel.click();
+            await until(action + ' modal closed', () => !document.querySelector('dialog[open]'), 'Modal did not close on 取消');
             actions.push(action + ' modal save/cancel reachable');
           }
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '模型设置') {
           const provider = [...document.querySelectorAll('.settings-navigation button')].find(element => visible(element) && element.textContent.trim().startsWith('Smoke Real A ·'));
-          await reach(provider, 'saved real Provider'); provider.click(); await new Promise(resolve => setTimeout(resolve, 100));
-          const key = document.querySelector('.settings-editor input[type="password"]'); await reach(key, 'Key input');
+          await reach(provider, 'saved real Provider'); provider.click();
+          const key = await until('Smoke Real A editor loaded', () => { const editor = document.querySelector('.settings-editor');
+            return editor && [...editor.querySelectorAll('input')].some(input => input.value === 'Smoke Real A') && editor.querySelector('input[type="password"]'); }, 'Unreachable control: Key input'); await reach(key, 'Key input');
           await reach(named('保存或替换 Key'), 'Key save'); await reach(named('删除 Key'), 'Key deletion');
           await reach(named('发起生成测试'), 'last settings action'); actions.push('long settings Key and last action reached without invoking generation');
         }
         const width = document.documentElement.clientWidth, scroll = document.documentElement.scrollWidth;
         if (scroll > width + 1) throw new Error('Horizontal page overflow: ' + scroll + '/' + width);
         return { theme: actual, width, height: innerHeight, scrollWidth: scroll, background: getComputedStyle(document.documentElement).backgroundColor, actions };
-      })()`);
+      })()`));
       result.sizes.push({ requested: [width,height], actualWindow: actualSize, workArea, constrainedByWorkArea: height > workArea.height, page, ...layout });
       if ((width === 800 && theme === 'dark' || width === 1280 && theme === 'light') && page === '模型设置') {
         const screenshot = join(directory, 'r78-' + result.phase + '-' + width + '-' + theme + '.png');

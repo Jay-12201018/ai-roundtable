@@ -5,6 +5,7 @@ const { basename, dirname, join } = require('node:path');
 const { tmpdir } = require('node:os');
 const { createHash } = require('node:crypto');
 const Database = require('better-sqlite3');
+const { quotedPosition, before, foreignAsAssistant, membersByMessage } = require('./public-context.cjs');
 
 assert.ok(process.versions.electron, 'Run with ELECTRON_RUN_AS_NODE=1 and the installed Electron');
 assert.equal(process.argv.length, 3, 'Pass one probe-result.json path');
@@ -40,10 +41,14 @@ try {
     assert.equal(complete.length,3);
     const b=JSON.parse(complete[1].input_snapshot).messages;
     const c=JSON.parse(complete[2].input_snapshot).messages;
-    assert.ok(b.some(m=>m.role==='assistant'&&m.content.includes(joint.completed.messages[0].content)));
-    const first=c.findIndex(m=>m.role==='assistant'&&m.content.includes(joint.completed.messages[0].content));
-    const second=c.findIndex(m=>m.role==='assistant'&&m.content.includes(joint.completed.messages[1].content));
-    assert.ok(first>=0 && second>=0 && first<second);
+    // D095: earlier members' replies are labelled "> " quotes on the user side, in order, never assistant turns.
+    const authors=membersByMessage(database,joint.completed.runId);
+    const [one,two]=joint.completed.messages;
+    assert.ok(quotedPosition(b,authors[one.id],one.content) && !foreignAsAssistant(b,one.content));
+    const first=quotedPosition(c,authors[one.id],one.content);
+    const second=quotedPosition(c,authors[two.id],two.content);
+    assert.ok(first && second && before(first,second));
+    assert.ok(!foreignAsAssistant(c,one.content) && !foreignAsAssistant(c,two.content));
     const repeated=attempts(joint.stopped.runId);
     assert.equal(repeated.length,3);
     const original=JSON.parse(repeated[0].input_snapshot).messages;

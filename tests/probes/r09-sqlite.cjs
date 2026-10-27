@@ -1,5 +1,5 @@
 // Read-only audit, after the production Main has naturally closed its private SQLite database.
-const assert=require('node:assert/strict');const fs=require('node:fs');const {join,dirname,basename,resolve}=require('node:path');const {tmpdir}=require('node:os');const Sqlite=require('better-sqlite3');
+const assert=require('node:assert/strict');const fs=require('node:fs');const {join,dirname,basename,resolve}=require('node:path');const {tmpdir}=require('node:os');const Sqlite=require('better-sqlite3');const {quotedPosition,before,foreignAsAssistant,membersByMessage}=require('./public-context.cjs');
 assert.ok(process.versions.electron);assert.equal(process.versions.modules,'139');assert.equal(process.argv.length,3);
 const resultPath=fs.realpathSync(process.argv[2]);const result=JSON.parse(fs.readFileSync(resultPath,'utf8'));assert.equal(result.status,'PASS');
 const directory=fs.realpathSync(result.directory);assert.equal(dirname(directory),fs.realpathSync(tmpdir()));assert.ok(basename(directory).startsWith('roundtable-r09-production-'));assert.equal(dirname(resultPath),directory);
@@ -8,17 +8,19 @@ assert.equal(resolve(result.paths.userData),join(result.directory,'userData'));
 const db=new Sqlite(join(directory,'userData','ai-roundtable.db'),{readonly:true,fileMustExist:true});
 let checks=0;const check=(v,message)=>{checks++;assert.ok(v,message);};
 try{
- assert.deepEqual(db.prepare('PRAGMA integrity_check').pluck().all(),['ok']);assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(),[1,2,3,4]);
+ assert.deepEqual(db.prepare('PRAGMA integrity_check').pluck().all(),['ok']);assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);assert.deepEqual(db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(),[1,2,3,4,5,6,7,8,9,10]);
  const saved=result.saved;const run=db.prepare('SELECT status,members_snapshot FROM workflow_runs WHERE id=?').get(saved.runId);assert.equal(run.status,'completed');const members=JSON.parse(run.members_snapshot);assert.deepEqual(members.map(m=>m.providerId),[saved['openai-compatible'],saved.openai,saved['openai-compatible']]);
  const messages=id=>db.prepare('SELECT id,content,status FROM messages WHERE run_id=? ORDER BY rowid').all(id);
  const attempts=id=>db.prepare('SELECT request_id,input_snapshot,status FROM request_attempts WHERE run_id=? ORDER BY rowid').all(id);
  const completed=messages(saved.runId);const rows=attempts(saved.runId);assert.equal(rows.length,3);assert.equal(new Set(rows.map(r=>r.request_id)).size,3);assert.ok(rows.every(r=>r.status==='completed'));
  if(result.phase==='first'){
-  const calls=result.requests.filter(r=>r.method==='POST'&&r.body.messages.some(m=>m.content.includes('R09 three Agent public context')));assert.equal(calls.length,3);
+  const authors=membersByMessage(db,saved.runId);const calls=result.requests.filter(r=>r.method==='POST'&&r.body.messages.some(m=>m.content.includes('R09 three Agent public context')));assert.equal(calls.length,3);
   for(let i=0;i<3;i++){
    const input=JSON.parse(rows[i].input_snapshot);assert.deepEqual(calls[i].body.messages,input.messages);assert.equal(input.modelId,'fixture');assert.equal(input.outputTokenLimit,4096);
    check(input.messages.some(m=>m.role==='system'&&m.content.includes('R09 system '+i)),'Frozen member system missing');
-   for(let j=0;j<i;j++)check(input.messages.some(m=>m.role==='assistant'&&m.content.includes(completed[j].content)),'Ordered public context missing');
+   // D095: earlier members' replies are labelled "> " quotes on the user side, in order, never assistant turns.
+   const positions=completed.slice(0,i).map(m=>quotedPosition(input.messages,authors[m.id],m.content));
+   for(let j=0;j<i;j++)check(positions[j]&&(j===0||before(positions[j-1],positions[j]))&&!foreignAsAssistant(input.messages,completed[j].content),'Ordered public context missing');
   }
   assert.equal(db.prepare("SELECT count(*) FROM run_events WHERE run_id=? AND type='usage_updated'").pluck().get(saved.runId),3);
  }

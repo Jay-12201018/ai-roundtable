@@ -3,6 +3,8 @@ async function page(stage, saved) {
   const check = (condition, message) => { if (!condition) throw new Error(message); };
   const sleep = () => new Promise(resolve => setTimeout(resolve, 30));
   const wait = async (read, predicate, message) => {
+    // The Electron side reads the step recorded last when a phase overruns its deadline.
+    window.__r78Step = stage + ': ' + message;
     const deadline = Date.now() + 15000;
     while (true) {
       const value = await read();
