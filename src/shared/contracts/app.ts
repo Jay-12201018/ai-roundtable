@@ -5,7 +5,7 @@ import type { RoomManagementApiContract, ProviderSettingsApiContract } from './c
 import type { HostCommand, HostCommandResult } from '../schemas/host';
 import type { WriteOffChargeInput, WriteOffChargeResult } from '../schemas/budget';
 import type { SummaryCommandResult, SummaryConfirmInput, SummaryGenerateInput, SummaryPreview, SummaryPreviewInput } from '../schemas/summary';
-import type { UsageExportResult, UsageReport } from '../schemas/usage';
+import type { UsageExportResult, UsageRange, UsageReport } from '../schemas/usage';
 import type { NetworkSettings, ProxyEndpoint, ProxySettings, ProxyTestResult } from '../schemas/network';
 
 export type RoomMessage = z.infer<typeof roomMessageSchema>;
@@ -20,9 +20,10 @@ export interface HostApiContract {
 }
 /** R13B usage ledger: the report, a host write-off of an unknown charge and a CSV export saved by Main. */
 export interface UsageApiContract {
-  getReport(): Promise<UsageReport>;
+  /** D117: optional range over when requests were sent; omitted means all. */
+  getReport(range?: UsageRange): Promise<UsageReport>;
   writeOff(input: WriteOffChargeInput): Promise<WriteOffChargeResult>;
-  exportCsv(): Promise<UsageExportResult>;
+  exportCsv(range?: UsageRange): Promise<UsageExportResult>;
 }
 /** R13B conversation summaries: generation is always an explicit, budgeted host request (D107). */
 export interface SummaryApiContract {

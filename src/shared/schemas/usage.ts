@@ -33,7 +33,12 @@ export const usageUnknownRowSchema = z.object({
   observedInputTokens: count.nullable(), observedOutputTokens: count.nullable(),
   writeOffs: z.array(chargeWriteOffSchema).max(64),
 }).strict();
-export const usageReportInputSchema = z.object({}).strict();
+/**
+ * D117: an optional time range [since, until) over when each request was sent. Absent bounds mean “all”; a Run that spans
+ * the boundary contributes only the requests sent inside the range.
+ */
+export const usageReportInputSchema = z.object({ since: timestampSchema.optional(), until: timestampSchema.optional() }).strict()
+  .refine(range => range.since === undefined || range.until === undefined || Date.parse(range.since) < Date.parse(range.until), 'An empty range');
 export const usageReportSchema = z.object({
   generatedAt: timestampSchema,
   /** Dates group requests by when they were sent, in this computer's time zone. */
@@ -50,3 +55,4 @@ export type UsageBucket = z.infer<typeof usageBucketSchema>;
 export type UsageReport = z.infer<typeof usageReportSchema>;
 export type UsageUnknownRow = z.infer<typeof usageUnknownRowSchema>;
 export type UsageExportResult = z.infer<typeof usageExportResultSchema>;
+export type UsageRange = z.infer<typeof usageReportInputSchema>;

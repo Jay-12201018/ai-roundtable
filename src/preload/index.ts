@@ -45,9 +45,9 @@ const api: RoundtableApiContract = {
     confirm: (input) => invoke('summary.confirm', input),
   },
   usage: {
-    getReport: () => invoke('usage.getReport', {}),
+    getReport: (range) => invoke('usage.getReport', range ?? {}),
     writeOff: (input) => invoke('usage.writeOff', input),
-    exportCsv: () => invoke('usage.exportCsv', {}),
+    exportCsv: (range) => invoke('usage.exportCsv', range ?? {}),
   },
   rooms: {
     createRoom: (input) => invoke('rooms.createRoom', input),

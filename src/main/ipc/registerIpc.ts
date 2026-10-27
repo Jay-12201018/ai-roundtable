@@ -8,7 +8,7 @@ import { runEventSchema } from '../../shared/schemas/run';
 import type { RoomManagementApiContract, ProviderSettingsApiContract } from '../../shared/contracts/configuration';
 import type { RunService } from '../services/RunService';
 import type { HostApiContract } from '../../shared/contracts/app';
-import type { UsageExportResult, UsageReport } from '../../shared/schemas/usage';
+import type { UsageExportResult, UsageRange, UsageReport } from '../../shared/schemas/usage';
 import type { NetworkSettings, ProxyEndpoint, ProxySettings, ProxyTestResult } from '../../shared/schemas/network';
 import { ContractError } from '../../shared/contracts/errors';
 
@@ -17,7 +17,7 @@ export type NetworkIpcService = { getSettings(): NetworkSettings; saveSettings(i
 export type LifecycleIpcService = { relaunch(): void };
 
 /** R13B: the usage report and the CSV export; the export writes only the file the user picks in Main's dialog. */
-export type UsageIpcService = { getReport(): UsageReport; exportCsv(window: BrowserWindow): Promise<UsageExportResult> };
+export type UsageIpcService = { getReport(range?: UsageRange): UsageReport; exportCsv(window: BrowserWindow, range?: UsageRange): Promise<UsageExportResult> };
 import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
 
 export type IpcDisposer = (() => void) & { drain(): Promise<void> };
@@ -64,9 +64,9 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'run.resumeAfterBudget': (runId) => service.resumeAfterBudget(runId),
     'run.previewContinuation': (input) => service.previewContinuation(input),
     'run.continueDiscussion': (input) => service.continueDiscussion(input),
-    'usage.getReport': () => usage.getReport(),
+    'usage.getReport': (range) => usage.getReport(range),
     'usage.writeOff': (input) => service.writeOffCharge(input),
-    'usage.exportCsv': () => usage.exportCsv(window),
+    'usage.exportCsv': (range) => usage.exportCsv(window, range),
     'summary.preview': (input) => service.previewSummary(input),
     'summary.generate': (input) => service.generateSummary(input),
     'summary.confirm': (input) => service.confirmSummary(input),
