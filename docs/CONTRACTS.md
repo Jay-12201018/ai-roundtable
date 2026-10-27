@@ -396,3 +396,20 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Renderer | 时间线编号、摘要消息、摘要面板、上下文提示；预算栏追加与历史、预算停止处"追加并继续"；花费行"按高峰价/按空闲价"、就地核销；新"用量"页；store 就地应用 `summary_delta` | — |
 
 安全影响：所有新写入只来自 typed IPC 和主持人点击，每次带 clientRequestId 幂等；模型文本不能触发追加、核销、确认或生成。摘要请求复用成员冻结的 Provider/模型、既有生成门禁、预留与结算；不自动生成、不自动重发。核销依据拒绝类密钥文本；CSV 由 Main 写入用户选择的文件，Renderer 无文件系统能力；导出单元格做公式中和。
+
+## 讨论延续专项（2026-10-27，子会话候选，未合 main）
+
+分支 `codex/r16-discussion-continuity`（基线 `eb0d66a`）。决策见 [DECISIONS](DECISIONS.md) D110–D112。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Database / migration 10 | 新表 `run_continuations(action_id 主键 → host_actions(id)，run_id，agent_ids_json 1–64 项，elapsed_base_ms，created_at)`：插入触发器要求 action 是同一运行的 `interject`；禁改禁删。`turns.override_action_id` 现在也可以指向一次继续的插话（继续的回答），恢复校验相应放宽并新增"继续回合的成员必须在名单里、数量不超过名单"。`insertTurn` 增加 `continuationId`（只能是最新一次继续、且必须是下一位应回应的成员）；新增 `listContinuations`、`insertContinuation`；`readRunSnapshot` 增加 `continuations` | 只新增表；migration 1–9 不变。旧库升级后没有继续记录，行为与 D110 之外的旧版一致 |
+| 状态机 | 运行 `completed → running`（仅 `continueDiscussion` 使用） | 其余转换不变 |
+| Shared `schemas/continuation.ts`（新） | `continueDiscussionInput/ResultSchema`、`continuationPreviewInput/Schema`（不可用原因 `not_finished/busy/member_unavailable/context_exceeds/budget_insufficient/unsupported`，费用 `free/priced{maxMicro, firstMicro, remainingMicro}/unavailable`）、`runContinuationSchema` | 新文件 |
+| Shared `schemas/run.ts` | 快照增加可选 `continuations`（其 `messageId` 必须在快照消息里）；`turn.overrideActionId` 的含义扩展为"主持人插入的回合"（点名或继续的回答） | 只增可选字段 |
+| IPC / Preload | 新通道 `run.previewContinuation`（只读）、`run.continueDiscussion`（写入，计入关窗前待完成写入）；输出校验 runId 一致，带 agentId 时结果只能是这一位。`RunApiContract` 增加同名两个方法 | 新增通道；没有通用 invoke |
+| Main `RunService` | 调度改为"待执行的点名 → 继续的下一位 → 计划"，`maxTurns` 只数计划回合（D110）；点名不再因计划回合用完被拒；继续的运行时长上限 = 继续时的累计用时 + 原上限；`previewContinuation`、`continueDiscussion` | 点名语义变化见 D110（R12 测试/探针已按新语义改写） |
+| R05 context（Main 私有） | `discussionRulesText(revisions)` 变为函数，修改规则只在已发送条目带修改标注时出现；来源 ID `discussion-rules-v2` | 请求内容变化：无修改的讨论少一条规则 |
+| Renderer | 已结束的讨论保留主持人输入框，进入"继续讨论"模式（预计谁回应、预计最高花费、预算不足时指向追加预算）；「新讨论」是唯一另开一场的入口；"下一位"显示插入的一轮和之后回到谁；本场信息按计划回合计数并单列插入的回合；时间线标出"继续讨论"的回合和主持人的话 | — |
+
+安全影响：继续只能由主持人在可信 UI 中发出，带 clientRequestId 幂等、指纹防止挪用；模型文本不能触发继续或点名。每次回答仍按冻结成员、既有生成门禁、发送前预留与结算执行，不自动重发中断的请求；Key 不进入 Renderer。
