@@ -27,7 +27,8 @@ function sse(events: unknown[], done = true) {
  * A DeepSeek Run against an owned fetch: the real policy, registry, ledger and context builder, a fixed settlement
  * clock and scripted usage (300 prompt tokens, 6 completion tokens, optionally with a cache split).
  */
-export async function deepSeekFixture(options: { modes?: Mode[]; clock?: string; cacheHit?: number; filename?: string; members?: Array<{ name: string; role: string }> } = {}) {
+export async function deepSeekFixture(options: { modes?: Mode[]; clock?: string; cacheHit?: number; filename?: string; members?: Array<{ name: string; role: string }>;
+  /** R14: the reply text for a request, instead of the default scripted text. */ reply?: (body: Record<string, unknown>) => string | undefined } = {}) {
   let now = beijing(options.clock ?? PEAK);
   vi.spyOn(settlementClock, 'now').mockImplementation(() => now);
   const db = new Database(options.filename ?? ':memory:');
@@ -44,7 +45,7 @@ export async function deepSeekFixture(options: { modes?: Mode[]; clock?: string;
     bodies.push(body);
     const mode = modes.shift() ?? 'ok';
     const summary = (body.messages as Array<{ content: string }>).some(message => message.content.includes('【请写摘要】'));
-    const text = { choices: [{ index: 0, delta: { content: summary ? `摘要正文-${bodies.length}` : `公开回复-${bodies.length}` }, finish_reason: null }] };
+    const text = { choices: [{ index: 0, delta: { content: options.reply?.(body) ?? (summary ? `摘要正文-${bodies.length}` : `公开回复-${bodies.length}`) }, finish_reason: null }] };
     const stop = { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
     const split = options.cacheHit === undefined ? {} : { prompt_cache_hit_tokens: options.cacheHit, prompt_cache_miss_tokens: 300 - options.cacheHit };
     if (mode === 'hang') {
