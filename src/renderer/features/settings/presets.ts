@@ -42,6 +42,20 @@ export const presets: ServicePreset[] = [
     keyHelp: '' },
 ];
 
+const listed = (names: string[]) => names.length > 1 ? `${names.slice(0, -1).join('、')} 和${names.at(-1)}` : names[0] ?? '';
+/**
+ * What can be used for a discussion today, from the presets' review state (the same fact D114 reports per saved model),
+ * so opening a new service changes this sentence without anyone rewriting it.
+ */
+export function availabilityText(): string {
+  const real = presets.filter(preset => preset.kind !== 'mock');
+  const ready = real.filter(preset => !preset.priceUnreviewed).map(preset => preset.name);
+  const pending = real.filter(preset => preset.priceUnreviewed).map(preset => preset.name);
+  if (!ready.length) return `${listed(pending)}可以先连接；价格审核前，暂时都不能用于讨论。`;
+  if (!pending.length) return `可以用于讨论：${listed(ready)}。`;
+  return `目前可以用于讨论的是 ${listed(ready)}；${listed(pending)}可以先连接，价格审核后开放讨论。`;
+}
+
 const normalize = (url: string | null | undefined) => url ? url.replace(/\/+$/u, '') : url;
 /** The built-in service a saved Provider matches, by kind and address; anything else is a user-entered service. */
 export function presetOf(provider: { kind: ProviderKind | null; baseUrl?: string | null }): ServicePreset | undefined {

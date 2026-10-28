@@ -31,6 +31,9 @@ it('D6-A 开始试玩 adds the demo service and a 演示房间 with three demo m
   const f = fixture(); render(<App />);
   await screen.findByRole('heading', { name: '让几位 AI 围坐一桌，替你把问题讨论透' });
   expect(document.body.textContent).toContain('回复是预先写好的示例，不代表真实模型的水平');
+  // It promises only what Main allows today: the unreviewed services can be connected, not used in a discussion.
+  expect(document.body.textContent).toContain('目前可以用于讨论的是 DeepSeek；OpenAI、Anthropic Claude、Google Gemini 和其他兼容服务可以先连接，价格审核后开放讨论。');
+  expect(document.body.textContent).not.toContain('支持 DeepSeek');
   fireEvent.click(screen.getByRole('button', { name: '开始试玩' }));
   await screen.findByRole('heading', { name: '这场讨论要解决什么？' });
   const [provider] = f.db.listProviderSummaries();
