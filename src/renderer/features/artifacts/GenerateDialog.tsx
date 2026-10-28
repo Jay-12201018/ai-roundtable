@@ -13,6 +13,13 @@ export const kindDescriptions: Record<ArtifactKind, string> = {
   code: '只预览文件路径和代码；不会执行，也不会写入磁盘',
 };
 
+/** D124: what the model says when the discussion holds nothing of this kind; the request is paid either way. */
+const nothingNotes: Partial<Record<ArtifactKind, string>> = {
+  code: '讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会产生费用。',
+  prd: '讨论不是关于产品或功能时，模型会如实说明“没有可整理的内容”，不会硬凑需求；这次请求仍会产生费用。',
+  actions: '讨论里没有要做的事时，模型会如实说明“没有可整理的内容”，不会硬凑事项；这次请求仍会产生费用。',
+};
+
 const reasonText = (preview: ArtifactPreview): string => {
   switch (preview.reason) {
     case 'busy': return '有请求正在进行（讨论还在进行，或正在生成摘要或产物）。暂停讨论或等它结束后再生成。';
@@ -74,6 +81,7 @@ export function GenerateDialog({ snapshot, kind, artifactId, commands, ledger, o
     <p className="summary-cost">{preview.cost.kind === 'free' ? '使用内置 Mock 模型，不产生费用。'
       : preview.cost.kind === 'priced' ? `预计最高 ${formatYuan(preview.cost.maxMicro)}（按高峰价和 ${preview.outputTokenLimit} tokens 输出上限预留），结束后按实际用量和时段结算，通常更低。当前剩余额度 ${formatYuan(preview.cost.remainingMicro)}。`
       : '暂时算不出预计花费。'}</p>
+    {nothingNotes[kind] && <p className="small muted">{nothingNotes[kind]}</p>}
     <p className="small muted">模型按固定格式输出 JSON，应用会逐项检查。检查不通过时原样保留输出、指出问题位置，<b>不会自动重试</b>；由你决定修改还是重新生成。</p>
     {preview.reason && <p role="alert" className="summary-reason">{reasonText(preview)}</p>}
     {shortfall > 0 && ledger?.available && <Button disabled={ledger.pending !== undefined} onClick={() => void ledger.addBudget(topUp, false)}>追加 {yuanText(topUp)} 预算</Button>}
