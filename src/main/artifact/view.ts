@@ -9,6 +9,7 @@ type Snapshot = ReturnType<Database['readRunSnapshot']>;
 export function versionStatus(version: ArtifactVersionRecord): ArtifactVersionStatus {
   if (version.request?.status === 'generating') return 'generating';
   if (version.validation === 'invalid') return 'invalid';
+  if (version.validation === 'empty') return 'empty';
   if (version.validation !== 'valid') return 'failed';
   if (version.origin !== 'edit' && version.adoptedAt === undefined) return 'candidate';
   return version.exports.length ? 'exported' : 'valid';
@@ -55,7 +56,7 @@ export function versionView(kind: ArtifactKind, version: ArtifactVersionRecord, 
     versionId: version.id, artifactId: version.artifactId, number: version.number, origin: version.origin, status: versionStatus(version),
     ...(version.parentVersionId ? { parentVersionId: version.parentVersionId } : {}), ...(version.agentId ? { agentId: version.agentId } : {}),
     ...(version.request ? { request: { requestId: version.request.requestId, status: version.request.status, ...(version.request.finishReason ? { finishReason: version.request.finishReason } : {}) } } : {}),
-    ...(content ? { title: content.title } : {}), issues, outputChars: version.rawOutput.length,
+    ...(content ? { title: content.title } : {}), issues, ...(version.emptyReason !== null ? { emptyReason: version.emptyReason } : {}), outputChars: version.rawOutput.length,
     ...(numbers.length ? { firstNumber: Math.min(...numbers), lastNumber: Math.max(...numbers) } : {}),
     affectedNumbers: affectedNumbers(snapshot, version.sources),
     ...(version.adoptedAt ? { adoptedAt: version.adoptedAt } : {}), ...(version.exports.length ? { exportedAt: version.exports.at(-1)!.createdAt } : {}),

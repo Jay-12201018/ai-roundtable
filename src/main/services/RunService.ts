@@ -952,8 +952,10 @@ export class RunService {
       completed: (content, reason) => {
         this.database.setArtifactOutput(versionId, content);
         this.database.finishArtifactRequest(requestId, 'completed', reason);
-        const result = parseArtifact(request.kind, content, { sourceNumbers: request.numbers });
+        const result = parseArtifact(request.kind, content, { sourceNumbers: request.numbers, allowNothing: true });
         if (result.ok) this.database.validateArtifactVersion(versionId, { contentJson: result.json });
+        // D124: a stated "nothing of this kind" is a valid answer, kept apart from documents and from failures.
+        else if (result.nothing !== undefined) this.database.validateArtifactVersion(versionId, { empty: result.nothing });
         else {
           // A cut-off output says so first: the fix is a larger limit or a shorter document, not a field.
           const cut = reason === 'length' ? [{ path: '', label: '整个 JSON', message: `输出达到 ${request.input.outputTokenLimit} tokens 的上限被截断，内容不完整` }] : [];
