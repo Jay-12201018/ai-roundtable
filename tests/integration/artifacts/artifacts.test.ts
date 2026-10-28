@@ -46,9 +46,12 @@ describe('structured artifacts (D118–D123)', () => {
       expect(f.provider.inputs.length).toBe(before + 1);
       const request = f.provider.inputs.at(-1)!;
       expect(request).toMatchObject({ agentRole: `artifact:${kind}`, outputTokenLimit: kind === 'code' ? 8192 : 4096 });
-      expect(request.messages[1].content).toContain('只输出一个 JSON 对象');
-      expect(request.messages[1].content).toContain('对应字段写 null，表示“未知”');
       const transcript = request.messages.at(-1)!.content;
+      // The kind's requirements come after the discussion, right before the answer (D120).
+      expect(transcript).toContain('只输出一个 JSON 对象');
+      expect(transcript).toContain('对应字段写 null，表示“未知”');
+      expect(transcript.indexOf('【整理要求')).toBeGreaterThan(transcript.indexOf('【第 3 条'));
+      expect(transcript.includes('{"nothing"')).toBe(kind !== 'minutes');
       expect(transcript).toContain('【第 1 条 · 成员「成员 a」· assistant】');
       expect(transcript).toContain('【第 3 条 · 成员「成员 c」· assistant】');
       expect(transcript).toContain('【请输出 JSON】\n请根据以上第 1–3 条发言整理');
@@ -160,16 +163,55 @@ describe('structured artifacts (D118–D123)', () => {
     const runId = await finished(f);
     const rule = '标注“已由主持人修改”的发言';
     await generate(f, runId, 'prd', 'g1');
-    const plain = f.provider.inputs.at(-1)!.messages[1].content;
+    const plain = f.provider.inputs.at(-1)!.messages.at(-1)!.content;
     expect(plain).not.toContain(rule);
     // The remaining rules stay numbered without a gap.
     expect(plain).toMatch(/\n4\. sources 写这条内容依据的发言编号[^]*\n5\. 内容用简体中文/u);
     await f.command({ runId, kind: 'editMessage', messageId: f.run.getSnapshot(runId).turns[1].messageId!, content: '主持人改过的第二条' });
     await generate(f, runId, 'minutes', 'g2');
     const revised = f.provider.inputs.at(-1)!;
-    expect(revised.messages[1].content).toContain(rule);
-    expect(revised.messages[1].content).toMatch(/\n5\. 标注“已由主持人修改”的发言[^]*\n6\. 内容用简体中文/u);
+    expect(revised.messages.at(-1)!.content).toContain(rule);
+    expect(revised.messages.at(-1)!.content).toMatch(/\n5\. 标注“已由主持人修改”的发言[^]*\n6\. 内容用简体中文/u);
     expect(revised.messages.at(-1)!.content).toContain('（此发言已由主持人修改');
+  });
+
+  it('gives every kind of one discussion the same request prefix, so later ones can hit the prompt cache (D120)', async () => {
+    const f = setup();
+    const runId = await finished(f);
+    for (const kind of artifactKindValues) await generate(f, runId, kind, `g-${kind}`);
+    const requests = f.provider.inputs.slice(-4);
+    const prefix = (content: string) => content.slice(0, content.indexOf('【整理要求'));
+    for (const request of requests.slice(1)) {
+      expect(request.messages.slice(0, -1)).toEqual(requests[0].messages.slice(0, -1));
+      expect(prefix(request.messages.at(-1)!.content)).toBe(prefix(requests[0].messages.at(-1)!.content));
+    }
+    expect(prefix(requests[0].messages.at(-1)!.content)).toContain('【第 3 条 · 成员');
+    expect(new Set(requests.map(request => request.messages.at(-1)!.content)).size).toBe(4);
+  });
+
+  it('keeps "nothing of this kind" as its own result: never adopted, exported or handed to R15 (D124)', async () => {
+    const f = setup();
+    const runId = await finished(f);
+    const reason = '讨论记录中没有出现任何代码设计，没有可整理的代码候选。';
+    const { result, version } = await generate(f, runId, 'code', 'g1', JSON.stringify({ nothing: reason }));
+    expect(version().version).toMatchObject({ status: 'empty', emptyReason: reason, issues: [] });
+    expect(version().content).toBeUndefined();
+    expect(version().rawOutput).toBe(JSON.stringify({ nothing: reason }));
+    expect(() => f.artifacts.adopt({ runId, clientRequestId: 'a1', versionId: result.versionId })).toThrowError(expect.objectContaining({ code: 'invalid_state' }));
+    await expect(f.artifacts.export({ runId, clientRequestId: 'x1', versionId: result.versionId, format: 'json', target: 'clipboard' })).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(f.artifacts.listCodeCandidates({ runId }).candidates).toEqual([]);
+    const raw = (f.db as unknown as { db: Sqlite.Database }).db;
+    expect(() => raw.prepare("INSERT INTO artifact_adoptions(version_id,run_id,client_request_id,created_at) VALUES(?,?,'c','t')").run(result.versionId, runId)).toThrow(/Invalid artifact adoption/u);
+    // The host's own version must be a document; writing one from scratch works.
+    expect(() => f.artifacts.edit({ runId, clientRequestId: 'e0', versionId: result.versionId, text: JSON.stringify({ nothing: '手写' }) }))
+      .toThrowError(expect.objectContaining({ detail: expect.objectContaining({ code: 'invalid_input', field: 'text' }) }));
+    expect(f.artifacts.edit({ runId, clientRequestId: 'e1', versionId: result.versionId, text: text(validDocuments.code) })).toMatchObject({ duplicate: false });
+    // Regenerating is still offered and adds a version.
+    await generate(f, runId, 'code', 'g2', text(validDocuments.code), result.artifactId);
+    expect(f.artifacts.list({ runId }).artifacts[0].versions.map(item => item.status)).toEqual(['empty', 'valid', 'candidate']);
+    // Minutes always exist: there, the same answer is a validation failure.
+    const minutes = await generate(f, runId, 'minutes', 'g3', JSON.stringify({ nothing: reason }));
+    expect(minutes.version().version).toMatchObject({ status: 'invalid', issues: [expect.objectContaining({ message: expect.stringContaining('会议纪要总能整理') })] });
   });
 
   it('uses a confirmed summary for the messages it covers and still tracks the originals behind it', async () => {

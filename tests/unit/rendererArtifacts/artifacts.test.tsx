@@ -99,6 +99,30 @@ describe('artifact reader (R14)', () => {
   });
 });
 
+describe('nothing of this kind (D124)', () => {
+  it('shows the model\'s reason as its own state, without adopt or export, and lets the host regenerate or write one', async () => {
+    const v = version({ status: 'empty', emptyReason: '讨论里没有涉及代码。' });
+    const c = commands({ v1: detail('code', v, '{"nothing": "讨论里没有涉及代码。"}') });
+    const onRegenerate = vi.fn();
+    render(<ArtifactReader snapshot={snapshot()} artifact={summary('code', [v])} commands={c} host={host} onClose={() => {}} onRegenerate={onRegenerate} onReveal={() => {}} />);
+    await screen.findByText('讨论里没有涉及代码。');
+    expect(screen.getByText(/这不是模型出错，但这一版不能采用、复制或导出/u)).toBeTruthy();
+    for (const name of ['采用这一版', '复制 Markdown', '复制 JSON', '另存为…']) expect(screen.queryByRole('button', { name })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重新生成…' }));
+    expect(onRegenerate).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '自己写一版…' }));
+    const area = await screen.findByLabelText('产物 JSON') as HTMLTextAreaElement;
+    expect(JSON.parse(area.value)).toMatchObject({ title: '', files: [{ path: '', content: '' }] });
+  });
+
+  it('says before generating code that an honest "nothing" still costs a request', async () => {
+    const preview: ArtifactPreview = { runId: 'run', kind: 'code', available: true, agents: [{ agentId: 'a', name: '综合者', providerId: 'p', modelId: 'deepseek-flash' }], agentId: 'a',
+      messageCount: 3, lastNumber: 3, cost: { kind: 'priced', maxMicro: 70_000, remainingMicro: 999_300 }, outputTokenLimit: 8192 };
+    render(<GenerateDialog snapshot={snapshot()} kind="code" commands={commands({}, { preview: vi.fn(async () => preview) })} onClose={() => {}} onStarted={() => {}} />);
+    await screen.findByText('讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会产生费用。');
+  });
+});
+
 describe('artifacts panel and generate dialog (R14)', () => {
   it('blocks generation while the discussion runs and opens the dialog when it can', () => {
     const onGenerate = vi.fn();

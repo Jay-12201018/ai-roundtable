@@ -100,6 +100,17 @@ describe('artifact schemas and parser (D119)', () => {
     expect(issues.every(issue => issue.line !== undefined)).toBe(true);
   });
 
+  it('accepts a stated "nothing of this kind" from a model only, only alone and never for minutes (D124)', () => {
+    const nothing = JSON.stringify({ nothing: '讨论里没有代码' });
+    for (const kind of ['prd', 'actions', 'code'] as const) expect(parseArtifact(kind, nothing, { allowNothing: true })).toEqual({ ok: false, issues: [], nothing: '讨论里没有代码' });
+    expect(parseArtifact('code', '```json\n' + nothing + '\n```', { allowNothing: true })).toMatchObject({ nothing: '讨论里没有代码' });
+    expect(fails('code', nothing)[0].message).toContain('你修改的版本要写出完整内容');
+    expect(fails('minutes', nothing, { allowNothing: true })[0].message).toContain('会议纪要总能整理');
+    expect(fails('code', JSON.stringify({ nothing: '没有', title: 'x' }), { allowNothing: true })[0].message).toBe('说明没有可整理的内容时，只写 nothing 这一个字段');
+    expect(fails('code', JSON.stringify({ nothing: ' ' }), { allowNothing: true })[0].message).toContain('nothing 要写一句原因');
+    expect(fails('code', JSON.stringify({ nothing: null }), { allowNothing: true })[0].path).toBe('nothing');
+  });
+
   it('accepts only relative candidate paths and bounded code', () => {
     for (const path of ['/etc/passwd', '../escape.ts', 'a//b.ts', 'C:\\x.ts', '~/x', 'a/./b']) {
       const code = clone(validDocuments.code) as { files: Array<Record<string, unknown>> }; code.files[0].path = path;
