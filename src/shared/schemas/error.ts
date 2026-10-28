@@ -22,7 +22,9 @@ export type ErrorCode = z.infer<typeof errorCodeSchema>;
 const retryableCodes: readonly ErrorCode[] = ['transport_error', 'rate_limited', 'timeout', 'network_error'];
 const errorFieldSchema = z.enum(['arguments', 'roomId', 'runId', 'turnId', 'messageId', 'cursor', 'task', 'workflowSnapshot', 'mode', 'maxTurns', 'maxDurationMs', 'outputTokenLimit', 'decision',
   'clientRequestId', 'kind', 'agentId', 'instructionId', 'content', 'budgetMicroCny',
-  'amountMicroCny', 'basis', 'requestId', 'acknowledgedUncertainty', 'throughSlotId', 'summaryId']);
+  'amountMicroCny', 'basis', 'requestId', 'acknowledgedUncertainty', 'throughSlotId', 'summaryId',
+  // R14 artifacts.
+  'artifactId', 'versionId', 'text', 'sources', 'format', 'target']);
 export type ErrorField = z.infer<typeof errorFieldSchema>;
 
 export const apiErrorSchema = z.object({

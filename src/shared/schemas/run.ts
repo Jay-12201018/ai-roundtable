@@ -50,6 +50,8 @@ export const runSnapshotSchema = z.object({
   summaries: z.array(contextSummarySchema).max(256).optional(), contextPressure: contextPressureSchema.optional(),
   // D111: continuations of a finished discussion, oldest first.
   continuations: z.array(runContinuationSchema).max(4096).optional(),
+  // R14 (D120): artifact requests of this Run, so every ledger row names a request; artifacts are read with artifact.list.
+  artifactRequestIds: z.array(idSchema).max(100000).optional(),
 }).strict().superRefine((snapshot, ctx) => {
   const summaryRequests = new Map((snapshot.summaries ?? []).flatMap(summary => summary.requests.map(request => [request.requestId, request.messageId] as const)));
   const current = snapshot.turns.find((turn) => turn.turnId === snapshot.currentTurnId);
@@ -62,7 +64,7 @@ export const runSnapshotSchema = z.object({
     || new Set(snapshot.attempts?.map(a=>a.requestId)).size !== (snapshot.attempts?.length ?? 0)
     || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))
     || new Set(snapshot.charges?.map(c=>c.requestId)).size !== (snapshot.charges?.length ?? 0)
-    || snapshot.charges?.some(c=>c.kind==='summary' ? !summaryRequests.has(c.requestId) : !snapshot.attempts?.some(a=>a.requestId===c.requestId))
+    || snapshot.charges?.some(c=>c.kind==='summary' ? !summaryRequests.has(c.requestId) : c.kind==='artifact' ? !snapshot.artifactRequestIds?.includes(c.requestId) : !snapshot.attempts?.some(a=>a.requestId===c.requestId))
     || [...summaryRequests.values()].some(messageId => !snapshot.messages.some(message => message.id === messageId))
     || snapshot.continuations?.some(item => item.messageId !== undefined && !snapshot.messages.some(message => message.id === item.messageId))) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent snapshot identities' });
@@ -108,6 +110,10 @@ export const runEventSchema = z.discriminatedUnion('type', [
   z.object({ ...base, ...runIdentity, type: z.literal('summary_updated'), payload: z.object({ summaryId: idSchema, messageId: idSchema,
     status: z.enum([...summaryRequestStatusValues, 'confirmed']) }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('summary_delta'), payload: z.object({ summaryId: idSchema, messageId: idSchema, text: z.string() }).strict() }).strict(),
+  // R14 (D120): an artifact version changed (generating, completed, failed, adopted, edited, exported). Artifacts are
+  // read with artifact.list; the event only tells the page to read again.
+  z.object({ ...base, ...runIdentity, type: z.literal('artifact_updated'), payload: z.object({ artifactId: idSchema, versionId: idSchema,
+    status: z.enum(['generating', 'completed', 'failed', 'aborted', 'adopted', 'edited', 'exported']) }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('snapshot_required'), payload: z.object({ reason: z.enum(['invalid_event', 'incompatible_version', 'sequence_gap']) }).strict() }).strict(),
 ]).superRefine((event, ctx) => {
   if ('turnId' in event.payload && event.payload.turnId !== event.turnId
@@ -126,7 +132,7 @@ export const runSubscriptionSchema = z.object({
       || index > 0 && event.sequence !== events[index - 1].sequence + 1)
     || subscription.events.some((event) => {
       if (event.type === 'run_state_changed' || event.type === 'snapshot_required' || event.type === 'host_updated'
-        || event.type === 'budget_updated' || event.type === 'summary_updated' || event.type === 'summary_delta') return false;
+        || event.type === 'budget_updated' || event.type === 'summary_updated' || event.type === 'summary_delta' || event.type === 'artifact_updated') return false;
       const turn = subscription.snapshot.turns.find((turn) => turn.turnId === event.turnId);
       const attempt = subscription.snapshot.attempts?.find(a=>a.requestId===event.requestId);
       return !turn || (attempt ? attempt.turnId!==turn.turnId || attempt.runId!==event.runId : turn.requestId!==event.requestId)

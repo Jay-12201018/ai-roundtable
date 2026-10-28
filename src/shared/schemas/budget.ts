@@ -57,8 +57,9 @@ export const requestChargeSchema = z.object({
   /** What this request counts against the budget now (see `effectiveChargeMicro`). */
   chargedMicro: micro,
   priceReviewedAt: timestampSchema.nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
-  /** R13B: a summary request is ledgered like a Turn request but has no Turn (D107). Absent means a Turn request. */
-  kind: z.enum(['turn', 'summary']).optional(),
+  /** R13B: a summary request is ledgered like a Turn request but has no Turn (D107). Absent means a Turn request.
+   * R14 (D120): an artifact request likewise. */
+  kind: z.enum(['turn', 'summary', 'artifact']).optional(),
   settlement: chargeSettlementSchema.optional(),
   writeOffs: z.array(chargeWriteOffSchema).max(64).optional(),
 }).strict().superRefine((charge, ctx) => {

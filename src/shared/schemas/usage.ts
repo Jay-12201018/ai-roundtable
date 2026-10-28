@@ -26,9 +26,11 @@ export const usageRunRowSchema = usageBucketSchema.extend({
 export const usageModelRowSchema = usageBucketSchema.extend({
   providerId: idSchema, providerName: z.string(), modelId: idSchema,
 }).strict();
+/** D120: what the requests were for — discussion turns, summaries or artifacts. */
+export const usageKindRowSchema = usageBucketSchema.extend({ kind: z.enum(['turn', 'summary', 'artifact']) }).strict();
 export const usageDateRowSchema = usageBucketSchema.extend({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u) }).strict();
 export const usageUnknownRowSchema = z.object({
-  requestId: idSchema, runId: idSchema, roomName: z.string(), task: z.string(), kind: z.enum(['turn', 'summary']),
+  requestId: idSchema, runId: idSchema, roomName: z.string(), task: z.string(), kind: z.enum(['turn', 'summary', 'artifact']),
   speaker: z.string(), providerName: z.string(), modelId: idSchema, createdAt: timestampSchema, reservedMicro: count,
   observedInputTokens: count.nullable(), observedOutputTokens: count.nullable(),
   writeOffs: z.array(chargeWriteOffSchema).max(64),
@@ -48,6 +50,8 @@ export const usageReportSchema = z.object({
   byModel: z.array(usageModelRowSchema).max(10000),
   byDate: z.array(usageDateRowSchema).max(100000),
   unknownCharges: z.array(usageUnknownRowSchema).max(100000),
+  /** Optional for compatibility with R13B readers; Main always sends it. */
+  byKind: z.array(usageKindRowSchema).max(3).optional(),
 }).strict();
 export const usageExportResultSchema = z.object({ saved: z.boolean(), fileName: z.string().max(512).optional(), rows: count }).strict();
 

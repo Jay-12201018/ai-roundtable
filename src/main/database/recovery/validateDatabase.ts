@@ -8,6 +8,8 @@ import { runEventSchema } from '../../../shared/schemas/run';
 import { trialRecordSchema } from '../../providers/controlledTrial/record';
 import { reconciliationAuditSchema } from '../../providers/controlledTrial/reconciliation';
 import { budgetBlockSchema, requestChargeSchema } from '../../../shared/schemas/budget';
+import { artifactContentSchemas, artifactIssueSchema, artifactKindSchema } from '../../../shared/schemas/artifact';
+import { streamChatInputSchema } from '../../../shared/schemas/provider';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
 
@@ -189,6 +191,10 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (!requestChargeSchema.safeParse({ ...row, chargedMicro }).success) throw new Error('Invalid charge evidence');
       }
     }
+    const artifacts = (versions.at(-1) ?? 0) >= 12;
+    // R14: from migration 12 artifact requests are a third ledger table that pricing and write-offs may refer to.
+    const artifactCharge = (alias: string, state: string, extra = '') => artifacts
+      ? ` AND NOT EXISTS(SELECT 1 FROM artifact_charges c WHERE c.request_id=${alias}.request_id AND c.run_id=${alias}.run_id AND c.state='${state}'${extra})` : '';
     if ((versions.at(-1) ?? 0) >= 9) {
       for (const table of ['run_budget_topups', 'context_summaries', 'summary_requests', 'summary_confirmations', 'summary_charges', 'charge_pricing', 'charge_writeoffs']) {
         if (!tables.includes(table)) throw new Error('Recovery v9 schema is incomplete');
@@ -206,17 +212,11 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         WHERE m.sender_type<>'system' OR m.run_id<>r.run_id OR v.slot_id<>r.summary_id LIMIT 1`, 'Invalid summary request identity');
       assertNoRows(db, "SELECT 1 FROM summary_charges c LEFT JOIN summary_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid summary charge identity');
       assertNoRows(db, `SELECT 1 FROM charge_pricing p WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled')
-        AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled') LIMIT 1`, 'Pricing without a settled charge');
+        AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled')${artifactCharge('p', 'settled')} LIMIT 1`, 'Pricing without a settled charge');
       assertNoRows(db, `SELECT 1 FROM charge_writeoffs w WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro)
-        AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro) LIMIT 1`, 'Write-off without an unknown charge');
+        AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro)${artifactCharge('w', 'unknown', ' AND w.amount_micro<=c.reserved_micro')} LIMIT 1`, 'Write-off without an unknown charge');
       assertNoRows(db, `SELECT 1 FROM run_budgets b WHERE b.limit_micro + COALESCE((SELECT SUM(t.amount_micro) FROM run_budget_topups t WHERE t.run_id=b.run_id),0) > 1000000000 LIMIT 1`, 'Run budget above the limit');
-      const summaryCharges = db.prepare(`SELECT request_id AS requestId,provider_id AS providerId,model_id AS modelId,currency,state,input_token_bound AS inputTokenBound,
-        output_token_limit AS outputTokenLimit,input_micro_per_token AS inputMicroPerToken,output_micro_per_token AS outputMicroPerToken,reserved_micro AS reservedMicro,
-        input_tokens AS inputTokens,output_tokens AS outputTokens,accounted_micro AS accountedMicro,price_reviewed_at AS priceReviewedAt,created_at AS createdAt,updated_at AS updatedAt FROM summary_charges`).iterate() as Iterable<Record<string, unknown>>;
-      for (const row of summaryCharges) {
-        const chargedMicro = row.state === 'settled' ? row.accountedMicro : row.state === 'not_sent' ? 0 : row.reservedMicro;
-        if (!requestChargeSchema.safeParse({ ...row, chargedMicro, kind: 'summary' }).success) throw new Error('Invalid charge evidence');
-      }
+      assertChargeEvidence(db, 'summary_charges', 'summary');
     }
     if ((versions.at(-1) ?? 0) >= 10) {
       if (!tables.includes('run_continuations')) throw new Error('Recovery v10 schema is incomplete');
@@ -235,6 +235,49 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       assertNoRows(db, `SELECT 1 FROM provider_target_approvals a LEFT JOIN providers p ON p.id=a.provider_id
         WHERE p.id IS NULL OR p.type<>a.kind OR a.kind='mock' LIMIT 1`, 'Invalid target approval');
     }
+    if (artifacts) {
+      for (const table of ['artifacts', 'artifact_versions', 'artifact_sources', 'artifact_requests', 'artifact_charges', 'artifact_adoptions', 'artifact_exports']) {
+        if (!tables.includes(table)) throw new Error('Recovery v12 schema is incomplete');
+      }
+      for (const name of ['artifact_insert', 'artifact_immutable', 'artifact_no_delete', 'artifact_version_insert', 'artifact_version_identity_immutable', 'artifact_version_output_once',
+        'artifact_version_no_delete', 'artifact_source_insert', 'artifact_source_immutable', 'artifact_source_no_delete', 'artifact_request_insert', 'artifact_request_identity_immutable',
+        'artifact_request_finish_once', 'artifact_request_no_delete', 'artifact_charge_identity_insert', 'artifact_charge_identity_immutable', 'artifact_charge_settle_once',
+        'artifact_charge_result_once', 'artifact_charge_no_delete', 'artifact_adoption_insert', 'artifact_adoption_immutable', 'artifact_adoption_no_delete',
+        'artifact_export_insert', 'artifact_export_immutable', 'artifact_export_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing R14 artifact protection');
+      }
+      // The recreated migration 9 cross-checks must also know artifact requests.
+      for (const name of ['charge_pricing_insert', 'charge_writeoff_insert']) {
+        const sql = db.prepare("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?").pluck().get(name) as string | undefined;
+        if (!sql?.includes('FROM artifact_charges')) throw new Error('Missing R14 ledger protection');
+      }
+      assertNoRows(db, "SELECT 1 FROM artifacts a LEFT JOIN workflow_runs r ON r.id=a.run_id WHERE r.id IS NULL OR r.room_id<>a.room_id LIMIT 1", 'Invalid artifact identity');
+      assertNoRows(db, `SELECT 1 FROM artifact_versions v LEFT JOIN artifacts a ON a.id=v.artifact_id LEFT JOIN artifact_versions p ON p.id=v.parent_version_id
+        WHERE a.id IS NULL OR a.run_id<>v.run_id OR (v.parent_version_id IS NOT NULL AND (p.id IS NULL OR p.artifact_id<>v.artifact_id OR p.version_number>=v.version_number))
+          OR v.version_number <> (SELECT COUNT(*) FROM artifact_versions u WHERE u.artifact_id=v.artifact_id AND u.version_number<=v.version_number) LIMIT 1`, 'Invalid artifact version');
+      assertNoRows(db, `SELECT 1 FROM artifact_versions v WHERE v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_requests r WHERE r.version_id=v.id) LIMIT 1`, 'Generated artifact version without its request');
+      assertNoRows(db, `SELECT 1 FROM artifact_versions v JOIN artifact_requests r ON r.version_id=v.id
+        WHERE r.run_id<>v.run_id OR r.agent_id IS NOT v.agent_id OR v.origin='edit' OR (v.validation<>'pending' AND r.status<>'completed') LIMIT 1`, 'Invalid artifact request identity');
+      assertNoRows(db, `SELECT 1 FROM artifact_sources s JOIN artifact_versions v ON v.id=s.version_id JOIN messages m ON m.id=s.message_id
+        WHERE v.run_id<>s.run_id OR m.run_id<>s.run_id LIMIT 1`, 'Artifact source outside its Run');
+      assertNoRows(db, "SELECT 1 FROM artifact_charges c LEFT JOIN artifact_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid artifact charge identity');
+      assertNoRows(db, `SELECT 1 FROM artifact_adoptions d LEFT JOIN artifact_versions v ON v.id=d.version_id
+        WHERE v.id IS NULL OR v.run_id<>d.run_id OR v.validation<>'valid' OR v.origin='edit' LIMIT 1`, 'Invalid artifact adoption');
+      assertNoRows(db, `SELECT 1 FROM artifact_exports e LEFT JOIN artifact_versions v ON v.id=e.version_id LEFT JOIN artifacts a ON a.id=v.artifact_id
+        WHERE v.id IS NULL OR v.run_id<>e.run_id OR v.validation<>'valid' OR (e.target='file' AND a.kind='code')
+          OR (v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_adoptions d WHERE d.version_id=v.id)) LIMIT 1`, 'Invalid artifact export');
+      for (const row of db.prepare('SELECT a.kind,v.validation,v.content_json AS content,v.issues_json AS issues FROM artifact_versions v JOIN artifacts a ON a.id=v.artifact_id')
+        .iterate() as Iterable<{ kind: string; validation: string; content: string | null; issues: string | null }>) {
+        const kind = artifactKindSchema.parse(row.kind);
+        if (row.content !== null && !artifactContentSchemas[kind].safeParse(JSON.parse(row.content)).success) throw new Error('Invalid artifact content');
+        if (row.issues !== null && !(JSON.parse(row.issues) as unknown[]).every(issue => artifactIssueSchema.safeParse(issue).success)) throw new Error('Invalid artifact issues');
+      }
+      for (const row of db.prepare('SELECT request_id,input_snapshot FROM artifact_requests').iterate() as Iterable<{ request_id: string; input_snapshot: string }>) {
+        const input = streamChatInputSchema.safeParse(JSON.parse(row.input_snapshot));
+        if (!input.success || input.data.requestId !== row.request_id) throw new Error('Invalid artifact request input');
+      }
+      assertChargeEvidence(db, 'artifact_charges', 'artifact');
+    }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {
       hash.update(JSON.stringify(table));
@@ -249,6 +292,17 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       evidenceSha256: hash.digest('hex'),
     };
   })();
+}
+
+/** Every ledger row of a Turn-less request table is a well-formed charge of that kind. */
+function assertChargeEvidence(db: Sqlite.Database, table: 'summary_charges' | 'artifact_charges', kind: 'summary' | 'artifact'): void {
+  const rows = db.prepare(`SELECT request_id AS requestId,provider_id AS providerId,model_id AS modelId,currency,state,input_token_bound AS inputTokenBound,
+    output_token_limit AS outputTokenLimit,input_micro_per_token AS inputMicroPerToken,output_micro_per_token AS outputMicroPerToken,reserved_micro AS reservedMicro,
+    input_tokens AS inputTokens,output_tokens AS outputTokens,accounted_micro AS accountedMicro,price_reviewed_at AS priceReviewedAt,created_at AS createdAt,updated_at AS updatedAt FROM ${table}`).iterate() as Iterable<Record<string, unknown>>;
+  for (const row of rows) {
+    const chargedMicro = row.state === 'settled' ? row.accountedMicro : row.state === 'not_sent' ? 0 : row.reservedMicro;
+    if (!requestChargeSchema.safeParse({ ...row, chargedMicro, kind }).success) throw new Error('Invalid charge evidence');
+  }
 }
 
 function assertNoRows(db: Sqlite.Database, sql: string, message: string): void {
