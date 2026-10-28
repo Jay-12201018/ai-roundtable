@@ -429,3 +429,21 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Renderer | 设置页（服务列表 + 卡片详情、三步连接向导、网络与代理、外观、数据与隐私）；房间单页、成员对话框与角色模板、讨论方式对话框（D116 本机记忆）；欢迎页与演示 / 首个房间自动创建；用量页时间范围。旧 `SettingsFeature` 与房间管理页删除 | localStorage 新键 `roundtable.workflow.<roomId>` |
 
 安全影响：明文 Key 仍只在输入框和 Main 的必需调用中出现，保存后输入框清空；批准与 Key 修订号绑定，Key 或地址变化即失效；代理只允许本机地址且仅用于固定官方地址，检测不发送 Key 或内容；重启由主持人显式触发。
+
+## R14 结构化产物（2026-10-28，子会话候选，未合 main）
+
+分支 `codex/r14-structured-artifacts`（基线 `0c29bfe`）。决策见 [DECISIONS](DECISIONS.md) D118–D123。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Database / migration 12 | 新表 `artifacts`（run/room/kind，room 必须是 run 的房间）、`artifact_versions`（版本号连续；`validation pending/valid/invalid`，`content_json` 与 `issues_json` 二选一；输出只在请求生成中可改、只在请求完成后校验一次）、`artifact_sources`（同一 Run、已完成、有版本记录的消息）、`artifact_requests`、`artifact_charges`（照搬 `summary_charges`）、`artifact_adoptions`、`artifact_exports`（代码候选不能 `target='file'`）。全部禁止删除，身份不可改。**重建** migration 9 的 `charge_pricing_insert`、`charge_writeoff_insert` 两个触发器，把 `artifact_charges` 加进它们核对的账本（规则不变）。`markInFlightRunsInterrupted` 把生成中的产物请求标 interrupted、预留改 unknown。`validateDatabase` 新增 v12 段（表、触发器、两个重建触发器含 `artifact_charges`、身份 / 来源 / 采用 / 导出、内容与问题过 schema、请求输入、账本证据），v9 段的"定价 / 核销没有对应账本"检查在 v12 起也查 `artifact_charges` | 只追加；旧表不改。旧库升级走既有"先校验备份再迁移" |
+| Shared `schemas/artifact.ts`（新） | 四类内容 schema（`prdContentSchema` 等）、`artifactContentSchema {kind, data}`、`artifactIssueSchema {path, label, message, line?, column?}`、版本 / 列表 / 详情 / 来源 DTO、预览 / 生成 / 采用 / 修改 / 导出的输入输出、`validatedCodeCandidateSchema`、`codeCandidateListSchema`；中文标签常量 | 新增 |
+| Shared `schemas/artifactParse.ts`（新） | `parseArtifact(kind, raw, {sourceNumbers?})` → `{ok, content, json}` 或 `{ok:false, issues}`；`issueLabel`、`formatIssuePath` | 纯函数，Main 与 Renderer 共用 |
+| Shared `schemas/budget.ts`、`usage.ts` | `requestCharge.kind` 增加 `'artifact'`；`usageUnknownRow.kind` 同；`usageReport.byKind?`（`turn/summary/artifact` 各一行） | 可选字段 / 枚举扩展；旧读者忽略 `byKind` |
+| Shared `schemas/run.ts` | 运行事件 `artifact_updated {artifactId, versionId, status: generating/completed/failed/aborted/adopted/edited/exported}`（run 级，store 收到后整份重取快照）；快照可选 `artifactRequestIds`，账本里 `kind:'artifact'` 的每一笔都必须在其中 | 新事件类型和可选字段；旧 Renderer 遇到未知事件会重取快照 |
+| Shared `schemas/error.ts` | 公开错误字段增加 `artifactId / versionId / text / sources / format / target` | 只增 |
+| IPC / Preload | 新通道 `artifact.preview`、`artifact.generate`、`artifact.list`、`artifact.getVersion`、`artifact.adopt`、`artifact.edit`、`artifact.export`、`artifact.listCodeCandidates`（输出逐个核对 `runId`，详情 / 导出核对 `versionId`，预览核对 `kind`）。Preload 新增 `artifact` 一组受限方法；`RoundtableApiContract.artifact` 为可选。另存为只由 Main 的系统保存对话框决定路径，页面传不进路径 | 新增 |
+| Main | `RunService.previewArtifact / generateArtifact`（与摘要共用 `streamSideRequest`）、`notifyArtifact`；`src/main/artifact/`：`prompt.ts`（编号转录 + 规则 + 模板）、`view.ts`（状态、受影响、来源）、`exportText.ts`（Markdown / JSON 只从校验过的内容生成）、`ArtifactService`（列表、详情、采用、修改、导出、R15 查询）；`Database` 产物读写方法、账本 UNION 加入产物；`UsageService` 按用途汇总、CSV"产物"；Mock 对 `agentRole: artifact:<kind>` 返回合法示例 | — |
+| Renderer | `features/artifacts/`（产物面板、生成对话框、阅读器与 JSON 编辑、结构化视图）；`RunPanel` 的产物标签页由 App 传入；`Timeline` 新增 `reveal`（跳到某条并高亮）；用量页"按用途"；`copyText` 在模态对话框里也能复制 | — |
+
+安全影响：模型输出没有主持人权限，候选必须采用后才能导出或交给 R15；模型文本经净化渲染，HTML / 脚本只显示为文字；代码候选不写盘、不执行，另存为在服务层和数据库层都拒绝代码；导出只含校验过的文档，不含 Key、提示词、讨论原文或推理；生成只在主持人点击后发出一次请求，失败不自动重试。
