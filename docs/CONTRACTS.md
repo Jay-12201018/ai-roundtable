@@ -432,13 +432,13 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 
 ## R14 结构化产物（2026-10-28，子会话候选，未合 main）
 
-分支 `codex/r14-structured-artifacts`（基线 `0c29bfe`）。决策见 [DECISIONS](DECISIONS.md) D118–D123。
+分支 `codex/r14-structured-artifacts`（基线 `0c29bfe`）。决策见 [DECISIONS](DECISIONS.md) D118–D124。
 
 | 层 | 变化 | 兼容性 |
 | --- | --- | --- |
-| Database / migration 12 | 新表 `artifacts`（run/room/kind，room 必须是 run 的房间）、`artifact_versions`（版本号连续；`validation pending/valid/invalid`，`content_json` 与 `issues_json` 二选一；输出只在请求生成中可改、只在请求完成后校验一次）、`artifact_sources`（同一 Run、已完成、有版本记录的消息）、`artifact_requests`、`artifact_charges`（照搬 `summary_charges`）、`artifact_adoptions`、`artifact_exports`（代码候选不能 `target='file'`）。全部禁止删除，身份不可改。**重建** migration 9 的 `charge_pricing_insert`、`charge_writeoff_insert` 两个触发器，把 `artifact_charges` 加进它们核对的账本（规则不变）。`markInFlightRunsInterrupted` 把生成中的产物请求标 interrupted、预留改 unknown。`validateDatabase` 新增 v12 段（表、触发器、两个重建触发器含 `artifact_charges`、身份 / 来源 / 采用 / 导出、内容与问题过 schema、请求输入、账本证据），v9 段的"定价 / 核销没有对应账本"检查在 v12 起也查 `artifact_charges` | 只追加；旧表不改。旧库升级走既有"先校验备份再迁移" |
-| Shared `schemas/artifact.ts`（新） | 四类内容 schema（`prdContentSchema` 等）、`artifactContentSchema {kind, data}`、`artifactIssueSchema {path, label, message, line?, column?}`、版本 / 列表 / 详情 / 来源 DTO、预览 / 生成 / 采用 / 修改 / 导出的输入输出、`validatedCodeCandidateSchema`、`codeCandidateListSchema`；中文标签常量 | 新增 |
-| Shared `schemas/artifactParse.ts`（新） | `parseArtifact(kind, raw, {sourceNumbers?})` → `{ok, content, json}` 或 `{ok:false, issues}`；`issueLabel`、`formatIssuePath` | 纯函数，Main 与 Renderer 共用 |
+| Database / migration 12 | 新表 `artifacts`（run/room/kind，room 必须是 run 的房间）、`artifact_versions`（版本号连续；`validation pending/valid/invalid/empty`，`content_json`、`issues_json`、`empty_reason`（D124，会议纪要不能为空）按状态三选一；输出只在请求生成中可改、只在请求完成后校验一次）、`artifact_sources`（同一 Run、已完成、有版本记录的消息）、`artifact_requests`、`artifact_charges`（照搬 `summary_charges`）、`artifact_adoptions`、`artifact_exports`（代码候选不能 `target='file'`）。全部禁止删除，身份不可改。**重建** migration 9 的 `charge_pricing_insert`、`charge_writeoff_insert` 两个触发器，把 `artifact_charges` 加进它们核对的账本（规则不变）。`markInFlightRunsInterrupted` 把生成中的产物请求标 interrupted、预留改 unknown。`validateDatabase` 新增 v12 段（表、触发器、两个重建触发器含 `artifact_charges`、身份 / 来源 / 采用 / 导出、内容与问题过 schema、请求输入、账本证据），v9 段的"定价 / 核销没有对应账本"检查在 v12 起也查 `artifact_charges` | 只追加；旧表不改。旧库升级走既有"先校验备份再迁移" |
+| Shared `schemas/artifact.ts`（新） | 四类内容 schema（`prdContentSchema` 等）、`artifactNothingSchema` 与 `artifactNothingKinds`（prd / actions / code）、版本状态增加 `empty` 与 `emptyReason`、`artifactSkeletons`、`artifactContentSchema {kind, data}`、`artifactIssueSchema {path, label, message, line?, column?}`、版本 / 列表 / 详情 / 来源 DTO、预览 / 生成 / 采用 / 修改 / 导出的输入输出、`validatedCodeCandidateSchema`、`codeCandidateListSchema`；中文标签常量 | 新增 |
+| Shared `schemas/artifactParse.ts`（新） | `parseArtifact(kind, raw, {sourceNumbers?, allowNothing?})` → `{ok, content, json}`、`{ok:false, issues}` 或 `{ok:false, issues:[], nothing}`（D124，只在模型输出时允许）；`issueLabel`、`formatIssuePath` | 纯函数，Main 与 Renderer 共用 |
 | Shared `schemas/budget.ts`、`usage.ts` | `requestCharge.kind` 增加 `'artifact'`；`usageUnknownRow.kind` 同；`usageReport.byKind?`（`turn/summary/artifact` 各一行） | 可选字段 / 枚举扩展；旧读者忽略 `byKind` |
 | Shared `schemas/run.ts` | 运行事件 `artifact_updated {artifactId, versionId, status: generating/completed/failed/aborted/adopted/edited/exported}`（run 级，store 收到后整份重取快照）；快照可选 `artifactRequestIds`，账本里 `kind:'artifact'` 的每一笔都必须在其中 | 新事件类型和可选字段；旧 Renderer 遇到未知事件会重取快照 |
 | Shared `schemas/error.ts` | 公开错误字段增加 `artifactId / versionId / text / sources / format / target` | 只增 |
