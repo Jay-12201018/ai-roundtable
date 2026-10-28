@@ -280,7 +280,7 @@ it('validation rejects a finish reason on a request that did not complete, and t
   raw.exec('DROP TRIGGER request_attempt_finish_once');
   expect(() => raw.prepare("UPDATE request_attempts SET finish_reason='truncated'").run()).toThrow(/CHECK/u);
   raw.exec(migration8.slice(migration8.indexOf('CREATE TRIGGER')));
-  expect(validateDatabase(raw).schemaVersion).toBe(11);
+  expect(validateDatabase(raw).schemaVersion).toBe(12);
   raw.prepare("UPDATE request_attempts SET status='failed'").run();
   expect(() => validateDatabase(raw)).toThrow(/finish reason/u);
 });

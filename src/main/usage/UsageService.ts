@@ -79,11 +79,11 @@ export class UsageService {
   getReport(range?: UsageRange): UsageReport {
     const { ledger, runs, providers, speaker } = this.load(range);
     const totals = emptyBucket();
-    const byRun = new Map<string, UsageBucket>(); const byModel = new Map<string, UsageBucket>(); const byDate = new Map<string, UsageBucket>();
+    const byRun = new Map<string, UsageBucket>(); const byModel = new Map<string, UsageBucket>(); const byDate = new Map<string, UsageBucket>(); const byKind = new Map<string, UsageBucket>();
     const bucketOf = (map: Map<string, UsageBucket>, key: string) => { let bucket = map.get(key); if (!bucket) map.set(key, bucket = emptyBucket()); return bucket; };
     for (const row of ledger) {
       const { charge } = row;
-      for (const bucket of [totals, bucketOf(byRun, row.runId), bucketOf(byModel, JSON.stringify([charge.providerId, charge.modelId])), bucketOf(byDate, this.dateOf(charge.createdAt))]) accumulate(bucket, charge);
+      for (const bucket of [totals, bucketOf(byRun, row.runId), bucketOf(byModel, JSON.stringify([charge.providerId, charge.modelId])), bucketOf(byDate, this.dateOf(charge.createdAt)), bucketOf(byKind, charge.kind ?? 'turn')]) accumulate(bucket, charge);
     }
     return usageReportSchema.parse({
       generatedAt: new Date().toISOString(), timeZone: this.timeZone, totals,
@@ -96,6 +96,7 @@ export class UsageService {
         return { providerId, providerName: providers.get(providerId) ?? 'Provider 已删除', modelId, ...bucket };
       }).sort((a, b) => b.totalMicro - a.totalMicro),
       byDate: [...byDate].map(([date, bucket]) => ({ date, ...bucket })).sort((a, b) => b.date.localeCompare(a.date)),
+      byKind: (['turn', 'summary', 'artifact'] as const).filter(kind => byKind.has(kind)).map(kind => ({ kind, ...byKind.get(kind)! })),
       unknownCharges: ledger.filter(row => row.charge.state === 'unknown' && row.charge.currency === 'CNY').map(row => {
         const run = runs.get(row.runId)!;
         return { requestId: row.charge.requestId, runId: row.runId, roomName: run.roomName, task: run.task, kind: row.charge.kind ?? 'turn', speaker: speaker(row),
@@ -117,7 +118,7 @@ export class UsageService {
     const lines = ledger.map(row => {
       const { charge } = row; const run = runs.get(row.runId);
       const settlement = charge.settlement; const writeOff = charge.writeOffs?.at(-1);
-      return [charge.requestId, charge.kind === 'summary' ? '摘要' : '发言', row.runId, run?.roomName, run?.task, speaker(row), providers.get(charge.providerId) ?? 'Provider 已删除', charge.modelId,
+      return [charge.requestId, charge.kind === 'summary' ? '摘要' : charge.kind === 'artifact' ? '产物' : '发言', row.runId, run?.roomName, run?.task, speaker(row), providers.get(charge.providerId) ?? 'Provider 已删除', charge.modelId,
         this.dateTimeOf(charge.createdAt), state(charge), charge.inputTokens, settlement ? settlement.cacheHitTokens ?? '未提供' : '', charge.outputTokens,
         settlement ? settlement.period === 'peak' ? '高峰价' : '空闲价' : charge.state === 'settled' ? '高峰价（未区分时段）' : '',
         settlement ? this.dateTimeOf(settlement.startedAt, 'Asia/Shanghai') : '', settlement ? this.dateTimeOf(settlement.finishedAt, 'Asia/Shanghai') : '',

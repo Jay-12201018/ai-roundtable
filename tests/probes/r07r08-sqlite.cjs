@@ -23,7 +23,7 @@ const database = new Sqlite(databasePath, { readonly: true, fileMustExist: true 
 try {
   assert.deepEqual(database.prepare('PRAGMA integrity_check').pluck().all(), ['ok']);
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
-  assert.deepEqual(database.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(), [1,2,3,4,5,6,7,8,9,10,11]);
+  assert.deepEqual(database.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(), [1,2,3,4,5,6,7,8,9,10,11,12]);
   const saved = result.saved;
   const completed = result.ui.snapshots.final ?? result.ui.snapshots.restarted;
   assert.equal(database.prepare('SELECT status FROM workflow_runs WHERE id=?').pluck().get(saved.runId), 'completed');

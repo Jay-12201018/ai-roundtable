@@ -28,6 +28,10 @@ import { activeSummary, buildSummaryMessages, publicSlots, revisedCoveredSlots, 
 import { measureContext, type ModelBudget } from '../context/wirePublicContext';
 import { countModelTokens } from '../context/buildPublicContext';
 import { mockModelBudget } from '../providers/mock/tokenBudget';
+import { artifactGenerateInputSchema, artifactPreviewInputSchema, MAX_ARTIFACT_ISSUES, type ArtifactCommandResult, type ArtifactGenerateInput, type ArtifactKind,
+  type ArtifactPreview, type ArtifactPreviewInput } from '../../shared/schemas/artifact';
+import { parseArtifact } from '../../shared/schemas/artifactParse';
+import { artifactOutputTokenLimit, buildArtifactRequest } from '../artifact/prompt';
 import { continuationPreviewInputSchema, continueDiscussionInputSchema, type ContinuationPreview, type ContinuationPreviewInput,
   type ContinueDiscussionInput, type ContinueDiscussionResult, type RunContinuation } from '../../shared/schemas/continuation';
 
@@ -240,6 +244,7 @@ export class RunService {
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
         versions, host: this.hostView(data), budget: data.budget, charges: data.charges,
         ...(data.summaries.length ? { summaries: this.summaryView(data) } : {}),
+        ...(data.artifactRequestIds.length ? { artifactRequestIds: data.artifactRequestIds } : {}),
         ...(data.continuations.length ? { continuations: data.continuations.map((item): RunContinuation => {
           const message = data.hostActions.find(action => action.id === item.actionId)?.resultMessageId;
           return { actionId: item.actionId, agentIds: item.agentIds, createdAt: item.createdAt, ...(message ? { messageId: message } : {}) };
@@ -802,10 +807,198 @@ export class RunService {
     return quote.reservedMicro > remainingMicro ? { ...plan, reason: 'budget_insufficient' as const } : plan;
   }
 
+  /** D120: what an artifact would be based on, who would write it and its maximum cost. Sends and records nothing. */
+  previewArtifact(input: ArtifactPreviewInput): ArtifactPreview {
+    const parsed = artifactPreviewInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    const plan = this.planArtifact(parsed.data);
+    const { snapshot } = plan;
+    return {
+      runId: snapshot.run.id, kind: parsed.data.kind, ...(plan.existing ? { artifactId: plan.existing.id } : {}),
+      available: plan.reason === undefined, ...(plan.reason ? { reason: plan.reason } : {}),
+      agents: (snapshot.run.membersSnapshot ?? []).map(member => ({ agentId: member.agentId, name: member.displayName, providerId: member.providerId, modelId: member.modelId })),
+      ...(plan.member ? { agentId: plan.member.agentId } : {}),
+      messageCount: plan.request?.numbers.length ?? 0, ...(plan.request ? { lastNumber: Math.max(...plan.request.numbers) } : {}),
+      ...(plan.basedOn ? { summarizedThrough: plan.basedOn.lastNumber } : {}),
+      cost: plan.cost, outputTokenLimit: plan.outputTokenLimit,
+      ...(plan.inputTokens !== undefined ? { inputTokens: plan.inputTokens } : {}), ...(plan.inputBudgetTokens !== undefined ? { inputBudgetTokens: plan.inputBudgetTokens } : {}),
+    };
+  }
+
+  /**
+   * D120: generate an artifact version as one explicit, budgeted request of one frozen member. A failed or invalid
+   * result is kept as it is and never retried automatically (that could be charged again); the host decides.
+   */
+  generateArtifact(input: ArtifactGenerateInput): ArtifactCommandResult {
+    const parsed = artifactGenerateInputSchema.safeParse(input);
+    if (!parsed.success) throw new ContractError('invalid_input');
+    input = parsed.data;
+    const run = this.requireRun(input.runId);
+    const previous = this.database.findArtifactWrite(run.id, input.clientRequestId);
+    if (previous) {
+      const artifact = this.database.listArtifacts(run.id).find(item => item.versions.some(version => version.id === previous.id));
+      const version = artifact?.versions.find(item => item.id === previous.id);
+      if (previous.kind !== 'version' || !artifact || !version?.request || artifact.kind !== input.kind || version.agentId !== input.agentId
+        || input.artifactId !== undefined && artifact.id !== input.artifactId) throw new ContractError('invalid_input', 'clientRequestId');
+      return { runId: run.id, artifactId: artifact.id, versionId: version.id, requestId: version.request.requestId, duplicate: true };
+    }
+    const plan = this.planArtifact(input);
+    if (plan.reason === 'busy') throw new ContractError('invalid_state');
+    if (plan.reason === 'budget_insufficient') throw new ContractError('budget_exceeded');
+    if (plan.reason === 'unsupported') throw new ContractError('unsupported');
+    if (plan.reason === 'context_exceeds') throw new ContractError('invalid_input', 'runId');
+    if (plan.reason || !plan.member || !plan.request) throw new ContractError('invalid_state');
+    if (plan.member.agentId !== input.agentId) throw new ContractError('invalid_input', 'agentId');
+    const { member, request, existing } = plan;
+    const context = this.contexts.get(run.id) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
+    const requestId = randomUUID(); const versionId = randomUUID();
+    const artifactId = existing?.id ?? randomUUID();
+    const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: request.messages, outputTokenLimit: plan.outputTokenLimit,
+      agentRole: `artifact:${input.kind}` });
+    let quote: RequestQuote | undefined;
+    context.job = {};
+    try {
+      this.schedule(context, () => {
+        // The reservation is checked against what is left in the same transaction that records the request.
+        quote = member.providerId && this.registry ? this.registry.quoteRequest(member.providerId, inputSnapshot) : undefined;
+        if (quote && quote.currency === 'CNY' && quote.reservedMicro > this.database.getRunBudget(run.id).remainingMicro) throw new ContractError('budget_exceeded');
+        if (!existing) this.database.insertArtifact({ id: artifactId, runId: run.id, roomId: run.roomId, kind: input.kind, clientRequestId: input.clientRequestId });
+        this.database.insertArtifactVersion({ id: versionId, artifactId, runId: run.id, origin: existing ? 'regenerate' : 'generate',
+          ...(existing ? { parentVersionId: existing.versions.at(-1)!.id } : {}), clientRequestId: input.clientRequestId, agentId: member.agentId, sources: request.basis });
+        this.database.insertArtifactRequest({ requestId, versionId, runId: run.id, agentId: member.agentId, inputSnapshot });
+        if (quote) {
+          const { currency, inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt } = quote;
+          this.database.reserveCharge({ requestId, runId: run.id, providerId: member.providerId!, modelId: inputSnapshot.modelId, currency, kind: 'artifact',
+            inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt });
+        }
+        context.job = { requestId };
+        this.appendEvent(run.id, 'artifact_updated', { artifactId, versionId, status: 'generating' });
+      }, undefined, async () => {
+        try { await this.executeArtifact(context, member, { requestId, versionId, artifactId, kind: input.kind, numbers: request.numbers, input: inputSnapshot, quote }); }
+        catch { /* The failed or stopped version keeps its partial output, its request and its charge as evidence. */ }
+        finally { this.endJob(context); }
+      });
+    } catch (error) { context.job = undefined; throw error; }
+    return { runId: run.id, artifactId, versionId, requestId, duplicate: false };
+  }
+
+  /** R14: a trusted artifact change (adopt, edit, export) and its run-level notification, in one transaction. */
+  notifyArtifact(runId: string, payload: { artifactId: string; versionId: string; status: 'adopted' | 'edited' | 'exported' }): void {
+    this.appendAndNotify(runId, 'artifact_updated', payload);
+  }
+
+  /**
+   * The plan both the artifact preview and the generation use: the whole public history (D121), the writing member
+   * (a synthesizer by role, else the first member; for a regeneration the earlier writer), the request and its cost.
+   */
+  private planArtifact(input: { runId: string; kind: ArtifactKind; agentId?: string; artifactId?: string }) {
+    const run = this.requireRun(input.runId);
+    const snapshot = this.database.readRunSnapshot(run.id);
+    const members = [...(run.membersSnapshot ?? [])].sort((a, b) => a.displayOrder - b.displayOrder);
+    const existing = input.artifactId === undefined ? undefined : this.database.listArtifacts(run.id).find(item => item.id === input.artifactId);
+    if (input.artifactId !== undefined && !existing) throw new ContractError('not_found');
+    if (existing && existing.kind !== input.kind) throw new ContractError('invalid_input', 'kind');
+    const context = this.contexts.get(run.id) ?? this.contextFrom(run);
+    const outputTokenLimit = artifactOutputTokenLimit(input.kind, context.outputTokenLimit);
+    type Plan = { snapshot: Snapshot; existing?: typeof existing; basedOn?: ActiveSummary; member?: MemberSnapshot; outputTokenLimit: number;
+      request?: NonNullable<ReturnType<typeof buildArtifactRequest>>; inputTokens?: number; inputBudgetTokens?: number; cost: ArtifactPreview['cost'];
+      reason?: NonNullable<ArtifactPreview['reason']> };
+    const plan: Plan = { snapshot, existing, outputTokenLimit, cost: { kind: 'unavailable' } };
+    if (run.task === null || !members.length) return { ...plan, reason: 'unsupported' as const };
+    const earlierWriter = existing ? [...existing.versions].reverse().find(version => version.agentId)?.agentId : undefined;
+    plan.member = members.find(member => member.agentId === (input.agentId ?? earlierWriter))
+      ?? (input.agentId === undefined ? members.find(member => summarizerPattern.test(`${member.roleTemplateId} ${member.displayName}`)) ?? members[0] : undefined);
+    if (!plan.member) throw new ContractError('not_found');
+    const busy = this.isExecuting(run.id) || !['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(run.status)
+      || snapshot.messages.some(message => message.status === 'streaming');
+    if (busy) return { ...plan, reason: 'busy' as const };
+    const basedOn = activeSummary(snapshot);
+    if (basedOn) plan.basedOn = basedOn;
+    const slots = publicSlots(snapshot);
+    if (!slots.some(slot => slot.author === 'agent' && slot.message.status === 'completed' && slot.message.content.trim())) return { ...plan, reason: 'too_few' as const };
+    const request = buildArtifactRequest({ kind: input.kind, task: run.task, members, snapshot, slots, ...(basedOn ? { basedOn } : {}) });
+    if (!request) return { ...plan, reason: 'too_few' as const };
+    plan.request = request;
+    const budget = this.modelBudget(plan.member);
+    const count = budget ? countModelTokens(request.messages, plan.member.modelId, budget.counter) : undefined;
+    if (!budget || count === undefined) return { ...plan, reason: 'unsupported' as const };
+    plan.inputTokens = count; plan.inputBudgetTokens = Math.max(0, budget.contextWindowTokens - outputTokenLimit);
+    if (count > plan.inputBudgetTokens) return { ...plan, reason: 'context_exceeds' as const };
+    if (!plan.member.providerId || !this.registry) { plan.cost = { kind: 'free' }; return plan; }
+    let quote: RequestQuote | undefined;
+    try { quote = this.registry.quoteRequest(plan.member.providerId, { requestId: randomUUID(), modelId: plan.member.modelId ?? 'mock', messages: request.messages, outputTokenLimit, agentRole: `artifact:${input.kind}` }); }
+    catch { return { ...plan, reason: 'unsupported' as const }; }
+    if (!quote || quote.currency !== 'CNY') { plan.cost = { kind: 'free' }; return plan; }
+    const remainingMicro = this.database.getRunBudget(run.id).remainingMicro;
+    plan.cost = { kind: 'priced', maxMicro: quote.reservedMicro, remainingMicro };
+    return quote.reservedMicro > remainingMicro ? { ...plan, reason: 'budget_insufficient' as const } : plan;
+  }
+
+  /**
+   * Streams one artifact request into its version and validates the complete output once (D119). Output is persisted
+   * at least every 2 KB while it streams, so an interrupted request keeps nearly all of what arrived.
+   */
+  private async executeArtifact(context: RunContext, member: MemberSnapshot, request: { requestId: string; versionId: string; artifactId: string; kind: ArtifactKind;
+    numbers: number[]; input: StreamChatInput; quote?: RequestQuote }): Promise<void> {
+    const { requestId, versionId, artifactId } = request;
+    let persisted = 0;
+    await this.streamSideRequest(context, member, request, {
+      text: content => {
+        if (content.length - persisted < 2048) return;
+        this.database.setArtifactOutput(versionId, content); persisted = content.length;
+      },
+      completed: (content, reason) => {
+        this.database.setArtifactOutput(versionId, content);
+        this.database.finishArtifactRequest(requestId, 'completed', reason);
+        const result = parseArtifact(request.kind, content, { sourceNumbers: request.numbers });
+        if (result.ok) this.database.validateArtifactVersion(versionId, { contentJson: result.json });
+        else {
+          // A cut-off output says so first: the fix is a larger limit or a shorter document, not a field.
+          const cut = reason === 'length' ? [{ path: '', label: '整个 JSON', message: `输出达到 ${request.input.outputTokenLimit} tokens 的上限被截断，内容不完整` }] : [];
+          this.database.validateArtifactVersion(versionId, { issues: [...cut, ...result.issues].slice(0, MAX_ARTIFACT_ISSUES) });
+        }
+        this.appendEvent(context.runId, 'artifact_updated', { artifactId, versionId, status: 'completed' });
+      },
+      ended: (content, aborted) => {
+        this.database.setArtifactOutput(versionId, content);
+        this.database.finishArtifactRequest(requestId, aborted ? 'aborted' : 'failed');
+        this.appendEvent(context.runId, 'artifact_updated', { artifactId, versionId, status: aborted ? 'aborted' : 'failed' });
+      },
+    });
+  }
+
   /** Streams one summary request into its own message and settles its charge from evidence, like a Turn request. */
   private async executeSummary(context: RunContext, member: MemberSnapshot,
     request: { requestId: string; messageId: string; summaryId: string; regenerate: boolean; input: StreamChatInput; quote?: RequestQuote }): Promise<void> {
-    const { requestId, messageId, summaryId, quote } = request;
+    const { requestId, messageId, summaryId } = request;
+    await this.streamSideRequest(context, member, request, {
+      text: (content, text) => {
+        this.database.updateMessage(messageId, content, 'streaming');
+        this.appendEvent(context.runId, 'summary_delta', { summaryId, messageId, text });
+      },
+      completed: (content, reason) => {
+        this.database.updateMessage(messageId, content, 'completed');
+        this.database.finishSummaryRequest(requestId, 'completed', reason);
+        // A regenerated summary replaces the effective version only once it is complete; it still needs confirmation.
+        if (request.regenerate) this.database.activateVersion(messageId);
+        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: 'completed' });
+      },
+      ended: (content, aborted) => {
+        this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
+        this.database.finishSummaryRequest(requestId, aborted ? 'aborted' : 'failed');
+        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: aborted ? 'aborted' : 'failed' });
+      },
+    });
+  }
+
+  /**
+   * One Turn-less request (a summary or an artifact): streams it, records text through `hooks`, and settles its charge
+   * from evidence in the same transaction as the outcome. A failed or stopped request keeps its partial text.
+   */
+  private async streamSideRequest(context: RunContext, member: MemberSnapshot, request: { requestId: string; input: StreamChatInput; quote?: RequestQuote },
+    hooks: { text(content: string, delta: string): void; completed(content: string, reason: 'stop' | 'length'): void; ended(content: string, aborted: boolean): void }): Promise<void> {
+    const { requestId, quote } = request;
     const signal = context.abortController.signal;
     let content = '';
     let iterator: AsyncIterator<unknown> | undefined;
@@ -843,9 +1036,8 @@ export class RunService {
           if (chunk.type === 'text_delta') {
             content += chunk.text;
             this.database.transaction(() => {
-              this.database.updateMessage(messageId, content, 'streaming');
+              hooks.text(content, chunk.text);
               this.persistElapsed(context);
-              this.appendEvent(context.runId, 'summary_delta', { summaryId, messageId, text: chunk.text });
             });
           } else if (chunk.type === 'usage') {
             usage = { inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens };
@@ -856,23 +1048,17 @@ export class RunService {
       if (!finishReason || finishReason === 'content_filter') throw new ContractError('invalid_response');
       const completedReason = finishReason;
       this.database.transaction(() => {
-        this.database.updateMessage(messageId, content, 'completed');
-        this.database.finishSummaryRequest(requestId, 'completed', completedReason);
-        // A regenerated summary replaces the effective version only once it is complete; it still needs confirmation.
-        if (request.regenerate) this.database.activateVersion(messageId);
+        hooks.completed(content, completedReason);
         settle();
         this.persistElapsed(context);
-        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: 'completed' });
       });
     } catch (error) {
       const code = toPublicError(error).code;
       const aborted = context.stopRequested || context.timedOut || code === 'cancelled' || code === 'timeout';
       this.database.transaction(() => {
-        this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
-        this.database.finishSummaryRequest(requestId, aborted ? 'aborted' : 'failed');
+        hooks.ended(content, aborted);
         settle();
         this.persistElapsed(context);
-        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: aborted ? 'aborted' : 'failed' });
       });
       throw error;
     } finally {

@@ -85,6 +85,8 @@ export interface TranscriptEntry {
   truncated?: boolean;
   /** D109: a message the confirmed summary covers, edited or regenerated after the summary was written. */
   revisedAfterSummary?: boolean;
+  /** R14 (D121): the timeline number, shown in the label only where a request must cite messages by number. */
+  number?: number;
 }
 
 /** Whether an entry is sent with a note about a host revision, which the revision rule explains. */
@@ -102,8 +104,9 @@ export function renderEntry(entry: TranscriptEntry): string {
     ];
     return [summaryLabel(entry.summary!.firstNumber, entry.summary!.lastNumber), ...notes, quoteText(entry.content)].join('\n');
   }
-  const label = entry.speaker === 'host' ? '【主持人插话】'
-    : entry.speaker === 'own' ? `【你此前的发言 · ${memberLabel(entry.member!)}】` : `【${memberLabel(entry.member!)}】`;
+  const numbered = entry.number === undefined ? '' : `第 ${entry.number} 条 · `;
+  const label = entry.speaker === 'host' ? `【${numbered}主持人插话】`
+    : entry.speaker === 'own' ? `【你此前的发言 · ${memberLabel(entry.member!)}】` : `【${numbered}${memberLabel(entry.member!)}】`;
   const notes = [
     ...(entry.editedByHost ? ['（此发言已由主持人修改，以下是修改后的版本，请以此为准。）'] : []),
     ...(entry.basedOnRevisedHistory ? ['（注意：此发言写于主持人修改前序发言之前，其中依赖旧内容的结论可能已经失效，不要沿用。）'] : []),

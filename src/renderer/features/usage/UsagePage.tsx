@@ -8,8 +8,11 @@ import { WriteOffForm, writeOffSummary } from './UsageViews';
 import { useLedgerCommands } from './useLedgerCommands';
 import './usage.css';
 
-type View = 'run' | 'model' | 'date';
-const views: Array<{ id: View; label: string; column: string }> = [{ id: 'run', label: '按讨论', column: '讨论' }, { id: 'model', label: '按模型', column: '模型' }, { id: 'date', label: '按日期', column: '日期' }];
+type View = 'run' | 'model' | 'date' | 'kind';
+const views: Array<{ id: View; label: string; column: string }> = [{ id: 'run', label: '按讨论', column: '讨论' }, { id: 'model', label: '按模型', column: '模型' },
+  { id: 'date', label: '按日期', column: '日期' }, { id: 'kind', label: '按用途', column: '用途' }];
+/** D120: what each request was for. */
+const kindLabels = { turn: '讨论发言', summary: '讨论摘要', artifact: '产物（文档、清单、代码候选）' } as const;
 export type UsagePeriod = 'this-month' | 'last-month' | 'all';
 const periods: Array<{ id: UsagePeriod; label: string }> = [{ id: 'this-month', label: '本月' }, { id: 'last-month', label: '上月' }, { id: 'all', label: '全部' }];
 /** D117: a calendar month in this computer's time zone, as the half-open range the report filters by. */
@@ -77,7 +80,8 @@ export function UsagePage({ api, onOpenRun }: { api: Pick<RoundtableApiContract,
   const { totals } = current;
   const rows = view === 'run' ? current.byRun.map(row => ({ key: row.runId, title: <>{row.task || '（目标未记录）'}<small>{row.roomName} · {when(row.createdAt)}</small></>, bucket: row, runId: row.runId }))
     : view === 'model' ? current.byModel.map(row => ({ key: `${row.providerId}:${row.modelId}`, title: <>{row.modelId}<small>{row.providerName}</small></>, bucket: row, runId: undefined }))
-      : current.byDate.map(row => ({ key: row.date, title: <>{row.date}</>, bucket: row, runId: undefined }));
+      : view === 'date' ? current.byDate.map(row => ({ key: row.date, title: <>{row.date}</>, bucket: row, runId: undefined }))
+        : (current.byKind ?? []).map(row => ({ key: row.kind, title: <>{kindLabels[row.kind]}</>, bucket: row, runId: undefined }));
   return <div className="page usage-page" aria-busy={report?.period !== period}><div className="page-inner">
     {head}
     {exportNote && <p role={exportNote.ok ? 'status' : 'alert'} className={exportNote.ok ? 'ok-text small usage-note' : 'field-error usage-note'}>{exportNote.text}</p>}
@@ -116,7 +120,7 @@ export function UsagePage({ api, onOpenRun }: { api: Pick<RoundtableApiContract,
             const writeOff = row.writeOffs.at(-1);
             return <li key={row.requestId} className="card-row usage-unknown-row">
               <Avatar name={row.speaker} />
-              <div className="grow"><b>{row.speaker}{row.kind === 'summary' ? '（讨论摘要）' : ''} · {row.task || row.roomName}</b>
+              <div className="grow"><b>{row.speaker}{row.kind === 'summary' ? '（讨论摘要）' : row.kind === 'artifact' ? '（产物）' : ''} · {row.task || row.roomName}</b>
                 <small>{row.providerName} {row.modelId} · {when(row.createdAt)} · {writeOff ? `已核销 ${writeOffSummary(writeOff.amountMicro, row.reservedMicro)} · 依据：${writeOff.basis}` : `按上限计 ${formatYuan(row.reservedMicro, 6)}`}</small></div>
               {writing !== row.requestId && <Button size="sm" onClick={() => setWriting(row.requestId)}>{writeOff ? '更正核销' : '核销'}</Button>}
               {writing === row.requestId && <WriteOffForm charge={asCharge(row)} runId={row.runId} ledger={ledger} onDone={() => setWriting(undefined)} />}

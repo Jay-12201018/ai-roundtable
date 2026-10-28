@@ -13,12 +13,14 @@ import { migration8 } from './migrations/v8';
 import { migration9 } from './migrations/v9';
 import { migration10 } from './migrations/v10';
 import { migration11 } from './migrations/v11';
+import { migration12 } from './migrations/v12';
 import { budgetBlockSchema, effectiveChargeMicro, requestChargeSchema, runBudgetInputSchema, settlementAmountMicro, writeOffBasisSchema, DEFAULT_RUN_BUDGET_MICRO_CNY, MAX_RUN_BUDGET_MICRO_CNY,
   type BudgetBlock, type BudgetTopUp, type ChargeSettlement, type ChargeWriteOff, type PricePeriod, type RequestCharge, type RunBudget } from '../../shared/schemas/budget';
 import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
 import { reconciliationInputSchema, reconciliationAuditSchema, reconciliationEvidenceSummary, type ReconciliationInput, type TrialReconciliation } from '../providers/controlledTrial/reconciliation';
 import { trialRecordSchema, type TrialRecord } from '../providers/controlledTrial/record';
 import { ContractError } from '../../shared/contracts/errors';
+import type { ArtifactIssue, ArtifactKind } from '../../shared/schemas/artifact';
 import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions } from '../../shared/schemas/configuration';
 import type { RoomInput,RoomConfiguration,AgentInput,AgentConfiguration,ProviderInput,ProviderConfiguration,ProviderSummary,RoomMessagePageInput,RoomMessagePage,RoomRunPageInput,RoomRunPage } from '../../shared/contracts/configuration';
 import { migration2 } from './migrations/v2';
@@ -85,6 +87,15 @@ export type SummaryRequestRecord = { requestId: string; summaryId: string; runId
   status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; inputSnapshot: StreamChatInputRecord; createdAt: string };
 export type SummaryRecord = { id: string; runId: string; clientRequestId: string; agentId: string; covered: string[]; basedOnSummaryId?: string; createdAt: string;
   requests: SummaryRequestRecord[]; confirmedMessageIds: string[] };
+
+/** R14: one artifact and its versions, oldest first. */
+export type ArtifactRequestRecord = { requestId: string; status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; createdAt: string };
+export type ArtifactVersionRecord = { id: string; artifactId: string; runId: string; number: number; origin: 'generate' | 'regenerate' | 'edit'; parentVersionId?: string;
+  clientRequestId: string; agentId?: string; validation: 'pending' | 'valid' | 'invalid'; rawOutput: string; contentJson: string | null; issuesJson: string | null;
+  createdAt: string; updatedAt: string; request?: ArtifactRequestRecord; sources: string[]; adoptedAt?: string;
+  exports: Array<{ id: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string; createdAt: string }> };
+export type ArtifactRecord = { id: string; runId: string; roomId: string; kind: ArtifactKind; clientRequestId: string; createdAt: string; versions: ArtifactVersionRecord[] };
+type RawArtifactVersion = Omit<ArtifactVersionRecord, 'parentVersionId' | 'agentId' | 'request' | 'sources' | 'adoptedAt' | 'exports'> & { parentVersionId: string | null; agentId: string | null };
 
 export type RunEventRecord = {
   runId: string;
@@ -216,6 +227,7 @@ const migrations = [
   migration9,
   migration10,
   migration11,
+  migration12,
 ];
 
 export class Database {
@@ -370,7 +382,7 @@ export class Database {
   /** R13A: reserve a request's maximum cost; the caller checks the remaining budget in the same transaction. */
   reserveCharge(input: { requestId: string; runId: string; providerId: string; modelId: string; currency: 'CNY' | 'USD';
     inputTokenBound: number; outputTokenLimit: number; inputMicroPerToken: number; outputMicroPerToken: number;
-    reservedMicro: number; priceEvidence: string; priceReviewedAt: string | null; kind?: 'turn' | 'summary' }): void {
+    reservedMicro: number; priceEvidence: string; priceReviewedAt: string | null; kind?: 'turn' | 'summary' | 'artifact' }): void {
     this.assertInitialized();
     const timestamp = now();
     this.db.prepare(`INSERT INTO ${chargeTable(input.kind)}(request_id,run_id,provider_id,model_id,currency,state,input_token_bound,output_token_limit,input_micro_per_token,output_micro_per_token,
@@ -408,21 +420,22 @@ export class Database {
   }
 
   private chargeRunId(requestId: string): string {
-    return this.db.prepare('SELECT run_id FROM request_charges WHERE request_id=? UNION ALL SELECT run_id FROM summary_charges WHERE request_id=?').pluck().get(requestId, requestId) as string;
+    return this.db.prepare('SELECT run_id FROM request_charges WHERE request_id=? UNION ALL SELECT run_id FROM summary_charges WHERE request_id=? UNION ALL SELECT run_id FROM artifact_charges WHERE request_id=?').pluck().get(requestId, requestId, requestId) as string;
   }
 
   getCharge(requestId: string): RequestCharge | undefined {
     this.assertInitialized(); idSchema.parse(requestId);
-    const row = this.db.prepare(`SELECT ${chargeColumns},'turn' AS kind FROM request_charges WHERE request_id=? UNION ALL SELECT ${chargeColumns},'summary' AS kind FROM summary_charges WHERE request_id=?`)
-      .get(requestId, requestId) as RawCharge | undefined;
+    const row = this.db.prepare(`SELECT ${chargeColumns},'turn' AS kind FROM request_charges WHERE request_id=? UNION ALL SELECT ${chargeColumns},'summary' AS kind FROM summary_charges WHERE request_id=?
+      UNION ALL SELECT ${chargeColumns},'artifact' AS kind FROM artifact_charges WHERE request_id=?`).get(requestId, requestId, requestId) as RawCharge | undefined;
     return row ? this.chargeFrom(row) : undefined;
   }
 
-  /** Turn and summary requests of a Run, in reservation order. */
+  /** Turn, summary and artifact requests of a Run, in reservation order. */
   listCharges(runId: string): RequestCharge[] {
     this.requireRun(runId);
     return (this.db.prepare(`SELECT * FROM (SELECT ${chargeColumns},'turn' AS kind,rowid AS position FROM request_charges WHERE run_id=?
-      UNION ALL SELECT ${chargeColumns},'summary' AS kind,rowid AS position FROM summary_charges WHERE run_id=?) ORDER BY createdAt,kind DESC,position`).all(runId, runId) as RawCharge[])
+      UNION ALL SELECT ${chargeColumns},'summary' AS kind,rowid AS position FROM summary_charges WHERE run_id=?
+      UNION ALL SELECT ${chargeColumns},'artifact' AS kind,rowid AS position FROM artifact_charges WHERE run_id=?) ORDER BY createdAt,kind DESC,position`).all(runId, runId, runId) as RawCharge[])
       .map(row => this.chargeFrom(row));
   }
 
@@ -433,7 +446,7 @@ export class Database {
       .get(charge.requestId) as ChargeSettlement | undefined;
     const writeOffs = this.db.prepare('SELECT id AS writeOffId,amount_micro AS amountMicro,basis,created_at AS createdAt FROM charge_writeoffs WHERE request_id=? ORDER BY created_at,rowid')
       .all(charge.requestId) as ChargeWriteOff[];
-    const detail = { ...charge, ...(kind === 'summary' ? { kind } : {}), ...(pricing ? { settlement: pricing } : {}), ...(writeOffs.length ? { writeOffs } : {}) };
+    const detail = { ...charge, ...(kind === 'summary' || kind === 'artifact' ? { kind } : {}), ...(pricing ? { settlement: pricing } : {}), ...(writeOffs.length ? { writeOffs } : {}) };
     return requestChargeSchema.parse({ ...detail, chargedMicro: effectiveChargeMicro(detail) });
   }
 
@@ -523,7 +536,9 @@ export class Database {
         SELECT ${chargeColumnsOf('c.')},'turn' AS kind,c.rowid AS position,c.run_id AS runId,t.agent_id AS agentId FROM request_charges c
           JOIN request_attempts a ON a.request_id=c.request_id JOIN turns t ON t.id=a.turn_id
         UNION ALL SELECT ${chargeColumnsOf('c.')},'summary' AS kind,c.rowid AS position,c.run_id AS runId,r.agent_id AS agentId FROM summary_charges c
-          JOIN summary_requests r ON r.request_id=c.request_id) ORDER BY createdAt,kind DESC,position`).all() as Array<RawCharge & { position: number; runId: string; agentId: string }>;
+          JOIN summary_requests r ON r.request_id=c.request_id
+        UNION ALL SELECT ${chargeColumnsOf('c.')},'artifact' AS kind,c.rowid AS position,c.run_id AS runId,r.agent_id AS agentId FROM artifact_charges c
+          JOIN artifact_requests r ON r.request_id=c.request_id) ORDER BY createdAt,kind DESC,position`).all() as Array<RawCharge & { position: number; runId: string; agentId: string }>;
       return rows.map(({ runId, agentId, ...row }) => ({ runId, agentId, charge: this.chargeFrom(row) }));
     });
   }
@@ -532,7 +547,8 @@ export class Database {
   listLedgerLabels(): { runs: Array<{ runId: string; roomId: string; roomName: string; task: string; createdAt: string; members: Array<{ agentId: string; displayName: string }> }>; providers: Array<{ id: string; name: string }> } {
     this.assertInitialized();
     const runs = (this.db.prepare(`SELECT r.id AS runId,r.room_id AS roomId,m.name AS roomName,COALESCE(r.task,'') AS task,r.created_at AS createdAt,r.members_snapshot AS members
-      FROM workflow_runs r JOIN rooms m ON m.id=r.room_id WHERE EXISTS(SELECT 1 FROM request_charges c WHERE c.run_id=r.id) OR EXISTS(SELECT 1 FROM summary_charges c WHERE c.run_id=r.id)`).all() as Array<{ runId: string; roomId: string; roomName: string; task: string; createdAt: string; members: string | null }>)
+      FROM workflow_runs r JOIN rooms m ON m.id=r.room_id WHERE EXISTS(SELECT 1 FROM request_charges c WHERE c.run_id=r.id) OR EXISTS(SELECT 1 FROM summary_charges c WHERE c.run_id=r.id)
+        OR EXISTS(SELECT 1 FROM artifact_charges c WHERE c.run_id=r.id)`).all() as Array<{ runId: string; roomId: string; roomName: string; task: string; createdAt: string; members: string | null }>)
       .map(({ members, ...run }) => ({ ...run, members: members === null ? [] : (JSON.parse(members) as Array<{ agentId: string; displayName: string }>).map(({ agentId, displayName }) => ({ agentId, displayName })) }));
     const providers = this.db.prepare('SELECT id,name FROM providers').all() as Array<{ id: string; name: string }>;
     return { runs, providers };
@@ -596,6 +612,125 @@ export class Database {
   findSummaryConfirmationByClient(runId: string, clientRequestId: string): { messageId: string; summaryId: string } | undefined {
     this.assertInitialized();
     return this.db.prepare('SELECT message_id AS messageId,summary_id AS summaryId FROM summary_confirmations WHERE run_id=? AND client_request_id=?').get(runId, clientRequestId) as { messageId: string; summaryId: string } | undefined;
+  }
+
+  // R14 (D118–D123) structured artifacts. Every write is append-only; a version's output and validation are set once.
+  insertArtifact(input: { id: string; runId: string; roomId: string; kind: ArtifactKind; clientRequestId: string }): void {
+    this.assertInitialized();
+    this.db.prepare('INSERT INTO artifacts(id,run_id,room_id,kind,client_request_id,created_at) VALUES(?,?,?,?,?,?)')
+      .run(input.id, input.runId, input.roomId, input.kind, input.clientRequestId, now());
+  }
+
+  /**
+   * A new version with the message versions it is based on. A generated version starts pending with empty output;
+   * a host edit is valid from the start. Sources must be completed messages of the same Run (D121).
+   */
+  insertArtifactVersion(input: { id: string; artifactId: string; runId: string; origin: ArtifactVersionRecord['origin']; parentVersionId?: string; clientRequestId: string;
+    agentId?: string; sources: readonly string[]; edit?: { rawOutput: string; contentJson: string } }): void {
+    this.assertInitialized();
+    z.array(idSchema).max(4096).parse(input.sources);
+    this.transaction(() => {
+      const timestamp = now();
+      const number = (this.db.prepare('SELECT COALESCE(MAX(version_number),0)+1 FROM artifact_versions WHERE artifact_id=?').pluck().get(input.artifactId) as number);
+      const runOf = this.db.prepare('SELECT run_id FROM messages WHERE id=?').pluck();
+      if (input.sources.some(id => runOf.get(id) !== input.runId)) throw new ContractError('invalid_input', 'sources');
+      this.db.prepare(`INSERT INTO artifact_versions(id,artifact_id,run_id,version_number,origin,parent_version_id,client_request_id,agent_id,validation,raw_output,content_json,issues_json,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`).run(input.id, input.artifactId, input.runId, number, input.origin, input.parentVersionId ?? null, input.clientRequestId,
+        input.agentId ?? null, input.edit ? 'valid' : 'pending', input.edit?.rawOutput ?? '', input.edit?.contentJson ?? null, timestamp, timestamp);
+      const source = this.db.prepare('INSERT INTO artifact_sources(version_id,message_id,run_id,position) VALUES(?,?,?,?)');
+      input.sources.forEach((messageId, position) => source.run(input.id, messageId, input.runId, position));
+    });
+  }
+
+  insertArtifactRequest(input: { requestId: string; versionId: string; runId: string; agentId: string; inputSnapshot: StreamChatInputRecord }): void {
+    this.assertInitialized();
+    const timestamp = now();
+    this.db.prepare(`INSERT INTO artifact_requests(request_id,version_id,run_id,agent_id,status,finish_reason,input_snapshot,created_at,updated_at) VALUES(?,?,?,?,'generating',NULL,?,?,?)`)
+      .run(input.requestId, input.versionId, input.runId, input.agentId, JSON.stringify(input.inputSnapshot), timestamp, timestamp);
+  }
+
+  /** The output received so far, kept as evidence while the request streams. */
+  setArtifactOutput(versionId: string, rawOutput: string): void {
+    this.assertInitialized();
+    this.db.prepare('UPDATE artifact_versions SET raw_output=?,updated_at=? WHERE id=?').run(rawOutput, now(), versionId);
+  }
+
+  finishArtifactRequest(requestId: string, status: 'completed' | 'failed' | 'aborted', finishReason?: 'stop' | 'length'): void {
+    this.assertInitialized();
+    const result = this.db.prepare("UPDATE artifact_requests SET status=?,finish_reason=?,updated_at=? WHERE request_id=? AND status='generating'").run(status, finishReason ?? null, now(), requestId);
+    if (result.changes !== 1) throw new Error('Artifact request is not generating');
+  }
+
+  /** The one validation of a completed generated version. */
+  validateArtifactVersion(versionId: string, outcome: { contentJson: string } | { issues: ArtifactIssue[] }): void {
+    this.assertInitialized();
+    const [validation, content, issues] = 'contentJson' in outcome ? ['valid', outcome.contentJson, null] : ['invalid', null, JSON.stringify(outcome.issues)];
+    const result = this.db.prepare("UPDATE artifact_versions SET validation=?,content_json=?,issues_json=?,updated_at=? WHERE id=? AND validation='pending'").run(validation, content, issues, now(), versionId);
+    if (result.changes !== 1) throw new Error('Artifact version is already validated');
+  }
+
+  /** Adoption is per version and append-only; adopting the same version again is the same adoption. */
+  adoptArtifactVersion(input: { versionId: string; runId: string; clientRequestId: string }): boolean {
+    this.assertInitialized();
+    return this.transaction(() => {
+      if (this.db.prepare('SELECT 1 FROM artifact_adoptions WHERE version_id=?').get(input.versionId)) return false;
+      this.db.prepare('INSERT INTO artifact_adoptions(version_id,run_id,client_request_id,created_at) VALUES(?,?,?,?)').run(input.versionId, input.runId, input.clientRequestId, now());
+      return true;
+    });
+  }
+
+  insertArtifactExport(input: { id: string; versionId: string; runId: string; clientRequestId: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string }): void {
+    this.assertInitialized();
+    this.db.prepare('INSERT INTO artifact_exports(id,version_id,run_id,client_request_id,format,target,file_name,created_at) VALUES(?,?,?,?,?,?,?,?)')
+      .run(input.id, input.versionId, input.runId, input.clientRequestId, input.format, input.target, input.fileName ?? null, now());
+  }
+
+  /** What an earlier delivery of the same clientRequestId did in this Run, if anything (artifact commands are idempotent). */
+  findArtifactWrite(runId: string, clientRequestId: string): { kind: 'artifact' | 'version' | 'adoption' | 'export'; id: string } | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare(`SELECT 'version' AS kind,id FROM artifact_versions WHERE run_id=? AND client_request_id=?
+      UNION ALL SELECT 'adoption',version_id FROM artifact_adoptions WHERE run_id=? AND client_request_id=?
+      UNION ALL SELECT 'export',id FROM artifact_exports WHERE run_id=? AND client_request_id=?`).get(runId, clientRequestId, runId, clientRequestId, runId, clientRequestId) as { kind: 'version' | 'adoption' | 'export'; id: string } | undefined;
+    return row;
+  }
+
+  getArtifactExport(id: string): { id: string; versionId: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string } | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare('SELECT id,version_id AS versionId,format,target,file_name AS fileName FROM artifact_exports WHERE id=?').get(id) as
+      { id: string; versionId: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName: string | null } | undefined;
+    if (!row) return;
+    const { fileName, ...rest } = row;
+    return { ...rest, ...(fileName === null ? {} : { fileName }) };
+  }
+
+  listArtifacts(runId: string): ArtifactRecord[] {
+    this.requireRun(runId);
+    return this.transaction(() => {
+      const artifacts = this.db.prepare('SELECT id,run_id AS runId,room_id AS roomId,kind,client_request_id AS clientRequestId,created_at AS createdAt FROM artifacts WHERE run_id=? ORDER BY created_at,rowid')
+        .all(runId) as Array<Omit<ArtifactRecord, 'versions'>>;
+      const versions = this.db.prepare(`SELECT id,artifact_id AS artifactId,run_id AS runId,version_number AS number,origin,parent_version_id AS parentVersionId,client_request_id AS clientRequestId,
+        agent_id AS agentId,validation,raw_output AS rawOutput,content_json AS contentJson,issues_json AS issuesJson,created_at AS createdAt,updated_at AS updatedAt
+        FROM artifact_versions WHERE run_id=? ORDER BY artifact_id,version_number`).all(runId) as RawArtifactVersion[];
+      const requests = new Map((this.db.prepare(`SELECT request_id AS requestId,version_id AS versionId,status,finish_reason AS finishReason,created_at AS createdAt FROM artifact_requests WHERE run_id=?`)
+        .all(runId) as Array<{ requestId: string; versionId: string; status: ArtifactRequestRecord['status']; finishReason: 'stop' | 'length' | null; createdAt: string }>)
+        .map(({ versionId, finishReason, ...request }) => [versionId, { ...request, ...(finishReason === null ? {} : { finishReason }) }]));
+      const sources = new Map<string, string[]>();
+      for (const row of this.db.prepare('SELECT version_id AS versionId,message_id AS messageId FROM artifact_sources WHERE run_id=? ORDER BY version_id,position').all(runId) as Array<{ versionId: string; messageId: string }>) {
+        sources.set(row.versionId, [...(sources.get(row.versionId) ?? []), row.messageId]);
+      }
+      const adoptions = new Map((this.db.prepare('SELECT version_id AS versionId,created_at AS createdAt FROM artifact_adoptions WHERE run_id=?').all(runId) as Array<{ versionId: string; createdAt: string }>)
+        .map(row => [row.versionId, row.createdAt]));
+      const exports = new Map<string, ArtifactVersionRecord['exports']>();
+      for (const row of this.db.prepare('SELECT id,version_id AS versionId,format,target,file_name AS fileName,created_at AS createdAt FROM artifact_exports WHERE run_id=? ORDER BY created_at,rowid')
+        .all(runId) as Array<{ id: string; versionId: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName: string | null; createdAt: string }>) {
+        const { versionId, fileName, ...entry } = row;
+        exports.set(versionId, [...(exports.get(versionId) ?? []), { ...entry, ...(fileName === null ? {} : { fileName }) }]);
+      }
+      return artifacts.map(artifact => ({ ...artifact, versions: versions.filter(version => version.artifactId === artifact.id).map(({ parentVersionId, agentId, ...version }) => ({
+        ...version, ...(parentVersionId === null ? {} : { parentVersionId }), ...(agentId === null ? {} : { agentId }),
+        ...(requests.has(version.id) ? { request: requests.get(version.id)! } : {}), sources: sources.get(version.id) ?? [],
+        ...(adoptions.has(version.id) ? { adoptedAt: adoptions.get(version.id)! } : {}), exports: exports.get(version.id) ?? [] })) }));
+    });
   }
 
   updateRun(id: string, patch: { status?: string;mode?:'automatic'|'step'; currentTurnId?: string | null; currentAgentId?: string | null; startedAt?: string | null; finishedAt?: string | null; lastError?: string | null }): void {
@@ -697,6 +832,9 @@ export class Database {
       // R13B: a summary request open at startup was interrupted the same way; it is never resent automatically.
       this.db.prepare("UPDATE summary_requests SET status='interrupted',updated_at=? WHERE status='generating'").run(timestamp);
       this.db.prepare("UPDATE summary_charges SET state='unknown',updated_at=? WHERE state='reserved'").run(timestamp);
+      // R14: an artifact request too; its version keeps the partial output and stays unvalidated.
+      this.db.prepare("UPDATE artifact_requests SET status='interrupted',updated_at=? WHERE status='generating'").run(timestamp);
+      this.db.prepare("UPDATE artifact_charges SET state='unknown',updated_at=? WHERE state='reserved'").run(timestamp);
       this.db.prepare("UPDATE messages SET status='aborted',updated_at=? WHERE status='streaming' AND run_id IS NOT NULL").run(timestamp);
       return ids.length;
     })();
@@ -957,7 +1095,8 @@ export class Database {
       const ids = this.db.prepare('SELECT id FROM messages WHERE run_id=? ORDER BY sort_key').pluck().all(runId) as string[];
       return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
         versions:this.listVersions(runId),hostActions:this.listHostActions(runId),instructions:this.listInstructionRevisions(runId),
-        charges:this.listCharges(runId),budget:this.getRunBudget(runId),summaries:this.listSummaries(runId),continuations:this.listContinuations(runId)};
+        charges:this.listCharges(runId),budget:this.getRunBudget(runId),summaries:this.listSummaries(runId),continuations:this.listContinuations(runId),
+        artifactRequestIds:this.db.prepare('SELECT request_id FROM artifact_requests WHERE run_id=? ORDER BY created_at,rowid').pluck().all(runId) as string[]};
     });
   }
 
@@ -1470,7 +1609,7 @@ const chargeColumnsOf = (alias: '' | 'c.') => `${alias}request_id AS requestId,$
   ${alias}price_reviewed_at AS priceReviewedAt,${alias}created_at AS createdAt,${alias}updated_at AS updatedAt`;
 const chargeColumns = chargeColumnsOf('');
 type RawCharge = Omit<RequestCharge, 'chargedMicro' | 'settlement' | 'writeOffs'>;
-const chargeTable = (kind: RequestCharge['kind']) => kind === 'summary' ? 'summary_charges' : 'request_charges';
+const chargeTable = (kind: RequestCharge['kind']) => kind === 'summary' ? 'summary_charges' : kind === 'artifact' ? 'artifact_charges' : 'request_charges';
 const summaryRequestSelect = `SELECT request_id AS requestId,summary_id AS summaryId,run_id AS runId,message_id AS messageId,client_request_id AS clientRequestId,agent_id AS agentId,
   status,finish_reason AS finishReason,input_snapshot AS inputSnapshot,created_at AS createdAt FROM summary_requests`;
 type RawSummaryRequest = Omit<SummaryRequestRecord, 'inputSnapshot' | 'finishReason'> & { inputSnapshot: string; finishReason: 'stop' | 'length' | null };
