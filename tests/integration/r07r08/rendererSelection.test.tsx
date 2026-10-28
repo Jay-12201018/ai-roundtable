@@ -175,11 +175,12 @@ it.each(['createProvider', 'deleteProvider', 'setKey', 'deleteKey'] as const)('r
     fireEvent.click(await screen.findByRole('button', { name: '展开 原 Provider' })); fireEvent.click(await screen.findByText('高级与删除'));
     fireEvent.click(screen.getByRole('button', { name: '删除服务…' })); fireEvent.click(screen.getByRole('button', { name: '确认删除服务' }));
   } else if (operation === 'setKey') {
-    fireEvent.click(await screen.findByRole('button', { name: '展开 原 Provider' }));
+    // The first real service opens by default once the list loads.
+    await screen.findByRole('button', { name: '收起 原 Provider' });
     fireEvent.click(await screen.findByRole('button', { name: '填写 Key' }));
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'fixture-key' } }); fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
   } else {
-    fireEvent.click(await screen.findByRole('button', { name: '展开 原 Provider' })); fireEvent.click(await screen.findByText('高级与删除'));
+    await screen.findByRole('button', { name: '收起 原 Provider' }); fireEvent.click(await screen.findByText('高级与删除'));
     fireEvent.click(await screen.findByRole('button', { name: '删除 Key…' })); fireEvent.click(screen.getByRole('button', { name: '确认删除 Key' }));
   }
   await waitFor(() => expect(mutation).toHaveBeenCalledOnce());

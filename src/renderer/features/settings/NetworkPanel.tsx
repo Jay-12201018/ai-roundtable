@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, Info, RotateCw } from 'lucide-react';
 import type { NetworkApiContract, AppLifecycleApiContract } from '../../../shared/contracts/app';
 import type { NetworkSettings, ProxySettings, ProxyTestResult } from '../../../shared/schemas/network';
-import { Button, Switch } from '../../components/ui';
+import { Button, Switch, cx } from '../../components/ui';
 import { errorMessage } from './model';
 
 const failures: Record<NonNullable<ProxyTestResult['failure']>, string> = {
@@ -85,9 +85,11 @@ export function NetworkPanel({ network, lifecycle }: { network?: NetworkApiContr
         <div className="inline-fields"><Button variant="primary" size="sm" disabled={busy || !dirty || Boolean(blocked)} onClick={() => void save()}>保存设置</Button>
           {notice && <span role="status" className="small ok-text">{notice}</span>}{error && <span role="alert" className="field-error">{error}</span>}</div>
       </div>
-      <div className="card-row net-effect"><Info aria-hidden size={16} /><div className="grow small">
+      {/* Calm while what runs is what was saved; the warning tint only while a saved change waits for a restart. */}
+      <div className={cx('card-row net-effect', (settings.restartRequired || settings.savedInvalid) && 'is-pending')}><Info aria-hidden size={16} /><div className="grow small">
         {environment ? <>当前生效：{describe(settings.effective)}。环境变量优先，这里保存的设置不会生效，直到去掉环境变量后重启。</>
-          : <>改动在<b>重启应用</b>后生效。当前生效：{describe(settings.effective)}。{settings.savedInvalid ? '保存的设置文件无法读取，已按直连处理。' : ''}</>}</div>
+          : settings.restartRequired ? <>保存的改动在<b>重启应用</b>后生效。当前生效：{describe(settings.effective)}。{settings.savedInvalid ? '保存的设置文件无法读取，已按直连处理。' : ''}</>
+          : <>当前生效：{describe(settings.effective)}。{settings.savedInvalid ? '保存的设置文件无法读取，已按直连处理。' : '改动保存后，重启应用才会生效。'}</>}</div>
         {!environment && settings.restartRequired && lifecycle && <Button size="sm" icon={RotateCw} disabled={busy} onClick={() => void restart()}>立即重启</Button>}</div>
     </section>}
   </>;

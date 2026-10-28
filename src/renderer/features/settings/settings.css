@@ -38,8 +38,10 @@
 .net-trust { align-items: flex-start; }
 .net-trust input { margin-top: 3px; }
 .net-trust b { font-weight: 500; display: block; }
-.net-effect { background: var(--warn-soft); border-radius: 0 0 var(--r-md) var(--r-md); border-top: 1px solid var(--line); }
-.net-effect > svg { color: var(--warn); flex: none; align-self: flex-start; margin-top: 2px; }
+.net-effect { background: var(--surface-2); border-radius: 0 0 var(--r-md) var(--r-md); border-top: 1px solid var(--line); }
+.net-effect > svg { color: var(--text-3); flex: none; align-self: flex-start; margin-top: 2px; }
+.net-effect.is-pending { background: var(--warn-soft); }
+.net-effect.is-pending > svg { color: var(--warn); }
 
 .wizard .stepper { margin-top: 14px; }
 .wizard-foot-note { margin: 14px 0 0; }

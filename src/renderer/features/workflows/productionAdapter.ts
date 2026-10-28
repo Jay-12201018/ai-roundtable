@@ -38,7 +38,9 @@ export function workflowProgressForFeature(snapshot?: RunSnapshot): WorkflowProg
     runLabel: snapshot.execution?.task ?? '历史任务（目标未记录）', status: statusLabels[snapshot.status],
     completedTurns: progress.completedTurns, totalTurns: progress.totalTurns, elapsedMs: progress.elapsedMs,
     currentStage: stage ? `当前阶段：${stageLabels[stage.kind]}` : '当前阶段未记录',
-    nextStep: progress.nextStep ? `${stageLabels[progress.nextStep.kind]} · ${member?.displayName ?? '成员身份未记录'}` : '没有待执行步骤',
+    // Main names the next step only between Turns; while one is being generated the rest of the plan is still ahead.
+    nextStep: progress.nextStep ? `${stageLabels[progress.nextStep.kind]} · ${member?.displayName ?? '成员身份未记录'}`
+      : !progress.limitReason && progress.completedTurns < progress.totalTurns && ['running', 'pausing'].includes(snapshot.status) ? '当前发言结束后按计划继续' : '没有待执行步骤',
     limitReason: progress.limitReason === 'max_duration' ? '累计时长到限' : progress.limitReason === 'max_turns' ? '回合数到限' : undefined,
     stages: progress.stages.map(value => ({ ...value, label: stageLabels[value.kind], status: { pending: '待执行', running: '执行中', completed: '已完成' }[value.status] })),
   };

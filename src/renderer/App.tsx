@@ -436,7 +436,7 @@ export function App() {
     emptyText={providers.length === 0 ? '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。' : undefined}
     noRealProvider={providerLoadState === 'ready' && !providers.some(provider => provider.kind !== 'mock' && provider.kind !== null && provider.enabled)}
     onOpenRoom={openRoom} onSelectRun={selectRun} onNewDiscussion={() => newDiscussion()} onNewRoom={() => { setNavOpen(false); setRoomDialog(true); }}
-    onOpenUsage={() => { setPage('usage'); setNavOpen(false); }} onOpenSettings={() => openSettings()}
+    onOpenUsage={() => { setPage('usage'); setNavOpen(false); }} onOpenSettings={() => openSettings()} onHome={goDiscussion}
     onCollapse={drawer ? undefined : () => collapseSidebar(true)} onClose={drawer ? () => setNavOpen(false) : undefined} />;
   const panel = <RunPanel snapshot={snapshot} commands={hostCommands} ledger={ledger} providers={providerNames} tab={panelTab} onTab={setPanelTab}
     onClose={() => { if (layout === 'wide') { setPanelPinned(false); remember('roundtable.panelOpen', false); } else setPanelDrawer(false); }}
@@ -462,7 +462,7 @@ export function App() {
           theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onConnected={createFirstRoom}
           onStart={() => { const target = starterRoom ?? roomId; if (target) newDiscussion(target); else goDiscussion(); }} />
       </> : page === 'rooms' ? <>
-        <Topbar title={room?.name ?? '房间'} detail={room ? `房间设置 · ${directory.counts.get(room.id) ?? 0} 位成员 · ${directory.runs.length} 次讨论` : undefined}
+        <Topbar title={room?.name ?? '房间'} detail={room ? `房间设置 · ${directory.counts.get(room.id) ?? 0} 位参与讨论 · ${directory.runs.length} 次讨论` : undefined}
           members={layout === 'narrow' ? undefined : modeMembers.filter(member => member.enabled).map(member => member.name)}
           onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined} onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined} />
         {pageBody.rooms()}

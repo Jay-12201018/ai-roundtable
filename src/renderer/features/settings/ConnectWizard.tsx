@@ -168,7 +168,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
       </div>
       <p className="small muted wizard-foot-note">“价格尚未审核”的服务可以保存 Key、检查连接，但在价格核对之前不会发送讨论请求，避免花费算不清。</p>
     </>}
-    {step === 1 && <form id="connect-form" className="form-stack" onSubmit={submit} noValidate>
+    {step === 1 && <form id="connect-form" className="form-stack" onSubmit={submit} onChange={() => setError('')} noValidate>
       {compatible && !rekey && <>
         <Field label="服务名称">{props => <input {...props} className="input" value={name} disabled={busy} onChange={event => setName(event.target.value)} placeholder="例如：Kimi" />}</Field>
         <Field label="地址" error={address.trim() !== '' && !typed?.success ? '地址必须以 https:// 开头（本机服务可以用 http://localhost），不能带账号、问号参数或 # 片段。' : undefined} help="照服务商文档填写，通常以 /v1 结尾。">

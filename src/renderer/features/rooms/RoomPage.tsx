@@ -47,6 +47,9 @@ export function RoomPage({ api, room, providers, readiness, runs, runCosts, work
   const [showArchived, setShowArchived] = useState(false);
   const [dragging, setDragging] = useState<string>(); const [dropBefore, setDropBefore] = useState<string>();
   const request = useRef(0); const alive = useRef(true); const lock = useRef(false);
+  // Keyboard reordering keeps focus on the moved member's grip, so ↑/↓ can be pressed again.
+  const refocus = useRef<string | undefined>(undefined);
+  useEffect(() => { if (!refocus.current || !agents) return; document.querySelector<HTMLElement>(`[data-grip="${refocus.current}"]`)?.focus(); refocus.current = undefined; }, [agents]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current++; }; }, []);
   const load = useCallback(async () => {
     const token = ++request.current;
@@ -82,7 +85,7 @@ export function RoomPage({ api, room, providers, readiness, runs, runCosts, work
     const ids = active.map(item => item.id).filter(id => id !== from); ids.splice(ids.indexOf(target), 0, from); void reorder(ids);
   }
   function gripKeys(event: KeyboardEvent, agent: AgentConfiguration) {
-    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); move(agent, event.key === 'ArrowUp' ? -1 : 1); }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); refocus.current = agent.id; move(agent, event.key === 'ArrowUp' ? -1 : 1); }
   }
 
   return <div className="page room-page"><div className="page-inner">
@@ -105,7 +108,7 @@ export function RoomPage({ api, room, providers, readiness, runs, runCosts, work
         return <li key={agent.id} className={cx('card-row', !agent.enabled && 'is-off', dragging === agent.id && 'is-dragging', dropBefore === agent.id && 'is-drop-before')}
           draggable={!busy && !archivedRoom} onDragStart={event => { setDragging(agent.id); event.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => { setDragging(undefined); setDropBefore(undefined); }}
           onDragOver={event => { if (dragging) { event.preventDefault(); setDropBefore(agent.id); } }} onDrop={event => drop(event, agent.id)}>
-          <button type="button" className="grip" aria-label={`调整「${agent.displayName}」的顺序：第 ${index + 1} 位，按上下方向键移动`} disabled={busy || archivedRoom} onKeyDown={event => gripKeys(event, agent)}><GripVertical aria-hidden /></button>
+          <button type="button" className="grip" data-grip={agent.id} aria-label={`调整「${agent.displayName}」的顺序：第 ${index + 1} 位，按上下方向键移动`} disabled={archivedRoom} onKeyDown={event => gripKeys(event, agent)}><GripVertical aria-hidden /></button>
           <Avatar name={agent.displayName} />
           <div className="grow"><b>{agent.displayName}</b>{role && <> <Tag>{role}</Tag></>}
             <small className={line.warn ? 'warn-text' : undefined}>{line.warn && <CircleAlert aria-hidden size={13} className="inline-icon" />}{agent.enabled ? '' : '已暂停参与 · '}{line.text}
@@ -187,8 +190,8 @@ function ConfirmDelete({ what, detail, onClose, onConfirm }: { what: string; det
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const run = async () => { setBusy(true); setError(''); try { await onConfirm(); } catch (cause) { setError(roomErrorText(cause)); setBusy(false); } };
   return <Modal title={`删除${what}？`} description={detail} onClose={onClose} busy={busy}
-    footer={<><Button autoFocus disabled={busy} onClick={onClose}>取消</Button><Button variant="danger" solid icon={Trash2} disabled={busy} onClick={() => void run()}>{busy ? '正在删除…' : '删除'}</Button></>}>
-    {error ? <p className="field-error" role="alert">{error}</p> : <p className="muted small">删除后无法恢复。</p>}
+    footer={<><Button data-autofocus disabled={busy} onClick={onClose}>取消</Button><Button variant="danger" solid icon={Trash2} disabled={busy} onClick={() => void run()}>{busy ? '正在删除…' : '删除'}</Button></>}>
+    {error && <p className="field-error" role="alert">{error}</p>}
   </Modal>;
 }
 

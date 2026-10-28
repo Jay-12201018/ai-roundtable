@@ -118,6 +118,7 @@ dialog.modal .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .modal-head p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
 .modal-below { padding: 0 24px; }
 .modal-body { padding: 16px 24px 20px; }
+.modal-body:empty { padding: 10px 0 0; }
 .modal-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 24px 20px; border-top: 1px solid var(--line); }
 .modal-foot .is-left { margin-right: auto; font-size: 13px; color: var(--text-2); }
 

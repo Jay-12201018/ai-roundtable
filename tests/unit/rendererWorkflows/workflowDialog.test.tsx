@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkflowDialog, createWorkflowDraft, readRoomWorkflow, workflowConfigFromDraft, writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft } from '../../../src/renderer/features/workflows';
+import { workflowProgressForFeature } from '../../../src/renderer/features/workflows/productionAdapter';
+import type { RunSnapshot } from '../../../src/shared/types/run';
 import { deferred } from '../rendererSubscriptions/fixtures';
 
 const members = [{ id: 'a', name: '起草者', enabled: true, role: '起草' }, { id: 'b', name: '审查者', enabled: true, role: '审查' }, { id: 'c', name: '综合者', enabled: true, role: '综合' }, { id: 'x', name: '停用成员', enabled: false, role: '审查' }];
@@ -27,6 +29,8 @@ describe('讨论方式 dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /^审查修订链/u }));
     expect((screen.getByRole('button', { name: '用于这个房间' }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect(onCheck).toHaveBeenLastCalledWith(expect.objectContaining({ template: 'review-revision' })), { timeout: 2000 });
+    // The last stage ends the plan anyway: only the four earlier ones offer to end there.
+    expect(within(screen.getByRole('list', { name: '阶段与成员' })).getAllByRole('button', { name: '在此结束' })).toHaveLength(4);
     fireEvent.click(within(screen.getByRole('list', { name: '阶段与成员' })).getAllByRole('button', { name: '在此结束' })[3]);
     expect(document.body.textContent).toContain('复审后结束');
     expect(document.body.textContent).toContain('综合者不在这个流程里，这次不会发言；需要时可以在讨论中生成摘要。');
@@ -64,5 +68,17 @@ describe('D116 per-room storage', () => {
     writeRoomWorkflow('r1', null); expect(readRoomWorkflow('r1')).toEqual({ damaged: false });
     localStorage.setItem('roundtable.workflow.r1', JSON.stringify({ version: 1, draft: { ...draft, template: 'something-else' } }));
     expect(readRoomWorkflow('r1')).toEqual({ damaged: true });
+  });
+});
+
+describe('workflow progress', () => {
+  const progress = (status: string, nextStep?: { kind: string; agentId: string }, completedTurns = 0) => workflowProgressForFeature({
+    status, execution: { task: '目标', membersSnapshot: [{ agentId: 'b', displayName: '审查者' }] },
+    workflow: { completedTurns, totalTurns: 5, elapsedMs: 0, currentStage: 's1', nextStep, stages: [{ id: 's1', kind: 'draft', status: 'running' }] },
+  } as unknown as RunSnapshot)!;
+  it('does not claim the plan is over while a Turn is being generated', () => {
+    expect(progress('running').nextStep).toBe('当前发言结束后按计划继续');
+    expect(progress('paused', { kind: 'review', agentId: 'b' }, 1).nextStep).toBe('审查 · 审查者');
+    expect(progress('completed', undefined, 5).nextStep).toBe('没有待执行步骤');
   });
 });

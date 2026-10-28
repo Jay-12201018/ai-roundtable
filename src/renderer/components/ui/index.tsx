@@ -97,6 +97,8 @@ export function Modal({ title, description, onClose, busy, children, footer, wid
   useEffect(() => {
     const dialog = ref.current!;
     if (typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal(); } else dialog.setAttribute('open', '');
+    // A safe default focus (for example 取消 in a destructive confirmation) wins over the first control.
+    dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     return () => { if (typeof dialog.close === 'function' && dialog.open) dialog.close(); };
   }, []);
   return <dialog ref={ref} className={cx('modal', className)} style={wide ? { width: 'min(760px, calc(100vw - 32px))' } : undefined} aria-modal="true" aria-labelledby={titleId}

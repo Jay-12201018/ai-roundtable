@@ -81,7 +81,7 @@ export function WorkflowDialog({ roomName, members, initial, onCheck, onSave, on
         </div>
         <div className="wf-stage-end">
           {(draft.template === 'free-chat' || pair || item.key === 'rebuttal') && <label className="wf-repeat">{pair ? '来回' : '每人'}<input className="input" inputMode="numeric" aria-label={`${item.title}的轮数`} value={item.repeat} onChange={event => phase(index, { repeat: event.target.value.trim() })} />轮</label>}
-          {draft.phases.length > 1 && (skipped ? <span className="small muted">不执行</span>
+          {draft.phases.length > 1 && index < draft.phases.length - 1 && (skipped ? <span className="small muted">不执行</span>
             : <button type="button" className="wf-end" aria-pressed={draft.finishAt === item.key} onClick={() => edit({ finishAt: draft.finishAt === item.key ? '' : item.key })}>{draft.finishAt === item.key ? `${item.title}后结束` : '在此结束'}</button>)}
         </div>
       </li>;

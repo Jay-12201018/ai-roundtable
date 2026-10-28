@@ -126,6 +126,9 @@ describe('设置 › 网络与代理 (D115)', () => {
     const { api } = fixture([]); const net = network(base); const relaunch = vi.fn(async () => {});
     show(api, { section: 'network', network: net as unknown as NetworkApiContract, relaunch });
     fireEvent.click(await screen.findByRole('switch', { name: '通过本机代理连接' }));
+    // Nothing saved waits for a restart: the note is neutral.
+    expect(document.querySelector('.net-effect')!.classList.contains('is-pending')).toBe(false);
+    expect(document.querySelector('.net-effect')!.textContent).toContain('改动保存后，重启应用才会生效。');
     expect(screen.getByRole('alert').textContent).toBe('要使用代理，需要勾选“由代理解析域名”。');
     expect((screen.getByRole('button', { name: '保存设置' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '检测代理' }));
@@ -134,6 +137,8 @@ describe('设置 › 网络与代理 (D115)', () => {
     fireEvent.click(screen.getByLabelText(/由代理解析域名/u));
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
     await screen.findByText('已保存，重启应用后生效。');
+    expect(document.querySelector('.net-effect')!.classList.contains('is-pending')).toBe(true);
+    expect(document.querySelector('.net-effect')!.textContent).toContain('保存的改动在重启应用后生效');
     expect(net.saveSettings).toHaveBeenCalledWith({ enabled: true, host: '127.0.0.1', port: 7890, trustProxyDns: true });
     fireEvent.click(screen.getByRole('button', { name: '立即重启' }));
     await waitFor(() => expect(relaunch).toHaveBeenCalled());

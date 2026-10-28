@@ -47,12 +47,12 @@ type Props = {
   rooms?: RoomConfiguration[]; archived?: RoomConfiguration[]; counts?: ReadonlyMap<string, number>; runs: RunSummary[]; failed: boolean; onRetry: () => void;
   roomId?: string; runId?: string; page: string; ready: boolean; monthSpend?: string; noRealProvider?: boolean; emptyText?: string;
   onOpenRoom: (id: string) => void; onSelectRun: (id: string) => void; onNewDiscussion: () => void; onNewRoom: () => void;
-  onOpenUsage: () => void; onOpenSettings: () => void;
+  onOpenUsage: () => void; onOpenSettings: () => void; onHome?: () => void;
   onCollapse?: () => void; onClose?: () => void;
 };
 
 /** Left navigation: rooms with their member counts and, under the current room, its discussions; usage and settings at the bottom. */
-export function Sidebar({ rooms, archived = [], counts, runs, failed, onRetry, roomId, runId, page, ready, monthSpend, noRealProvider, emptyText, onOpenRoom, onSelectRun, onNewDiscussion, onNewRoom, onOpenUsage, onOpenSettings, onCollapse, onClose }: Props) {
+export function Sidebar({ rooms, archived = [], counts, runs, failed, onRetry, roomId, runId, page, ready, monthSpend, noRealProvider, emptyText, onOpenRoom, onSelectRun, onNewDiscussion, onNewRoom, onOpenUsage, onOpenSettings, onHome, onCollapse, onClose }: Props) {
   const [showAll, setShowAll] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   useEffect(() => setShowAll(false), [roomId]);
@@ -61,8 +61,9 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, onRetry, r
     const current = room.id === roomId; const count = counts?.get(room.id);
     return <li key={room.id}>
       <button type="button" className="sb-item" aria-current={current && page === 'rooms' ? 'page' : undefined} aria-expanded={!room.archivedAt ? current : undefined}
+        aria-label={room.name} aria-describedby={count !== undefined ? `sb-count-${room.id}` : undefined}
         disabled={!ready} onClick={() => onOpenRoom(room.id)} title={room.objective || room.name}>
-        <Users aria-hidden size={16} /><span className="t">{room.name}</span>{count !== undefined && <span className="meta" aria-label={`${count} 位成员`}>{count} 人</span>}</button>
+        <Users aria-hidden size={16} /><span className="t">{room.name}</span>{count !== undefined && <span className="meta" id={`sb-count-${room.id}`} title={`${count} 位成员参与讨论（不含暂停参与的）`}>{count} 人</span>}</button>
       {current && !room.archivedAt && <ul className="sb-runs" aria-label={`${room.name} 的讨论记录`}>
         {runs.length === 0 && <li className="sb-empty small">还没有讨论。写下目标就能开始第一场。</li>}
         {shown.map(run => <li key={run.id}>
@@ -76,7 +77,7 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, onRetry, r
     </li>;
   };
   return <nav className="sidebar" aria-label="应用导航">
-    <div className="sb-top"><div className="brand"><Logo />AI 圆桌</div>
+    <div className="sb-top">{onHome ? <button type="button" className="brand brand-home" onClick={onHome} title="回到首页（新讨论或欢迎页）">{<Logo />}AI 圆桌</button> : <div className="brand"><Logo />AI 圆桌</div>}
       {onClose ? <IconButton icon={X} label="关闭导航" onClick={onClose} data-autofocus /> : onCollapse && <IconButton icon={PanelLeftClose} label="收起导航" onClick={onCollapse} />}</div>
     <Button className="sb-new" icon={Plus} disabled={!ready || !roomId} title={roomId ? '在当前房间开始一场新的讨论' : '先建一个房间'} onClick={onNewDiscussion}>新讨论</Button>
     <div className="sb-scroll">

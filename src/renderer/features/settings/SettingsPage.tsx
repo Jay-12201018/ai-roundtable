@@ -40,6 +40,8 @@ export function SettingsPage({ api, network, lifecycle, providers, providerLoadS
   const [wizard, setWizard] = useState<{ rekey?: ProviderConfiguration }>();
   const readiness = useReadiness(api, providers);
   const changed = () => { onProvidersChanged(); void readiness.reload(); };
+  // Opening 设置 reads the services afresh, so a change made elsewhere (another window, a restart) is never stale here.
+  useEffect(() => { onProvidersChanged(); }, []);
   return <div className="settings-shell">
     <nav className="settings-nav" aria-label="设置分类"><h1>设置</h1>
       {sections.map(item => <button key={item.id} type="button" className="sb-item" aria-current={section === item.id ? 'page' : undefined} onClick={() => onSection(item.id)}>

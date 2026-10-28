@@ -14,6 +14,13 @@ type Props = {
 /** 设置 › 模型服务: one card per service, its status at a glance, details and the dangerous actions folded away. */
 export function ServicesPanel({ api, providers, loadState, readiness, onChanged, onAdd, onRekey }: Props) {
   const [open, setOpen] = useState<string | undefined>(() => providers.find(provider => provider.kind !== 'mock')?.id);
+  // A service connected while this page is open (or loaded after it) shows its details without another click.
+  const known = useRef(new Set(providers.map(provider => provider.id)));
+  useEffect(() => {
+    const added = providers.find(provider => !known.current.has(provider.id) && provider.kind !== 'mock');
+    for (const provider of providers) known.current.add(provider.id);
+    if (added) setOpen(added.id); else if (open === undefined) setOpen(providers.find(provider => provider.kind !== 'mock')?.id);
+  }, [providers]);
   return <>
     <div className="page-head"><div className="grow"><h1>模型服务</h1><p>成员用哪个服务、哪个模型，在房间里为每位成员选。这里管理连接和 Key。</p></div>
       <div className="actions"><Button variant="primary" icon={Plus} onClick={onAdd}>添加服务</Button></div></div>

@@ -20,6 +20,8 @@
 .wf-repeat .input { width: 52px; min-height: 30px; padding: 4px 8px; text-align: center; }
 .wf-end { border: 0; background: none; padding: 4px 6px; border-radius: var(--r-xs); font-size: 13px; color: var(--text-3); }
 .wf-end:hover { color: var(--text); background: var(--surface-2); }
+/* Ending early is an occasional choice: it shows on the row being pointed at or focused, and always once chosen. */
+.wf-stage:not(:hover):not(:focus-within) .wf-end:not([aria-pressed="true"]) { opacity: 0; }
 .wf-end[aria-pressed="true"] { color: var(--accent); font-weight: 600; }
 .wf-limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 760px) { .wf-stage { grid-template-columns: 24px minmax(0, 1fr); } .wf-stage .wf-members, .wf-stage .wf-stage-end { grid-column: 2; justify-content: flex-start; } .wf-limits { grid-template-columns: 1fr; } }
