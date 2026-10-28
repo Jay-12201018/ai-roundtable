@@ -56,7 +56,9 @@ const actions = json({ title: '校园跑腿试点行动清单', items: [
 const code = json({ title: '订单费用计算', summary: '按基础费 2 元和 8% 抽成计算骑手收入；22 点后拒绝下单。', files: [
   { path: 'src/pilot/fee.ts', language: 'typescript', description: '费用与夜间规则', content: "export const BASE_FEE = 2;\nexport const COMMISSION = 0.08;\n\n/** 骑手实收：基础费扣掉平台抽成。 */\nexport function riderIncome(fee = BASE_FEE): number {\n  return Math.round(fee * (1 - COMMISSION) * 100) / 100;\n}\n\nexport function canOrder(hour: number): boolean {\n  return hour < 22;\n}\n" },
 ], notes: ['没有处理节假日', '金额精确到分'] });
-const artifactReplies = { '需求文档（PRD）': [prd(), prd('2 栋宿舍楼')], 会议纪要: [invalidMinutes], 行动清单: [actions], 代码候选: [code] };
+// The first code request finds no code in this discussion and says so (D124); the regeneration then writes some.
+const nothingCode = json({ nothing: '讨论记录中没有出现任何代码设计或实现要求，没有可整理的代码候选。' });
+const artifactReplies = { '需求文档（PRD）': [prd(), prd('2 栋宿舍楼')], 会议纪要: [invalidMinutes], 行动清单: [actions], 代码候选: [nothingCode, code] };
 const artifactKind = body => /整理「([^」]+)」。只输出 JSON 对象。$/u.exec(body.messages.at(-1).content)?.[1];
 fixture.reply = body => {
   const kind = artifactKind(body);
@@ -208,9 +210,19 @@ async function main() {
     await panelOpen();
     await click('生成…', { scope: '.artifact', which: 0 });
     await until(`document.querySelector('dialog[open] .summary-cost')`, 'code dialog');
-    check((await js(`document.querySelector('dialog[open]').innerText`)).includes('8192 tokens 输出上限'), 'Code gets a larger output limit, stated in the cost');
+    const codeDialog = await js(`document.querySelector('dialog[open]').innerText`);
+    check(codeDialog.includes('8192 tokens 输出上限'), 'Code gets a larger output limit, stated in the cost');
+    check(codeDialog.includes('讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会产生费用。'), 'The dialog says an honest nothing still costs a request');
     await click('生成（发送 1 次请求）');
-    await readerHas('候选 · 待采用', 30000);
+    await readerHas('没有可整理的内容', 30000);
+    const emptyText = await reader();
+    check(emptyText.includes('这不是模型出错') && emptyText.includes('讨论记录中没有出现任何代码设计或实现要求') && !emptyText.includes('校验失败'), 'Nothing of this kind is its own state, with the reason');
+    check(!(await ui.find('采用这一版')) && !(await ui.find('复制 JSON')), 'Nothing to adopt or export');
+    await capture('code-empty', '这场讨论没有涉及代码：模型按约定只回了 {"nothing": 原因}。阅读器显示“没有可整理的内容”（中性灰，不是红色的校验失败），写明这不是模型出错、这一版不能采用或导出，并原样给出模型的说明；底部是“重新生成…”（主按钮）和“自己写一版…”，没有采用和导出。', 'dialog.artifact-reader');
+    await click('重新生成…');
+    await until(`[...document.querySelectorAll('dialog[open] h2')].some(e => e.textContent === '重新生成代码候选')`, 'code regenerate dialog');
+    await click('生成（发送 1 次请求）', { which: 'last' });
+    await readerHas('第 2 版', 30000); await readerHas('候选 · 待采用', 30000);
     const codeText = await reader();
     check(codeText.includes('这些代码只在这里预览：不会执行，也不会写入任何文件。') && codeText.includes('src/pilot/fee.ts') && codeText.includes('riderIncome'), 'Code preview with path and code');
     await capture('code-candidate', '代码候选：顶部写明“只在这里预览：不会执行，也不会写入任何文件”；每个文件显示相对路径、语言和行数，代码用净化后的代码块显示（可复制）。', 'dialog.artifact-reader');
@@ -293,7 +305,7 @@ async function main() {
   await panelOpen();
   const list = await artifactsOf();
   const states = list.map(item => `${item.kind}:${item.versions.map(version => `${version.number}${version.origin[0]}-${version.status}`).join('/')}`).join(' ');
-  check(states === 'prd:1g-exported/2r-exported minutes:1g-invalid/2e-valid actions:1g-valid code:1g-valid', 'Artifacts, versions and states after restart: ' + states);
+  check(states === 'prd:1g-exported/2r-exported minutes:1g-invalid/2e-valid actions:1g-valid code:1g-empty/2r-valid', 'Artifacts, versions and states after restart: ' + states);
   check(list.find(item => item.kind === 'prd').versions[0].affectedNumbers.join() === '1', 'The affected mark survives');
   await capture('restart-panel', '重启应用后重新打开这场讨论：四份产物、各自的版本和状态（有效 · 已导出、你修改的版本、受影响）都在。', '.art-panel');
   await click('打开会议纪要', { prefix: true });
@@ -306,8 +318,9 @@ async function main() {
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
     check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 12, 'Migration 12');
-    check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 6 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 5
-      && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='settled'").pluck().get() === 5, 'Six versions, five settled artifact requests');
+    check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 7 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 6
+      && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='settled'").pluck().get() === 6, 'Seven versions, six settled artifact requests');
+    check(db.prepare("SELECT empty_reason FROM artifact_versions WHERE validation='empty'").pluck().all().join() === '讨论记录中没有出现任何代码设计或实现要求，没有可整理的代码候选。', 'The empty answer and its reason are stored');
     check(db.prepare("SELECT COUNT(*) FROM artifact_exports WHERE target='file'").pluck().get() === 1, 'One file export');
   } finally { db.close(); }
   await finish();
