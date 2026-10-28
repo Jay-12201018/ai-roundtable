@@ -18,14 +18,20 @@ export type LifecycleIpcService = { relaunch(): void };
 
 /** R13B: the usage report and the CSV export; the export writes only the file the user picks in Main's dialog. */
 export type UsageIpcService = { getReport(range?: UsageRange): UsageReport; exportCsv(window: BrowserWindow, range?: UsageRange): Promise<UsageExportResult> };
+import type { ArtifactService } from '../artifact/ArtifactService';
+import type { ArtifactExportInput, ArtifactExportResult } from '../../shared/schemas/artifact';
 import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
+
+/** R14: artifact reads and host writes; a file export asks Main's save dialog, owned by this window. */
+export type ArtifactIpcService = Pick<ArtifactService, 'list' | 'getVersion' | 'adopt' | 'edit' | 'listCodeCandidates'> & {
+  export(window: BrowserWindow, input: ArtifactExportInput): Promise<ArtifactExportResult> };
 
 export type IpcDisposer = (() => void) & { drain(): Promise<void> };
 let currentDisposer: IpcDisposer | undefined;
 
 export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract; usage: UsageIpcService;
-  network?: NetworkIpcService; lifecycle?: LifecycleIpcService }): IpcDisposer {
-  const { run: service, rooms, settings, host, usage, network, lifecycle } = services;
+  network?: NetworkIpcService; lifecycle?: LifecycleIpcService; artifacts?: ArtifactIpcService }): IpcDisposer {
+  const { run: service, rooms, settings, host, usage, network, lifecycle, artifacts } = services;
   const unsupported = (): never => { throw new ContractError('unsupported'); };
   currentDisposer?.();
   let disposed = false;
@@ -70,6 +76,14 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'summary.preview': (input) => service.previewSummary(input),
     'summary.generate': (input) => service.generateSummary(input),
     'summary.confirm': (input) => service.confirmSummary(input),
+    'artifact.preview': (input) => service.previewArtifact(input),
+    'artifact.generate': (input) => service.generateArtifact(input),
+    'artifact.list': (input) => artifacts ? artifacts.list(input) : unsupported(),
+    'artifact.getVersion': (input) => artifacts ? artifacts.getVersion(input) : unsupported(),
+    'artifact.adopt': (input) => artifacts ? artifacts.adopt(input) : unsupported(),
+    'artifact.edit': (input) => artifacts ? artifacts.edit(input) : unsupported(),
+    'artifact.export': (input) => artifacts ? artifacts.export(window, input) : unsupported(),
+    'artifact.listCodeCandidates': (input) => artifacts ? artifacts.listCodeCandidates(input) : unsupported(),
     'rooms.createRoom': (input) => rooms.createRoom(input),
     'rooms.updateRoom': (input) => rooms.updateRoom(input),
     'rooms.getRoomConfiguration': (input) => rooms.getRoomConfiguration(input),
@@ -122,7 +136,8 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         return response;
       })();
       if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.addBudget' || channel === 'run.continueDiscussion'
-        || channel === 'usage.writeOff' || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'network.saveSettings') {
+        || channel === 'usage.writeOff' || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'network.saveSettings'
+        || channel === 'artifact.generate' || channel === 'artifact.adopt' || channel === 'artifact.edit' || channel === 'artifact.export') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
       }

@@ -131,7 +131,8 @@ describe('application lifecycle', () => {
     expect(fixture.database.recoverControlledTrials).toHaveBeenCalledOnce();
     expect(fixture.installTrialMenu).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.trial, expect.any(Function));
     expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) } });
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) },
+      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), adopt: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) } });
   });
 
   it('relaunches only after the 立即重启 call has been answered, and refuses while a discussion or the trial runs', async () => {
@@ -266,7 +267,8 @@ describe('application lifecycle', () => {
 
     expect(fixture.unregister[0]).toHaveBeenCalledTimes(1);
     expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) } });
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) },
+      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), adopt: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) } });
     expect(fixture.windows[1]?.destroyed).toBe(false);
   });
 
@@ -571,7 +573,8 @@ describe('application lifecycle', () => {
     emit('second-instance');
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
     expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) } });
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) },
+      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), adopt: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) } });
     expect(fixture.windows.filter((window) => !window.destroyed)).toHaveLength(1);
   });
 });

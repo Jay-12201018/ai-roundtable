@@ -22,6 +22,7 @@ export { deepSeekTrialReview } from './providers/controlledTrial/estimate';
 import { confirmTrial, installTrialMenu } from './providers/controlledTrial/menu';
 import { ContractError } from '../shared/contracts/errors';
 import { UsageService } from './usage/UsageService';
+import { ArtifactService } from './artifact/ArtifactService';
 // D106: replaceable only by a probe that names itself as a fixture clock before Main starts.
 export { settlementClock } from './usage/pricing';
 
@@ -34,6 +35,7 @@ let settingsService: ProviderSettingsService | undefined;
 let runService: RunService | undefined;
 let hostService: HostService | undefined;
 let usageService: UsageService | undefined;
+let artifactService: ArtifactService | undefined;
 let networkSettings: NetworkSettingsService | undefined;
 let controlledTrial: ControlledTrialService | undefined;
 let shutdownRequested = false;
@@ -83,6 +85,7 @@ if (!hasLock) {
         () => { if (controlledTrial?.isBusy()) throw new ContractError('invalid_state'); },
         member => { try { return modelBudget(member.modelId, member); } catch { return undefined; } });
       usageService = new UsageService(database);
+      artifactService = new ArtifactService(database, runService);
       hostService = new HostService(database, runService);
       controlledTrial = new ControlledTrialService(database, providers, confirmTrial, () => runService?.hasActiveRuns() ?? true);
       installTrialMenu(database, controlledTrial, () => runService?.hasActiveRuns() ?? true);
@@ -104,8 +107,9 @@ if (!hasLock) {
 function createAppWindow(): void {
   if (shutdownRequested) return;
   try {
-    if (!runService || !roomService || !settingsService || !hostService || !usageService) throw new Error('Run service is not initialized');
+    if (!runService || !roomService || !settingsService || !hostService || !usageService || !artifactService) throw new Error('Run service is not initialized');
     const usage = usageService;
+    const artifacts = artifactService;
     disposeCurrentIpc();
     const createdWindow = createMainWindow();
     window = createdWindow;
@@ -115,6 +119,15 @@ function createAppWindow(): void {
         const result = await dialog.showSaveDialog(owner, { title: '导出用量明细', defaultPath: join(app.getPath('documents'), defaultName), filters: [{ name: 'CSV', extensions: ['csv'] }] });
         return result.canceled || !result.filePath ? undefined : result.filePath;
       }, range),
+    }, artifacts: {
+      list: input => artifacts.list(input), getVersion: input => artifacts.getVersion(input), adopt: input => artifacts.adopt(input), edit: input => artifacts.edit(input),
+      listCodeCandidates: input => artifacts.listCodeCandidates(input),
+      // R14: only the file the host picks in this dialog is written; a code candidate is never saved here (R15).
+      export: (owner, input) => artifacts.export(input, async (defaultName, format) => {
+        const result = await dialog.showSaveDialog(owner, { title: '导出产物', defaultPath: join(app.getPath('documents'), defaultName),
+          filters: format === 'markdown' ? [{ name: 'Markdown', extensions: ['md'] }] : [{ name: 'JSON', extensions: ['json'] }] });
+        return result.canceled || !result.filePath ? undefined : result.filePath;
+      }),
     }, network: networkSettings, lifecycle: { relaunch: () => {
       // A restart stops nothing silently: refuse while a discussion or the controlled trial is still running.
       if (runService?.hasActiveRuns() || controlledTrial?.isBusy()) throw new ContractError('invalid_state');

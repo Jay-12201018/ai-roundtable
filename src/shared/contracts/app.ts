@@ -5,6 +5,8 @@ import type { RoomManagementApiContract, ProviderSettingsApiContract } from './c
 import type { HostCommand, HostCommandResult } from '../schemas/host';
 import type { WriteOffChargeInput, WriteOffChargeResult } from '../schemas/budget';
 import type { SummaryCommandResult, SummaryConfirmInput, SummaryGenerateInput, SummaryPreview, SummaryPreviewInput } from '../schemas/summary';
+import type { ArtifactAdoptInput, ArtifactCommandResult, ArtifactEditInput, ArtifactExportInput, ArtifactExportResult, ArtifactGenerateInput, ArtifactList, ArtifactListInput,
+  ArtifactPreview, ArtifactPreviewInput, ArtifactVersionDetail, ArtifactVersionInput, CodeCandidateList } from '../schemas/artifact';
 import type { UsageExportResult, UsageRange, UsageReport } from '../schemas/usage';
 import type { NetworkSettings, ProxyEndpoint, ProxySettings, ProxyTestResult } from '../schemas/network';
 
@@ -31,6 +33,19 @@ export interface SummaryApiContract {
   generate(input: SummaryGenerateInput): Promise<SummaryCommandResult>;
   confirm(input: SummaryConfirmInput): Promise<SummaryCommandResult>;
 }
+/** R14 structured artifacts: generation is an explicit, budgeted request; a model's version needs the host's adoption. */
+export interface ArtifactApiContract {
+  preview(input: ArtifactPreviewInput): Promise<ArtifactPreview>;
+  generate(input: ArtifactGenerateInput): Promise<ArtifactCommandResult>;
+  list(input: ArtifactListInput): Promise<ArtifactList>;
+  getVersion(input: ArtifactVersionInput): Promise<ArtifactVersionDetail>;
+  adopt(input: ArtifactAdoptInput): Promise<ArtifactCommandResult>;
+  edit(input: ArtifactEditInput): Promise<ArtifactCommandResult>;
+  /** Clipboard returns the text to copy; a file is saved by Main to the path the host picks (never for code). */
+  export(input: ArtifactExportInput): Promise<ArtifactExportResult>;
+  /** D123: validated code candidates for R15; nothing has been written or run. */
+  listCodeCandidates(input: ArtifactListInput): Promise<CodeCandidateList>;
+}
 /** D115: the local proxy settings; saved for the next launch, never applied to this one. */
 export interface NetworkApiContract {
   getSettings(): Promise<NetworkSettings>;
@@ -46,6 +61,8 @@ export interface RoundtableApiContract {
   room: RoomApiContract;
   host: HostApiContract;
   summary: SummaryApiContract;
+  /** Optional for pages built before R14; Preload always provides it. */
+  artifact?: ArtifactApiContract;
   usage: UsageApiContract;
   run: RunApiContract;
   rooms: RoomManagementApiContract;

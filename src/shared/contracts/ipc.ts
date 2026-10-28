@@ -12,6 +12,8 @@ import { addRunBudgetInputSchema, addRunBudgetResultSchema, writeOffChargeInputS
 import { summaryCommandResultSchema, summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, summaryPreviewSchema } from '../schemas/summary';
 import { usageExportResultSchema, usageReportInputSchema, usageReportSchema } from '../schemas/usage';
 import { networkSettingsSchema, proxyEndpointSchema, proxySettingsSchema, proxyTestResultSchema } from '../schemas/network';
+import { artifactAdoptInputSchema, artifactCommandResultSchema, artifactEditInputSchema, artifactExportInputSchema, artifactExportResultSchema, artifactGenerateInputSchema,
+  artifactListInputSchema, artifactListSchema, artifactPreviewInputSchema, artifactPreviewSchema, artifactVersionDetailSchema, artifactVersionInputSchema, codeCandidateListSchema } from '../schemas/artifact';
 import { continuationPreviewInputSchema, continuationPreviewSchema, continueDiscussionInputSchema, continueDiscussionResultSchema } from '../schemas/continuation';
 
 export function ipcResponseSchema<T extends z.ZodType>(data: T) {
@@ -47,6 +49,16 @@ export const ipcContracts = {
   'summary.preview': { input: summaryPreviewInputSchema, output: summaryPreviewSchema },
   'summary.generate': { input: summaryGenerateInputSchema, output: summaryCommandResultSchema },
   'summary.confirm': { input: summaryConfirmInputSchema, output: summaryCommandResultSchema },
+  // R14: structured artifacts. Generation is an explicit, budgeted request; adopt/edit/export are trusted host writes.
+  'artifact.preview': { input: artifactPreviewInputSchema, output: artifactPreviewSchema },
+  'artifact.generate': { input: artifactGenerateInputSchema, output: artifactCommandResultSchema },
+  'artifact.list': { input: artifactListInputSchema, output: artifactListSchema },
+  'artifact.getVersion': { input: artifactVersionInputSchema, output: artifactVersionDetailSchema },
+  'artifact.adopt': { input: artifactAdoptInputSchema, output: artifactCommandResultSchema },
+  'artifact.edit': { input: artifactEditInputSchema, output: artifactCommandResultSchema },
+  'artifact.export': { input: artifactExportInputSchema, output: artifactExportResultSchema },
+  // D123: the validated code candidates R15 may consume; read-only.
+  'artifact.listCodeCandidates': { input: artifactListInputSchema, output: codeCandidateListSchema },
   'rooms.createRoom': roomManagementContracts.createRoom,
   'rooms.updateRoom': roomManagementContracts.updateRoom,
   'rooms.getRoomConfiguration': roomManagementContracts.getRoomConfiguration,
@@ -118,6 +130,17 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
   }
   if (channel === 'run.addBudget' || channel === 'run.previewContinuation' || channel === 'summary.preview' || channel === 'summary.generate' || channel === 'summary.confirm') {
     matches = (data as { runId: string }).runId === (input as { runId: string }).runId;
+  }
+  if (channel.startsWith('artifact.')) {
+    const request = input as { runId: string; versionId?: string; kind?: string; artifactId?: string };
+    const result = data as { runId: string; versionId?: string; kind?: string; artifactId?: string; version?: { versionId: string };
+      artifacts?: Array<{ runId: string }>; candidates?: Array<{ runId: string }> };
+    matches = result.runId === request.runId
+      && (channel !== 'artifact.getVersion' || result.version?.versionId === request.versionId)
+      && (channel !== 'artifact.export' || result.versionId === request.versionId)
+      && (channel !== 'artifact.preview' || result.kind === request.kind)
+      && (channel !== 'artifact.generate' || request.artifactId === undefined || result.artifactId === request.artifactId)
+      && (result.artifacts ?? result.candidates ?? []).every(item => item.runId === request.runId);
   }
   if (channel === 'usage.writeOff') {
     const result = data as IpcOutput<'usage.writeOff'>;
