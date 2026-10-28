@@ -937,16 +937,17 @@ export class RunService {
 
   /**
    * Streams one artifact request into its version and validates the complete output once (D119). Output is persisted
-   * at least every 2 KB while it streams, so an interrupted request keeps nearly all of what arrived.
+   * on the first text, then every 2 KB or every second, so the reader shows progress and an interrupted request keeps
+   * nearly all of what arrived without rewriting a long output on every fragment.
    */
   private async executeArtifact(context: RunContext, member: MemberSnapshot, request: { requestId: string; versionId: string; artifactId: string; kind: ArtifactKind;
     numbers: number[]; input: StreamChatInput; quote?: RequestQuote }): Promise<void> {
     const { requestId, versionId, artifactId } = request;
-    let persisted = 0;
+    let persisted = 0; let persistedAt = 0;
     await this.streamSideRequest(context, member, request, {
       text: content => {
-        if (content.length - persisted < 2048) return;
-        this.database.setArtifactOutput(versionId, content); persisted = content.length;
+        if (persisted > 0 && content.length - persisted < 2048 && Date.now() - persistedAt < 1000) return;
+        this.database.setArtifactOutput(versionId, content); persisted = content.length; persistedAt = Date.now();
       },
       completed: (content, reason) => {
         this.database.setArtifactOutput(versionId, content);
