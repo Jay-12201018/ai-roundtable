@@ -181,7 +181,8 @@ async function main() {
   await click('运行详情（排查问题时用）', { selector: 'summary' });
   await click('产物', { selector: '[role=tab]' });
   const panelText = await js(`document.querySelector('.run-panel').innerText`);
-  check(panelText.includes('即将推出') && !/R1[45]/u.test(panelText), 'Artifacts tab says 即将推出 without development terms');
+  // R14: the artifacts tab is live; it states the cost and the adoption rule, without development terms.
+  check(panelText.includes('整理成…') && panelText.includes('每次生成发送 1 次请求') && panelText.includes('模型写的版本要你采用后才算数') && !panelText.includes('即将推出') && !/R1[45]/u.test(panelText), 'Artifacts tab states cost and adoption without development terms');
   await click('进度', { selector: '[role=tab]' });
 
   // ── 9. Summary: dialog with coverage and cost; nothing is sent until the button ─

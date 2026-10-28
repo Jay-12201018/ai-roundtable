@@ -109,7 +109,9 @@ async function main() {
     // R12 added the host group: exactly one typed method, no generic invoke/send.
     // R13B added the summary and usage groups (typed methods only).
     // R16 batch 2 added network and app (saved proxy settings, a keyless proxy check, relaunch; D115).
-    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app','host','network','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    // R14 added artifact (typed methods only; a file export asks Main's save dialog).
+    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app','artifact','host','network','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    check(JSON.stringify(Object.keys(api.artifact)) === JSON.stringify(['preview','generate','list','getVersion','adopt','edit','export','listCodeCandidates']), 'Unexpected artifact surface');
     check(JSON.stringify(Object.keys(api.network)) === JSON.stringify(['getSettings','saveSettings','testProxy']) && JSON.stringify(Object.keys(api.app)) === JSON.stringify(['relaunch']), 'Unexpected network/app surface');
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview','generate','confirm']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport','writeOff','exportCsv']), 'Unexpected summary/usage surface');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host surface');
@@ -118,7 +120,7 @@ async function main() {
     check(JSON.stringify(Object.keys(api.rooms).sort()) === JSON.stringify(rooms), 'Unexpected rooms surface');
     check(JSON.stringify(Object.keys(api.settings).sort()) === JSON.stringify(settings), 'Unexpected settings surface');
     check(!('invoke' in api) && !('send' in api) && !('resolveKey' in api.settings) && !('invoke' in api.host) && !('send' in api.host)
-      && !('invoke' in api.summary) && !('invoke' in api.usage) && !('invoke' in api.network) && !('invoke' in api.app), 'Unrestricted capability exposed');
+      && !('invoke' in api.summary) && !('invoke' in api.usage) && !('invoke' in api.network) && !('invoke' in api.app) && !('invoke' in api.artifact), 'Unrestricted capability exposed');
     const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     check(csp.includes("connect-src 'none';") && !/unsafe-eval|localhost|127\\.0\\.0\\.1/u.test(csp), 'Production CSP broadened');
     return { groups: Object.keys(api).sort(), rooms: Object.keys(api.rooms).sort(), settings: Object.keys(api.settings).sort(), csp };
