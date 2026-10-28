@@ -164,12 +164,14 @@ async function main() {
     await readerHas('格式检查没有通过', 30000);
     const invalidText = await reader();
     check(invalidText.includes('参与者') && invalidText.includes('应该是列表') && invalidText.includes('决策 第 1 项 › 决定人') && invalidText.includes('缺少这个字段'), 'Errors name the fields');
-    check(await js(`document.querySelectorAll('dialog.artifact-reader .art-raw > span.is-bad').length >= 2`), 'The raw output marks the lines');
+    check(invalidText.includes('格式检查没有通过：3 处问题') && invalidText.includes('第 7 条不在这次依据的发言里（第 1–3 条）'), 'The out-of-range source is listed with the schema errors, all at once');
+    check(await js(`document.querySelectorAll('dialog.artifact-reader .art-issues li').length === 3`), 'Exactly three problems, none repeated');
+    check(await js(`document.querySelectorAll('dialog.artifact-reader .art-raw > span.is-bad').length >= 3`), 'The raw output marks the lines');
     check(await js(`document.querySelector('dialog.artifact-reader .art-raw').innerText.includes('\`\`\`json')`), 'The raw output is kept exactly, fence included');
     const afterInvalid = fixture.requests.length;
     await sleep(1500);
     check(fixture.requests.length === afterInvalid, 'No automatic retry after an invalid output');
-    await capture('minutes-invalid', '会议纪要的夹具故意返回不合格的 JSON：状态“校验失败”，写明有几处问题、原始输出完整保留、没有自动重试。问题逐条列出字段和行号（“参与者：应该是列表”“决策 第 1 项 › 决定人：缺少这个字段（不知道就写 null，不能省略）”），原始输出带行号并把出错的行标红。主按钮“修改为有效版本…”。等待 1.5 秒确认没有自动重发。', 'dialog.artifact-reader');
+    await capture('minutes-invalid', '会议纪要的夹具故意返回不合格的 JSON：状态“校验失败”，写明有几处问题、原始输出完整保留、没有自动重试。三处问题一次列全，每条写明字段和行号：“参与者：应该是列表”“决策 第 1 项 › 决定人：缺少这个字段（不知道就写 null，不能省略）”，以及结论第 2 项引用了不存在的“第 7 条”（这次依据第 1–3 条）——来源编号和格式错误同时检查，不用改完前两处才发现第三处。原始输出带行号并把出错的行标红。主按钮“修改为有效版本…”。等待 1.5 秒确认没有自动重发。', 'dialog.artifact-reader');
     await click('修改为有效版本…');
     await until(`document.querySelector('.art-json')`, 'editor');
     await field('产物 JSON'); await selectAll();
@@ -177,7 +179,7 @@ async function main() {
     await type(halfFixed);
     await until(`document.querySelector('.art-check')?.innerText.includes('还有 1 处问题')`, 'one issue left');
     check((await reader()).includes('第 7 条不在这次依据的发言里（第 1–3 条）'), 'The cited number must exist');
-    await capture('minutes-editing', '点“修改为有效版本…”：在带实时校验的 JSON 编辑框里修改。改好“参与者”（写成列表）和“决定人”（讨论没说，写 null 表示未知）后，校验立刻指出还剩 1 处：结论第 2 项引用了不存在的“第 7 条”（这次依据第 1–3 条）。每处问题前的“第 N 行”可以点，光标直接跳到那一行。“保存为新版本”在校验通过前不可用。', 'dialog.artifact-reader');
+    await capture('minutes-editing', '点“修改为有效版本…”：在带实时校验的 JSON 编辑框里修改。改好“参与者”（写成列表）和“决定人”（讨论没说，写 null 表示未知）后，实时校验显示只剩一开始就列出的那 1 处：结论第 2 项引用了不存在的“第 7 条”（这次依据第 1–3 条）。每处问题前的“第 N 行”可以点，光标直接跳到那一行。“保存为新版本”在校验通过前不可用。', 'dialog.artifact-reader');
     await click('第', { selector: '.art-issues button', prefix: true });
     check(await js(`document.activeElement === document.querySelector('.art-json') && document.activeElement.selectionEnd > document.activeElement.selectionStart`), 'Clicking the line number selects that line');
     await selectAll(); await type(halfFixed.replace('"sources": [\n        7\n      ]', '"sources": [\n        3\n      ]'));
