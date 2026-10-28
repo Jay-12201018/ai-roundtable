@@ -9,7 +9,7 @@ import { validDocuments, text } from '../../unit/artifacts/fixtures';
 afterEach(closeR13bFixtures);
 const isArtifact = (body: Record<string, unknown>) => JSON.stringify(body.messages).includes('【请输出 JSON】');
 // Two messages in these Runs, so the list cites only 1 and 2.
-const twoMessageActions = { ...validDocuments.actions, items: validDocuments.actions.items.map(item => ({ ...(item as object), sources: [1, 2] })) };
+const twoMessageActions = { ...validDocuments.actions, items: (validDocuments.actions.items as Array<Record<string, unknown>>).map(item => ({ ...item, sources: [1, 2] })) };
 
 describe('artifact requests are budgeted and settled like Turns (D120)', () => {
   it('quotes, refuses beyond the budget, then reserves, settles and reports an artifact request as its own kind', async () => {
@@ -40,7 +40,7 @@ describe('artifact requests are budgeted and settled like Turns (D120)', () => {
     const report = usage.getReport();
     expect(report.byKind).toEqual([expect.objectContaining({ kind: 'turn', requests: 2 }), expect.objectContaining({ kind: 'artifact', requests: 1, settled: expect.objectContaining({ amountMicro: 648 }) })]);
     expect(report.totals.totalMicro).toBe(snapshot.budget!.settledMicro + snapshot.budget!.unknownMicro);
-    expect(usage.csv().text.split('\r\n').find(line => line.startsWith(result.requestId))).toContain(',产物,');
+    expect(usage.csv().text.split('\r\n').find(line => line.startsWith(result.requestId!))).toContain(',产物,');
   });
 
   it('counts a stopped artifact request as unknown at its cap; a write-off applies to it like any request', async () => {

@@ -98,6 +98,6 @@ describe('artifact schemas and parser (D119)', () => {
   it('treats Markdown, HTML and script as plain text: valid content, nothing interpreted', () => {
     const minutes = clone(validDocuments.minutes); minutes.summary = '<script>alert(1)</script> **粗体** <img src=x onerror=alert(2)>';
     const result = parseArtifact('minutes', text(minutes));
-    expect(result.ok && result.content.summary).toBe('<script>alert(1)</script> **粗体** <img src=x onerror=alert(2)>');
+    expect(result.ok && (result.content as { summary: string }).summary).toBe('<script>alert(1)</script> **粗体** <img src=x onerror=alert(2)>');
   });
 });
