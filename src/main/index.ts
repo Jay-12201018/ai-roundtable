@@ -118,7 +118,8 @@ function createAppWindow(): void {
     }, network: networkSettings, lifecycle: { relaunch: () => {
       // A restart stops nothing silently: refuse while a discussion or the controlled trial is still running.
       if (runService?.hasActiveRuns() || controlledTrial?.isBusy()) throw new ContractError('invalid_state');
-      app.relaunch(); app.quit();
+      // Answer this call first (registerIpc checks the sender again before replying); quitting destroys the window.
+      setImmediate(() => { app.relaunch(); app.quit(); });
     } } });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {

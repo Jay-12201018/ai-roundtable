@@ -37,7 +37,7 @@ const fixture = vi.hoisted(() => {
     windows: [] as Window[],
     ready: false,
     resolveReady: () => {},
-    app: { requestSingleInstanceLock: vi.fn(), on: vi.fn(), whenReady: vi.fn(), isReady: vi.fn(), getPath: vi.fn(), quit: vi.fn(), exit: vi.fn() },
+    app: { requestSingleInstanceLock: vi.fn(), on: vi.fn(), whenReady: vi.fn(), isReady: vi.fn(), getPath: vi.fn(), quit: vi.fn(), exit: vi.fn(), relaunch: vi.fn() },
     dialog: { showErrorBox: vi.fn(), showMessageBoxSync: vi.fn() },
     database: { initialize: vi.fn(), purgeKeyLikeModelIds: vi.fn(() => 0), markInFlightRunsInterrupted: vi.fn(), recoverControlledTrials: vi.fn(), close: vi.fn() },
     service: { shutdown: vi.fn(), hasActiveRuns: vi.fn() },
@@ -132,6 +132,23 @@ describe('application lifecycle', () => {
     expect(fixture.installTrialMenu).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.trial, expect.any(Function));
     expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
       usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) } });
+  });
+
+  it('relaunches only after the 立即重启 call has been answered, and refuses while a discussion or the trial runs', async () => {
+    await startApp();
+    const { relaunch } = fixture.registerIpc.mock.calls[0][1].lifecycle as { relaunch: () => void };
+    fixture.service.hasActiveRuns.mockReturnValueOnce(true);
+    expect(() => relaunch()).toThrow(expect.objectContaining({ code: 'invalid_state' }));
+    fixture.trial.isBusy.mockReturnValueOnce(true);
+    expect(() => relaunch()).toThrow(expect.objectContaining({ code: 'invalid_state' }));
+    await new Promise(resolve => setImmediate(resolve));
+    expect(fixture.app.relaunch).not.toHaveBeenCalled();
+    // The handler returns at once; the window (and the IPC sender check) still exist until the next turn of the loop.
+    expect(relaunch()).toBeUndefined();
+    expect(fixture.app.relaunch).not.toHaveBeenCalled(); expect(fixture.app.quit).not.toHaveBeenCalled();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(fixture.app.relaunch).toHaveBeenCalledOnce(); expect(fixture.app.quit).toHaveBeenCalledOnce();
+    expect(fixture.app.relaunch.mock.invocationCallOrder[0]).toBeLessThan(fixture.app.quit.mock.invocationCallOrder[0]);
   });
 
   it('clears key-like model IDs after initialization and before any window or IPC, logging only the count', async () => {
