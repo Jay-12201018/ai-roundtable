@@ -413,3 +413,19 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Renderer | 已结束的讨论保留主持人输入框，进入"继续讨论"模式（预计谁回应、预计最高花费、预算不足时指向追加预算）；「新讨论」是唯一另开一场的入口；"下一位"显示插入的一轮和之后回到谁；本场信息按计划回合计数并单列插入的回合；时间线标出"继续讨论"的回合和主持人的话 | — |
 
 安全影响：继续只能由主持人在可信 UI 中发出，带 clientRequestId 幂等、指纹防止挪用；模型文本不能触发继续或点名。每次回答仍按冻结成员、既有生成门禁、发送前预留与结算执行，不自动重发中断的请求；Key 不进入 Renderer。
+
+## R16 第二批：设置、房间、首次使用与用量（2026-10-28，子会话候选，未合 main）
+
+分支 `codex/r16-batch2`（基线 `29b4e84`）。决策见 [DECISIONS](DECISIONS.md) D113–D117。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Database / migration 11 | 新表 `provider_target_approvals(provider_id 主键 → providers ON DELETE CASCADE, kind CHECK 真实类型, base_url, key_revision, confirmed_at)`；`Database.saveTargetApproval / getTargetApproval`；改地址或类型（`writeProvider` targetChanged）、`replaceProviderKey`（换 Key 与删 Key 都走这里）、`deleteProvider` 都删除这一行；`validateDatabase` 增加 v11 检查（`Invalid target approval`） | 新表，不改已发布 migration；旧数据库升级后没有任何批准行，第一次讨论前需确认一次 |
+| Shared `schemas/network.ts`（新） | `proxySettingsSchema {enabled, host: '127.0.0.1'\|'::1', port 1–65535, trustProxyDns}`（开启时必须 `trustProxyDns: true`）、`proxyEndpointSchema`、`networkSettingsSchema {saved, effective{source: environment/settings/none, proxy}, restartRequired, savedInvalid}`、`proxyTestResultSchema {ok, target: 'api.deepseek.com', failure?: refused/rejected/timeout}` | 新文件 |
+| Shared `schemas/configuration.ts` | `modelReadinessSchema {modelId, price: reviewed/unreviewed/free, priceReviewedAt, usable, blockedBy: disabled/invalid/price/key/target/null}`、`providerReadinessSchema {providerId, keyState, targetConfirmed, confirmedBaseUrl, models}` | 只增 |
+| Shared `schemas/usage.ts` | `usageReportInputSchema {since?, until?}`（左闭右开，`since < until`） | 输入可省略，省略时与原行为相同 |
+| IPC / Preload | 新通道 `settings.listModelReadiness`（只读）、`network.getSettings`（只读）、`network.saveSettings`、`network.testProxy`、`app.relaunch`；`usage.getReport` / `usage.exportCsv` 接受可选范围。Preload 新增 `network`、`app` 两组受限方法（无通用 invoke/send）；`SettingsApiContract.listModelReadiness`、`network`、`app` 在契约类型上是可选成员，便于既有夹具编译 | 新增通道；未注册服务时返回 `unsupported` |
+| Main | `ProviderRegistry` 批准持久化（D113）、`approvedPolicy()` / `confirmedTarget()`；`ProviderSettingsService.listModelReadiness`；`NetworkSettingsService`（D115，`index.ts` 启动时构造并把 `proxy` 交给 Provider 网络栈）；`app.relaunch` 在有运行或试发进行中时拒绝；`UsageService` 按范围过滤 | 生成门禁规则不变，只是批准来源从内存改为数据库 |
+| Renderer | 设置页（服务列表 + 卡片详情、三步连接向导、网络与代理、外观、数据与隐私）；房间单页、成员对话框与角色模板、讨论方式对话框（D116 本机记忆）；欢迎页与演示 / 首个房间自动创建；用量页时间范围。旧 `SettingsFeature` 与房间管理页删除 | localStorage 新键 `roundtable.workflow.<roomId>` |
+
+安全影响：明文 Key 仍只在输入框和 Main 的必需调用中出现，保存后输入框清空；批准与 Key 修订号绑定，Key 或地址变化即失效；代理只允许本机地址且仅用于固定官方地址，检测不发送 Key 或内容；重启由主持人显式触发。
