@@ -174,25 +174,34 @@ export function parseArtifact(kind: ArtifactKind, raw: string, options: { source
       const path = issue.code === 'unrecognized_keys' && issue.keys.length === 1 ? [...issue.path, issue.keys[0]] : issue.path;
       issues.push({ path: formatIssuePath(path), label: issueLabel(path), message: zodMessage(issue, located.value), ...locate(path) });
     }
-  } else if (options.sourceNumbers) {
-    // D121: an item may only cite messages this version is based on.
+  }
+  if (options.sourceNumbers) {
+    // D121: an item may only cite messages this version is based on. Checked on what was read even when other fields
+    // are wrong, so every problem is listed at once; a sources list that already has a schema problem is left to it.
     const allowed = new Set(options.sourceNumbers);
     const range = options.sourceNumbers.length ? `第 ${Math.min(...options.sourceNumbers)}–${Math.max(...options.sourceNumbers)} 条` : '没有可引用的发言';
+    const reported = issues.map(issue => issue.path);
+    const covered = (path: string) => reported.some(item => item === path || item.startsWith(`${path}[`) || item.startsWith(`${path}.`) || path.startsWith(`${item}[`) || path.startsWith(`${item}.`));
     const visit = (value: unknown, path: Array<string | number>) => {
       if (Array.isArray(value)) value.forEach((item, index) => visit(item, [...path, index]));
       else if (value !== null && typeof value === 'object') {
         for (const [key, nested] of Object.entries(value)) {
-          if (key === 'sources' && Array.isArray(nested)) nested.forEach((number, index) => {
-            if (!allowed.has(number as number)) issues.push({ path: formatIssuePath([...path, key, index]), label: issueLabel([...path, key, index]),
-              message: `第 ${String(number)} 条不在这次依据的发言里（${range}）`, ...locate([...path, key, index]) });
-          });
-          else if (key !== 'content') visit(nested, [...path, key]);
+          if (key === 'sources' && Array.isArray(nested)) {
+            if (covered(formatIssuePath([...path, key]))) continue;
+            nested.forEach((number, index) => {
+              if (!allowed.has(number as number)) issues.push({ path: formatIssuePath([...path, key, index]), label: issueLabel([...path, key, index]),
+                message: `第 ${String(number)} 条不在这次依据的发言里（${range}）`, ...locate([...path, key, index]) });
+            });
+          } else if (key !== 'content') visit(nested, [...path, key]);
         }
       }
     };
-    visit(parsed.data, []);
+    visit(parsed.success ? parsed.data : located.value, []);
   }
-  if (issues.length) return { ok: false, issues: issues.slice(0, MAX_ARTIFACT_ISSUES) };
+  // In reading order; problems of the whole document (no line) first.
+  if (issues.length) return { ok: false, issues: issues.map((issue, index) => ({ issue, index })).sort((a, b) => (a.issue.line ?? 0) - (b.issue.line ?? 0) || a.index - b.index)
+    .map(item => item.issue).slice(0, MAX_ARTIFACT_ISSUES) };
+  if (!parsed.success) throw new Error('unreachable: a failed schema always has issues');
   const content = parsed.data as ArtifactContent;
   return { ok: true, content, json: JSON.stringify(content, null, 2) };
 }

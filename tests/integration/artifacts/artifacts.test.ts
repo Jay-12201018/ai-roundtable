@@ -155,6 +155,23 @@ describe('structured artifacts (D118–D123)', () => {
     expect(detail.sources.map(source => [source.number, source.active])).toEqual([[1, true], [2, true], [3, true]]);
   });
 
+  it('sends the rule about revision notes only when the request carries such a note (D112)', async () => {
+    const f = setup();
+    const runId = await finished(f);
+    const rule = '标注“已由主持人修改”的发言';
+    await generate(f, runId, 'prd', 'g1');
+    const plain = f.provider.inputs.at(-1)!.messages[1].content;
+    expect(plain).not.toContain(rule);
+    // The remaining rules stay numbered without a gap.
+    expect(plain).toMatch(/\n4\. sources 写这条内容依据的发言编号[^]*\n5\. 内容用简体中文/u);
+    await f.command({ runId, kind: 'editMessage', messageId: f.run.getSnapshot(runId).turns[1].messageId!, content: '主持人改过的第二条' });
+    await generate(f, runId, 'minutes', 'g2');
+    const revised = f.provider.inputs.at(-1)!;
+    expect(revised.messages[1].content).toContain(rule);
+    expect(revised.messages[1].content).toMatch(/\n5\. 标注“已由主持人修改”的发言[^]*\n6\. 内容用简体中文/u);
+    expect(revised.messages.at(-1)!.content).toContain('（此发言已由主持人修改');
+  });
+
   it('uses a confirmed summary for the messages it covers and still tracks the originals behind it', async () => {
     const f = setup();
     const { runId } = await startFree(f, { mode: 'automatic', maxTurns: 5 });

@@ -84,6 +84,22 @@ describe('artifact schemas and parser (D119)', () => {
     expect(fails('minutes', text(zero))[0]).toMatchObject({ path: 'conclusions[0].sources[0]' });
   });
 
+  it('lists out-of-range sources together with schema errors, without repeating a mistyped list', () => {
+    const minutes = clone(validDocuments.minutes) as Record<string, unknown> & { conclusions: Array<{ sources: unknown }>; openIssues: Array<{ sources: unknown }> };
+    minutes.participants = '起草者、审查者';
+    minutes.conclusions[0].sources = [7];
+    minutes.openIssues[0].sources = ['第 2 条'];
+    const issues = fails('minutes', text(minutes), { sourceNumbers: [1, 2, 3] });
+    expect(issues.map(issue => [issue.path, issue.message])).toEqual([
+      ['participants', '应该是列表'],
+      ['conclusions[0].sources[0]', '第 7 条不在这次依据的发言里（第 1–3 条）'],
+      ['openIssues[0].sources[0]', '应该是数字'],
+    ]);
+    // In reading order.
+    expect(issues.map(issue => issue.line!)).toEqual([...issues.map(issue => issue.line!)].sort((a, b) => a - b));
+    expect(issues.every(issue => issue.line !== undefined)).toBe(true);
+  });
+
   it('accepts only relative candidate paths and bounded code', () => {
     for (const path of ['/etc/passwd', '../escape.ts', 'a//b.ts', 'C:\\x.ts', '~/x', 'a/./b']) {
       const code = clone(validDocuments.code) as { files: Array<Record<string, unknown>> }; code.files[0].path = path;
