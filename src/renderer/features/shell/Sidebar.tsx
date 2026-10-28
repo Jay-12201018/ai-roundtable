@@ -15,36 +15,43 @@ export function useRoomDirectory(api: RoomManagementApiContract, roomId: string 
   const [counts, setCounts] = useState<ReadonlyMap<string, number>>(new Map());
   const [runs, setRuns] = useState<{ roomId: string; items: RunSummary[] }>();
   const [failed, setFailed] = useState(false);
+  const [runsFailed, setRunsFailed] = useState(false);
   const request = useRef(0);
   const load = useCallback(async () => {
     const token = ++request.current;
+    let list: RoomConfiguration[];
     try {
       const all = await api.listRooms({ includeArchived: true });
       if (token !== request.current) return;
-      const list = Array.isArray(all) ? all : [];
+      list = Array.isArray(all) ? all : [];
       setRooms(list.filter(room => !room.archivedAt)); setArchived(list.filter(room => room.archivedAt)); setFailed(false);
-      // Members who take part (enabled, not archived) per room; a room whose members fail to load shows no count.
-      void Promise.all(list.map(room => api.listAgentConfigurations({ roomId: room.id }).then(agents => [room.id, agents.filter(agent => agent.enabled && !agent.archivedAt).length] as const, () => undefined)))
-        .then(rows => { if (token === request.current) setCounts(new Map(rows.filter((row): row is readonly [string, number] => Boolean(row)))); });
-      if (!roomId) { setRuns(undefined); return; }
-      // Pages come oldest first; read up to 500 so the newest discussions are known.
+    } catch { if (token === request.current) setFailed(true); return; }
+    // Members who take part (enabled, not archived) per room; a room whose members fail to load shows no count.
+    void Promise.all(list.map(room => api.listAgentConfigurations({ roomId: room.id }).then(agents => [room.id, agents.filter(agent => agent.enabled && !agent.archivedAt).length] as const, () => undefined)))
+      .then(rows => { if (token === request.current) setCounts(new Map(rows.filter((row): row is readonly [string, number] => Boolean(row)))); });
+    if (!roomId) { setRuns(undefined); setRunsFailed(false); return; }
+    // Pages come oldest first, so read them all: only the last page holds the newest discussions, and the room page
+    // counts and lists every one. A page that fails (or a cursor that does not move) leaves the list unread, never cut short.
+    try {
       const items: RunSummary[] = []; let cursor: Parameters<RoomManagementApiContract['listRoomRuns']>[0]['cursor'];
-      for (let page = 0; page < 5; page++) {
+      for (;;) {
         const result = await api.listRoomRuns({ roomId, limit: 100, ...(cursor ? { cursor } : {}) });
-        if (!result) break;
+        if (token !== request.current) return;
+        if (!result) throw new Error('No page');
         items.push(...result.items);
-        if (!result.hasMore || !result.nextCursor) break;
+        if (!result.hasMore) break;
+        if (!result.nextCursor || JSON.stringify(result.nextCursor) === JSON.stringify(cursor)) throw new Error('Cursor did not advance');
         cursor = result.nextCursor;
       }
-      if (token === request.current) setRuns({ roomId, items: items.reverse() });
-    } catch { if (token === request.current) setFailed(true); }
+      setRuns({ roomId, items: items.reverse() }); setRunsFailed(false);
+    } catch { if (token === request.current) setRunsFailed(true); }
   }, [api, roomId]);
   useEffect(() => { void load(); }, [load, refreshKey]);
-  return { rooms, archived, counts, runs: runs && runs.roomId === roomId ? runs.items : [], runsLoaded: runs?.roomId === roomId, failed, reload: load };
+  return { rooms, archived, counts, runs: runs && runs.roomId === roomId ? runs.items : [], runsLoaded: runs?.roomId === roomId, failed, runsFailed, reload: load };
 }
 
 type Props = {
-  rooms?: RoomConfiguration[]; archived?: RoomConfiguration[]; counts?: ReadonlyMap<string, number>; runs: RunSummary[]; failed: boolean; onRetry: () => void;
+  rooms?: RoomConfiguration[]; archived?: RoomConfiguration[]; counts?: ReadonlyMap<string, number>; runs: RunSummary[]; failed: boolean; runsFailed?: boolean; onRetry: () => void;
   roomId?: string; runId?: string; page: string; ready: boolean; monthSpend?: string; noRealProvider?: boolean; emptyText?: string;
   onOpenRoom: (id: string) => void; onSelectRun: (id: string) => void; onNewDiscussion: () => void; onNewRoom: () => void;
   onOpenUsage: () => void; onOpenSettings: () => void; onHome?: () => void;
@@ -52,7 +59,7 @@ type Props = {
 };
 
 /** Left navigation: rooms with their member counts and, under the current room, its discussions; usage and settings at the bottom. */
-export function Sidebar({ rooms, archived = [], counts, runs, failed, onRetry, roomId, runId, page, ready, monthSpend, noRealProvider, emptyText, onOpenRoom, onSelectRun, onNewDiscussion, onNewRoom, onOpenUsage, onOpenSettings, onHome, onCollapse, onClose }: Props) {
+export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed, onRetry, roomId, runId, page, ready, monthSpend, noRealProvider, emptyText, onOpenRoom, onSelectRun, onNewDiscussion, onNewRoom, onOpenUsage, onOpenSettings, onHome, onCollapse, onClose }: Props) {
   const [showAll, setShowAll] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   useEffect(() => setShowAll(false), [roomId]);
@@ -65,7 +72,8 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, onRetry, r
         disabled={!ready} onClick={() => onOpenRoom(room.id)} title={room.objective || room.name}>
         <Users aria-hidden size={16} /><span className="t">{room.name}</span>{count !== undefined && <span className="meta" id={`sb-count-${room.id}`} title={`${count} 位成员参与讨论（不含暂停参与的）`}>{count} 人</span>}</button>
       {current && !room.archivedAt && <ul className="sb-runs" aria-label={`${room.name} 的讨论记录`}>
-        {runs.length === 0 && <li className="sb-empty small">还没有讨论。写下目标就能开始第一场。</li>}
+        {runsFailed && <li className="sb-empty small" role="alert">讨论记录没有读完。<button type="button" className="link-btn" onClick={onRetry}>重试</button></li>}
+        {runs.length === 0 && !runsFailed && <li className="sb-empty small">还没有讨论。写下目标就能开始第一场。</li>}
         {shown.map(run => <li key={run.id}>
           <button type="button" className="sb-item" aria-current={run.id === runId && page === 'discussion' ? 'page' : undefined} onClick={() => onSelectRun(run.id)}
             title={`${run.task ?? '旧任务（目标未知）'} · ${statusLabels[run.status] ?? run.status}`}>
