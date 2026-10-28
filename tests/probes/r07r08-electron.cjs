@@ -108,15 +108,17 @@ async function main() {
     const api = window.roundtable;
     // R12 added the host group: exactly one typed method, no generic invoke/send.
     // R13B added the summary and usage groups (typed methods only).
-    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['host','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    // R16 batch 2 added network and app (saved proxy settings, a keyless proxy check, relaunch; D115).
+    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app','host','network','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    check(JSON.stringify(Object.keys(api.network)) === JSON.stringify(['getSettings','saveSettings','testProxy']) && JSON.stringify(Object.keys(api.app)) === JSON.stringify(['relaunch']), 'Unexpected network/app surface');
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview','generate','confirm']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport','writeOff','exportCsv']), 'Unexpected summary/usage surface');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host surface');
     const rooms = ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'];
-    const settings = ['confirmTarget','createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModels','listProviderSummaries','setKey','testConnection','updateProvider'];
+    const settings = ['confirmTarget','createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModelReadiness','listModels','listProviderSummaries','setKey','testConnection','updateProvider'];
     check(JSON.stringify(Object.keys(api.rooms).sort()) === JSON.stringify(rooms), 'Unexpected rooms surface');
     check(JSON.stringify(Object.keys(api.settings).sort()) === JSON.stringify(settings), 'Unexpected settings surface');
     check(!('invoke' in api) && !('send' in api) && !('resolveKey' in api.settings) && !('invoke' in api.host) && !('send' in api.host)
-      && !('invoke' in api.summary) && !('invoke' in api.usage), 'Unrestricted capability exposed');
+      && !('invoke' in api.summary) && !('invoke' in api.usage) && !('invoke' in api.network) && !('invoke' in api.app), 'Unrestricted capability exposed');
     const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     check(csp.includes("connect-src 'none';") && !/unsafe-eval|localhost|127\\.0\\.0\\.1/u.test(csp), 'Production CSP broadened');
     return { groups: Object.keys(api).sort(), rooms: Object.keys(api.rooms).sort(), settings: Object.keys(api.settings).sort(), csp };
@@ -187,19 +189,22 @@ async function main() {
         // The resize reaches the Renderer asynchronously; start once the layout has folded (or unfolded) for this width.
         await until('layout for width ${width}', () => innerWidth === ${width}
           && [...document.querySelectorAll('.sidebar')].some(element => visible(element) && !element.closest('.drawer')) === (${width} >= 1024), 'Layout did not follow the window width');
-        // R16: pages are reached from the sidebar (a drawer below 1024px); 返回讨论 leads back.
-        const pages = { '讨论': '.composer', '房间与成员': '.rooms-feature', '模型设置': '.settings-feature' };
+        // R16: pages are reached from the sidebar (a drawer below 1024px): the room by its name, the discussion by its entry under it
+        // (the completed Run the UI phase selected last, as 返回讨论 led back to before).
+        const pages = { '讨论': '.composer', '房间与成员': '.room-page', '模型设置': '.settings-shell' };
+        const inSidebar = () => [...document.querySelectorAll('.sidebar')].find(element => visible(element));
+        const sidebarButton = prefix => { const bar = inSidebar(); return bar && [...bar.querySelectorAll('button.sb-item')].find(element => element.textContent.trim().startsWith(prefix)); };
+        const openNavigation = async () => { if (!inSidebar()) { await press('打开导航'); await until('navigation drawer settled', () => settled(document.querySelector('.drawer.is-left')), 'Navigation drawer did not open'); } };
         const go = async target => {
-          if (target === '讨论') { if (byName('返回讨论')) await press('返回讨论'); }
-          else {
-            const entry = target === '房间与成员' ? '管理房间与成员' : '设置';
-            if (!byName(entry)) { await press('打开导航'); await until('navigation drawer settled', () => settled(document.querySelector('.drawer.is-left')), 'Navigation drawer did not open'); }
-            await press(entry);
-          }
+          await openNavigation();
+          const entry = target === '模型设置' ? '设置' : target === '房间与成员' ? 'Smoke Roundtable' : 'R78 public three Agent collaboration';
+          if (target === '讨论' && !sidebarButton(entry)) { (await until('room entry', () => sidebarButton('Smoke Roundtable'), 'Room entry missing')).click(); await openNavigation(); }
+          (await until('sidebar entry ' + entry, () => sidebarButton(entry), 'Sidebar entry missing: ' + entry)).click();
           await until(target + ' page shown', () => { const shown = document.querySelector(pages[target]); return shown && visible(shown) && !document.querySelector('.drawer'); }, 'Page not shown: ' + target);
         };
+        const openAppearance = async () => { await go('模型设置'); await press('外观'); };
         // 外观 lives in 设置; it applies to every page and is remembered.
-        await go('模型设置'); await press(${JSON.stringify(theme === 'light' ? '浅色' : '深色')});
+        await openAppearance(); await press(${JSON.stringify(theme === 'light' ? '浅色' : '深色')});
         await until('theme ${theme} applied', () => document.documentElement.dataset.theme === ${JSON.stringify(theme)}, 'Theme did not apply');
         await go(${JSON.stringify(page)});
         const actual = document.documentElement.dataset.theme;
@@ -230,24 +235,26 @@ async function main() {
           actions.push('navigation and 本场信息 drawers opened, reached, closed');
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '房间与成员') {
-          for (const action of ['新建房间','新增成员']) {
-            if (action === '新增成员') { (await until('成员配置 tab', () => named('成员配置'), 'Unreachable control: 成员配置')).click(); }
-            const open = await until(action + ' button', () => named(action), 'Unreachable control: ' + action); await reach(open, action);
+          for (const action of ['新建房间','添加成员']) {
+            if (action === '新建房间') await openNavigation();
+            const open = await until(action + ' button', () => byName(action), 'Unreachable control: ' + action); await reach(open, action);
             if (open.disabled) throw new Error('Editor unavailable'); open.click();
             const dialog = await until(action + ' modal open', () => document.querySelector('dialog[open]'), 'Real modal not opened');
-            await reach(named(action === '新建房间' ? '保存房间' : '保存成员', dialog), 'modal save');
+            await reach(named(action === '新建房间' ? '新建' : '添加', dialog), 'modal save');
             const cancel = named('取消', dialog); await reach(cancel, 'modal cancel'); cancel.click();
             await until(action + ' modal closed', () => !document.querySelector('dialog[open]'), 'Modal did not close on 取消');
             actions.push(action + ' modal save/cancel reachable');
           }
+          await reach(named('删除…'), 'room deletion (last action)');
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '模型设置') {
-          const provider = [...document.querySelectorAll('.settings-navigation button')].find(element => visible(element) && element.textContent.trim().startsWith('Smoke Real A ·'));
-          await reach(provider, 'saved real Provider'); provider.click();
-          const key = await until('Smoke Real A editor loaded', () => { const editor = document.querySelector('.settings-editor');
-            return editor && [...editor.querySelectorAll('input')].some(input => input.value === 'Smoke Real A') && editor.querySelector('input[type="password"]'); }, 'Unreachable control: Key input'); await reach(key, 'Key input');
-          await reach(named('保存或替换 Key'), 'Key save'); await reach(named('删除 Key'), 'Key deletion');
-          await reach(named('发起生成测试'), 'last settings action'); actions.push('long settings Key and last action reached without invoking generation');
+          await press('模型服务');
+          const card = await until('Smoke Real A card', () => document.querySelector('section[aria-label="Smoke Real A"]'), 'Unreachable control: Smoke Real A');
+          if (!card.querySelector('.svc-body')) named('展开 Smoke Real A', card) || [...card.querySelectorAll('button')].find(element => element.getAttribute('aria-label') === '展开 Smoke Real A').click();
+          const replace = await until('Key replacement', () => [...card.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === '更换'), 'Unreachable control: 更换'); await reach(replace, 'Key replacement');
+          const details = card.querySelector('details.adv'); if (!details.open) details.querySelector('summary').click();
+          await reach(await until('Key deletion', () => named('删除 Key…', card), 'Unreachable control: 删除 Key…'), 'Key deletion');
+          await reach(named('删除服务…', card), 'last settings action'); actions.push('Key replacement, deletion and the last action reached without invoking generation');
         }
         const width = document.documentElement.clientWidth, scroll = document.documentElement.scrollWidth;
         if (scroll > width + 1) throw new Error('Horizontal page overflow: ' + scroll + '/' + width);

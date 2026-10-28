@@ -28,13 +28,16 @@ async function page(stage) {
   const api = window.roundtable;
   const selectDemo = async () => {
     const { roomId } = await api.room.createDemo('R04-R06 regression fixture');
-    await click('管理房间与成员'); await click('刷新房间');
+    // R16: rooms live in the sidebar; changing page refreshes it. The room opens on its page; 新讨论 starts there.
+    await click('用量');
     const rooms = await api.rooms.listRooms();
     const index = rooms.findIndex(room => room.id === roomId);
     check(index >= 0, 'Fresh demo room absent');
-    await wait(() => document.querySelectorAll('.rooms-navigation .rooms-list button'), buttons => buttons.length === rooms.length, 'Rooms projection stale');
-    document.querySelectorAll('.rooms-navigation .rooms-list button')[index].click();
-    await click('返回讨论');
+    const items = () => document.querySelectorAll('.sidebar .sb-rooms > li > button.sb-item');
+    await wait(items, buttons => buttons.length === rooms.length, 'Rooms projection stale');
+    items()[index].click();
+    await wait(() => document.querySelector('.room-page h1')?.textContent, value => value === 'Mock 圆桌', 'Room page not opened');
+    await click('新讨论');
   };
   let id;
   const read = () => api.run.getSnapshot(id);

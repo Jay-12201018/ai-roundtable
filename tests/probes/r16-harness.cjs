@@ -11,10 +11,11 @@ const { app, session, safeStorage, dialog } = require('electron');
 const http = require('node:http');
 const { syncBuiltinESMExports } = require('node:module');
 
-function isolate(prefix) {
+function isolate(prefix, reuse) {
   assert.equal(app.isReady(), false, 'Isolation must precede readiness/Main');
   app.commandLine.appendSwitch('use-mock-keychain');
-  const directory = fs.mkdtempSync(join(tmpdir(), `${prefix}-`));
+  // A restart phase reopens the profile its own first phase created (same prefix, owned, under the system temp directory).
+  const directory = reuse ? resolve(reuse) : fs.mkdtempSync(join(tmpdir(), `${prefix}-`));
   assert.ok(basename(directory).startsWith(`${prefix}-`) && fs.realpathSync(dirname(directory)) === fs.realpathSync(tmpdir()), 'Only this probe owned temporary profile is allowed');
   assert.ok(fs.lstatSync(directory).isDirectory() && !fs.lstatSync(directory).isSymbolicLink());
   assert.equal(fs.statSync(directory).uid, process.getuid());
@@ -22,21 +23,21 @@ function isolate(prefix) {
   for (const [name, path] of Object.entries(paths)) { fs.mkdirSync(path, { recursive: true, mode: 0o700 }); app.setPath(name, path); assert.equal(app.getPath(name), path); }
   const realProfile = join(app.getPath('appData'), 'ai-roundtable');
   assert.notEqual(resolve(paths.userData), resolve(realProfile), 'Probe must never open the real profile');
-  assert.equal(fs.existsSync(join(paths.userData, 'ai-roundtable.db')), false);
+  assert.equal(fs.existsSync(join(paths.userData, 'ai-roundtable.db')), Boolean(reuse), reuse ? 'A restart reopens an existing profile' : 'A first phase starts empty');
   delete process.env.ELECTRON_RENDERER_URL;
   for (const name of ['ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS', 'ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
   return { directory, paths };
 }
 
-function createProbe({ prefix, name, timeoutMs = 600000 }) {
-  const { directory, paths } = isolate(prefix);
+function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' }) {
+  const { directory, paths } = isolate(prefix, reuse);
   const root = resolve(__dirname, '../..');
   const build = process.env.ROUNDTABLE_PROBE_BUILD ? resolve(process.env.ROUNDTABLE_PROBE_BUILD) : join(root, 'out');
   const entry = join(build, 'main/index.js');
   for (const file of [entry, join(build, 'preload/index.cjs'), join(build, 'renderer/index.html')]) assert.ok(fs.existsSync(file), 'Build missing: ' + file);
   const result = { status: 'RUNNING', probe: name, directory, runtime: { electron: process.versions.electron, node: process.versions.node }, fakeSafeStorage: { encrypt: 0, decrypt: 0 },
     nodeNetworkAttempts: [], chromiumNetworkAttempts: [], consoleErrors: [], preloadErrors: [], externalLinkPrompts: [], checks: [], screens: [] };
-  const resultPath = join(directory, `${prefix}.json`);
+  const resultPath = join(directory, phase === 'first' ? `${prefix}.json` : `${prefix}-${phase}.json`);
   const save = () => fs.writeFileSync(resultPath, JSON.stringify(result, null, 2) + '\n', { mode: 0o600 });
   const fake = {
     isEncryptionAvailable: () => true, getSelectedStorageBackend: () => 'r16-fixture-only',
@@ -51,7 +52,8 @@ function createProbe({ prefix, name, timeoutMs = 600000 }) {
   dialog.showErrorBox = (title, content) => { result.consoleErrors.push(`errorBox: ${title} ${content}`); };
 
   // DeepSeek-shaped SSE fixture. `fixture.mode` per request: ok | hang | length | no-usage; `fixture.reply(body)` picks text.
-  const fixture = { mode: 'ok', requests: [], hung: [], port: 0, chunkMs: 40, chunks: 6, reply: () => '好的。' };
+  // proxyPort: one owned loopback CONNECT proxy a probe may start; only CONNECT requests to it pass the guard below.
+  const fixture = { mode: 'ok', requests: [], hung: [], port: 0, proxyPort: 0, chunkMs: 40, chunks: 6, reply: () => '好的。' };
   const usage = { prompt_tokens: 300, completion_tokens: 6, prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 200 };
   let failNow;
   const server = http.createServer(async (req, res) => {
@@ -84,7 +86,13 @@ function createProbe({ prefix, name, timeoutMs = 600000 }) {
   });
   fixture.release = () => { const waiting = fixture.hung.splice(0); for (const release of waiting) release(); return waiting.length; };
   const originalRequest = http.request;
-  http.request = function (url) { const target = new URL(String(url)); assert.equal(target.hostname, '127.0.0.1'); assert.equal(Number(target.port), fixture.port); return originalRequest.apply(this, arguments); };
+  http.request = function (url) {
+    if (url && typeof url === 'object' && !(url instanceof URL) && url.method === 'CONNECT') {
+      assert.ok(fixture.proxyPort > 0 && url.hostname === '127.0.0.1' && Number(url.port) === fixture.proxyPort, 'Only the owned loopback proxy may be reached');
+      return originalRequest.apply(this, arguments);
+    }
+    const target = new URL(String(url)); assert.equal(target.hostname, '127.0.0.1'); assert.equal(Number(target.port), fixture.port); return originalRequest.apply(this, arguments);
+  };
   http.get = () => { throw new Error('Unexpected HTTP get'); };
   const https = require('node:https'); https.request = https.get = () => { result.nodeNetworkAttempts.push('remote https blocked'); throw new Error('Remote TLS blocked'); };
   globalThis.fetch = async () => { result.nodeNetworkAttempts.push('global fetch blocked'); throw new Error('Remote fetch blocked'); };
@@ -111,7 +119,7 @@ function createProbe({ prefix, name, timeoutMs = 600000 }) {
   const sleep = ms => new Promise(done => setTimeout(done, ms));
   const check = (value, message) => { result.checks.push(message); if (!value) throw new Error('Check failed: ' + message); };
 
-  async function start({ screens, width = 1440, height = 900, fixedClock }) {
+  async function start({ screens, width = 1440, height = 900, fixedClock, keepScreens = false, firstShot = 0 }) {
     await new Promise(done => server.listen(0, '127.0.0.1', done)); fixture.port = server.address().port;
     const { ProviderRegistry: Registry, settlementClock } = await import(pathToFileURL(entry).href);
     if (fixedClock) settlementClock.now = () => new Date(fixedClock);
@@ -128,7 +136,7 @@ function createProbe({ prefix, name, timeoutMs = 600000 }) {
     assert.equal(preferences.sandbox, true); assert.equal(preferences.contextIsolation, true); assert.equal(preferences.nodeIntegration, false);
     window.setContentSize(width, height);
     failureShot = async () => { fs.writeFileSync(join(directory, 'failure.png'), (await contents.capturePage()).toPNG()); result.failureText = await contents.executeJavaScript('document.body.innerText'); };
-    if (screens) { fs.mkdirSync(screens, { recursive: true }); for (const old of fs.readdirSync(screens)) if (/^\d\d-.*\.png$/u.test(old)) fs.rmSync(join(screens, old)); }
+    if (screens && !keepScreens) { fs.mkdirSync(screens, { recursive: true }); for (const old of fs.readdirSync(screens)) if (/^\d\d-.*\.png$/u.test(old)) fs.rmSync(join(screens, old)); }
     const cdp = contents.debugger; cdp.attach('1.3');
     const send = (method, params = {}) => cdp.sendCommand(method, params);
     const js = code => contents.executeJavaScript(code);
@@ -139,7 +147,9 @@ function createProbe({ prefix, name, timeoutMs = 600000 }) {
     // Finds a visible control by accessible name (aria-label, enclosing label or own text) and scrolls it into view.
     const locator = `window.__r16 = (name, o = {}) => {
       const visible = e => e && !e.closest('[hidden]') && !e.closest('[inert]') && e.getClientRects().length > 0;
-      const label = e => (e.getAttribute('aria-label') || (e.tagName !== 'BUTTON' && e.labels && e.labels[0] ? e.labels[0].textContent : '') || (e.closest('label') && e.tagName !== 'BUTTON' ? e.closest('label').textContent : '') || e.textContent || '').trim();
+      // Visible text without decorations marked aria-hidden (a service logo, an icon), as a name is read.
+      const shown = e => { const c = e.cloneNode(true); c.querySelectorAll('[aria-hidden="true"]').forEach(x => x.remove()); return c.textContent; };
+      const label = e => (e.getAttribute('aria-label') || (e.tagName !== 'BUTTON' && e.labels && e.labels[0] ? e.labels[0].textContent : '') || (e.closest('label') && e.tagName !== 'BUTTON' ? e.closest('label').textContent : '') || shown(e) || '').trim();
       let list = [...document.querySelectorAll(o.selector || 'button,[role=option],summary')].filter(e => visible(e) && (o.prefix ? label(e).startsWith(name) : label(e) === name));
       if (o.scope) list = list.filter(e => e.closest(o.scope));
       if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
@@ -186,7 +196,7 @@ function createProbe({ prefix, name, timeoutMs = 600000 }) {
       await sleep(140);
     };
     const type = text => send('Input.insertText', { text }).then(() => sleep(120));
-    let shot = 0;
+    let shot = firstShot;
     const capture = async (file, caption, focus) => {
       if (focus) await js(`(() => { const e = typeof ${JSON.stringify(focus)} === 'string' ? document.querySelector(${JSON.stringify(focus)}) : null; e?.scrollIntoView({ block: 'center' }); return true; })()`);
       await sleep(400);

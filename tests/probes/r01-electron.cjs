@@ -168,7 +168,10 @@ async function probe() {
     const api = window.roundtable;
     // R12 added the host group: exactly one typed method, no generic invoke/send.
     // R13B added the summary and usage groups: typed methods only, still no generic invoke/send.
-    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
+    // R16 batch 2 added network (saved proxy settings, a keyless proxy check) and app (relaunch), typed methods only (D115).
+    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
+    check(JSON.stringify(Object.keys(api.network)) === JSON.stringify(['getSettings', 'saveSettings', 'testProxy']) && JSON.stringify(Object.keys(api.app)) === JSON.stringify(['relaunch'])
+      && [...Object.values(api.network), ...Object.values(api.app)].every(value => typeof value === 'function'), 'Unexpected network/app API');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host API');
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview', 'generate', 'confirm']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport', 'writeOff', 'exportCsv'])
       && [...Object.values(api.summary), ...Object.values(api.usage)].every(value => typeof value === 'function'), 'Unexpected summary/usage API');
@@ -179,7 +182,7 @@ async function probe() {
     check(JSON.stringify(Object.keys(api.run).sort()) === JSON.stringify(expected), 'Unexpected run API');
     const configurationKeys = {
       rooms: ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'],
-      settings: ['confirmTarget','createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModels','listProviderSummaries','setKey','testConnection','updateProvider'],
+      settings: ['confirmTarget','createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModelReadiness','listModels','listProviderSummaries','setKey','testConnection','updateProvider'],
     };
     for (const [group, methods] of Object.entries(configurationKeys)) {
       check(JSON.stringify(Object.keys(api[group]).sort()) === JSON.stringify(methods), 'Unexpected ' + group + ' API');

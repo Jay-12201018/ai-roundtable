@@ -148,8 +148,8 @@ async function main() {
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r13a = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
-    const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
-    let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
+    const label = e => e.getAttribute('aria-label') || (e.tagName !== 'BUTTON' && e.labels?.[0]?.textContent?.trim()) || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || (n => { const c = n.cloneNode(true); c.querySelectorAll('[aria-hidden="true"]').forEach(x => x.remove()); return c.textContent.trim(); })(e);
+    let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && (o.prefix ? label(e).startsWith(name) : label(e) === name));
     if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
     const e = o.which === 'last' ? list.at(-1) : list[o.which || 0];
@@ -203,7 +203,7 @@ async function main() {
   result.screens = [];
   const text = () => js('document.body.innerText');
   // A native <select> opens an OS popup that page input events cannot drive; it is set like a user's pick (focus + change).
-  const choose = (name, value) => js(`(() => { const e = [...document.querySelectorAll('select')].find(e => e.closest('label')?.firstChild?.textContent?.trim() === ${JSON.stringify(name)});
+  const choose = (name, value) => js(`(() => { const e = [...document.querySelectorAll('select')].find(e => (e.labels?.[0]?.textContent?.trim() ?? e.closest('label')?.firstChild?.textContent?.trim()) === ${JSON.stringify(name)});
     e.focus(); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, ${JSON.stringify(value)}); e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; })()`);
   const type = text => send('Input.insertText', { text }).then(() => sleep(120));
   const snapshot = () => js(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'))`);
@@ -216,23 +216,30 @@ async function main() {
     // Step R1: startup cleared every stored copy and said so without the value.
     check(result.mainLog.includes('已清除 3 处疑似 API Key 的模型 ID'), 'Main logged only the count of cleared places');
     check(!dbBytes().includes(Buffer.from(pastedKey)), 'After startup the plaintext is gone from the database file, WAL and SHM');
-    await click('管理房间与成员');
-    await until(`document.body.innerText.includes('校园跑腿讨论') && document.body.innerText.includes('审查者')`, 'rooms loaded');
+    // The earlier discussion, read before the room is opened (opening a room leaves the selected discussion).
+    const earlier = await until(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId')).then(run => run.execution.task)`, 'earlier run restored');
+    await click('校园跑腿讨论', { selector: '.sb-item' });
+    await until(`document.querySelector('.room-page') && document.body.innerText.includes('审查者')`, 'room loaded');
     const roomText = await text();
-    check(roomText.includes('Model 未配置：请编辑成员，填写模型 ID 后才能参与运行'), 'The member left without a model is told to fill one in');
+    check(roomText.includes('还没选模型，暂时不会参与讨论'), 'The member left without a model is told to choose one');
     check(!roomText.includes(pastedKey), 'The key never reaches the page');
-    await capture('purged-member', '把一串合成的 sk- 假值直接写进数据库三处模型 ID（Provider 默认模型、自定义模型、审查者的 Model），模拟旧版本留下的数据后重启：启动时已全部清除，日志只记"已清除 3 处疑似 API Key 的模型 ID"，数据库文件（含 WAL/SHM）里再也找不到这串明文。"房间与成员"里审查者显示"Model 未配置：请编辑成员，填写模型 ID 后才能参与运行"，其他成员不受影响。', '.rooms-feature');
-    await click('编辑 审查者', { selector: 'button' });
-    await field('Model'); await type('deepseek-flash'); await click('保存成员');
-    await until(`!document.querySelector('dialog[open], .rooms-dialog') && !document.body.innerText.includes('Model 未配置')`, 'reviewer model filled in again');
-    await capture('purged-member-fixed', '点"编辑"给审查者重新填 deepseek-flash 并保存：提示消失，成员恢复可用。', '.rooms-feature');
+    await capture('purged-member', '把一串合成的 sk- 假值直接写进数据库三处模型 ID（Provider 默认模型、自定义模型、审查者的模型），模拟旧版本留下的数据后重启：启动时已全部清除，日志只记"已清除 3 处疑似 API Key 的模型 ID"，数据库文件（含 WAL/SHM）里再也找不到这串明文。房间页里审查者显示“还没选模型，暂时不会参与讨论 · 去选择”，其他成员不受影响。', '.room-page');
+    await click('「审查者」：编辑、排序、归档、删除'); await click('编辑…', { selector: '[role=menuitem]' });
+    const option = await js(`[...document.querySelectorAll('dialog[open] option')].find(o => o.value.endsWith('\\u0000deepseek-flash'))?.value`);
+    check(Boolean(option), 'deepseek-flash is still offered for the member');
+    await choose('模型', option); await click('保存', { scope: 'dialog[open]' });
+    await until(`!document.querySelector('dialog[open]') && !document.body.innerText.includes('还没选模型')`, 'reviewer model chosen again');
+    await capture('purged-member-fixed', '在成员菜单里点“编辑…”，给审查者重新选 DeepSeek 直连 · DeepSeek Flash 并保存：提示消失，成员恢复可用。', '.room-page');
     await click('设置');
-    await until(`document.body.innerText.includes('编辑 Provider')`, 'provider editor');
-    check(await js(`document.querySelector('[aria-describedby=settings-default-model-help]').value`) === '', 'The default model is empty after the purge');
-    check(!(await text()).includes(pastedKey) && !(await text()).includes('已隐藏'), 'Nothing key-like is left to hide');
-    await capture('purged-provider', '"模型设置"里 DeepSeek 直连的默认模型 ID 已被清空（只剩示例"例如 deepseek-flash"），自定义模型里那条疑似 Key 的条目已删除，只剩 deepseek-flash；页面上没有任何密钥文本。', '#settings-default-model-help');
+    await until(`document.querySelector('.svc-card') && document.body.innerText.includes('deepseek-flash')`, 'service card');
+    const purged = await js(`window.roundtable.settings.listProviderSummaries().then(list => window.roundtable.settings.getProviderConfiguration({ id: list[0].id }))`);
+    check(purged.defaultModelId === null && JSON.stringify(purged.customModels) === JSON.stringify([{ id: 'deepseek-flash', name: 'DeepSeek Flash' }]), 'The default model is empty and only deepseek-flash remains after the purge');
+    check(!(await text()).includes(pastedKey) && !(await text()).includes('已经隐藏'), 'Nothing key-like is left to hide');
+    await capture('purged-provider', '设置 › 模型服务：DeepSeek 直连的默认模型已被清空，自定义模型里那条疑似 Key 的条目已删除，只剩 deepseek-flash；页面上没有任何密钥文本。', '.svc-card');
     // Step R2: the earlier Run's members are named by their Provider, never by its UUID.
-    await click('返回讨论');
+    await click('校园跑腿讨论', { selector: '.sb-item' });
+    const runAt = await until(`(() => { const e = [...document.querySelectorAll('.sb-runs .sb-item')].find(e => e.textContent.startsWith(${JSON.stringify(earlier)})); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`, 'earlier run listed');
+    await clickAt(runAt);
     // R16: the identity line names the model; the service is in each message's 请求详情.
     await until(`document.querySelectorAll('.thread-item [aria-label=请求详情]').length > 0`, 'earlier run shown');
     await js(`document.querySelectorAll('.thread-item [aria-label=请求详情]').forEach(button => button.click()); true`);
@@ -241,69 +248,50 @@ async function main() {
     check(!uuidPattern.test(await text()), 'No UUID anywhere on the discussion page');
     await capture('provider-name', '重启后打开上一次运行（成员快照冻结的是 Provider ID）：每条消息的身份行显示"Drafter · Provider：DeepSeek 直连 · Model：deepseek-flash"，不再显示 UUID。Provider 找不到时显示"Provider 已删除"（单元测试覆盖）。', 0);
   } else {
-  // Step 1: a pasted API Key in the model ID field is flagged at once and cannot be saved.
-  await click('设置'); await click('新增 Provider');
-  await field('Provider 名称'); await ime('deepseek', 'DeepSeek 直连');
-  check(await choose('Provider 类型', 'openai-compatible') === 'openai-compatible', 'Provider type OpenAI-Compatible');
-  await field('Base URL'); await type('https://api.deepseek.com');
-  await click('我已核对请求目标', { selector: 'input[type=checkbox]' });
-  check(await js(`document.getElementById('settings-default-model-help').textContent`) === '例如 deepseek-flash', 'The model ID field shows an example before anything is typed');
-  await field('默认模型 ID'); await type(pastedKey);
-  check((await text()).includes('这看起来是 API Key，不是模型 ID。请先删掉它；保存配置后，在下方出现的“API Key”输入框里填写。'), 'A pasted key is flagged at once in Chinese');
-  check(await js(`document.querySelector('[aria-describedby=settings-default-model-help]').getAttribute('aria-invalid')`) === 'true', 'The field is marked invalid');
-  await click('保存配置');
-  check((await js(`document.querySelector('.settings-editor h2').textContent`)) === '新增 Provider' && (await js('window.roundtable.settings.listProviderSummaries()')).length === 0, 'Saving is refused: no Provider was created');
-  await capture('model-id-key-blocked', '在“默认模型 ID”里误填了一串 sk- 开头的内容（合成的假值）：输入框立即标红，下方提示“这看起来是 API Key，不是模型 ID。请先删掉它；保存配置后，在下方出现的“API Key”输入框里填写。”；点“保存配置”被拒绝，没有创建 Provider。输入框下方原本显示示例“例如 deepseek-flash”。', '#settings-default-model-help');
+  // Step 1 (D096, R16 batch 2): in the connect wizard, a pasted API Key in the model name is flagged at once and cannot be saved.
+  await click('设置'); await click('添加服务');
+  await click('其他兼容服务', { selector: '.choice', prefix: true }); await click('下一步');
+  await field('服务名称'); await selectAll(); await ime('deepseek', 'DeepSeek 直连');
+  await field('地址'); await type('https://api.deepseek.com');
+  check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The typed address is written above the Key');
+  await field('模型名'); await type(pastedKey);
+  check((await text()).includes('这看起来是 API Key，不是模型名。Key 请填在「API Key」一栏；这里只填模型名，例如 deepseek-flash。'), 'A pasted key is flagged at once in Chinese');
+  check(await js(`[...document.querySelectorAll('input')].find(e => e.labels?.[0]?.textContent === '模型名').getAttribute('aria-invalid')`) === 'true', 'The field is marked invalid');
+  await field('API Key'); await type(fakeKey);
+  await click('保存并连接');
+  check((await js('window.roundtable.settings.listProviderSummaries()')).length === 0, 'Saving is refused: no Provider was created');
+  check(await js(`[...document.querySelectorAll('input')].every(e => e.value !== ${JSON.stringify(fakeKey)})`), 'The refused attempt cleared the Key field');
+  await capture('model-id-key-blocked', '连接向导 › 其他兼容服务：在“模型名”里误填了一串 sk- 开头的内容（合成的假值）：输入框立即标红，提示“这看起来是 API Key，不是模型名。Key 请填在「API Key」一栏……”；点“保存并连接”被拒绝，没有创建服务，Key 输入框也已清空。上方写明“Key 只会发往 https://api.deepseek.com”。', 'dialog[open]');
 
-  // Step 2: the right model ID saves; the Key input explains why it is unavailable and how to fix it.
-  await field('默认模型 ID'); await selectAll(); await type('deepseek-flash');
-  check(!(await text()).includes('这看起来是 API Key'), 'The warning clears once a model ID is typed');
-  await field('新增模型 ID'); await type('deepseek-flash'); await field('新增模型名称'); await type('DeepSeek Flash');
-  await click('添加自定义模型');
-  await click('保存配置');
-  await until(`document.body.innerText.includes('编辑 Provider')`, 'provider saved');
-  check(await js(`${keyField}.disabled`), 'After saving, the Key input is unavailable until the target is checked');
-  check((await js(`document.getElementById('settings-key-blocked').textContent`)).includes('输入框暂不可用：填写 Key 之前，请先核对 Key 将发往的请求目标：https://api.deepseek.com/'), 'The reason sits right next to the Key input');
-  check((await js(`${keyField}.getAttribute('aria-describedby')`)).includes('settings-key-blocked'), 'The reason is announced with the input');
-  check((await js(`document.querySelector('.settings-progress').textContent`)).includes('下一步：在下方“API Key”一栏核对请求目标并填写 Key。'), 'The progress line names the next step');
-  await capture('key-blocked-reason', '保存配置后，“API Key”输入框不可用。紧挨着输入框说明原因：“输入框暂不可用：填写 Key 之前，请先核对 Key 将发往的请求目标：https://api.deepseek.com/”，并给出一键操作“目标无误，启用输入框”。（编辑页顶部另有“接入进度”，此时写着“下一步：在下方“API Key”一栏核对请求目标并填写 Key。”，见第 4 张截图的位置。）', '#settings-key-blocked');
+  // Step 2: the right model name; the address the Key goes to stays written right above the Key.
+  await field('模型名'); await selectAll(); await type('deepseek-flash');
+  check(!(await text()).includes('这看起来是 API Key'), 'The warning clears once a model name is typed');
+  await field('显示名可选'); await type('DeepSeek Flash');
+  await capture('key-blocked-reason', '改成 deepseek-flash 后提示消失。Key 只有一个入口：“Key 只会发往 https://api.deepseek.com”写在 API Key 上方，底部“保存即表示你确认了上面的地址”（D113，取代原来的“目标无误，启用输入框”和“确认本次会话”两步）。', 'dialog[open]');
 
-  // Step 3: one click enables and focuses the input; the Key is typed and saved with Enter.
-  await click('目标无误，启用输入框');
-  await until(`!${keyField}.disabled && document.activeElement === ${keyField}`, 'key input enabled and focused');
-  check(await js(`[...document.querySelectorAll('input[type=checkbox]')].find(e => e.closest('label')?.textContent.trim() === '我已核对请求目标').checked`), 'The one click is the same target check as the checkbox');
-  await type(fakeKey); await key('Enter');
-  await until(`document.body.innerText.includes('已配置；系统安全存储。')`, 'key saved');
+  // Step 3: the Key is typed and saved with Enter; saving confirms the address in the same step.
+  await field('API Key'); await type(fakeKey); await key('Enter');
+  await until(`document.body.innerText.includes('DeepSeek 直连 已连接')`, 'key saved');
   check(!(await text()).includes(fakeKey), 'The Key is never echoed in the page');
-  check((await text()).includes('最后一步：确认本次会话的请求目标 https://api.deepseek.com/。'), 'The last step appears under the Key');
-  check(!(await text()).includes('输入框暂不可用'), 'Only one next step is shown once the Key is saved');
-  await capture('key-saved-last-step', '点“目标无误，启用输入框”：输入框立即可用并获得焦点，“我已核对请求目标”同时被勾选。键入假 Key 按 Enter 保存后显示“已配置；系统安全存储。”（Key 不回显）。Key 下方只出现一个下一步：“最后一步：确认本次会话的请求目标 https://api.deepseek.com/……”和按钮“目标无误，确认本次会话”。（首轮实操时这里同时出现了“输入框暂不可用”和“最后一步”两个提示，已改为只显示一个。）', '.settings-section');
+  check((await text()).includes('请求地址 https://api.deepseek.com 已确认') && (await text()).includes('deepseek-flash 可以用于讨论') || (await text()).includes('DeepSeek Flash 可以用于讨论'), 'The check names the confirmed address and a usable model');
+  await capture('key-saved-last-step', '按 Enter 保存：第 3 步写明 Key 已保存、请求地址已确认、DeepSeek Flash 可以用于讨论；DeepSeek 没有免费检查 Key 的接口，写“Key 还没有核对”。没有额外的“最后一步”。', 'dialog[open]');
 
-  // Step 4: confirm the session target right there.
-  await click('目标无误，确认本次会话');
-  await until(`document.querySelector('.settings-progress').textContent.includes('本次会话目标：已确认')`, 'session confirmed');
-  check((await text()).includes('已就绪：房间成员可以向此 Provider 发送真实请求'), 'Progress says the Provider is ready');
-  check(!(await text()).includes('最后一步'), 'The last-step box goes away');
-  await capture('session-confirmed', '点“目标无误，确认本次会话”：接入进度三项都变为完成——配置已保存、API Key 已配置、本次会话目标已确认，并写明“已就绪：房间成员可以向此 Provider 发送真实请求（仍受模型审核和运行预算限制）”。整个“新增 Provider → 填 Key → 确认会话目标”在一屏内完成。', '.settings-progress');
+  // Step 4: the service card says it is ready; nothing is asked again at the next launch (D113).
+  await click('稍后再说');
+  await until(`document.body.innerText.includes('可以使用')`, 'service ready');
+  check((await text()).includes('保存 Key 时已确认') && (await text()).includes('已保存（不显示）'), 'The card says the address was confirmed with the Key');
+  await capture('session-confirmed', '设置 › 模型服务：“DeepSeek 直连 · 可以使用”，请求地址写明“保存 Key 时已确认”，API Key“已保存（不显示）”。整个连接在一个三步对话框里完成。', '.svc-card');
 
-  // Step 5: a room with three DeepSeek members.
-  await click('返回讨论'); await click('管理房间与成员'); await click('新建房间');
-  await field('房间名称'); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存房间');
-  await until(`document.body.innerText.includes('新增成员')`, 'room saved');
-  for (const [index, [pinyin, name, role]] of [['qicao', '起草者', 'Drafter'], ['shencha', '审查者', 'Critic'], ['zonghe', '综合者', 'Synthesizer']].entries()) {
-    await click('新增成员');
-    await field('成员名称'); await ime(pinyin, name);
-    await field('成员角色'); await type(role);
-    const providerValue = await js(`[...document.querySelectorAll('option')].find(o => o.textContent.startsWith('DeepSeek 直连'))?.value`);
-    await choose('Provider', providerValue);
-    check(await js(`document.querySelector('input[list]').value`) === 'deepseek-flash', 'Choosing the Provider pre-fills its default model ' + index);
-    await click('保存成员');
-    await until(`!document.querySelector('dialog[open], .rooms-dialog') && document.body.innerText.split('${name}').length > 1`, 'member saved ' + index);
-  }
-  await capture('members', '新建房间“校园跑腿讨论”，添加“起草者（Drafter）”“审查者（Critic）”“综合者（Synthesizer）”三个成员，Provider 均为“DeepSeek 直连”，Model 自动带出 deepseek-flash。', '.rooms-feature');
+  // Step 5: the room made for the first service (D6-A), renamed; three DeepSeek members.
+  await click('我的第一场讨论', { selector: '.sb-item' });
+  await until(`document.querySelector('.room-page')`, 'room page');
+  await click('编辑'); await field('房间名称'); await selectAll(); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存');
+  await until(`document.querySelector('.room-page h1')?.textContent === '校园跑腿讨论'`, 'room renamed');
+  check((await text()).split('DeepSeek Flash · 可以使用').length === 4, 'Three members on DeepSeek Flash, each usable');
+  await capture('members', '连接后自动建好的房间改名为“校园跑腿讨论”（输入法组合输入）：起草者、审查者、综合者三位成员都写着“DeepSeek Flash · 可以使用”。', '.room-page');
 
   // Step 6: start, then pause without moving the pointer: 开始讨论 turns into 暂停 at the same spot.
-  await click('返回讨论');
+  await click('新讨论', { scope: '.room-page' });
   await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
   // R16: the budget is in the settings popover beside the goal (opened from 更多设置 or the budget chip).
   await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.05');
@@ -419,7 +407,7 @@ async function main() {
 
   // The reviewer saw the drafter's reply as quoted discussion on the user side, never as its own assistant turn.
   check(reviewer.filter(m => m.role !== 'system').map(m => m.role).join(',') === 'user', 'The reviewer request has one user block and no assistant message');
-  check(reviewer.at(-1).content.includes('【成员「起草者」· Drafter】\n> DeepSeek 夹具回复 1') && reviewer.at(-1).content.includes('现在由你（成员「审查者」· Critic）发言'), 'Labelled, quoted drafter reply and the turn cue');
+  check(reviewer.at(-1).content.includes('【成员「起草者」· 起草】\n> DeepSeek 夹具回复 1') && reviewer.at(-1).content.includes('现在由你（成员「审查者」· 审查）发言'), 'Labelled, quoted drafter reply and the turn cue');
   check(requests.every(r => r.keyMatches && r.model === 'deepseek-flash' && r.thinking?.type === 'disabled'), 'Requests carried the saved Key, the approved model and thinking disabled');
   result.reviewerMessages = reviewer;
 

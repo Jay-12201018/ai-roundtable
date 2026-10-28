@@ -6,9 +6,9 @@ async function page(stage, saved = {}) {
   const wait = async (read, accepts, message) => { const deadline = Date.now() + 90000; for (;;) { const value = await read(); if (accepts(value)) return value; if (Date.now() > deadline) throw new Error(message); await sleep(); } };
   const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
   const buttons = name => [...document.querySelectorAll('button')].filter(e => visible(e) && (e.getAttribute('aria-label') === name || e.textContent.trim() === name));
-  const clickIn = async (scope, name) => { const button = await wait(() => [...document.querySelectorAll(scope + ' button')].find(e => visible(e) && e.textContent.trim() === name), b => b && !b.disabled, 'Unavailable button in ' + scope + ': ' + name); button.click(); await sleep(); };
+  const clickIn = async (scope, name) => { const button = await wait(() => [...document.querySelectorAll(scope + ' button')].find(e => visible(e) && (e.getAttribute('aria-label') === name || e.textContent.trim() === name)), b => b && !b.disabled, 'Unavailable button in ' + scope + ': ' + name); button.click(); await sleep(); };
   const click = async (name, pick = list => list[0]) => { const button = await wait(() => pick(buttons(name)), b => b && !b.disabled, 'Unavailable button: ' + name); button.click(); await sleep(); };
-  const field = name => [...document.querySelectorAll('input,select,textarea')].find(e => visible(e) && (e.getAttribute('aria-label') === name || e.closest('label')?.firstChild?.textContent?.trim() === name));
+  const field = name => [...document.querySelectorAll('input,select,textarea')].find(e => visible(e) && (e.getAttribute('aria-label') === name || e.labels?.[0]?.textContent?.trim() === name || e.closest('label')?.firstChild?.textContent?.trim() === name));
   const fill = async (name, value) => {
     const input = await wait(() => field(name), e => e && !e.disabled, 'Unavailable field: ' + name);
     const prototype = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -52,8 +52,8 @@ async function page(stage, saved = {}) {
 
   // A demo room has three legacy Mock members (Drafter, Critic, Synthesizer); no Provider or Key is involved.
   const { roomId } = await api.room.createDemo('R12 probe room'); saved.roomId = roomId;
-  // R16: opening the room list refreshes the sidebar; the sidebar room opens a new discussion in it.
-  await click('管理房间与成员'); await clickIn('.sidebar', 'Mock 圆桌');
+  // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.
+  await click('用量'); await clickIn('.sidebar', 'Mock 圆桌'); await clickIn('.room-page', '新讨论');
   await fill('讨论目标', 'R12 主持人探针任务'); await click('开始讨论');
   const runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run absent'); saved.runId = runId;
   await wait(() => api.run.getSnapshot(runId), run => run.messages[0]?.content, 'No streamed output');

@@ -23,7 +23,7 @@ const database = new Sqlite(databasePath, { readonly: true, fileMustExist: true 
 try {
   assert.deepEqual(database.prepare('PRAGMA integrity_check').pluck().all(), ['ok']);
   assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
-  assert.deepEqual(database.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(), [1,2,3,4,5,6,7,8,9,10]);
+  assert.deepEqual(database.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all(), [1,2,3,4,5,6,7,8,9,10,11]);
   const saved = result.saved;
   const completed = result.ui.snapshots.final ?? result.ui.snapshots.restarted;
   assert.equal(database.prepare('SELECT status FROM workflow_runs WHERE id=?').pluck().get(saved.runId), 'completed');
@@ -55,7 +55,10 @@ try {
   const decoded = Buffer.from([...Buffer.from(key[0].encrypted_value, 'base64')].map(value => value ^ 0xa5)).toString();
   assert.equal(decoded, 'r78-fake-key-final');
   assert.equal(database.prepare('SELECT api_key_reference FROM providers WHERE id=?').pluck().get(saved.otherProviderId), null);
-  for (const table of ['rooms','agents','providers','workflow_runs','turns','messages','request_attempts','run_events','key_records']) {
+  // D113 (migration 11): the confirmed address is bound to the current Key revision; the Key-less provider has none.
+  const approvals = database.prepare('SELECT a.provider_id AS providerId, a.base_url AS baseUrl, a.key_revision = p.key_revision AS current FROM provider_target_approvals a JOIN providers p ON p.id=a.provider_id').all();
+  assert.deepEqual(approvals, [{ providerId: saved.realProviderId, baseUrl: 'https://fixture.invalid/v2', current: 1 }]);
+  for (const table of ['rooms','agents','providers','workflow_runs','turns','messages','request_attempts','run_events','key_records','provider_target_approvals']) {
     assert.ok(!/r78-fake-key-(?:one|two|three|final)/u.test(JSON.stringify(database.prepare('SELECT * FROM ' + table).all())), 'Plain fake Key persisted in ' + table);
   }
   console.log(JSON.stringify({ status:'PASS', phase:result.phase, sqlite:process.versions.modules, privateProfile:directory, completedRun:saved.runId, attempts:3, repeatAttempts:3, keyRecords:1, fakeBackendOnly:true, publicContext:true, historicalDataPreserved:true }));

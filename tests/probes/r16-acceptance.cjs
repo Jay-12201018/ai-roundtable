@@ -44,11 +44,13 @@ async function main() {
   const { js, until, click, field, key, selectAll, ime, type, capture, api, status, text, resize, find, mouse, runSnapshot } = ui;
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
   const noOverflow = async label => check(await js('document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth'), `${label}: no horizontal page scroll`);
+  // R16 batch 2: 外观 is a section of 设置; the discussion is reopened from its entry in the sidebar.
   const setTheme = async value => {
-    await click('设置', { selector: '.sb-item' });
-    await click({ system: '跟随系统', light: '浅色', dark: '深色' }[value], { scope: '.seg' });
+    const task = (await runSnapshot())?.execution?.task;
+    await click('设置', { selector: '.sb-item' }); await click('外观');
+    await click({ system: '跟随系统', light: '浅色', dark: '深色' }[value], { selector: '.choice' });
     check(await js(`document.documentElement.dataset.theme`) === value, `Theme ${value} applied`);
-    await click('返回讨论');
+    await click(task, { selector: '.sb-runs .sb-item', prefix: true });
   };
 
   // Setup (accepted hands-on in R13A/R13B): a DeepSeek Provider with a fake Key and confirmed session target,
@@ -64,7 +66,8 @@ async function main() {
   await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded'); await ui.ensureLocator();
 
   // ── 1. New discussion ──────────────────────────────────────────────
-  await click('校园跑腿讨论', { selector: '.sb-item' });
+  // R16 batch 2: the room opens on its page; 新讨论 there starts a discussion in it.
+  await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
   await until(`document.body.innerText.includes('这场讨论要解决什么？') && document.body.innerText.includes('起草者、审查者、综合者')`, 'empty room state');
   await field('讨论目标'); await selectAll();
   // An Enter that only confirms the IME candidate must not start anything; ⌘Enter is the start shortcut.

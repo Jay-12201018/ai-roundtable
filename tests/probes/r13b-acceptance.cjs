@@ -143,7 +143,7 @@ async function main() {
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   const locator = `window.__r13b = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
-    const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
+    const label = e => e.getAttribute('aria-label') || (e.tagName !== 'BUTTON' && e.labels?.[0]?.textContent?.trim()) || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
     let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
     if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
@@ -192,7 +192,7 @@ async function main() {
   result.screens = [];
   const text = () => js('document.body.innerText');
   // A native <select> opens an OS popup that page input events cannot drive; it is set like a user's pick (focus + change).
-  const choose = (name, value) => js(`(() => { const e = [...document.querySelectorAll('select')].find(e => e.closest('label')?.firstChild?.textContent?.trim() === ${JSON.stringify(name)});
+  const choose = (name, value) => js(`(() => { const e = [...document.querySelectorAll('select')].find(e => (e.labels?.[0]?.textContent?.trim() ?? e.closest('label')?.firstChild?.textContent?.trim()) === ${JSON.stringify(name)});
     e.focus(); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, ${JSON.stringify(value)}); e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; })()`);
   const type = text => send('Input.insertText', { text }).then(() => sleep(120));
   const snapshot = () => js(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'))`);
@@ -212,8 +212,8 @@ async function main() {
   // Reload so the page reads the Provider list as it would after configuring it in Settings.
   await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded');
   await js(locator);
-  // R16: opening the room list refreshes the sidebar; the sidebar room opens a new discussion in it.
-  await click('管理房间与成员'); await click('校园跑腿讨论', { scope: '.sidebar' });
+  // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.
+  await click('用量'); await click('校园跑腿讨论', { scope: '.sidebar' }); await click('新讨论', { scope: '.room-page' });
 
   // Step 1 (D104): a budget smaller than one request stops before sending; the reason and the way on sit together.
   await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
@@ -312,7 +312,7 @@ async function main() {
 
   // Step 7 (D108): the usage page keeps the three categories apart and exports a CSV through Main.
   await click('用量');
-  await until(`document.querySelector('.usage-totals')`, 'usage page');
+  await until(`document.querySelector('.usage-page [aria-label="合计"]')`, 'usage page');
   const usagePage = await js(`document.querySelector('.usage-page').innerText`);
   check(usagePage.includes('已结算') && usagePage.includes('未知（按上限计）') && usagePage.includes('已核销') && usagePage.includes('全按高峰价为'), 'Usage totals by category');
   check(usagePage.includes('比原上限少 ¥'), 'Usage page uses the same write-off wording');
@@ -325,13 +325,13 @@ async function main() {
   await capture('usage-export', '切到"按日期"并点"导出 CSV"：Main 弹出系统保存对话框（探针用自己的临时目录作答），写入 5 条记录后页面提示"已导出 5 条记录到…"。CSV 每笔一行，含北京时间计价起止、空闲/高峰价、单价、按高峰价金额、计入金额和核销依据。', '.usage-page');
 
   // Step 8: dark theme — the same views must stay legible.
-  // R16: 外观 lives in 设置.
-  await click('设置'); await click('深色', { scope: '.seg' });
+  // R16: 外观 is a section of 设置.
+  await click('设置'); await click('外观'); await click('深色', { selector: '.choice' });
   check(await js(`document.documentElement.dataset.theme`) === 'dark', 'Dark theme selected');
-  await click('用量'); await until(`document.querySelector('.usage-totals')`, 'usage page again');
+  await click('用量'); await until(`document.querySelector('.usage-page [aria-label="合计"]')`, 'usage page again');
   await capture('usage-dark', '外观切到"深色"：用量页的卡片、表格、未知费用列表在深色主题下层级和对比度正常。', '.usage-page');
-  await click('按运行');
-  const link = await js(`(() => { const e = [...document.querySelectorAll('.usage-table .link-button')].find(e => e.textContent.includes('设计一个校园跑腿平台')); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await click('按讨论');
+  const link = await js(`(() => { const e = [...document.querySelectorAll('.usage-page .data .row-link')].find(e => e.textContent.includes('设计一个校园跑腿平台')); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: link.x, y: link.y, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: link.x, y: link.y, button: 'left', clickCount: 1 });
   await until(`document.querySelector('.summary-card')`, 'run opened from the usage page');

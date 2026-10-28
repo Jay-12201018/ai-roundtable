@@ -105,7 +105,8 @@ const guarded=app.whenReady().then(()=>{
  session.defaultSession.webRequest.onBeforeRequest({urls:['<all_urls>']},(details,cb)=>{const network=/^(https?|wss?):/u.test(details.url);if(network)result.chromiumNetworkAttempts.push(details.url);cb({cancel:network});});
 });
 async function main(){
- await new Promise(r=>fixture.listen(0,'127.0.0.1',r));fixturePort=fixture.address().port;fixtureBase='http://127.0.0.1:'+fixturePort;
+ // The compatible service's saved address names this port, so a restart listens on the first phase's port again.
+ await new Promise(r=>fixture.listen(restarting?prior.fixturePort:0,'127.0.0.1',r));fixturePort=fixture.address().port;fixtureBase='http://127.0.0.1:'+fixturePort;
  // The reviewed Main profile directory intentionally has no live-provider profiles. Substitute only
  // trusted Main policy/official transport for this owned zero-cost fixture; no product env backdoor.
  const entryModule=await import(pathToFileURL(entry).href);
@@ -127,7 +128,13 @@ async function main(){
  const preferences=contents.getLastWebPreferences();assert.equal(preferences.sandbox,true);assert.equal(preferences.contextIsolation,true);assert.equal(preferences.nodeIntegration,false);assert.equal(preferences.webSecurity,true);
  result.bridge=await contents.executeJavaScript(`(()=>{const a=window.roundtable;if(typeof require!=='undefined'||typeof process!=='undefined'||'invoke' in a||'resolveKey' in a.settings||typeof a.settings.confirmTarget!=='function')throw new Error('Bridge security failure');return {restricted:true,settings:Object.keys(a.settings).sort()};})()`);
  const ui=require('./r09-ui.cjs');
- if(restarting){result.ui=await ui(contents,'restart',prior.saved);assert.equal(requests.length,0,'Restart must not automatically send requests');}
+ if(restarting){
+  // Nothing is sent by the restart itself; D113: the explicit new start sends without asking to confirm the target again.
+  const before=requests.length;assert.equal(before,0,'Restart must not automatically send requests');
+  result.ui=await ui(contents,'restart',prior.saved);
+  const sent=requests.filter(r=>r.method==='POST'&&r.body.messages.some(m=>m.content.includes('R09 confirmed restart')));
+  assert.equal(sent.length,3,'Only the explicit start after the restart sent requests');assert.equal(requests.filter(r=>r.method==='POST').length,3,'No other request was sent after the restart');
+ }
  else{
   result.first=await ui(contents,'first',{},fixtureBase+'/compatible/v1');
   const refreshed=new Promise(r=>contents.once('did-finish-load',r));contents.reload();await refreshed;
@@ -155,7 +162,7 @@ async function main(){
  const publicResults={ui:result.ui,first:result.first,resumed:result.resumed,requests};assert.ok(!JSON.stringify(publicResults).includes('r09-fake-key-'),'Key leaked to ordinary data');
  result.requests=requests;result.saved=result.ui.saved;result.assertions=(result.ui.assertions??0)+(result.first?.assertions??0)+(result.resumed?.assertions??0);
  assert.ok(result.assertions>0,'No UI assertions executed');result.status='PASS';save();
- if(!restarting)fs.writeFileSync(manifestPath,JSON.stringify({status:'PASS',directory,saved:result.saved},null,2),{mode:0o600,flag:'wx'});
+ if(!restarting)fs.writeFileSync(manifestPath,JSON.stringify({status:'PASS',directory,saved:result.saved,fixturePort},null,2),{mode:0o600,flag:'wx'});
  console.log('R09_PRODUCTION_PASS '+JSON.stringify({resultPath,manifestPath,requests:requests.length,assertions:result.assertions,liveApi:false}));
  quitting=true;await new Promise(r=>{fixture.closeAllConnections();fixture.close(r);});app.quit();
 }

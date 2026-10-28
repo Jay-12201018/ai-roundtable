@@ -99,7 +99,7 @@ async function main() {
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r12 = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
-    const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || e.textContent.trim();
+    const label = e => e.getAttribute('aria-label') || (e.tagName !== 'BUTTON' && e.labels?.[0]?.textContent?.trim()) || e.closest('label')?.firstChild?.textContent?.trim() || e.textContent.trim();
     let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
     if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
@@ -165,8 +165,8 @@ async function main() {
 
   // Setup only: a demo room with three Mock members (room management itself is R07, not under test here).
   const { roomId } = await js(`window.roundtable.room.createDemo('R12 实操验收')`);
-  // R16: opening the room list refreshes the sidebar; the sidebar room opens a new discussion in it.
-  await click('管理房间与成员'); await click('Mock 圆桌', { scope: '.sidebar' });
+  // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.
+  await click('用量'); await click('Mock 圆桌', { scope: '.sidebar' }); await click('新讨论', { scope: '.room-page' });
 
   // Path 1: @Override the next speaker while the first Turn is streaming.
   await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园二手书交换平台');
@@ -263,10 +263,11 @@ async function main() {
   // Path 5a (D102): a tiny output limit no longer fails the Run. Each reply is kept and marked as truncated, the Run
   // goes on to the next member, and once it has finished a truncated reply can be continued as a new version.
   await click('新讨论', { scope: '.controls' });
-  await click('讨论方式：按顺序轮流 · 3 回合');
-  await field('单次输出上限（Token）'); await selectAll(); await send('Input.insertText', { text: '3' });
-  await click('验证并预览'); await until(`document.body.innerText.includes('已验证的计划预览')`, 'workflow preview');
-  await click('应用配置'); await click('返回讨论');
+  // R16 batch 2 (D116): 讨论方式 is a dialog that Main checks as you edit; 用于这个房间 remembers it for the room.
+  await click('讨论方式：自由讨论 · 3 回合');
+  await field('单次发言上限'); await selectAll(); await send('Input.insertText', { text: '3' });
+  await until(`document.body.innerText.includes('已核对：预计 3 回合')`, 'workflow checked');
+  await click('用于这个房间');
   await field('讨论目标'); await selectAll(); await ime('jieduan', '演示截断与续写'); await click('开始讨论');
   await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'run completed despite truncation');
   const truncated = await snapshot();
@@ -285,6 +286,9 @@ async function main() {
   check(continued.messages.find(m => m.id === versions[1].messageId).content.startsWith(original) && continued.status === 'completed', 'The continuation starts from the kept text; the Run status is unchanged');
   await capture('continued', '运行结束后点第一条的"续写"：生成"续写 · 当前有效 · 版本 2/2"，从原来的文字接着写（这里仍受上限 3 限制，所以再次标注截断，可以继续续写）；原版本保留为版本 1，后续发言被标为受影响。', 0);
 
+  // The 3-token mode was only for this path: back to the room's default before the next one.
+  await click('新讨论', { scope: '.controls' }); await click('讨论方式：自由讨论'); await click('恢复默认');
+  await until(`document.querySelector('[aria-label="讨论方式：自由讨论 · 3 回合"]')`, 'default mode restored');
   // Path 5b: Stop keeps the partial text; an explicit retry then succeeds.
   // The production Mock finishes a 3-turn Run in about 1.5 s, so Stop (now two clicks, D098) can lose the race to the
   // end of the Run. Each attempt waits for explicit state: the first turn streaming, then the confirmation, then a

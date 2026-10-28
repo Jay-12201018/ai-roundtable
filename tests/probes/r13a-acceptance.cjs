@@ -131,7 +131,7 @@ async function main() {
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r13a = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
-    const label = e => e.getAttribute('aria-label') || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
+    const label = e => e.getAttribute('aria-label') || (e.tagName !== 'BUTTON' && e.labels?.[0]?.textContent?.trim()) || e.closest('label')?.firstChild?.textContent?.trim() || (e.type === 'checkbox' ? e.closest('label')?.textContent?.trim() : '') || e.textContent.trim();
     let list = [...document.querySelectorAll(o.selector || 'button')].filter(e => visible(e) && label(e) === name);
     if (o.slot !== undefined) { const slot = document.querySelectorAll('.thread-item')[o.slot]; list = list.filter(e => slot && slot.contains(e)); }
     if (o.scope) list = list.filter(e => e.closest(o.scope));
@@ -179,59 +179,44 @@ async function main() {
   result.screens = [];
   const text = () => js('document.body.innerText');
   // A native <select> opens an OS popup that page input events cannot drive; it is set like a user's pick (focus + change).
-  const choose = (name, value) => js(`(() => { const e = [...document.querySelectorAll('select')].find(e => e.closest('label')?.firstChild?.textContent?.trim() === ${JSON.stringify(name)});
+  const choose = (name, value) => js(`(() => { const e = [...document.querySelectorAll('select')].find(e => (e.labels?.[0]?.textContent?.trim() ?? e.closest('label')?.firstChild?.textContent?.trim()) === ${JSON.stringify(name)});
     e.focus(); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, ${JSON.stringify(value)}); e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; })()`);
   const type = text => send('Input.insertText', { text }).then(() => sleep(120));
   const snapshot = () => js(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'))`);
 
-  // Step 1: configure the DeepSeek direct Provider in Settings.
-  await click('设置'); await click('新增 Provider');
-  await field('Provider 名称'); await ime('deepseek', 'DeepSeek 直连');
-  check(await choose('Provider 类型', 'openai-compatible') === 'openai-compatible', 'Provider type OpenAI-Compatible');
-  await field('Base URL'); await type('https://api.deepseek.com');
-  await click('我已核对请求目标', { selector: 'input[type=checkbox]' });
-  await field('默认模型 ID'); await type('deepseek-flash');
-  await field('新增模型 ID'); await type('deepseek-flash'); await field('新增模型名称'); await type('DeepSeek Flash');
-  await click('添加自定义模型');
-  await click('保存配置');
-  await until(`document.body.innerText.includes('编辑 Provider')`, 'provider saved');
-  await capture('provider-saved', '在"模型设置"新增 Provider：名称"DeepSeek 直连"（中文由输入法组合输入），类型 OpenAI-Compatible，Base URL https://api.deepseek.com，勾选"我已核对请求目标"，默认模型与自定义模型均为 deepseek-flash，点"保存配置"后进入"编辑 Provider"。', '.settings-feature h2');
+  // Step 1 (R16 batch 2): connect DeepSeek with the wizard; the address is written above the Key (D113).
+  await click('设置'); await click('添加服务');
+  check(await js(`document.querySelector('dialog[open] .choice[aria-pressed=true] b').textContent.endsWith('DeepSeek')`), 'DeepSeek is the preselected service');
+  await click('下一步');
+  check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The Key target is written above the Key');
+  await capture('provider-saved', '设置 › 模型服务 › 添加服务：选 DeepSeek（推荐）后第 2 步写明“Key 只会发往 https://api.deepseek.com”，默认模型 DeepSeek Flash，底部“保存即表示你确认了上面的地址”。', 'dialog[open]');
 
-  // Step 2: save a fake Key (never a real one); a new Key voids the session confirmation, so confirm afterwards.
-  await click('我已核对请求目标', { selector: 'input[type=checkbox]' });
+  // Step 2: save a fake Key (never a real one); 保存并连接 saves it and confirms that address in one step.
   await field('API Key'); await type(fakeKey); await key('Enter');
-  await until(`document.body.innerText.includes('已配置；系统安全存储。')`, 'key saved');
-  check(!(await text()).includes(fakeKey), 'The Key is never echoed in the page');
-  check((await text()).includes('本次会话尚未确认请求目标'), 'After saving a Key the page says the session target needs confirming');
-  await capture('key-saved', '勾选"我已核对请求目标"后 API Key 输入框可用；键入假 Key 并按 Enter 保存（脚本已核对页面显示"已配置；系统安全存储。"且 Key 不回显，该文字位于截图下方）。核对勾选随之复位，请求目标区提示"本次会话尚未确认请求目标……保存或更换 Key 后需重新确认"——实操中发现原来没有这条提示、保存 Key 后直接开始会被拒绝，已补上。', '.settings-target');
-  await click('我已核对请求目标', { selector: 'input[type=checkbox]' });
-  await click('确认本次会话目标');
-  await until(`document.body.innerText.includes('本次会话请求目标已确认')`, 'target confirmed');
-  check(!(await text()).includes('本次会话尚未确认请求目标'), 'The reminder goes away once confirmed');
-  await capture('target-confirmed', '再次勾选核对并点"确认本次会话目标"：显示"本次会话请求目标已确认；更换 Key 或目标后需重新确认。"，提醒消失。', '.settings-target');
+  await until(`document.body.innerText.includes('DeepSeek 已连接')`, 'key saved');
+  check(!(await text()).includes(fakeKey) && await js(`[...document.querySelectorAll('input')].every(e => !e.value.includes(${JSON.stringify(fakeKey)}))`), 'The Key is never echoed in the page');
+  check((await text()).includes('DeepSeek Flash 可以用于讨论') && (await text()).includes('请求地址 https://api.deepseek.com 已确认'), 'The check says the model can be used and the address is confirmed');
+  await capture('key-saved', '键入假 Key 按 Enter（等同“保存并连接”）：第 3 步写明“已保存……请求地址 https://api.deepseek.com 已确认”“DeepSeek Flash 可以用于讨论（价格已核对）”；DeepSeek 没有免费检查 Key 的接口，如实写“Key 还没有核对”。Key 不回显。已为第一个服务建好房间“我的第一场讨论”。', 'dialog[open]');
+  await click('稍后再说');
+  await until(`document.body.innerText.includes('可以使用')`, 'service usable');
+  check((await text()).includes('官方地址，保存 Key 时已确认'), 'The card says when the address was confirmed');
+  await capture('target-confirmed', '回到 设置 › 模型服务：DeepSeek 卡片显示“可以使用”，请求地址“官方地址，保存 Key 时已确认”，API Key“已保存（不显示）”。不再有单独的“确认本次会话目标”一步。', '.svc-card');
 
-  // Step 3: a room with two DeepSeek members.
-  await click('返回讨论'); await click('管理房间与成员'); await click('新建房间');
-  await field('房间名称'); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存房间');
-  await until(`document.body.innerText.includes('新增成员')`, 'room saved');
-  for (const [index, [pinyin, name, role]] of [['qicao', '起草者', 'Drafter'], ['shencha', '审查者', 'Critic']].entries()) {
-    await click('新增成员');
-    await field('成员名称'); await ime(pinyin, name);
-    await field('成员角色'); await type(role);
-    const providerValue = await js(`[...document.querySelectorAll('option')].find(o => o.textContent.startsWith('DeepSeek 直连'))?.value`);
-    check(Boolean(providerValue), 'DeepSeek Provider offered to members');
-    await choose('Provider', providerValue);
-    // Picking the Provider pre-fills its default model; the host still types it over to show the field is free text.
-    check(await js(`document.querySelector('input[list]').value`) === 'deepseek-flash', 'Choosing the Provider pre-fills its default model');
-    await field('Model'); await selectAll(); await type('deepseek-flash');
-    check(await js(`document.querySelector('input[list]').value`) === 'deepseek-flash', 'Model is exactly deepseek-flash');
-    await click('保存成员');
-    await until(`!document.querySelector('dialog[open], .rooms-dialog') && document.body.innerText.split('${name}').length > 1`, 'member saved ' + index);
-  }
-  await capture('members', '新建房间"校园跑腿讨论"，添加"起草者""审查者"两个成员，Provider 均选"DeepSeek 直连"（选中后 Model 自动带出默认模型 deepseek-flash）。', '.rooms-feature');
+  // Step 3: the room made for the first service (D6-A), renamed and down to two DeepSeek members.
+  await click('我的第一场讨论', { selector: '.sb-item' });
+  await until(`document.querySelector('.room-page')`, 'room page');
+  await click('编辑'); await field('房间名称'); await selectAll(); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存');
+  await until(`document.querySelector('.room-page h1')?.textContent === '校园跑腿讨论'`, 'room renamed');
+  await click('「综合者」：编辑、排序、归档、删除'); await click('删除…', { selector: '[role=menuitem]' }); await click('删除', { scope: 'dialog[open]' });
+  await until(`!document.querySelector('dialog[open]') && !document.querySelector('[aria-label="综合者 参与讨论"]')`, 'member removed');
+  const roomId = await js(`window.roundtable.rooms.listRooms().then(rooms => rooms.find(room => room.name === '校园跑腿讨论').id)`);
+  const members = await js(`window.roundtable.rooms.listAgentConfigurations({ roomId: ${JSON.stringify(roomId)} })`);
+  check(members.map(member => member.displayName).join() === '起草者,审查者' && members.every(member => member.modelId === 'deepseek-flash'), 'Two DeepSeek members remain');
+  check((await text()).split('DeepSeek Flash · 可以使用').length === 3, 'Each member says DeepSeek Flash can be used');
+  await capture('members', '连接后自动建好的“我的第一场讨论”改名为“校园跑腿讨论”（中文由输入法组合输入），删掉综合者，留下起草者、审查者，都写着“DeepSeek Flash · 可以使用”。', '.room-page');
 
   // Step 4: a budgeted Run; each message shows usage and cost, the header shows spend and what is left.
-  await click('返回讨论');
+  await click('新讨论', { scope: '.room-page' });
   await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
   // R16: the budget is in the settings popover beside the goal.
   await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.05');

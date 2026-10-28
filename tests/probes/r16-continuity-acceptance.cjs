@@ -45,7 +45,8 @@ async function main() {
   await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded'); await ui.ensureLocator();
 
   // ── Path 1: a 3-round discussion; after round 2 the host names 审查者 ─────────────
-  await click('校园跑腿讨论', { selector: '.sb-item' });
+  // R16 batch 2: the room opens on its page; 新讨论 there starts a discussion in it.
+  await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
   await until(`document.body.innerText.includes('这场讨论要解决什么？')`, 'empty room');
   await field('讨论目标'); await ui.selectAll();
   await ime('sheji', '为学校设计一个校园跑腿平台的试点方案：说清范围、定价和衡量指标。');
@@ -135,11 +136,17 @@ async function main() {
   check((await text()).includes('计划 3 / 3 回合 · 另有 5 轮插入（点名 1、继续讨论 4）'), 'Progress counts plan turns apart from inserted ones');
   await capture('panel-progress', '本场信息 › 进度：计划回合与插入的回合分开计数', '.run-panel');
 
+  // R16 batch 2: 外观 is a section of 设置; the discussion is reopened from its entry in the sidebar.
+  const themeTo = async label => {
+    const task = (await runSnapshot()).execution.task;
+    await click('设置', { selector: '.sb-item' }); await click('外观'); await click(label, { selector: '.choice' });
+    await click(task, { selector: '.sb-runs .sb-item', prefix: true });
+  };
   // Dark theme for the continue box.
-  await click('设置', { selector: '.sb-item' }); await click('深色', { scope: '.seg' }); await click('返回讨论');
+  await themeTo('深色');
   await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('整轮最多')`, 'dark preview');
   await capture('continue-box-dark', '深色：继续讨论的输入框与预计花费');
-  await click('设置', { selector: '.sb-item' }); await click('浅色', { scope: '.seg' }); await click('返回讨论');
+  await themeTo('浅色');
 
   // A new discussion is only the explicit button.
   await click('新讨论', { scope: '.dock' });

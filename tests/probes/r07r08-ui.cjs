@@ -25,8 +25,36 @@ async function page(stage, saved) {
     const element = await wait(() => findButton(name), element => element && !element.disabled, 'Unavailable button: ' + name);
     element.click(); await sleep();
   };
-  const field = name => [...document.querySelectorAll('input,select,textarea')].find(element => visible(element)
-    && (element.getAttribute('aria-label') === name || element.closest('label')?.firstChild?.textContent?.trim() === name || element.closest('label')?.textContent?.trim() === name));
+  // R16: fields are labelled with <label for>; the visible label text names the control.
+  // While a modal dialog is open the page behind it is inert: look for fields in the dialog.
+  const field = name => [...(document.querySelector('dialog[open]') ?? document).querySelectorAll('input,select,textarea')].find(element => visible(element)
+    && (element.getAttribute('aria-label') === name || element.labels?.[0]?.textContent?.trim() === name || element.closest('label')?.firstChild?.textContent?.trim() === name || element.closest('label')?.textContent?.trim() === name));
+  // A choice card or a list row is named by its first words (its description follows).
+  const clickPrefix = async (name, scope = document) => {
+    const element = await wait(() => [...scope.querySelectorAll('button')].find(element => visible(element) && (n => { const c = n.cloneNode(true); c.querySelectorAll('[aria-hidden="true"]').forEach(x => x.remove()); return c.textContent.trim(); })(element).startsWith(name)), element => element && !element.disabled, 'Unavailable button: ' + name + '…');
+    element.click(); await sleep();
+  };
+  const card = name => document.querySelector('section[aria-label="' + name + '"]');
+  const clickInCard = async (cardName, name) => {
+    const element = await wait(() => card(cardName) && [...card(cardName).querySelectorAll('button')].find(element => visible(element) && (element.textContent.trim() === name || element.getAttribute('aria-label') === name)), element => element && !element.disabled, 'Unavailable button in ' + cardName + ': ' + name);
+    element.click(); await sleep();
+  };
+  const openAdvanced = async cardName => { const details = await wait(() => card(cardName)?.querySelector('details.adv'), Boolean, 'Advanced section missing: ' + cardName); if (!details.open) { details.querySelector('summary').click(); await sleep(); } };
+  const dialog = () => document.querySelector('dialog[open]');
+  const closeWizard = async () => { const button = await wait(() => dialog() && [...dialog().querySelectorAll('.modal-foot button')].find(element => ['关闭', '稍后再说'].includes(element.textContent.trim())), Boolean, 'Wizard did not finish');
+    button.click(); await wait(dialog, value => !value, 'Wizard did not close'); };
+  // The member menu: 编辑…, 上移, 下移, 归档, 删除….
+  const memberAction = async (member, action) => {
+    await click('「' + member + '」：编辑、排序、归档、删除');
+    const item = await wait(() => [...document.querySelectorAll('[role=menu] button')].find(element => element.textContent.trim() === action), element => element && !element.disabled, 'Menu item unavailable: ' + action);
+    item.click(); await sleep();
+  };
+  const roomTitle = () => document.querySelector('.room-page .page-head h1')?.firstChild?.textContent;
+  const openRoom = async name => { await clickPrefix(name, document.querySelector('.sidebar')); await wait(roomTitle, value => value === name, 'Room page not opened: ' + name); };
+  const openRun = async task => {
+    const row = await wait(() => [...document.querySelectorAll('.run-list li')].find(element => element.querySelector('b')?.textContent === task), Boolean, 'Run not listed: ' + task);
+    row.querySelector('button').click(); await sleep();
+  };
   const fill = async (name, value) => {
     const element = await wait(() => field(name), element => element && !element.disabled, 'Unavailable field: ' + name);
     const prototype = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -78,38 +106,49 @@ async function page(stage, saved) {
     return value;
   };
   if (stage === 'first') {
-    check(!findButton('开始讨论') || findButton('开始讨论').disabled, 'Empty room must not start a legacy demo');
+    // D6-A: with no service and no room the welcome page shows; nothing starts and no demo is created implicitly.
+    await wait(() => document.querySelector('.welcome'), Boolean, 'Welcome page absent');
+    check(!findButton('开始讨论'), 'Empty profile must not offer a start');
     await click('设置');
-    await click('新增 Provider'); await fill('Provider 名称', 'Smoke Mock'); await fill('Provider 类型', 'mock');
-    await click('保存配置');
-    const mock = await wait(providerList, providers => providers.some(provider => provider.name === 'Smoke Mock'), 'Mock Provider not saved');
-    saved.mockProviderId = mock.find(provider => provider.name === 'Smoke Mock').id;
-    async function realProvider(name) {
-      await click('新增 Provider'); await fill('Provider 名称', name); await fill('Base URL', 'https://fixture.invalid/v1');
-      await fill('默认模型 ID', 'fixture-model'); await fill('新增模型 ID', 'fixture-model'); await fill('新增模型名称', 'Fixture Model');
-      await click('添加自定义模型'); await toggle('我已核对请求目标', true); await click('保存配置');
+    await click('添加服务'); await clickPrefix('演示（Mock）', dialog()); await click('下一步'); await click('添加演示服务');
+    const mock = await wait(providerList, providers => providers.some(provider => provider.kind === 'mock'), 'Mock Provider not saved');
+    saved.mockProviderId = mock.find(provider => provider.kind === 'mock').id;
+    await closeWizard();
+    const keyState = id => api.settings.getProviderKeyState({ providerId: id });
+    const secretsGone = () => check(!/r78-fake-key-/u.test(document.body.innerHTML) && [...document.querySelectorAll('input')].every(input => !input.value.startsWith('r78-fake-key-')), 'Secret left in the page');
+    // A compatible service: name, typed address, model and the Key in one step; 保存并连接 confirms the address (D113).
+    async function realProvider(name, key) {
+      await click('添加服务'); await clickPrefix('其他兼容服务', dialog()); await click('下一步');
+      await fill('服务名称', name); await fill('地址', 'https://fixture.invalid/v1'); await fill('模型名', 'fixture-model'); await fill('显示名可选', 'Fixture Model');
+      check(dialog().querySelector('.target').textContent === 'Key 只会发往 https://fixture.invalid/v1', 'Target not written above the Key');
+      await fill('API Key', key); await click('保存并连接');
       const providers = await wait(providerList, values => values.some(value => value.name === name), 'Provider not saved: ' + name);
       const provider = providers.find(value => value.name === name);
-      await wait(() => field('API Key'), Boolean, 'Saved Provider editor not loaded');
+      await wait(() => keyState(provider.id), state => state.state === 'configured' && state.sessionTargetConfirmed === true, 'Key not saved with its target confirmed: ' + name);
+      await closeWizard(); secretsGone();
       return provider.id;
     }
-    saved.realProviderId = await realProvider('Smoke Real A');
-    const keyState = () => api.settings.getProviderKeyState({ providerId: saved.realProviderId });
-    async function saveKey(value) {
-      await toggle('我已核对请求目标', true); await fill('API Key', value); await click('保存或替换 Key');
-      const state = await wait(keyState, state => state.state === 'configured', 'Fake secure Key not configured');
-      check(field('API Key').value === '', 'Secret form not cleared after save'); return noKey(state);
+    saved.realProviderId = await realProvider('Smoke Real A', 'r78-fake-key-one');
+    const firstKey = noKey(await keyState(saved.realProviderId));
+    async function rekey(cardName, label, value) {
+      await clickInCard(cardName, label); await fill('API Key', value); await click('保存并连接');
     }
-    const firstKey = await saveKey('r78-fake-key-one');
-    await toggle('我已核对请求目标', true); await fill('API Key', 'r78-fake-key-two'); await click('保存或替换 Key');
-    const replacement = await wait(keyState, state => state.state === 'configured' && state.keyReference.id !== firstKey.keyReference.id, 'Replacement did not revoke old reference');
-    await click('删除 Key'); await click('确认删除 Key'); await wait(keyState, state => state.state === 'missing', 'Key deletion not saved');
-    await saveKey('r78-fake-key-three');
-    await fill('Base URL', 'https://fixture.invalid/v2'); await toggle('我已核对请求目标', true); await click('保存配置');
-    await wait(keyState, state => state.state === 'missing', 'Endpoint change did not revoke old Key');
-    const finalKey = await saveKey('r78-fake-key-final');
+    await rekey('Smoke Real A', '更换', 'r78-fake-key-two');
+    const replacement = await wait(() => keyState(saved.realProviderId), state => state.state === 'configured' && state.keyReference.id !== firstKey.keyReference.id, 'Replacement did not revoke old reference');
+    await closeWizard(); secretsGone();
+    await openAdvanced('Smoke Real A'); await clickInCard('Smoke Real A', '删除 Key…'); await clickInCard('Smoke Real A', '确认删除 Key');
+    await wait(() => keyState(saved.realProviderId), state => state.state === 'missing', 'Key deletion not saved');
+    await rekey('Smoke Real A', '填写 Key', 'r78-fake-key-three');
+    await wait(() => keyState(saved.realProviderId), state => state.state === 'configured', 'Third Key not saved'); await closeWizard();
+    await openAdvanced('Smoke Real A'); await fill('请求地址', 'https://fixture.invalid/v2'); await clickInCard('Smoke Real A', '保存（会删除已保存的 Key）');
+    await wait(() => keyState(saved.realProviderId), state => state.state === 'missing' && state.sessionTargetConfirmed === false, 'Endpoint change did not revoke old Key and confirmation');
+    await rekey('Smoke Real A', '填写 Key', 'r78-fake-key-final');
+    const finalKey = noKey(await wait(() => keyState(saved.realProviderId), state => state.state === 'configured', 'Final Key not saved')); await closeWizard(); secretsGone();
     saved.keyReference = finalKey.keyReference;
-    saved.otherProviderId = await realProvider('Smoke Real B');
+    saved.otherProviderId = await realProvider('Smoke Real B', 'r78-fake-key-b');
+    if (!card('Smoke Real B').querySelector('.svc-body')) await clickInCard('Smoke Real B', '展开 Smoke Real B');
+    await openAdvanced('Smoke Real B'); await clickInCard('Smoke Real B', '删除 Key…'); await clickInCard('Smoke Real B', '确认删除 Key');
+    await wait(() => keyState(saved.otherProviderId), state => state.state === 'missing', 'Smoke Real B Key not deleted');
     const target = await api.settings.getProviderConfiguration({ id: saved.otherProviderId });
     const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...otherInput } = target;
     let rejected = false; let rejectionEvidence;
@@ -117,40 +156,50 @@ async function page(stage, saved) {
     catch (error) { rejectionEvidence = { name: error.name, message: error.message, code: error.code, detail: error.detail, keys: Object.getOwnPropertyNames(error) }; rejected = error.code === 'invalid_input' || error.detail?.code === 'invalid_input'; }
     check(rejected, 'Cross-provider Key reference injection rejection shape: ' + JSON.stringify(rejectionEvidence));
     check((await api.settings.getProviderKeyState({ providerId: saved.otherProviderId })).state === 'missing', 'Other Provider acquired Key');
-    await toggle('我已核对请求目标', true); await click('测试鉴权');
-    await wait(() => document.body.innerText, value => value.includes('鉴权测试：当前目标或模型缺少已确认的能力、计数或预算信息。'), 'Real Provider reported false network success');
+    // 检查连接 is free: the compatible target has no free Key check, and nothing pretends it succeeded.
+    if (!card('Smoke Real A').querySelector('.svc-body')) await clickInCard('Smoke Real A', '展开 Smoke Real A');
+    await clickInCard('Smoke Real A', '检查连接');
+    await wait(() => card('Smoke Real A').textContent, value => value.includes('地址和配置没问题；这个服务没有免费检查 Key 的接口'), 'Real Provider reported false network success');
+    check(card('Smoke Real A').textContent.includes('价格尚未审核 · 暂时不能用于讨论'), 'Unreviewed price not stated');
     noKey(await api.settings.listProviderSummaries()); noKey(await api.settings.getProviderConfiguration({ id: saved.realProviderId }));
-    noKey(await keyState()); noKey(replacement);
-    await click('返回讨论'); await click('管理房间与成员');
+    noKey(await keyState(saved.realProviderId)); noKey(replacement);
+    // D6-A: the first real service got 我的第一场讨论; it never had a discussion, so it can be deleted.
+    await openRoom('我的第一场讨论'); await click('删除…'); await clickIn('dialog[open]', '删除');
+    await wait(roomList, values => !values.some(value => value.name === '我的第一场讨论'), 'Starter room not deleted');
     async function createRoom(name) {
-      await click('新建房间'); await fill('房间名称', name); await fill('房间目标', name + ' public goal'); await click('保存房间');
+      await click('新建房间'); await fill('房间名称', name); await fill('默认目标可选', name + ' public goal'); await click('新建');
       const rooms = await wait(roomList, values => values.some(value => value.name === name), 'Room not saved: ' + name);
-      await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === name, 'Created room not selected');
+      await wait(roomTitle, value => value === name, 'Created room not opened');
       return rooms.find(value => value.name === name).id;
     }
     saved.roomId = await createRoom('Smoke Roundtable');
+    // The three default members have no model (no usable one exists): replace them with explicit Mock members.
+    const starters = await api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false });
+    check(starters.map(agent => agent.displayName).join() === '起草者,审查者,综合者' && starters.every(agent => agent.providerId === null), 'Default members missing or silently on Mock');
+    for (const starter of starters) { await memberAction(starter.displayName, '删除…'); await clickIn('dialog[open]', '删除'); await wait(dialog, value => !value, 'Member deletion did not finish'); }
     const names = ['Smoke Drafter', 'Smoke Critic', 'Smoke Synthesizer']; const roles = ['Drafter', 'Critic', 'Synthesizer'];
     for (let index = 0; index < names.length; index++) {
-      await click('新增成员'); await fill('成员名称', names[index]); await fill('成员角色', roles[index]);
-      await fill('System prompt', 'Only use public discussion. ' + roles[index]);
-      const providerOptions = await wait(() => field('Provider'), Boolean, 'Provider field absent');
-      check([...providerOptions.options].some(option => option.value === saved.realProviderId), 'Settings summary did not refresh in Rooms');
-      await fill('Provider', saved.mockProviderId); check(field('Model').value === 'mock', 'Explicit Mock model not selected');
-      await click('保存成员'); await wait(() => api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false }), values => values.length === index + 1, 'Member not persisted');
-      await wait(() => document.querySelector('dialog[open]'), value => !value, 'Member editor did not close');
+      await click('添加成员'); await clickPrefix('自定义', dialog()); await fill('名字', names[index]); await fill('角色', roles[index]);
+      await fill('设定可选', 'Only use public discussion. ' + roles[index]);
+      const modelOptions = await wait(() => field('模型'), Boolean, 'Model field absent');
+      check([...modelOptions.options].some(option => option.value.startsWith(saved.realProviderId + '\u0000')), 'Settings summary did not refresh in member options');
+      await fill('模型', saved.mockProviderId + '\u0000mock');
+      check(dialog().textContent.includes('演示成员不联网、不花钱'), 'Mock choice not explained');
+      await clickIn('dialog[open]', '添加'); await wait(() => api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false }), values => values.length === index + 1, 'Member not persisted');
+      await wait(dialog, value => !value, 'Member editor did not close');
     }
     saved.agents = await api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false });
     check(saved.agents.every(agent => agent.providerId === saved.mockProviderId && agent.modelId === 'mock'), 'Members are not all explicit Mock');
     saved.otherRoomId = await createRoom('Smoke Disposable');
-    // The sidebar room opens a new discussion in it.
-    await click('Smoke Roundtable'); await fill('讨论目标', 'R78 public three Agent collaboration');
+    await openRoom('Smoke Roundtable'); await clickIn('.room-page', '新讨论');
+    await fill('讨论目标', 'R78 public three Agent collaboration');
     await click('开始讨论'); saved.runId = await wait(() => localStorage.getItem('roundtable.runId'), Boolean, 'Run not selected');
     await wait(text, values => values[0]?.length > 0, 'Partial message not projected');
     await click('暂停'); snapshots.paused = await settle(saved.runId, 'paused', 1);
     check(snapshots.paused.execution.membersSnapshot.length === 3, 'Frozen members missing');
     check(snapshots.paused.execution.membersSnapshot.every(member => member.providerId === saved.mockProviderId && member.modelId === 'mock'), 'Frozen Provider/model identity changed');
     saved.paused = snapshots.paused;
-    return { saved, checks: ['real UI Provider/model CRUD', 'fake Key save/replace/delete/endpoint revoke', 'cross-provider reference rejected', 'ordinary DTO secret exclusion', 'real network unsupported', 'room/three explicit Mock members', 'settings summary refreshed in member options', 'start/partial projection/pause'], snapshots };
+    return { saved, checks: ['welcome page, no implicit demo', 'connect wizard: Mock and compatible services, address above the Key confirmed by saving', 'fake Key save/replace/delete/endpoint revoke', 'cross-provider reference rejected', 'ordinary DTO and page secret exclusion', 'real network unsupported stated honestly', 'D6 starter room deletable', 'default members without a model, replaced by explicit Mock members', 'settings summary refreshed in member options', 'start/partial projection/pause'], snapshots };
   }
   check(saved.runId && saved.roomId && saved.realProviderId, 'Missing first-phase manifest');
   if (stage === 'resume') {
@@ -178,44 +227,42 @@ async function page(stage, saved) {
     }
     check(await history(snapshots.repeats.at(-1), 0) === 3, 'Original, retry and continuation versions must all stay reachable');
     saved.repeatRunId = repeatRunId;
-    await click('Smoke Disposable');
+    await openRoom('Smoke Disposable');
     check(localStorage.getItem('roundtable.runId') === null && text().length === 0, 'Room switch kept old Run/messages');
-    await click('管理房间与成员'); await clickIn('.rooms-feature', 'Smoke Roundtable');
-    await click('编辑 Smoke Drafter'); await fill('成员名称', 'Smoke Current Renamed'); await fill('成员角色', 'New Current Role'); await click('保存成员');
-    await wait(() => document.querySelector('dialog[open]'), value => !value, 'Member edit did not close');
-    await click('删除 Smoke Current Renamed'); await click('确认删除');
-    await wait(() => document.querySelector('dialog[open] [role="alert"]')?.textContent, value => value?.includes('受保护'), 'Historical member deletion not protected');
-    await click('取消');
-    await click('历史记录'); await clickIn('.rooms-feature', 'R78 public three Agent collaboration');
+    await openRoom('Smoke Roundtable');
+    await memberAction('Smoke Drafter', '编辑…'); await fill('名字', 'Smoke Current Renamed'); await fill('角色', 'New Current Role'); await clickIn('dialog[open]', '保存');
+    await wait(dialog, value => !value, 'Member edit did not close');
+    await memberAction('Smoke Current Renamed', '删除…'); await clickIn('dialog[open]', '删除');
+    await wait(() => document.querySelector('dialog[open] [role="alert"]')?.textContent, value => value?.includes('已有讨论记录引用了它'), 'Historical member deletion not protected');
+    await clickIn('dialog[open]', '取消');
+    await openRun('R78 public three Agent collaboration');
     await settle(saved.runId, 'completed', 3);
     check(document.querySelector('.thread-item .msg-name').textContent === 'Smoke Drafter', 'Historical name replaced by current member');
     document.querySelector('.thread-item button[aria-label="请求详情"]').click(); await sleep();
     check(document.querySelector('.msg-details').textContent.includes('Drafter') && !document.querySelector('.msg-details').textContent.includes('New Current Role'), 'Historical role replaced');
-    await click('管理房间与成员'); await click('删除房间'); await click('确认删除');
-    await wait(() => document.querySelector('dialog[open] [role="alert"]')?.textContent, value => value?.includes('受保护'), 'Historical room deletion not protected');
-    await click('取消'); await click('归档房间'); await click('确认归档');
-    await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Disposable', 'Archive did not switch to remaining room');
-    await click('删除房间'); await click('确认删除');
-    await wait(() => document.querySelector('.rooms-empty h2')?.textContent, value => value === '你的下一场圆桌', 'Last visible room deletion did not clear');
-    await click('返回讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && findButton('开始讨论').disabled, 'Last-room clear kept old projection/start');
-    await click('管理房间与成员'); await toggle('显示归档房间', true);
-    await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Roundtable', 'Archived room unavailable');
-    await click('历史记录'); await clickIn('.rooms-feature', 'R78 public three Agent collaboration'); await settle(saved.runId, 'completed', 3);
-    await click('管理房间与成员'); await toggle('显示归档房间', false);
-    await wait(() => document.querySelector('.rooms-empty h2')?.textContent, value => value === '你的下一场圆桌', 'Filter did not remove last selection');
-    await click('返回讨论'); check(text().length === 0 && localStorage.getItem('roundtable.runId') === null, 'Filter retained Run projection');
-    await click('管理房间与成员'); await toggle('显示归档房间', true);
-    await wait(() => findButton('恢复房间'), Boolean, 'Archived selected room missing'); await click('恢复房间');
-    await wait(() => findButton('归档房间'), Boolean, 'Room restore failed');
-    await click('成员配置'); await click('归档 Smoke Current Renamed'); await click('确认归档');
-    await wait(() => document.querySelector('dialog[open]'), value => !value, 'Member archive did not finish');
-    await toggle('显示归档成员', true); await wait(() => findButton('恢复 Smoke Current Renamed'), Boolean, 'Archived member not visible');
-    await click('恢复 Smoke Current Renamed'); await wait(() => findButton('归档 Smoke Current Renamed'), Boolean, 'Member restore failed');
-    await click('历史记录'); await clickIn('.rooms-feature', 'R78 public three Agent collaboration'); snapshots.final = await settle(saved.runId, 'completed', 3);
+    // A room with discussions cannot be deleted at all (no request is offered); it can be archived.
+    await openRoom('Smoke Roundtable');
+    check(findButton('删除…').disabled && document.body.innerText.includes('这个房间已经有讨论记录，不能删除；可以归档。'), 'Historical room deletion not protected');
+    await click('归档'); await wait(() => findButton('恢复房间'), Boolean, 'Archive did not finish');
+    check((await roomList()).find(room => room.id === saved.roomId).archivedAt !== null, 'Room not archived');
+    await openRoom('Smoke Disposable'); await click('删除…'); await clickIn('dialog[open]', '删除');
+    await wait(() => document.querySelector('.room-page'), value => !value, 'Deleted room page still shown');
+    check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && findButton('开始讨论').disabled, 'Last-room clear kept old projection/start');
+    // The archived room stays reachable from the folded list, with its history.
+    await click('已归档（1）'); await openRoom('Smoke Roundtable');
+    await openRun('R78 public three Agent collaboration'); await settle(saved.runId, 'completed', 3);
+    await openRoom('Smoke Roundtable'); await click('恢复房间');
+    await wait(() => findButton('归档'), Boolean, 'Room restore failed');
+    await memberAction('Smoke Current Renamed', '归档'); await wait(() => findButton('已归档的成员（1）'), Boolean, 'Archived member not visible');
+    await click('已归档的成员（1）'); await click('恢复');
+    await wait(() => findButton('Smoke Current Renamed 参与讨论'), Boolean, 'Member restore failed');
+    await openRun('R78 public three Agent collaboration'); snapshots.final = await settle(saved.runId, 'completed', 3);
     noKey(snapshots.final); noKey(Object.fromEntries(Object.entries(localStorage)));
-    return { saved, checks: ['refresh preserved paused evidence', 'step/resume/three members', 'stop/explicit retry/continue retained original partial and request', 'cross-room projection clear', 'frozen name/role/provider/model', 'member/room history deletion guards', 'archive/delete last room clear', 'archive filter clear', 'room/member restore'], snapshots };
+    return { saved, checks: ['refresh preserved paused evidence', 'step/resume/three members', 'stop/explicit retry/continue retained original partial and request', 'cross-room projection clear', 'frozen name/role/provider/model', 'member/room history deletion guards', 'archive, delete last visible room clears', 'archived room reachable with history', 'room/member restore'], snapshots };
   }
   check(stage === 'restart', 'Unknown UI stage');
+  // R16: the layout pass ended on the room page, which shows the room rather than a discussion; open the Run from its list.
+  await openRoom('Smoke Roundtable'); await openRun('R78 public three Agent collaboration');
   snapshots.restarted = await settle(saved.runId, 'completed', 3);
   check(snapshots.restarted.messages[0].senderName === 'Smoke Drafter', 'Restart changed historical sender');
   noKey(snapshots.restarted);
@@ -224,9 +271,11 @@ async function page(stage, saved) {
   const keyState = noKey(await api.settings.getProviderKeyState({ providerId: saved.realProviderId }));
   check(keyState.state === 'configured' && keyState.keyReference.id === saved.keyReference.id, 'Fake secure Key did not survive restart');
   check((await api.settings.getProviderKeyState({ providerId: saved.otherProviderId })).state === 'missing', 'Cross-provider isolation lost on restart');
-  await click('管理房间与成员'); await wait(() => document.querySelector('.rooms-header h2')?.textContent, value => value === 'Smoke Roundtable', 'Restart room selection missing');
-  await click('成员配置'); await wait(() => findButton('编辑 Smoke Current Renamed'), Boolean, 'Edited configuration not restored');
-  await click('设置'); await wait(() => document.querySelector('.settings-feature'), Boolean, 'Settings not mounted after restart');
+  await openRoom('Smoke Roundtable');
+  await wait(() => findButton('Smoke Current Renamed 参与讨论'), Boolean, 'Edited configuration not restored');
+  await click('设置'); await wait(() => document.querySelector('.settings-shell'), Boolean, 'Settings not mounted after restart');
+  // D113: the remembered confirmation survived the restart for the unchanged Key.
+  check((await api.settings.getProviderKeyState({ providerId: saved.realProviderId })).sessionTargetConfirmed === true, 'Target confirmation not remembered across restart');
   return { saved, checks: ['restart actual Main/Renderer configuration/history', 'fake secure Key persistence and owner isolation', 'edited member restored'], snapshots };
 }
 
