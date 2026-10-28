@@ -1,6 +1,17 @@
 # R00–R18 状态与授权看板
 
-## 当前状态（2026-10-27）
+## 当前状态（2026-10-28）
+
+- **R16 第二批（E 设置与连接向导、F 房间成员与讨论方式、G 首次使用与用量）：merged / verified。** 分支 `codex/r16-batch2`（`a72301a`，基于 main `29b4e84`），以 ff-only 方式合入 main。决策 D113–D117；**migration 11**（`provider_target_approvals`，换 Key、改地址或类型、删服务时同事务删除，恢复校验已覆盖）；新增 IPC `settings.listModelReadiness`、`network.getSettings/saveSettings/testProxy`、`app.relaunch`，`usage.getReport/exportCsv` 增加可选时间范围。
+  - E：设置页改为分类 + 内容；三步连接向导（选服务 → 地址写在 Key 上方、「保存并连接」即确认 → 免费检查连接）；价格未审核的服务如实写“暂时不能用于讨论”；D113 地址确认跨重启记住，绑定“Key 修订号 + 地址 + 服务类型”；D115 代理存 Main 本地配置（只允许本机地址、必须显式勾选“由代理解析域名”、环境变量优先、「检测代理」只做不带 Key 的 CONNECT、「立即重启」在有讨论进行时拒绝）；外观挪进设置。
+  - F：房间单页，房间列表只在侧栏并显示人数；成员对话框带角色模板（D5-A），模型只能从已配置服务中选；新房间默认三位成员，不自动改用 Mock；拖动与键盘排序；D116 讨论方式按房间记在本机，每次开始前由 Main 重新核对；工作流状态行“第 n/N 步 · 阶段”，发言带阶段标签；只有从未讨论过的房间可删（Main 强制）。
+  - G：欢迎页（按审核状态生成“目前可以用于讨论的是 DeepSeek；其他服务可以先连接”）；D6-A 自动建演示房间和“我的第一场讨论”；用量页换装并支持本月 / 上月 / 全部（D117，按请求发出时间归入）。R13B 遗留“预算停下后右侧仍显示灰色重试/续写”已不再出现。
+  - 审查后修复：欢迎页措辞过满、侧栏讨论超过 500 场时看不到最新的（第一批遗留，改为读完全部分页并在失败时可重试）、开始讨论时记住的讨论方式在成员未读完前被误判、「立即重启」后主进程报 Unauthorized IPC sender（改为先回复再重启）。
+- **第二批的检查**：合并候选 `a72301a` 上总控跑了完整检查：typecheck、134 个文件 / 1970 个测试（界面整体替换，删去 13 个旧测试文件、新增 9 个，总控逐条核对旧测试守护的行为已有新测试覆盖）、build；R01（三种模式）、R07/R08、R09、R12、R13A、R13B 的首次运行和重启，R10/R11，premerge（首次 + 重启），R12、R13A、R13B、R16 实操，R16 长历史，讨论延续实操，第二批验收（首次 58 项 + 重启 7 项 + 第二次重启 7 项），全部 exit 0，liveApi=false。记录见 [R16 第二批](verification/2026-10-28-r16-batch2.md)。
+- **第二批真实模型实测（用户本人的 DeepSeek Key，`deepseek-flash`，2026-10-28 周三 12:24 起，空闲时段）**：启动时不带任何代理环境变量；用户在设置页确认 DeepSeek 地址，配好 127.0.0.1:7890 并勾选“由代理解析域名”，点「立即重启」；重启后不再要求确认地址（确认记录未变、Key 修订号一致），设置页保存的代理生效，审查修订链 5 次请求全部成功，按空闲价、命中缓存部分按缓存价结算，逐笔验算一致，合计 ¥0.0339；讨论质量好（审查者认错撤回、修订者逐条采纳或说明不采纳的理由）。换 Key 后需重新确认这一项未在真实环境实测，由自动化和实操覆盖。
+- **下一步路线**：R16 已全部完成（第一批、讨论延续、第二批）。按规划接着是 R14 结构化产物 → R15 安全代码导出 → R17 E2E 与发布。
+
+## 较早状态（2026-10-27）
 
 - **讨论延续专项（R16 第一批之后、第二批之前）：merged / verified。** 分支 `codex/r16-discussion-continuity`（`4d3e8b7`，基于 main `eb0d66a`），以 ff-only 方式合入 main。决策 D110–D112；**migration 10**（只追加的 `run_continuations`，带不可改、不可删和身份校验触发器，恢复校验已覆盖）；新增受信 IPC `run.previewContinuation`、`run.continueDiscussion`。
   - D110：点名改为在下一回合**插入**一轮，计划轮数只算原计划的回合，原计划的成员不再被跳过；@ 的正好是计划中的下一位时只发插话，不多插一轮。
@@ -88,7 +99,7 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 | R13 | 摘要、usage、费用预算 | R05/R09/R11 | R13A/R13B子会话；总控集成 | merged / verified | 用户批准合main | codex/r13a-real-model-enable、codex/r13a-premerge-quality、codex/r13b-usage-summary | b3e3324、0ccb49c、a96d4fe | 预算、账本、按时段与缓存结算、摘要均经DeepSeek真实账单核对 |
 | R14 | 结构化产物 | R11 | 未分派 | ready | 待派发 | 未创建 | 无 | 未运行 |
 | R15 | 安全代码导出 | R14 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
-| R16 | 聊天 UI 与可用性 | R06；主要交互稳定 | R16子会话；总控集成 | 第一批与讨论延续 merged；第二批未开始 | 用户确认设计（D1–D6）并批准第一批合main | codex/r16-ui-redesign、codex/r16-impl-discussion、codex/r16-discussion-continuity | 8c8eb1b、8d833a2、4d3e8b7 | 第一批：自动化、实操、DeepSeek真实试用三层通过；讨论延续（D110–D112、migration 10）三层通过；第二批（设置与连接向导、房间成员、引导与用量页）待派发 |
+| R16 | 聊天 UI 与可用性 | R06；主要交互稳定 | R16子会话；总控集成 | merged / verified | 用户确认设计（D1–D6）并批准各批合main | codex/r16-ui-redesign、codex/r16-impl-discussion、codex/r16-discussion-continuity、codex/r16-batch2 | 8c8eb1b、8d833a2、4d3e8b7、a72301a | 第一批、讨论延续、第二批均经自动化、实操、DeepSeek真实模型三层验收 |
 | R17 | Electron E2E 与发布 | 骨架 R02；最终 R07–R16，含 R10A/R10B | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R18 | V1.1 评测与 ADR | R17 V1 验收 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 
