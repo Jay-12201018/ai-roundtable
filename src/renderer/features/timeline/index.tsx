@@ -24,10 +24,12 @@ export { AgentMessage, HostMessage, SlotItem } from './MessageItem';
 export { providerNamesFrom, modelLabel, providerLabel, type ProviderNames } from './model';
 
 type Props = { snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames; ledger?: LedgerCommands; summaries: SummaryCommands;
-  onRegenerateSummary: (summaryId: string) => void; header?: ReactNode; footer?: ReactNode };
+  onRegenerateSummary: (summaryId: string) => void; header?: ReactNode; footer?: ReactNode;
+  /** R14: a message to bring into view, by slot id (from an artifact's sources). */
+  reveal?: { key: string; nonce: number } };
 
 /** The shared public timeline of one Run: one item per message slot, its effective version first. */
-export function DiscussionTimeline({ snapshot, commands, providers, ledger, summaries, onRegenerateSummary, header, footer }: Props) {
+export function DiscussionTimeline({ snapshot, commands, providers, ledger, summaries, onRegenerateSummary, header, footer, reveal }: Props) {
   const items = useMemo<TimelineItem[]>(() => {
     const slots = timelineSlots(snapshot);
     if (!slots) return snapshot.messages.map(message => ({ key: message.id, render: () => <LegacyMessage snapshot={snapshot} messageId={message.id} providers={providers} /> }));
@@ -43,7 +45,7 @@ export function DiscussionTimeline({ snapshot, commands, providers, ledger, summ
   const last = snapshot.messages.at(-1);
   return <Timeline viewKey={snapshot.runId} label="讨论时间线" items={items} header={header} footer={footer}
     contentVersion={`${snapshot.sequence}:${snapshot.messages.length}:${last?.content.length ?? 0}`}
-    latestFromHost={[...snapshot.messages].reverse().find(message => message.senderName === '主持人')?.id} />;
+    latestFromHost={[...snapshot.messages].reverse().find(message => message.senderName === '主持人')?.id} reveal={reveal} />;
 }
 
 /** Builds without version data keep a flat rendering. */

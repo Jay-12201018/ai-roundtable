@@ -18,6 +18,8 @@ type Props = {
   header?: ReactNode; footer?: ReactNode; label: string;
   /** The host's latest message; when the host sends a new one, the view goes to the latest output to show the answer. */
   latestFromHost?: string;
+  /** R14: bring one item into view and mark it briefly (a source cited by an artifact); a new nonce repeats it. */
+  reveal?: { key: string; nonce: number };
 };
 
 /**
@@ -25,7 +27,7 @@ type Props = {
  * or looking at an older version stops following, and a 「有新消息 · 回到最新」 pill appears instead of jumping.
  * Long histories are windowed with measured heights keyed by slotId, so the DOM stays bounded.
  */
-export function Timeline({ viewKey, items, contentVersion, header, footer, label, latestFromHost }: Props) {
+export function Timeline({ viewKey, items, contentVersion, header, footer, label, latestFromHost, reveal }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -82,6 +84,21 @@ export function Timeline({ viewKey, items, contentVersion, header, footer, label
     return () => { document.removeEventListener('selectionchange', onSelection); observer?.disconnect(); };
   }, [stick]);
 
+  // R14: going back to a cited message stops following and keeps that place as the reading position.
+  const [revealed, setRevealed] = useState<string>();
+  useLayoutEffect(() => {
+    const element = scroller.current; if (!element || !reveal) return;
+    const index = items.findIndex(item => item.key === reveal.key); if (index < 0) return;
+    let y = list.current?.offsetTop ?? 0;
+    for (let at = 0; at < index; at++) y += heights.current.get(items[at].key) ?? (virtual ? ESTIMATE : 0);
+    const node = !virtual ? list.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(reveal.key)}"]`) : undefined;
+    element.scrollTop = Math.max(0, (node ? node.offsetTop : y) - 16);
+    atBottom.current = false; setFresh(false); setScrollTop(element.scrollTop); positions.set(viewKey, element.scrollTop);
+    setRevealed(reveal.key);
+    const timer = setTimeout(() => setRevealed(undefined), 2400);
+    return () => clearTimeout(timer);
+  }, [reveal?.nonce]);
+
   const onScroll = () => {
     const element = scroller.current!;
     atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < BOTTOM_SLACK;
@@ -120,8 +137,8 @@ export function Timeline({ viewKey, items, contentVersion, header, footer, label
           <div ref={list} className="thread-list" data-virtual={virtual || undefined} data-rendered={end - start}>
             {virtual && <div aria-hidden style={{ height: before }} />}
             {items.slice(start, end).map(item => virtual
-              ? <Measured key={item.key} id={item.key} onHeight={measure}>{item.render()}</Measured>
-              : <div key={item.key} className="thread-item">{item.render()}</div>)}
+              ? <Measured key={item.key} id={item.key} onHeight={measure} revealed={revealed === item.key}>{item.render()}</Measured>
+              : <div key={item.key} className={revealed === item.key ? 'thread-item is-revealed' : 'thread-item'} data-key={item.key}>{item.render()}</div>)}
             {virtual && <div aria-hidden style={{ height: after }} />}
           </div>
           {footer}
@@ -132,7 +149,7 @@ export function Timeline({ viewKey, items, contentVersion, header, footer, label
   </TimelineHoldContext.Provider>;
 }
 
-function Measured({ id, onHeight, children }: { id: string; onHeight: (key: string, height: number) => void; children: ReactNode }) {
+function Measured({ id, onHeight, children, revealed }: { id: string; onHeight: (key: string, height: number) => void; children: ReactNode; revealed?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = ref.current; if (!element) return;
@@ -142,5 +159,5 @@ function Measured({ id, onHeight, children }: { id: string; onHeight: (key: stri
     observer.observe(element);
     return () => observer.disconnect();
   }, [id, onHeight]);
-  return <div ref={ref} className="thread-item" data-key={id}>{children}</div>;
+  return <div ref={ref} className={revealed ? 'thread-item is-revealed' : 'thread-item'} data-key={id}>{children}</div>;
 }

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Check, Code, FileText, ListChecks, Table, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { Check, X } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { formatYuan } from '../../../shared/schemas/budget';
 import { Avatar, Button, IconButton, Pill, Tabs, cx } from '../../components/ui';
@@ -167,35 +167,24 @@ function InstructionsTab({ snapshot, commands }: { snapshot: RunSnapshot; comman
   </section>;
 }
 
-function ArtifactsTab() {
-  const item = (Icon: typeof FileText, title: string, text: string) => <div className="artifact"><Icon aria-hidden size={16} /><div className="grow"><b>{title}</b><small>{text}</small></div><span className="tag">即将推出</span></div>;
-  return <section className="ctx-sec"><h3>整理成…</h3>
-    <p className="small muted ctx-lead">把讨论整理成可以直接用的东西。这部分功能即将推出，现在还不能生成。</p>
-    {item(FileText, '方案文档', '把讨论结论整理成一份文档，标出来源发言')}
-    {item(Table, '对比表', '把讨论中的几种方案并排比较')}
-    {item(ListChecks, '行动清单', '负责人、截止时间、来源发言')}
-    {item(Code, '代码候选', '预览 diff 和路径，逐个文件确认后才写入磁盘；不会执行生成的代码')}
-    <p className="small muted">将来生成产物是一次真实请求，开始前会显示预计最高花费。</p>
-  </section>;
-}
-
 /** 本场信息: for looking things up; acting stays in the composer and on the messages themselves. */
-export function RunPanel({ snapshot, commands, ledger, providers, tab, onTab, onClose, onSummarize, onOpenWorkflow, syncLabel }: {
+export function RunPanel({ snapshot, commands, ledger, providers, tab, onTab, onClose, onSummarize, onOpenWorkflow, syncLabel, artifacts, artifactCount }: {
   snapshot: RunSnapshot | undefined; commands: HostCommands; ledger?: LedgerCommands; providers?: ProviderNames;
   tab: PanelTab; onTab: (tab: PanelTab) => void; onClose: () => void; onSummarize?: () => void; onOpenWorkflow?: () => void; syncLabel: string;
+  /** R14: the artifacts tab, assembled by the App (it owns the artifact dialogs). */ artifacts?: ReactNode; artifactCount?: number;
 }) {
   const instructions = snapshot?.host?.instructions.filter(item => item.status === 'active').length ?? 0;
   const members = snapshot?.execution?.membersSnapshot?.length ?? 0;
   return <aside className="run-panel" aria-label="本场信息">
     <div className="ctx-head"><h2>本场信息</h2><IconButton icon={X} label="关闭本场信息" onClick={onClose} data-autofocus /></div>
     <Tabs idPrefix="ctx" label="本场信息" value={tab} onChange={onTab} tabs={[{ id: 'progress', label: '进度' }, { id: 'members', label: '成员', count: members },
-      { id: 'instructions', label: '指令', count: instructions }, { id: 'artifacts', label: '产物' }]} />
+      { id: 'instructions', label: '指令', count: instructions }, { id: 'artifacts', label: '产物', count: artifactCount }]} />
     <div className="ctx-body" id={`ctx-panel-${tab}`} role="tabpanel" aria-labelledby={`ctx-tab-${tab}`}>
       {!snapshot ? <p className="small muted">开始讨论后，这里会显示这场讨论的预算和花费、讨论方式的进度、成员状态和持续指令。</p>
         : tab === 'progress' ? <ProgressTab snapshot={snapshot} ledger={ledger} onSummarize={onSummarize} onOpenWorkflow={onOpenWorkflow} />
         : tab === 'members' ? <MembersTab snapshot={snapshot} commands={commands} providers={providers} />
         : tab === 'instructions' ? <InstructionsTab snapshot={snapshot} commands={commands} />
-        : <ArtifactsTab />}
+        : artifacts ?? <p className="small muted">这个版本的应用没有产物功能。</p>}
     </div>
     <details className="dev-details"><summary>运行详情（排查问题时用）</summary>
       <dl><dt>运行 ID</dt><dd>{snapshot?.runId ?? '—'}</dd><dt>事件序列</dt><dd>{snapshot?.sequence ?? 0}</dd>

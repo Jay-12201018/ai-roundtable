@@ -142,7 +142,8 @@ export async function copyText(text: string): Promise<boolean> {
   catch {
     try {
       const area = document.createElement('textarea'); area.value = text; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0';
-      document.body.appendChild(area); area.select(); const ok = document.execCommand('copy'); area.remove(); return ok;
+      // Outside an open modal dialog everything is inert and cannot be selected, so the helper goes inside it.
+      (document.querySelector('dialog[open]') ?? document.body).appendChild(area); area.select(); const ok = document.execCommand('copy'); area.remove(); return ok;
     } catch { return false; }
   }
 }

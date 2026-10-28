@@ -1,0 +1,90 @@
+/* R14 structured artifacts: the panel list and the reader. Colors come from the theme tokens only. */
+.art-blocked { color: var(--text-2); background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 10px; }
+.art-entry { display: grid; gap: 4px; width: 100%; margin-top: 8px; padding: 8px 10px; text-align: left; font: inherit; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer; }
+.art-entry:hover { border-color: var(--line-strong); }
+.art-entry:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.art-entry-title { font-weight: 600; overflow-wrap: anywhere; }
+.art-entry-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+dialog.modal.artifact-reader { width: min(880px, calc(100vw - 32px)); height: min(860px, calc(100dvh - 32px)); }
+.art-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-top: 12px; }
+.art-version .select { max-width: min(420px, 100%); }
+.art-status-text { margin: 0 0 12px; color: var(--text-2); font-size: 14px; line-height: 22px; }
+.art-status-text.is-bad { color: var(--danger); }
+.artifact-reader .note { margin-bottom: 12px; }
+.artifact-reader .tabs { margin: 4px -24px 0; padding: 0 20px; }
+.art-body { padding-top: 16px; }
+.art-save { position: relative; display: inline-flex; }
+.art-save-menu { position: absolute; right: 0; bottom: calc(100% + 6px); display: grid; gap: 6px; padding: 8px; min-width: 190px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow-pop); z-index: 2; }
+
+/* The document */
+.art-doc { max-width: var(--reading-width); }
+.art-title { margin: 0 0 16px; font-size: 20px; line-height: 28px; font-weight: 600; overflow-wrap: anywhere; }
+.art-sec { margin: 0 0 22px; }
+.art-sec > h3 { margin: 0 0 10px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--text-2); }
+.art-list, .art-checks, .art-points { margin: 0; padding-left: 20px; }
+.art-list li, .art-checks li { margin: 3px 0; line-height: 24px; overflow-wrap: anywhere; }
+.art-checks { list-style: none; padding-left: 0; }
+.art-checks li { position: relative; padding-left: 22px; }
+.art-checks li::before { content: ""; position: absolute; left: 2px; top: 6px; width: 11px; height: 11px; border: 1.5px solid var(--line-strong); border-radius: 3px; }
+.art-points li { margin: 0 0 8px; line-height: 24px; overflow-wrap: anywhere; }
+.art-points li > span:first-child { margin-right: 6px; }
+.art-card { padding: 12px 14px; margin: 0 0 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); }
+.art-card > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; margin-bottom: 6px; }
+.art-card > header b { font-weight: 600; overflow-wrap: anywhere; }
+.art-card .md { font-size: 14px; line-height: 23px; }
+.art-id { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); }
+.art-label { margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.art-strong { margin: 0 0 6px; font-weight: 600; overflow-wrap: anywhere; }
+.art-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 6px; font-size: 14px; line-height: 22px; }
+.art-facts dt { color: var(--text-2); }
+.art-facts dd { margin: 0; overflow-wrap: anywhere; }
+.art-actions { list-style: none; margin: 0; padding: 0; }
+.art-status.is-done { color: var(--success); background: var(--accent-soft); border-color: transparent; }
+.art-status.is-doing { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.art-status.is-blocked { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.art-unknown { display: inline-block; padding: 0 6px; border-radius: var(--r-xs); color: var(--warn); background: var(--warn-soft); font-size: 12px; line-height: 18px; }
+.art-sources { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; line-height: 18px; }
+.art-sources > .muted { margin-right: 2px; }
+.art-source { display: inline-flex; align-items: center; padding: 0 6px; border-radius: var(--r-xs); border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--text-2); font: inherit; font-size: 12px; line-height: 18px; }
+button.art-source { cursor: pointer; }
+button.art-source:hover { color: var(--accent); border-color: var(--accent); }
+.art-safe { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--info-soft); color: var(--text); font-size: 13px; line-height: 20px; }
+.art-safe svg { flex: none; margin-top: 2px; color: var(--info); }
+.art-file { margin: 0 0 16px; }
+.art-file > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.art-path { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+
+/* Raw output, errors and the editor */
+.art-issues { margin: 0 0 12px; padding: 10px 12px 10px 30px; border-radius: var(--r-sm); background: var(--danger-soft); font-size: 13px; line-height: 20px; }
+.art-issues li { margin: 2px 0; overflow-wrap: anywhere; }
+.art-issues li > * + * { margin-left: 6px; }
+.art-issues b { font-weight: 600; }
+.art-raw { margin: 0; padding: 10px 0; max-height: none; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; counter-reset: none; }
+.art-raw > span { display: block; padding: 0 12px 0 52px; position: relative; }
+.art-raw > span > i { position: absolute; left: 0; width: 40px; text-align: right; font-style: normal; color: var(--text-3); user-select: none; }
+.art-raw > span.is-bad { background: var(--danger-soft); }
+.art-basis { list-style: none; margin: 0; padding: 0; }
+.art-basis li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.art-basis li.is-stale > span:not(.tag) { color: var(--text-3); }
+.art-editor { display: grid; gap: 8px; }
+.art-editor p { margin: 0; }
+.art-json { width: 100%; min-height: 320px; font-family: var(--font-mono); font-size: 12.5px; line-height: 20px; resize: vertical; tab-size: 2; }
+.art-check { font-size: 13px; }
+.art-check .ok-text, .art-check .warn-text { display: inline-flex; align-items: center; gap: 4px; }
+.art-check .warn-text { color: var(--danger); }
+.art-editor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* Going back to a cited message: a brief, quiet mark. */
+.thread-item.is-revealed > * { animation: art-reveal 2.4s ease-out; border-radius: var(--r-md); }
+@keyframes art-reveal { 0%, 40% { box-shadow: 0 0 0 3px var(--accent-soft); background: var(--accent-soft); } 100% { box-shadow: 0 0 0 3px transparent; } }
+@media (prefers-reduced-motion: reduce) { .thread-item.is-revealed > * { animation: none; outline: 2px solid var(--accent); outline-offset: 4px; } }
+
+@media (max-width: 860px) {
+  dialog.modal.artifact-reader { height: calc(100dvh - 24px); width: calc(100vw - 24px); }
+  .artifact-reader .modal-foot { justify-content: flex-start; }
+}

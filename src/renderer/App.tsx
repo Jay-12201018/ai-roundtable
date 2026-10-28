@@ -9,11 +9,13 @@ import { errorCodeSchema } from '../shared/schemas/error';
 import { ConnectWizard, SettingsPage, isUserAddress, useReadiness, type ConnectedRoom, type SettingsSection } from './features/settings';
 import { Welcome, startDemo } from './features/onboarding';
 import type { ProviderConfiguration, ProviderReadiness } from '../shared/contracts/configuration';
-import { useHostCommands, useSummaryCommands } from './features/host';
+import { timelineSlots, useHostCommands, useSummaryCommands } from './features/host';
 import { UsagePage, chargeOfMessage, parseBudgetYuan, useLedgerCommands } from './features/usage';
 import { DiscussionTimeline, RunNotices, SummaryDialog, providerNamesFrom } from './features/timeline';
 import { HostComposer, TaskComposer, interjectionBoxFor, type RunControls } from './features/composer/Composer';
 import { RunPanel, type PanelTab } from './features/runPanel/RunPanel';
+import { ArtifactReader, ArtifactsPanel, GenerateDialog, useArtifacts } from './features/artifacts';
+import type { ArtifactKind } from '../shared/schemas/artifact';
 import { Sidebar, useRoomDirectory } from './features/shell/Sidebar';
 import { Topbar } from './features/shell/Topbar';
 import { Avatar, Button, Drawer, Pill } from './components/ui';
@@ -221,6 +223,18 @@ export function App() {
   const [summaryTarget, setSummaryTarget] = useState<{ summaryId?: string }>();
   useEffect(() => setSummaryTarget(undefined), [snapshot?.runId]);
   const openSummary = useCallback((summaryId?: string) => { setPanelDrawer(false); setSummaryTarget(summaryId ? { summaryId } : {}); }, []);
+  // R14: artifacts of the selected Run — the generate dialog, the reader, and going back to a message it cites.
+  const artifactCommands = useArtifacts(api.artifact, snapshot?.runId, snapshot?.sequence);
+  const [generateTarget, setGenerateTarget] = useState<{ kind: ArtifactKind; artifactId?: string }>();
+  const [readerTarget, setReaderTarget] = useState<{ artifactId: string; versionId?: string }>();
+  const [reveal, setReveal] = useState<{ key: string; nonce: number }>();
+  useEffect(() => { setGenerateTarget(undefined); setReaderTarget(undefined); setReveal(undefined); }, [snapshot?.runId]);
+  const readerArtifact = readerTarget ? artifactCommands.artifacts?.find(artifact => artifact.artifactId === readerTarget.artifactId) : undefined;
+  const revealNumber = useCallback((number: number) => {
+    const slotId = timelineSlots(snapshot)?.find(slot => slot.number === number)?.slotId;
+    if (!slotId) return;
+    setReaderTarget(undefined); setPanelDrawer(false); setReveal({ key: slotId, nonce: Date.now() });
+  }, [snapshot]);
 
   const runStatus = snapshot?.status;
   // A budget stop is a deliberate guard, not a model failure; say so in the header.
@@ -371,7 +385,7 @@ export function App() {
   const recentTasks = [...new Set(directory.runs.map(run => run.task).filter((task): task is string => Boolean(task?.trim())))].slice(0, 3);
   const discussionBody = (() => {
     if (snapshot) return <DiscussionTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} ledger={ledger} summaries={summaryCommands}
-      onRegenerateSummary={openSummary}
+      onRegenerateSummary={openSummary} reveal={reveal}
       header={<><div className="goal-card"><div className="label">讨论目标</div><p>{snapshot.execution?.task?.trim() || '历史任务（目标未记录）'}</p></div>
         <div className="sys-line">{snapshot.workflow ? workflowTemplateLabels[snapshot.workflow.templateId] : '按顺序轮流发言'}{runMembers?.length ? ` · ${runMembers.join(' → ')}` : ''}{budget ? ` · 预算 ${yuanShort(budget.initialLimitMicro ?? budget.limitMicro)}` : ''}</div></>}
       footer={<RunNotices snapshot={snapshot} error={error} syncFailed={syncStatus === 'error'} onRetrySync={synchronizeHost} budgetStopped={budgetStopped}
@@ -443,7 +457,10 @@ export function App() {
     onCollapse={drawer ? undefined : () => collapseSidebar(true)} onClose={drawer ? () => setNavOpen(false) : undefined} />;
   const panel = <RunPanel snapshot={snapshot} commands={hostCommands} ledger={ledger} providers={providerNames} tab={panelTab} onTab={setPanelTab}
     onClose={() => { if (layout === 'wide') { setPanelPinned(false); remember('roundtable.panelOpen', false); } else setPanelDrawer(false); }}
-    onSummarize={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setWorkflowOpen(true); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'} />;
+    onSummarize={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setWorkflowOpen(true); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'}
+    artifactCount={artifactCommands.artifacts?.length}
+    artifacts={snapshot && artifactCommands.available ? <ArtifactsPanel snapshot={snapshot} commands={artifactCommands}
+      onGenerate={kind => { setPanelDrawer(false); setGenerateTarget({ kind }); }} onOpen={artifactId => { setPanelDrawer(false); setReaderTarget({ artifactId }); }} /> : undefined} />;
 
   return <div className="app app-shell" data-layout={layout}>
     {sidebarInline && <div className="app-side" inert={anyDrawer || undefined}>{sidebar(false)}</div>}
@@ -482,6 +499,12 @@ export function App() {
       const created = await createStarterRoom(api.rooms, value, defaultModelFor(providers, readiness.rows));
       setRoomDialog(false); void directory.reload(); openRoom(created.id);
     }} />}
+    {snapshot && readerArtifact && <ArtifactReader key={readerArtifact.artifactId} snapshot={snapshot} artifact={readerArtifact} commands={artifactCommands} host={hostCommands}
+      initialVersionId={readerTarget?.versionId} onClose={() => setReaderTarget(undefined)} onReveal={revealNumber}
+      onRegenerate={() => setGenerateTarget({ kind: readerArtifact.kind, artifactId: readerArtifact.artifactId })} />}
+    {snapshot && generateTarget && <GenerateDialog key={`${generateTarget.kind}:${generateTarget.artifactId ?? 'new'}`} snapshot={snapshot} kind={generateTarget.kind}
+      artifactId={generateTarget.artifactId} commands={artifactCommands} ledger={ledger} onClose={() => setGenerateTarget(undefined)}
+      onStarted={result => { setGenerateTarget(undefined); setReaderTarget({ artifactId: result.artifactId, versionId: result.versionId }); }} />}
     {snapshot && summaryTarget && <SummaryDialog key={summaryTarget.summaryId ?? 'new'} snapshot={snapshot} summaries={summaryCommands} ledger={ledger} summaryId={summaryTarget.summaryId} onClose={() => setSummaryTarget(undefined)} />}
   </div>;
 }
