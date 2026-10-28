@@ -57,14 +57,17 @@ async function main() {
     // ── G · first use ──────────────────────────────────────────────────────────
     await has('让几位 AI 围坐一桌，替你把问题讨论透');
     const welcome = await text();
-    for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '建房间、选成员（默认起草 · 审查 · 综合）', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型'])
+    for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '建房间、选成员（默认起草 · 审查 · 综合）', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型',
+      // Only what Main allows today: DeepSeek can be used in a discussion; the unreviewed services can be connected first.
+      '目前可以用于讨论的是 DeepSeek；OpenAI、Anthropic Claude、Google Gemini 和其他兼容服务可以先连接，价格审核后开放讨论。'])
       check(welcome.includes(piece), 'Welcome says: ' + piece);
+    check(!welcome.includes('支持 DeepSeek'), 'The welcome page does not promise services that cannot be used yet');
     check(await js(`!document.querySelector('[aria-label="讨论目标"]')`), 'No goal box before anything exists');
     await noOverflow('welcome 1280');
-    await capture('welcome-1280-light', '首次启动（1280，浅色）：没有服务也没有房间，主区域是欢迎页——“连接模型服务”（主推，墨绿描边）和“先试玩演示”（写明回复是预先写好的示例、不代表真实模型水平）；下方三步说明与数据/Key 安全说明；侧栏写“还没有房间……会自动建好第一个房间”，设置旁提示“未连接模型”。');
+    await capture('welcome-1280-light', '首次启动（1280，浅色）：没有服务也没有房间，主区域是欢迎页——“连接模型服务”（主推，墨绿描边）和“先试玩演示”（写明回复是预先写好的示例、不代表真实模型水平）；连接卡片按审核状态如实写“目前可以用于讨论的是 DeepSeek；OpenAI、Anthropic Claude、Google Gemini 和其他兼容服务可以先连接，价格审核后开放讨论”；下方三步说明与数据/Key 安全说明；侧栏写“还没有房间……会自动建好第一个房间”，设置旁提示“未连接模型”。');
     await theme('dark'); await resize(800, 600); await openNav(); await click('AI 圆桌', { selector: '.brand-home' });
     await has('先试玩演示'); await noOverflow('welcome 800');
-    await capture('welcome-800-dark', '800×600 深色：欢迎页两张卡片改为上下排列，无横向滚动。点侧栏左上角“AI 圆桌”可以从设置回到首页（实操中发现首次使用时离开欢迎页后没有回来的入口，已补上）。');
+    await capture('welcome-800-dark', '800×600 深色：欢迎页两张卡片改为上下排列，无横向滚动，服务说明同浅色。点侧栏左上角“AI 圆桌”可以从设置回到首页（实操中发现首次使用时离开欢迎页后没有回来的入口，已补上）。');
     await resize(1280, 800); await theme('light'); await click('AI 圆桌', { selector: '.brand-home' });
 
     // D6-A: 开始试玩 — the demo service and 演示房间, the goal in the box, nothing started.
