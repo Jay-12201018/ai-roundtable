@@ -72,6 +72,22 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
     expect(screen.getByRole('button', { name: '更改讨论方式' })).toBeTruthy();
   });
 
+  it('waits for the room’s members before a remembered mode can start, instead of judging it against nobody', async () => {
+    localStorage.setItem('roundtable.workflow.room', JSON.stringify({ version: 1, draft: createWorkflowDraft('review-revision', members) }));
+    const f = fixture(); const gate = deferred<void>(); let held = true;
+    const list = f.rooms.listAgentConfigurations.getMockImplementation()!;
+    f.rooms.listAgentConfigurations.mockImplementation(async input => { if (held) await gate.promise; return list(input); });
+    render(<App />);
+    await screen.findByRole('button', { name: '开始讨论' });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(true);
+    held = false; await act(async () => gate.resolve());
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
+    await waitFor(() => expect(f.api.run.start).toHaveBeenCalledOnce());
+    expect(document.body.textContent).not.toContain('需要调整');
+  });
+
   it('without a remembered mode, starts with Main’s default plan', async () => {
     const f = fixture(); render(<App />); await ready();
     fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));

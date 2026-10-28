@@ -157,6 +157,8 @@ export function App() {
   const modeMembers: WorkflowMember[] = roomId && workflowMembers?.roomId === roomId
     ? workflowMembers.members.filter(member => !member.archivedAt).map(member => ({ id: member.id, name: member.displayName, enabled: member.enabled, role: member.roleTemplateId })) : [];
   const stored = useMemo(() => roomId ? readRoomWorkflow(roomId) : { damaged: false }, [roomId, workflowVersion]);
+  // A remembered mode is checked against the members as they are now, so starting waits until they have been read.
+  const modeReady = !stored.draft || workflowMembers?.roomId === roomId;
   const checkWorkflow = useCallback(async (value: WorkflowDraft): Promise<WorkflowCheck> => {
     if (!roomId) return { ok: false, errors: ['先选一个房间。'] };
     try {
@@ -174,6 +176,7 @@ export function App() {
     setWorkflowNotice(undefined);
     let workflow: { workflowConfig: ReturnType<typeof workflowConfigFromDraft>; workflowPreviewId: string } | undefined;
     const saved = readRoomWorkflow(room).draft;
+    if (saved && workflowMembers?.roomId !== room) return;
     if (saved) {
       // D116: the remembered mode is checked by Main against the members as they are now; if it no longer fits, say why here.
       const problems = draftProblems(saved, modeMembers);
@@ -358,7 +361,7 @@ export function App() {
       settledSlot={budgetStopped ? <Button variant="primary" className="slot" disabled title="预算不足，先在上方追加预算">继续</Button>
         : <Button className="slot" icon={Plus} disabled={!bootReady} onClick={() => newDiscussion(snapshot.roomId)}>新讨论</Button>} />;
     return <TaskComposer draft={draft} setDraft={value => session.store.getState().setDraft(value)}
-      canStart={startEnabled && !otherLive && !startChecking && !room?.archivedAt && budgetMicroCny !== undefined && outputTokenLimit !== undefined}
+      canStart={startEnabled && modeReady && !otherLive && !startChecking && !room?.archivedAt && budgetMicroCny !== undefined && outputTokenLimit !== undefined}
       starting={pending?.command === 'start' || startChecking} onStart={() => void startRun()} notices={<>{syncNotices}{taskNotices}</>}
       placeholder={snapshot ? '在这个房间开始新的讨论，写下目标和约束…' : undefined}
       settings={{ budgetText, setBudgetText, budgetValid: budgetMicroCny !== undefined, outputLimitText, setOutputLimitText, outputLimitValid: outputTokenLimit !== undefined,
@@ -431,7 +434,7 @@ export function App() {
     usage: () => <UsagePage api={api} onOpenRun={selectRun} />,
   };
 
-  const sidebar = (drawer: boolean) => <Sidebar rooms={directory.rooms} archived={directory.archived} counts={directory.counts} runs={directory.runs} failed={directory.failed} onRetry={() => void directory.reload()}
+  const sidebar = (drawer: boolean) => <Sidebar rooms={directory.rooms} archived={directory.archived} counts={directory.counts} runs={directory.runs} failed={directory.failed} runsFailed={directory.runsFailed} onRetry={() => void directory.reload()}
     roomId={roomId} runId={snapshot?.runId ?? runId} page={page} ready={bootReady} monthSpend={monthSpend}
     emptyText={providers.length === 0 ? '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。' : undefined}
     noRealProvider={providerLoadState === 'ready' && !providers.some(provider => provider.kind !== 'mock' && provider.kind !== null && provider.enabled)}
