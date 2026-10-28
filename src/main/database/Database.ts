@@ -91,7 +91,7 @@ export type SummaryRecord = { id: string; runId: string; clientRequestId: string
 /** R14: one artifact and its versions, oldest first. */
 export type ArtifactRequestRecord = { requestId: string; status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; createdAt: string };
 export type ArtifactVersionRecord = { id: string; artifactId: string; runId: string; number: number; origin: 'generate' | 'regenerate' | 'edit'; parentVersionId?: string;
-  clientRequestId: string; agentId?: string; validation: 'pending' | 'valid' | 'invalid'; rawOutput: string; contentJson: string | null; issuesJson: string | null;
+  clientRequestId: string; agentId?: string; validation: 'pending' | 'valid' | 'invalid' | 'empty'; rawOutput: string; contentJson: string | null; issuesJson: string | null; emptyReason: string | null;
   createdAt: string; updatedAt: string; request?: ArtifactRequestRecord; sources: string[]; adoptedAt?: string;
   exports: Array<{ id: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string; createdAt: string }> };
 export type ArtifactRecord = { id: string; runId: string; roomId: string; kind: ArtifactKind; clientRequestId: string; createdAt: string; versions: ArtifactVersionRecord[] };
@@ -662,10 +662,11 @@ export class Database {
   }
 
   /** The one validation of a completed generated version. */
-  validateArtifactVersion(versionId: string, outcome: { contentJson: string } | { issues: ArtifactIssue[] }): void {
+  validateArtifactVersion(versionId: string, outcome: { contentJson: string } | { issues: ArtifactIssue[] } | { empty: string }): void {
     this.assertInitialized();
-    const [validation, content, issues] = 'contentJson' in outcome ? ['valid', outcome.contentJson, null] : ['invalid', null, JSON.stringify(outcome.issues)];
-    const result = this.db.prepare("UPDATE artifact_versions SET validation=?,content_json=?,issues_json=?,updated_at=? WHERE id=? AND validation='pending'").run(validation, content, issues, now(), versionId);
+    const [validation, content, issues, empty] = 'contentJson' in outcome ? ['valid', outcome.contentJson, null, null] : 'empty' in outcome ? ['empty', null, null, outcome.empty]
+      : ['invalid', null, JSON.stringify(outcome.issues), null];
+    const result = this.db.prepare("UPDATE artifact_versions SET validation=?,content_json=?,issues_json=?,empty_reason=?,updated_at=? WHERE id=? AND validation='pending'").run(validation, content, issues, empty, now(), versionId);
     if (result.changes !== 1) throw new Error('Artifact version is already validated');
   }
 
@@ -709,7 +710,7 @@ export class Database {
       const artifacts = this.db.prepare('SELECT id,run_id AS runId,room_id AS roomId,kind,client_request_id AS clientRequestId,created_at AS createdAt FROM artifacts WHERE run_id=? ORDER BY created_at,rowid')
         .all(runId) as Array<Omit<ArtifactRecord, 'versions'>>;
       const versions = this.db.prepare(`SELECT id,artifact_id AS artifactId,run_id AS runId,version_number AS number,origin,parent_version_id AS parentVersionId,client_request_id AS clientRequestId,
-        agent_id AS agentId,validation,raw_output AS rawOutput,content_json AS contentJson,issues_json AS issuesJson,created_at AS createdAt,updated_at AS updatedAt
+        agent_id AS agentId,validation,raw_output AS rawOutput,content_json AS contentJson,issues_json AS issuesJson,empty_reason AS emptyReason,created_at AS createdAt,updated_at AS updatedAt
         FROM artifact_versions WHERE run_id=? ORDER BY artifact_id,version_number`).all(runId) as RawArtifactVersion[];
       const requests = new Map((this.db.prepare(`SELECT request_id AS requestId,version_id AS versionId,status,finish_reason AS finishReason,created_at AS createdAt FROM artifact_requests WHERE run_id=?`)
         .all(runId) as Array<{ requestId: string; versionId: string; status: ArtifactRequestRecord['status']; finishReason: 'stop' | 'length' | null; createdAt: string }>)

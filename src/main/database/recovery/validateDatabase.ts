@@ -8,7 +8,7 @@ import { runEventSchema } from '../../../shared/schemas/run';
 import { trialRecordSchema } from '../../providers/controlledTrial/record';
 import { reconciliationAuditSchema } from '../../providers/controlledTrial/reconciliation';
 import { budgetBlockSchema, requestChargeSchema } from '../../../shared/schemas/budget';
-import { artifactContentSchemas, artifactIssueSchema, artifactKindSchema } from '../../../shared/schemas/artifact';
+import { artifactContentSchemas, artifactIssueSchema, artifactKindSchema, artifactNothingKinds } from '../../../shared/schemas/artifact';
 import { streamChatInputSchema } from '../../../shared/schemas/provider';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
@@ -266,9 +266,11 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       assertNoRows(db, `SELECT 1 FROM artifact_exports e LEFT JOIN artifact_versions v ON v.id=e.version_id LEFT JOIN artifacts a ON a.id=v.artifact_id
         WHERE v.id IS NULL OR v.run_id<>e.run_id OR v.validation<>'valid' OR (e.target='file' AND a.kind='code')
           OR (v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_adoptions d WHERE d.version_id=v.id)) LIMIT 1`, 'Invalid artifact export');
-      for (const row of db.prepare('SELECT a.kind,v.validation,v.content_json AS content,v.issues_json AS issues FROM artifact_versions v JOIN artifacts a ON a.id=v.artifact_id')
-        .iterate() as Iterable<{ kind: string; validation: string; content: string | null; issues: string | null }>) {
+      for (const row of db.prepare('SELECT a.kind,v.validation,v.content_json AS content,v.issues_json AS issues,v.empty_reason AS empty FROM artifact_versions v JOIN artifacts a ON a.id=v.artifact_id')
+        .iterate() as Iterable<{ kind: string; validation: string; content: string | null; issues: string | null; empty: string | null }>) {
         const kind = artifactKindSchema.parse(row.kind);
+        // D124: only kinds a discussion may lack can be empty.
+        if (row.empty !== null && !artifactNothingKinds.includes(kind)) throw new Error('Invalid empty artifact');
         if (row.content !== null && !artifactContentSchemas[kind].safeParse(JSON.parse(row.content)).success) throw new Error('Invalid artifact content');
         if (row.issues !== null && !(JSON.parse(row.issues) as unknown[]).every(issue => artifactIssueSchema.safeParse(issue).success)) throw new Error('Invalid artifact issues');
       }

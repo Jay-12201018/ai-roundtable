@@ -26,7 +26,8 @@ END;
 
 -- Every generation, regeneration and host edit is a new version; older versions are never changed. A generated
 -- version streams into raw_output while pending, then is validated exactly once: content_json holds the normalized
--- valid document, issues_json the field-located problems. Raw output is always kept as received.
+-- valid document, issues_json the field-located problems, empty_reason the model's reason when the discussion holds
+-- nothing of this kind (D124; never adopted or exported). Raw output is always kept as received.
 CREATE TABLE artifact_versions (
   id TEXT PRIMARY KEY,
   artifact_id TEXT NOT NULL REFERENCES artifacts(id),
@@ -36,16 +37,18 @@ CREATE TABLE artifact_versions (
   parent_version_id TEXT REFERENCES artifact_versions(id),
   client_request_id TEXT NOT NULL,
   agent_id TEXT,
-  validation TEXT NOT NULL CHECK(validation IN ('pending','valid','invalid')),
+  validation TEXT NOT NULL CHECK(validation IN ('pending','valid','invalid','empty')),
   raw_output TEXT NOT NULL CHECK(length(raw_output) <= 1000000),
   content_json TEXT CHECK(content_json IS NULL OR (json_valid(content_json) AND json_type(content_json)='object')),
   issues_json TEXT CHECK(issues_json IS NULL OR (json_valid(issues_json) AND json_type(issues_json)='array' AND json_array_length(issues_json) >= 1)),
+  empty_reason TEXT CHECK(empty_reason IS NULL OR length(trim(empty_reason)) BETWEEN 1 AND 500),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(artifact_id, version_number),
   UNIQUE(run_id, client_request_id),
   CHECK((validation='valid') = (content_json IS NOT NULL)),
   CHECK((validation='invalid') = (issues_json IS NOT NULL)),
+  CHECK((validation='empty') = (empty_reason IS NOT NULL)),
   CHECK(origin <> 'edit' OR (validation='valid' AND agent_id IS NULL AND parent_version_id IS NOT NULL)),
   CHECK(origin = 'edit' OR agent_id IS NOT NULL),
   CHECK(origin <> 'generate' OR (version_number=1 AND parent_version_id IS NULL))
@@ -61,11 +64,12 @@ END;
 CREATE TRIGGER artifact_version_identity_immutable BEFORE UPDATE OF id,artifact_id,run_id,version_number,origin,parent_version_id,client_request_id,agent_id,created_at ON artifact_versions BEGIN
   SELECT RAISE(ABORT,'Artifact version identity is immutable');
 END;
-CREATE TRIGGER artifact_version_output_once BEFORE UPDATE OF raw_output,validation,content_json,issues_json ON artifact_versions BEGIN
+CREATE TRIGGER artifact_version_output_once BEFORE UPDATE OF raw_output,validation,content_json,issues_json,empty_reason ON artifact_versions BEGIN
   -- Output grows only while its request streams; it is validated only after the request completed.
   SELECT CASE WHEN OLD.validation <> 'pending'
     OR (NEW.raw_output IS NOT OLD.raw_output AND NOT EXISTS(SELECT 1 FROM artifact_requests r WHERE r.version_id=OLD.id AND r.status='generating'))
     OR (NEW.validation <> 'pending' AND NOT EXISTS(SELECT 1 FROM artifact_requests r WHERE r.version_id=OLD.id AND r.status='completed'))
+    OR (NEW.validation = 'empty' AND EXISTS(SELECT 1 FROM artifacts a WHERE a.id=OLD.artifact_id AND a.kind='minutes'))
   THEN RAISE(ABORT,'Validated artifact versions are immutable') END;
 END;
 CREATE TRIGGER artifact_version_no_delete BEFORE DELETE ON artifact_versions BEGIN

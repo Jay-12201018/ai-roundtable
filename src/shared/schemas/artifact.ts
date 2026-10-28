@@ -9,6 +9,13 @@ export const artifactKindValues = ['prd', 'minutes', 'actions', 'code'] as const
 export const artifactKindSchema = z.enum(artifactKindValues);
 export type ArtifactKind = z.infer<typeof artifactKindSchema>;
 export const artifactKindLabels: Record<ArtifactKind, string> = { prd: '需求文档（PRD）', minutes: '会议纪要', actions: '行动清单', code: '代码候选' };
+/**
+ * D124: kinds a discussion may simply not contain (no code, no product, nothing to do). For these a model answers
+ * `{"nothing": "<why>"}` instead of forcing a document. Minutes always exist: any discussion can be summarized.
+ */
+export const artifactNothingKinds: readonly ArtifactKind[] = ['prd', 'actions', 'code'];
+export const MAX_NOTHING_REASON_CHARS = 500;
+export const artifactNothingSchema = z.object({ nothing: z.string().trim().min(1).max(MAX_NOTHING_REASON_CHARS) }).strict();
 
 /** Words a model uses for “not known”; they mean the same as an explicit null and are stored as null. */
 const unknownWords = new Set(['未知', '不详', '不明', '待定', '待确认', '暂无', '无', '未指定', '未提及', '未明确', '未说明', 'tbd', 'unknown', 'n/a', 'na', 'none', 'null', '-', '—', '？', '?']);
@@ -117,9 +124,10 @@ export const MAX_ARTIFACT_ISSUES = 50;
  * Version status: `generating` while the request streams; `failed` when it failed, was stopped or was interrupted
  * (partial output kept); `invalid` when the complete output did not parse or validate (output kept in full);
  * `candidate` when a model's output is valid but the host has not adopted it; `valid` once adopted or written by
- * the host; `exported` once a valid version was copied or saved.
+ * the host; `exported` once a valid version was copied or saved; `empty` when the model said, in the agreed form, that
+ * the discussion holds nothing of this kind (D124) — a valid answer, but not a document: never adopted or exported.
  */
-export const artifactVersionStatusValues = ['generating', 'failed', 'invalid', 'candidate', 'valid', 'exported'] as const;
+export const artifactVersionStatusValues = ['generating', 'failed', 'invalid', 'candidate', 'valid', 'exported', 'empty'] as const;
 export type ArtifactVersionStatus = (typeof artifactVersionStatusValues)[number];
 export const artifactRequestStatusValues = ['generating', 'completed', 'failed', 'aborted', 'interrupted'] as const;
 export const artifactOriginValues = ['generate', 'regenerate', 'edit'] as const;
@@ -139,6 +147,8 @@ export const artifactVersionSchema = z.object({
   /** The document title once valid; otherwise absent. */
   title: z.string().max(200).optional(),
   issues: z.array(artifactIssueSchema).max(MAX_ARTIFACT_ISSUES),
+  /** D124: why there is nothing to write, in the model's words (status `empty`). */
+  emptyReason: z.string().max(MAX_NOTHING_REASON_CHARS).optional(),
   outputChars: sequenceSchema,
   /** The public message numbers this version is based on (a summary counts for the numbers it covers). */
   firstNumber: position.optional(), lastNumber: position.optional(),
@@ -234,7 +244,15 @@ export type CodeCandidateList = z.infer<typeof codeCandidateListSchema>;
 export const priorityLabels: Record<PrdContent['requirements'][number]['priority'], string> = { must: '必须', should: '应该', could: '可以' };
 export const actionStatusLabels: Record<(typeof actionStatusValues)[number], string> = { todo: '未开始', doing: '进行中', done: '已完成', blocked: '受阻' };
 export const artifactStatusLabels: Record<ArtifactVersionStatus, string> = {
-  generating: '生成中', failed: '没有完成', invalid: '校验失败', candidate: '候选 · 待采用', valid: '有效', exported: '有效 · 已导出',
+  generating: '生成中', failed: '没有完成', invalid: '校验失败', candidate: '候选 · 待采用', valid: '有效', exported: '有效 · 已导出', empty: '没有可整理的内容',
 };
 /** “第 1、3、4 条” for cited message numbers. */
 export const sourceNumbersText = (numbers: readonly number[]) => `第 ${numbers.join('、')} 条`;
+
+/** D124: where a host starts when writing a document of a kind the model found nothing for: every field, empty. */
+export const artifactSkeletons: Record<ArtifactKind, unknown> = {
+  prd: { title: '', background: null, goals: [''], requirements: [{ id: 'R1', title: '', description: '', priority: 'must', acceptanceCriteria: [''], sources: null }], nonGoals: [], openQuestions: [] },
+  minutes: { title: '', summary: '', participants: [], conclusions: [{ text: '', sources: null }], decisions: [], openIssues: [] },
+  actions: { title: '', items: [{ id: 'A1', task: '', owner: null, due: null, status: 'todo', sources: null }] },
+  code: { title: '', summary: '', files: [{ path: '', language: null, description: null, content: '' }], notes: [] },
+};

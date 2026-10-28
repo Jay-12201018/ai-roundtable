@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { artifactContentSchemas, MAX_ARTIFACT_ISSUES, type ArtifactContent, type ArtifactIssue, type ArtifactKind } from './artifact';
+import { artifactContentSchemas, artifactNothingKinds, artifactNothingSchema, MAX_ARTIFACT_ISSUES, MAX_NOTHING_REASON_CHARS, type ArtifactContent, type ArtifactIssue, type ArtifactKind } from './artifact';
 
 /**
  * D119: one parser for model output and the host's own edits, used by Main (authoritative) and by the editor (live).
@@ -8,7 +8,9 @@ import { artifactContentSchemas, MAX_ARTIFACT_ISSUES, type ArtifactContent, type
  */
 export type ArtifactParseResult =
   | { ok: true; content: ArtifactContent; json: string }
-  | { ok: false; issues: ArtifactIssue[] };
+  | { ok: false; issues: ArtifactIssue[]; nothing?: undefined }
+  /** D124: the model said there is nothing of this kind; not a document. */
+  | { ok: false; issues: []; nothing: string };
 
 type Path = Array<string | number>;
 type Located = { value: unknown; offsets: Map<string, number> };
@@ -145,7 +147,10 @@ function unwrap(raw: string): { body: string; base: number } {
   return { body: raw, base: 0 };
 }
 
-export function parseArtifact(kind: ArtifactKind, raw: string, options: { sourceNumbers?: readonly number[] } = {}): ArtifactParseResult {
+/**
+ * `allowNothing` is for model output only: a host's own version must be a document, so `{"nothing": …}` there is an error.
+ */
+export function parseArtifact(kind: ArtifactKind, raw: string, options: { sourceNumbers?: readonly number[]; allowNothing?: boolean } = {}): ArtifactParseResult {
   const at = (offset: number | undefined) => offset === undefined ? {} : lineOf(raw, offset);
   if (!raw.trim()) return { ok: false, issues: [{ path: '', label: '整个 JSON', message: '没有输出任何内容' }] };
   const { body, base } = unwrap(raw);
@@ -159,6 +164,15 @@ export function parseArtifact(kind: ArtifactKind, raw: string, options: { source
   catch (error) {
     if (!(error instanceof SyntaxProblem)) throw error;
     return { ok: false, issues: [{ path: '', label: 'JSON 格式', message: error.message, ...at(error.offset) }] };
+  }
+  const value = located.value as Record<string, unknown>;
+  if (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'nothing')) {
+    const offset = located.offsets.get('.nothing');
+    if (!artifactNothingKinds.includes(kind)) return { ok: false, issues: [{ path: 'nothing', label: '整个 JSON', message: '会议纪要总能整理：请按模板写出概要和结论，不要用 nothing', ...at(offset) }] };
+    if (!options.allowNothing) return { ok: false, issues: [{ path: 'nothing', label: '整个 JSON', message: '你修改的版本要写出完整内容；“没有可整理的内容”只用于模型说明', ...at(offset) }] };
+    const nothing = artifactNothingSchema.safeParse(value);
+    if (nothing.success) return { ok: false, issues: [], nothing: nothing.data.nothing };
+    return { ok: false, issues: [{ path: 'nothing', label: '整个 JSON', message: Object.keys(value).length > 1 ? '说明没有可整理的内容时，只写 nothing 这一个字段' : `nothing 要写一句原因，最多 ${MAX_NOTHING_REASON_CHARS} 个字符`, ...at(offset) }] };
   }
   const parsed = artifactContentSchemas[kind].safeParse(located.value);
   const issues: ArtifactIssue[] = [];
