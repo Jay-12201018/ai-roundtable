@@ -24,7 +24,9 @@ const errorFieldSchema = z.enum(['arguments', 'roomId', 'runId', 'turnId', 'mess
   'clientRequestId', 'kind', 'agentId', 'instructionId', 'content', 'budgetMicroCny',
   'amountMicroCny', 'basis', 'requestId', 'acknowledgedUncertainty', 'throughSlotId', 'summaryId',
   // R14 artifacts.
-  'artifactId', 'versionId', 'text', 'sources', 'format', 'target']);
+  'artifactId', 'versionId', 'text', 'sources', 'format', 'target',
+  // R15 code export.
+  'rootId', 'previewId', 'files']);
 export type ErrorField = z.infer<typeof errorFieldSchema>;
 
 export const apiErrorSchema = z.object({

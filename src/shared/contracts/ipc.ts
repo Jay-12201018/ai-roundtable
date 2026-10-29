@@ -14,6 +14,8 @@ import { usageExportResultSchema, usageReportInputSchema, usageReportSchema } fr
 import { networkSettingsSchema, proxyEndpointSchema, proxySettingsSchema, proxyTestResultSchema } from '../schemas/network';
 import { artifactAdoptInputSchema, artifactCommandResultSchema, artifactEditInputSchema, artifactExportInputSchema, artifactExportResultSchema, artifactGenerateInputSchema,
   artifactListInputSchema, artifactListSchema, artifactPreviewInputSchema, artifactPreviewSchema, artifactVersionDetailSchema, artifactVersionInputSchema, codeCandidateListSchema } from '../schemas/artifact';
+import { codeExportChooseRootInputSchema, codeExportChooseRootResultSchema, codeExportPreviewInputSchema, codeExportPreviewSchema, codeExportWriteInputSchema,
+  codeExportWriteResultSchema } from '../schemas/codeExport';
 import { continuationPreviewInputSchema, continuationPreviewSchema, continueDiscussionInputSchema, continueDiscussionResultSchema } from '../schemas/continuation';
 
 export function ipcResponseSchema<T extends z.ZodType>(data: T) {
@@ -59,6 +61,11 @@ export const ipcContracts = {
   'artifact.export': { input: artifactExportInputSchema, output: artifactExportResultSchema },
   // D123: the validated code candidates R15 may consume; read-only.
   'artifact.listCodeCandidates': { input: artifactListInputSchema, output: codeCandidateListSchema },
+  // R15: writing an adopted code candidate. Main owns the folder dialog; the page holds only a folder reference, asks
+  // for a read-only preview against it, then for a write of the files the host ticked in that preview.
+  'codeExport.chooseRoot': { input: codeExportChooseRootInputSchema, output: codeExportChooseRootResultSchema },
+  'codeExport.preview': { input: codeExportPreviewInputSchema, output: codeExportPreviewSchema },
+  'codeExport.write': { input: codeExportWriteInputSchema, output: codeExportWriteResultSchema },
   'rooms.createRoom': roomManagementContracts.createRoom,
   'rooms.updateRoom': roomManagementContracts.updateRoom,
   'rooms.getRoomConfiguration': roomManagementContracts.getRoomConfiguration,
@@ -141,6 +148,15 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
       && (channel !== 'artifact.preview' || result.kind === request.kind)
       && (channel !== 'artifact.generate' || request.artifactId === undefined || result.artifactId === request.artifactId)
       && (result.artifacts ?? result.candidates ?? []).every(item => item.runId === request.runId);
+  }
+  if (channel.startsWith('codeExport.')) {
+    const request = input as { runId: string; versionId?: string; rootId?: string; previewId?: string; files?: Array<{ path: string }> };
+    const result = data as { runId: string; versionId: string; root?: { rootId?: string }; previewId?: string; files?: Array<{ path: string }> };
+    matches = result.runId === request.runId
+      && (request.versionId === undefined || result.versionId === request.versionId)
+      && (channel !== 'codeExport.preview' || result.root?.rootId === request.rootId)
+      && (channel !== 'codeExport.write' || result.previewId === request.previewId
+        && request.files!.every(file => result.files!.some(item => item.path === file.path)));
   }
   if (channel === 'usage.writeOff') {
     const result = data as IpcOutput<'usage.writeOff'>;

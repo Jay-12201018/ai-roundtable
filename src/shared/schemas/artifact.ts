@@ -125,7 +125,7 @@ export const MAX_ARTIFACT_ISSUES = 50;
  * Version status: `generating` while the request streams; `failed` when it failed, was stopped or was interrupted
  * (partial output kept); `invalid` when the complete output did not parse or validate (output kept in full);
  * `candidate` when a model's output is valid but the host has not adopted it; `valid` once adopted or written by
- * the host; `exported` once a valid version was copied or saved; `empty` when the model said, in the agreed form, that
+ * the host; `exported` once a valid version was copied or saved (or, R15, at least one of its files was written); `empty` when the model said, in the agreed form, that
  * the discussion holds nothing of this kind (D124) — a valid answer, but not a document: never adopted or exported.
  */
 export const artifactVersionStatusValues = ['generating', 'failed', 'invalid', 'candidate', 'valid', 'exported', 'empty'] as const;
@@ -157,7 +157,11 @@ export const artifactVersionSchema = z.object({
   firstNumber: position.optional(), lastNumber: position.optional(),
   /** D087/D109: messages it is based on that were later edited or regenerated, by timeline number. */
   affectedNumbers: z.array(position).max(4096),
+  /** The latest copy, save or (R15) file write of this version. */
   adoptedAt: timestampSchema.optional(), exportedAt: timestampSchema.optional(),
+  /** R15 (D130): each write of a code version into a folder the host chose, oldest first. */
+  codeWrites: z.array(z.object({ exportId: idSchema, folder: z.string().min(1).max(4096), written: sequenceSchema, skipped: sequenceSchema, failed: sequenceSchema,
+    at: timestampSchema }).strict()).max(256).optional(),
   createdAt: timestampSchema, updatedAt: timestampSchema,
 }).strict();
 export const artifactSummarySchema = z.object({
