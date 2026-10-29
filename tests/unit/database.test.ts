@@ -141,7 +141,7 @@ describe('Database', () => {
       database = undefined;
       reader = new DatabaseDriver(filename, { readonly: true, fileMustExist: true });
       const firstVersions = reader.prepare('SELECT version, applied_at FROM schema_migrations ORDER BY version').all();
-      expect(firstVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)},{version:3,applied_at:expect.any(String)},{version:4,applied_at:expect.any(String)},{version:5,applied_at:expect.any(String)},{version:6,applied_at:expect.any(String)},{version:7,applied_at:expect.any(String)},{version:8,applied_at:expect.any(String)},{version:9,applied_at:expect.any(String)},{version:10,applied_at:expect.any(String)},{version:11,applied_at:expect.any(String)},{version:12,applied_at:expect.any(String)}]);
+      expect(firstVersions).toEqual([{ version: 1, applied_at: expect.any(String) },{version:2,applied_at:expect.any(String)},{version:3,applied_at:expect.any(String)},{version:4,applied_at:expect.any(String)},{version:5,applied_at:expect.any(String)},{version:6,applied_at:expect.any(String)},{version:7,applied_at:expect.any(String)},{version:8,applied_at:expect.any(String)},{version:9,applied_at:expect.any(String)},{version:10,applied_at:expect.any(String)},{version:11,applied_at:expect.any(String)},{version:12,applied_at:expect.any(String)},{version:13,applied_at:expect.any(String)}]);
       reader.close();
       reader = undefined;
 

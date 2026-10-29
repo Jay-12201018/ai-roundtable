@@ -11,6 +11,8 @@ import { budgetBlockSchema, requestChargeSchema } from '../../../shared/schemas/
 import { artifactContentSchemas, artifactIssueSchema, artifactKindSchema, artifactNothingKinds } from '../../../shared/schemas/artifact';
 import { streamChatInputSchema } from '../../../shared/schemas/provider';
 import { errorCodeSchema } from '../../../shared/schemas/error';
+import { codeExportReasonSchema } from '../../../shared/schemas/codeExport';
+import { candidatePathSchema } from '../../../shared/schemas/artifact';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
 
@@ -281,6 +283,22 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (!input.success || input.data.requestId !== row.request_id) throw new Error('Invalid artifact request input');
       }
       assertChargeEvidence(db, 'artifact_charges', 'artifact');
+    }
+    if ((versions.at(-1) ?? 0) >= 13) {
+      // R15: code writes are append-only records of an effective code version and what happened to each of its files.
+      for (const table of ['code_exports', 'code_export_files']) if (!tables.includes(table)) throw new Error('Recovery v13 schema is incomplete');
+      for (const name of ['code_export_insert', 'code_export_immutable', 'code_export_no_delete', 'code_export_file_immutable', 'code_export_file_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing R15 code export protection');
+      }
+      assertNoRows(db, `SELECT 1 FROM code_exports e LEFT JOIN artifact_versions v ON v.id=e.version_id LEFT JOIN artifacts a ON a.id=v.artifact_id
+        WHERE v.id IS NULL OR v.run_id<>e.run_id OR a.kind<>'code' OR v.validation<>'valid'
+          OR (v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_adoptions d WHERE d.version_id=v.id)) LIMIT 1`, 'Invalid code export');
+      assertNoRows(db, "SELECT 1 FROM code_exports e WHERE NOT EXISTS(SELECT 1 FROM code_export_files f WHERE f.export_id=e.id) LIMIT 1", 'Code export without files');
+      assertNoRows(db, `SELECT 1 FROM code_export_files f WHERE f.position <> (SELECT COUNT(*) FROM code_export_files g WHERE g.export_id=f.export_id AND g.position<f.position)
+        OR f.content_sha256 GLOB '*[^0-9a-f]*' LIMIT 1`, 'Invalid code export file');
+      for (const row of db.prepare('SELECT path,reason FROM code_export_files').iterate() as Iterable<{ path: string; reason: string | null }>) {
+        if (!candidatePathSchema.safeParse(row.path).success || (row.reason !== null && !codeExportReasonSchema.safeParse(row.reason).success)) throw new Error('Invalid code export file');
+      }
     }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {

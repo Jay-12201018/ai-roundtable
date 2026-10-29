@@ -59,7 +59,7 @@ describe('controlled trial migration 4 and durable unknown charges', () => {
       expect(database.listControlledTrials()).toEqual([]);
       raw = new Sqlite(f.path, { readonly: true });
       const versions = raw.prepare('SELECT version,applied_at FROM schema_migrations ORDER BY version').all();
-      expect(versions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(version => ({ version, applied_at: expect.any(String) })));
+      expect(versions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map(version => ({ version, applied_at: expect.any(String) })));
       const receipt = raw.prepare('SELECT id,version FROM schema_backups').get() as { id: number; version: number };
       expect(receipt.version).toBe(3);
       const restored = await database.prepareRegisteredRestore(receipt.id);
@@ -74,7 +74,7 @@ describe('controlled trial migration 4 and durable unknown charges', () => {
       raw = new Sqlite(f.path, { readonly: true });
       expect(raw.prepare('SELECT version,applied_at FROM schema_migrations ORDER BY version').all()).toEqual(versions);
       expect(raw.prepare('SELECT COUNT(*) FROM schema_backups').pluck().get()).toBe(1);
-      expect(validateDatabase(raw).schemaVersion).toBe(12);
+      expect(validateDatabase(raw).schemaVersion).toBe(13);
     } finally { raw?.close(); database.close(); f.dispose(); }
   });
 
@@ -130,7 +130,7 @@ describe('controlled trial migration 4 and durable unknown charges', () => {
       await database.initialize(); database.reserveControlledTrial(reservation()); database.updateControlledTrialProgress('trial-one', { text: 'partial' }); database.recoverControlledTrials();
       const expected = database.listControlledTrials(); raw = new Sqlite(f.path);
       const backups = join(f.directory, 'v4-backups'); mkdirSync(backups, { mode: 0o700 });
-      const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(12);
+      const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(13);
       const restored = await prepareRestore(backup, backups); expect(statSync(restored.path).mode & 0o777).toBe(0o600);
       const candidate = new Database(restored.path);
       try {

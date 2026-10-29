@@ -393,7 +393,7 @@ describe('structured artifacts (D118–D123)', () => {
       expect(again.artifacts[2].versions[0].request).toMatchObject({ requestId: held.requestId, status: 'interrupted' });
       expect(new ArtifactService(reopened, { notifyArtifact: () => {} }).getVersion({ runId, versionId: result.versionId }).rawOutput).toBe('不是 JSON');
       const raw = new Sqlite(filename, { readonly: true });
-      try { expect(validateDatabase(raw).schemaVersion).toBe(12); } finally { raw.close(); }
+      try { expect(validateDatabase(raw).schemaVersion).toBe(13); } finally { raw.close(); }
       reopened.close();
       const calls = f.provider.inputs.length;
       await new Promise(resolve => setTimeout(resolve, 30));
@@ -431,7 +431,7 @@ describe('recovery validation of migration 12', () => {
         const source = new Sqlite(filename); source.pragma('wal_checkpoint(TRUNCATE)'); source.close();
         copyFileSync(filename, copy);
         const raw = new Sqlite(copy);
-        try { expect(validateDatabase(raw).schemaVersion).toBe(12); raw.exec(tamper); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
+        try { expect(validateDatabase(raw).schemaVersion).toBe(13); raw.exec(tamper); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
       };
       check('DROP TRIGGER artifact_version_output_once', /Missing R14 artifact protection/u);
       check(`DROP TRIGGER charge_pricing_insert; CREATE TRIGGER charge_pricing_insert BEFORE INSERT ON charge_pricing BEGIN SELECT 1; END;`, /Missing R14 ledger protection/u);

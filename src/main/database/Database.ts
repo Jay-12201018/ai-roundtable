@@ -14,6 +14,7 @@ import { migration9 } from './migrations/v9';
 import { migration10 } from './migrations/v10';
 import { migration11 } from './migrations/v11';
 import { migration12 } from './migrations/v12';
+import { migration13 } from './migrations/v13';
 import { budgetBlockSchema, effectiveChargeMicro, requestChargeSchema, runBudgetInputSchema, settlementAmountMicro, writeOffBasisSchema, DEFAULT_RUN_BUDGET_MICRO_CNY, MAX_RUN_BUDGET_MICRO_CNY,
   type BudgetBlock, type BudgetTopUp, type ChargeSettlement, type ChargeWriteOff, type PricePeriod, type RequestCharge, type RunBudget } from '../../shared/schemas/budget';
 import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
@@ -95,9 +96,14 @@ export type ArtifactRequestRecord = { requestId: string; status: 'generating' | 
 export type ArtifactVersionRecord = { id: string; artifactId: string; runId: string; number: number; origin: 'generate' | 'regenerate' | 'edit'; parentVersionId?: string;
   clientRequestId: string; agentId?: string; validation: 'pending' | 'valid' | 'invalid' | 'empty'; rawOutput: string; contentJson: string | null; issuesJson: string | null; emptyReason: string | null;
   createdAt: string; updatedAt: string; request?: ArtifactRequestRecord; sources: string[]; adoptedAt?: string;
-  exports: Array<{ id: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string; createdAt: string }> };
+  exports: Array<{ id: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string; createdAt: string }>;
+  /** R15: writes of a code version into a folder, oldest first. */
+  codeWrites: Array<{ id: string; rootPath: string; written: number; skipped: number; failed: number; createdAt: string }> };
+/** R15: one write of a code version and what happened to each of its files. */
+export type CodeExportFileRecord = { path: string; action: 'create' | 'overwrite' | 'none'; outcome: 'written' | 'skipped' | 'failed'; reason?: string; contentSha256: string; bytes: number };
+export type CodeExportRecord = { id: string; versionId: string; runId: string; clientRequestId: string; rootPath: string; createdAt: string; files: CodeExportFileRecord[] };
 export type ArtifactRecord = { id: string; runId: string; roomId: string; kind: ArtifactKind; clientRequestId: string; createdAt: string; versions: ArtifactVersionRecord[] };
-type RawArtifactVersion = Omit<ArtifactVersionRecord, 'parentVersionId' | 'agentId' | 'request' | 'sources' | 'adoptedAt' | 'exports'> & { parentVersionId: string | null; agentId: string | null };
+type RawArtifactVersion = Omit<ArtifactVersionRecord, 'parentVersionId' | 'agentId' | 'request' | 'sources' | 'adoptedAt' | 'exports' | 'codeWrites'> & { parentVersionId: string | null; agentId: string | null };
 
 export type RunEventRecord = {
   runId: string;
@@ -230,6 +236,7 @@ const migrations = [
   migration10,
   migration11,
   migration12,
+  migration13,
 ];
 
 export class Database {
@@ -713,6 +720,30 @@ export class Database {
     return { ...rest, ...(fileName === null ? {} : { fileName }) };
   }
 
+  /** R15: one write and its per-file results, recorded after the files were handled; never the file contents. */
+  insertCodeExport(input: Omit<CodeExportRecord, 'createdAt'>): string {
+    this.assertInitialized();
+    return this.transaction(() => {
+      const createdAt = now();
+      this.db.prepare('INSERT INTO code_exports(id,version_id,run_id,client_request_id,root_path,created_at) VALUES(?,?,?,?,?,?)')
+        .run(input.id, input.versionId, input.runId, input.clientRequestId, input.rootPath, createdAt);
+      const file = this.db.prepare('INSERT INTO code_export_files(export_id,position,path,action,outcome,reason,content_sha256,byte_count) VALUES(?,?,?,?,?,?,?,?)');
+      input.files.forEach((entry, position) => file.run(input.id, position, entry.path, entry.action, entry.outcome, entry.reason ?? null, entry.contentSha256, entry.bytes));
+      return createdAt;
+    });
+  }
+
+  /** The earlier write of the same clientRequestId in this Run, if any (a write is never repeated). */
+  findCodeExport(runId: string, clientRequestId: string): CodeExportRecord | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare('SELECT id,version_id AS versionId,run_id AS runId,client_request_id AS clientRequestId,root_path AS rootPath,created_at AS createdAt FROM code_exports WHERE run_id=? AND client_request_id=?')
+      .get(runId, clientRequestId) as Omit<CodeExportRecord, 'files'> | undefined;
+    if (!row) return;
+    const files = (this.db.prepare('SELECT path,action,outcome,reason,content_sha256 AS contentSha256,byte_count AS bytes FROM code_export_files WHERE export_id=? ORDER BY position').all(row.id) as
+      Array<Omit<CodeExportFileRecord, 'reason'> & { reason: string | null }>).map(({ reason, ...entry }) => ({ ...entry, ...(reason === null ? {} : { reason }) }));
+    return { ...row, files };
+  }
+
   listArtifacts(runId: string): ArtifactRecord[] {
     this.requireRun(runId);
     return this.transaction(() => {
@@ -737,10 +768,18 @@ export class Database {
         const { versionId, fileName, ...entry } = row;
         exports.set(versionId, [...(exports.get(versionId) ?? []), { ...entry, ...(fileName === null ? {} : { fileName }) }]);
       }
+      const codeWrites = new Map<string, ArtifactVersionRecord['codeWrites']>();
+      for (const row of this.db.prepare(`SELECT e.id,e.version_id AS versionId,e.root_path AS rootPath,e.created_at AS createdAt,
+          SUM(f.outcome='written') AS written,SUM(f.outcome='skipped') AS skipped,SUM(f.outcome='failed') AS failed
+        FROM code_exports e JOIN code_export_files f ON f.export_id=e.id WHERE e.run_id=? GROUP BY e.id ORDER BY e.created_at,e.rowid`)
+        .all(runId) as Array<{ id: string; versionId: string; rootPath: string; createdAt: string; written: number; skipped: number; failed: number }>) {
+        const { versionId, ...entry } = row;
+        codeWrites.set(versionId, [...(codeWrites.get(versionId) ?? []), entry]);
+      }
       return artifacts.map(artifact => ({ ...artifact, versions: versions.filter(version => version.artifactId === artifact.id).map(({ parentVersionId, agentId, ...version }) => ({
         ...version, ...(parentVersionId === null ? {} : { parentVersionId }), ...(agentId === null ? {} : { agentId }),
         ...(requests.has(version.id) ? { request: requests.get(version.id)! } : {}), sources: sources.get(version.id) ?? [],
-        ...(adoptions.has(version.id) ? { adoptedAt: adoptions.get(version.id)! } : {}), exports: exports.get(version.id) ?? [] })) }));
+        ...(adoptions.has(version.id) ? { adoptedAt: adoptions.get(version.id)! } : {}), exports: exports.get(version.id) ?? [], codeWrites: codeWrites.get(version.id) ?? [] })) }));
     });
   }
 

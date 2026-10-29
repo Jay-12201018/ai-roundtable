@@ -132,7 +132,7 @@ it('preserves new diagnostics and unknown charges through a validated current-sc
   database.reserveControlledTrial({ ...record, state: 'reserved', outcome: 'running' }); database.recoverControlledTrials();
   const expected = database.listControlledTrials(); const raw = new Sqlite(path); cleanup.push(() => { raw.close(); });
   const backups = join(directory, 'backups'); mkdirSync(backups, { mode: 0o700 });
-  const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(12);
+  const backup = await createVerifiedBackup(raw, backups); expect(backup.validation.schemaVersion).toBe(13);
   const restored = await prepareRestore(backup, backups); const candidate = new Database(restored.path); cleanup.push(() => candidate.close()); candidate.initialize(); candidate.recoverControlledTrials();
   expect(candidate.listControlledTrials()).toEqual(expected);
   expect(candidate.listControlledTrials()[0]).toMatchObject({ state: 'unknown', reservedMicroCny: 50000, diagnostics: { httpStatus: 429, category: 'http_error' } });
