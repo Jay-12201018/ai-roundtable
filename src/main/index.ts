@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { app, dialog, BrowserWindow } from 'electron';
 import { Database } from './database/Database';
 import { createElectronKeyBackend } from './security/electronSafeStorage';
@@ -23,6 +24,7 @@ import { confirmTrial, installTrialMenu } from './providers/controlledTrial/menu
 import { ContractError } from '../shared/contracts/errors';
 import { UsageService } from './usage/UsageService';
 import { ArtifactService } from './artifact/ArtifactService';
+import { CodeExportService } from './export/CodeExportService';
 // D106: replaceable only by a probe that names itself as a fixture clock before Main starts.
 export { settlementClock } from './usage/pricing';
 
@@ -36,6 +38,7 @@ let runService: RunService | undefined;
 let hostService: HostService | undefined;
 let usageService: UsageService | undefined;
 let artifactService: ArtifactService | undefined;
+let codeExportService: CodeExportService | undefined;
 let networkSettings: NetworkSettingsService | undefined;
 let controlledTrial: ControlledTrialService | undefined;
 let shutdownRequested = false;
@@ -86,6 +89,13 @@ if (!hasLock) {
         member => { try { return modelBudget(member.modelId, member); } catch { return undefined; } });
       usageService = new UsageService(database);
       artifactService = new ArtifactService(database, runService);
+      const artifactsForExport = artifactService;
+      // R15: the app's own data folder (as configured and as resolved) is never a write target, whatever folder the host picks.
+      const userData = app.getPath('userData');
+      let realUserData = userData;
+      try { realUserData = realpathSync(userData); } catch { /* the folder exists once the database is open; keep the configured path */ }
+      codeExportService = new CodeExportService(database, runId => artifactsForExport.listCodeCandidates({ runId }), runService,
+        { protectedDirs: [...new Set([userData, realUserData])] });
       hostService = new HostService(database, runService);
       controlledTrial = new ControlledTrialService(database, providers, confirmTrial, () => runService?.hasActiveRuns() ?? true);
       installTrialMenu(database, controlledTrial, () => runService?.hasActiveRuns() ?? true);
@@ -107,9 +117,10 @@ if (!hasLock) {
 function createAppWindow(): void {
   if (shutdownRequested) return;
   try {
-    if (!runService || !roomService || !settingsService || !hostService || !usageService || !artifactService) throw new Error('Run service is not initialized');
+    if (!runService || !roomService || !settingsService || !hostService || !usageService || !artifactService || !codeExportService) throw new Error('Run service is not initialized');
     const usage = usageService;
     const artifacts = artifactService;
+    const codeExport = codeExportService;
     disposeCurrentIpc();
     const createdWindow = createMainWindow();
     window = createdWindow;
@@ -127,6 +138,14 @@ function createAppWindow(): void {
         const result = await dialog.showSaveDialog(owner, { title: '导出产物', defaultPath: join(app.getPath('documents'), defaultName),
           filters: format === 'markdown' ? [{ name: 'Markdown', extensions: ['md'] }] : [{ name: 'JSON', extensions: ['json'] }] });
         return result.canceled || !result.filePath ? undefined : result.filePath;
+      }),
+    }, codeExport: {
+      preview: input => codeExport.preview(input), write: input => codeExport.write(input),
+      // R15: only a folder the host picks in this dialog can be written into; the page never sends a path.
+      chooseRoot: (owner, input) => codeExport.chooseRoot(input, async () => {
+        const result = await dialog.showOpenDialog(owner, { title: '选择要写入的文件夹', buttonLabel: '选择这个文件夹', defaultPath: app.getPath('documents'),
+          properties: ['openDirectory', 'createDirectory'] });
+        return result.canceled ? undefined : result.filePaths[0];
       }),
     }, network: networkSettings, lifecycle: { relaunch: () => {
       // A restart stops nothing silently: refuse while a discussion or the controlled trial is still running.

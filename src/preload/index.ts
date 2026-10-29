@@ -54,6 +54,11 @@ const api: RoundtableApiContract = {
     export: (input) => invoke('artifact.export', input),
     listCodeCandidates: (input) => invoke('artifact.listCodeCandidates', input),
   },
+  codeExport: {
+    chooseRoot: (input) => invoke('codeExport.chooseRoot', input),
+    preview: (input) => invoke('codeExport.preview', input),
+    write: (input) => invoke('codeExport.write', input),
+  },
   usage: {
     getReport: (range) => invoke('usage.getReport', range ?? {}),
     writeOff: (input) => invoke('usage.writeOff', input),

@@ -18,7 +18,7 @@ const emit = (value: unknown) => { for (const handler of fixture.handlers) handl
 beforeEach(() => { fixture.invoke.mockReset(); fixture.handlers.clear(); });
 describe('restricted Preload contract', () => {
   it('exposes only typed feature methods and sends one explicit undefined argument for no-input requests', async () => {
-    expect(Object.keys(fixture.api!).sort()).toEqual(['app', 'artifact', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
+    expect(Object.keys(fixture.api!).sort()).toEqual(['app', 'artifact', 'codeExport', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
     // D115: saved proxy settings, a keyless proxy check and a restart; no generic file or process access.
     expect(Object.keys(fixture.api!.network!)).toEqual(['getSettings', 'saveSettings', 'testProxy']);
     expect(Object.keys(fixture.api!.app!)).toEqual(['relaunch']);
@@ -28,6 +28,8 @@ describe('restricted Preload contract', () => {
     expect(Object.keys(fixture.api!.usage)).toEqual(['getReport', 'writeOff', 'exportCsv']);
     // R14: typed artifact commands only; a file export goes through Main's save dialog, never a path from the page.
     expect(Object.keys(fixture.api!.artifact!)).toEqual(['preview', 'generate', 'list', 'getVersion', 'adopt', 'edit', 'export', 'listCodeCandidates']);
+    // R15: a folder reference from Main's dialog, a read-only preview and a write of ticked files; never a path from the page.
+    expect(Object.keys(fixture.api!.codeExport!)).toEqual(['chooseRoot', 'preview', 'write']);
     expect(fixture.api!.settings).not.toHaveProperty('resolveKey');
     fixture.invoke.mockResolvedValue({ version: 1, ok: true, data: [] });
     await fixture.api!.settings.listProviderSummaries();
