@@ -1,6 +1,20 @@
 # R00–R18 状态与授权看板
 
-## 当前状态（2026-10-28）
+## 当前状态（2026-10-29）
+
+- **R14 结构化产物：merged / verified。** 分支 `codex/r14-structured-artifacts`（`af16f3d`，基于 main `0c29bfe`），以 ff-only 方式合入 main。决策 D118–D125；**migration 12**（`artifacts`、`artifact_versions`、`artifact_sources`、`artifact_requests`、`artifact_charges`、`artifact_adoptions`、`artifact_exports`，全部只追加、身份与状态由触发器约束；重建 migration 9 的两个账本交叉核对触发器，规则不变，只把产物费用加入核对范围）；新增 `artifact.*` IPC 8 个。
+  - 四类产物（需求文档、会议纪要、行动清单、代码候选）用严格 Zod schema 校验，未知信息必须显式写 null（界面显示"未知"），不得编造；一个解析器把错误定位到字段和行号，格式错误与来源越界一次列全；原始输出始终保留，不自动重试。
+  - 生成是显式、计入预算的一次请求：先预览谁来写和最多花多少，同一事务里核对剩余预算并预留，结束按实际结算，用量页"按用途"单列；共同前缀在前、各类规则在后，同一场讨论的第二份产物起可命中服务商缓存。
+  - 版本（生成 / 重新生成 / 主持人修改）、"采用"后才算正式版本并可复制或导出；来源记录依据的发言版本，原文被改后标"受影响"。D124：讨论里确实没有这类内容时，模型可如实回答"没有可整理的内容"，单独成状态，不能采用、导出或交给 R15。D125：产物与摘要请求失败时记录脱敏的公开错误码，界面用中文说明原因、费用和下一步。
+  - 代码候选只预览，不写盘、不执行，不能导出为文件（界面、Main、数据库三层拒绝）；只有已采用且校验通过的代码候选通过 `artifact.listCodeCandidates` 交给 R15。
+- **R14 的检查**：合并候选 `af16f3d` 上总控跑了完整检查：typecheck、138 个文件 / 2018 个测试、build；R01（三种模式）、R07/R08、R09、R12、R13A、R13B 的首次运行和重启，R10/R11，premerge（首次 + 重启），R12、R13A、R13B、R16 实操，R16 长历史，讨论延续实操，R14 实操（首次 + 重启），全部 exit 0。第二批验收探针在"用模拟输入法给房间改名"一步偶发超时（重启两步因此连带失败），单独重跑首次 + 两次重启全部通过；子会话也报告过 R16 实操探针在输入法步骤偶发失败一次。liveApi=false。记录见 [R14](verification/2026-10-28-r14.md)。
+- **R14 真实模型实测（用户本人的 DeepSeek Key，`deepseek-flash`）**：
+  - 2026-10-28 21:11 起（空闲）：基于 5 条发言的读书会讨论，会议纪要、行动清单、PRD 都一次通过校验并被采用；行动清单 15 项负责人全部为"未知"、截止时间照抄原话，没有编造；来源编号都在依据范围内；4 笔合计 ¥0.048。代码候选因讨论未涉及代码，模型如实说明"没有"，旧版界面却显示"校验失败"——由 D124 修复；缓存命中为 0——由消息顺序调整修复。
+  - 修复后复测（试用库先另存为 `ai-roundtable.r14-old-v12-2026-10-28.sqlite3`，再从升级前备份恢复并按新版 migration 12 重新升级）：代码候选两次都得到"没有可整理的内容"并写明原因；PRD 第一次请求 3 秒后失败（原因当时未记录，由 D125 修复，费用暂记为未知、预留 ¥0.083），重新生成后一次通过校验（13 条需求均有验收标准和来源），没有被误判为"没有"；2026-10-29 高峰时段 PRD 命中缓存 5632/6421、代码候选 6144/6365，代码候选只花 ¥0.001。逐笔验算一致。D125 本身未在真实环境触发过失败，由自动化与实操覆盖。
+- **维护事项（待安排）**：实操探针里模拟中文输入法的步骤偶发超时（R16 实操、第二批验收各出现过一次，重跑通过），需查清是探针等待不足还是输入法组合事件的时序问题。试用库里 PRD 第一次失败的未知费用（预留 ¥0.083）可由用户对照 DeepSeek 控制台后在用量页核销。
+- **下一步路线**：R15 安全代码导出（消费 R14 的 `artifact.listCodeCandidates`）→ R17 E2E 与发布。
+
+## 较早状态（2026-10-28）
 
 - **R16 第二批（E 设置与连接向导、F 房间成员与讨论方式、G 首次使用与用量）：merged / verified。** 分支 `codex/r16-batch2`（`a72301a`，基于 main `29b4e84`），以 ff-only 方式合入 main。决策 D113–D117；**migration 11**（`provider_target_approvals`，换 Key、改地址或类型、删服务时同事务删除，恢复校验已覆盖）；新增 IPC `settings.listModelReadiness`、`network.getSettings/saveSettings/testProxy`、`app.relaunch`，`usage.getReport/exportCsv` 增加可选时间范围。
   - E：设置页改为分类 + 内容；三步连接向导（选服务 → 地址写在 Key 上方、「保存并连接」即确认 → 免费检查连接）；价格未审核的服务如实写“暂时不能用于讨论”；D113 地址确认跨重启记住，绑定“Key 修订号 + 地址 + 服务类型”；D115 代理存 Main 本地配置（只允许本机地址、必须显式勾选“由代理解析域名”、环境变量优先、「检测代理」只做不带 Key 的 CONNECT、「立即重启」在有讨论进行时拒绝）；外观挪进设置。
@@ -97,8 +111,8 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 | R11 | 声明式工作流 | R07/R04–R06 | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 四种模板经生产入口fixture完整运行与重启验证；真实模型工作流待测 |
 | R12 | 主持人与消息版本 | R11 | R12子会话；总控集成 | merged / verified | 用户批准合main | codex/r12-host-message-versions → codex/integrate-r12-r13a | 15e2e30；合并见顶部 | 自动化、实操、DeepSeek真实模型三层通过 |
 | R13 | 摘要、usage、费用预算 | R05/R09/R11 | R13A/R13B子会话；总控集成 | merged / verified | 用户批准合main | codex/r13a-real-model-enable、codex/r13a-premerge-quality、codex/r13b-usage-summary | b3e3324、0ccb49c、a96d4fe | 预算、账本、按时段与缓存结算、摘要均经DeepSeek真实账单核对 |
-| R14 | 结构化产物 | R11 | 未分派 | ready | 待派发 | 未创建 | 无 | 未运行 |
-| R15 | 安全代码导出 | R14 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
+| R14 | 结构化产物 | R11 | R14子会话；总控集成 | merged / verified | 用户批准合main | codex/r14-structured-artifacts | af16f3d | 自动化、实操、DeepSeek真实模型三层通过（含修复后复测） |
+| R15 | 安全代码导出 | R14 | 未分派 | ready | 待派发 | 未创建 | 无 | 未运行 |
 | R16 | 聊天 UI 与可用性 | R06；主要交互稳定 | R16子会话；总控集成 | merged / verified | 用户确认设计（D1–D6）并批准各批合main | codex/r16-ui-redesign、codex/r16-impl-discussion、codex/r16-discussion-continuity、codex/r16-batch2 | 8c8eb1b、8d833a2、4d3e8b7、a72301a | 第一批、讨论延续、第二批均经自动化、实操、DeepSeek真实模型三层验收 |
 | R17 | Electron E2E 与发布 | 骨架 R02；最终 R07–R16，含 R10A/R10B | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 | R18 | V1.1 评测与 ADR | R17 V1 验收 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
