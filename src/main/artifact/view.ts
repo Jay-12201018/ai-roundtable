@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { sep } from 'node:path';
 import type { ArtifactRecord, ArtifactVersionRecord, Database } from '../database/Database';
 import { publicSlots } from '../context/summary';
 import { artifactContentSchemas, artifactIssueSchema, type ArtifactKind, type ArtifactSource, type ArtifactSummary, type ArtifactVersion,
@@ -12,8 +14,17 @@ export function versionStatus(version: ArtifactVersionRecord): ArtifactVersionSt
   if (version.validation === 'empty') return 'empty';
   if (version.validation !== 'valid') return 'failed';
   if (version.origin !== 'edit' && version.adoptedAt === undefined) return 'candidate';
-  return version.exports.length ? 'exported' : 'valid';
+  return lastExportAt(version) ? 'exported' : 'valid';
 }
+
+/** The latest copy or save, or (R15) write that put at least one file on disk; undefined when there is none. */
+export function lastExportAt(version: ArtifactVersionRecord): string | undefined {
+  const times = [...version.exports.map(entry => entry.createdAt), ...version.codeWrites.filter(entry => entry.written > 0).map(entry => entry.createdAt)];
+  return times.length ? times.reduce((latest, time) => time > latest ? time : latest) : undefined;
+}
+
+/** A recorded folder as the host sees it: the home folder shown as ~. */
+export const folderDisplay = (real: string, home = homedir()) => real === home ? '~' : real.startsWith(home + sep) ? '~' + real.slice(home.length) : real;
 
 /** True for a version the host has made effective: adopted, or written by the host. */
 export const isEffective = (version: ArtifactVersionRecord) => version.validation === 'valid' && (version.origin === 'edit' || version.adoptedAt !== undefined);
@@ -60,7 +71,9 @@ export function versionView(kind: ArtifactKind, version: ArtifactVersionRecord, 
     ...(content ? { title: content.title } : {}), issues, ...(version.emptyReason !== null ? { emptyReason: version.emptyReason } : {}), outputChars: version.rawOutput.length,
     ...(numbers.length ? { firstNumber: Math.min(...numbers), lastNumber: Math.max(...numbers) } : {}),
     affectedNumbers: affectedNumbers(snapshot, version.sources),
-    ...(version.adoptedAt ? { adoptedAt: version.adoptedAt } : {}), ...(version.exports.length ? { exportedAt: version.exports.at(-1)!.createdAt } : {}),
+    ...(version.adoptedAt ? { adoptedAt: version.adoptedAt } : {}), ...(lastExportAt(version) ? { exportedAt: lastExportAt(version) } : {}),
+    ...(version.codeWrites.length ? { codeWrites: version.codeWrites.map(entry => ({ exportId: entry.id, folder: folderDisplay(entry.rootPath),
+      written: entry.written, skipped: entry.skipped, failed: entry.failed, at: entry.createdAt })) } : {}),
     createdAt: version.createdAt, updatedAt: version.updatedAt,
   };
 }

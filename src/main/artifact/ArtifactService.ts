@@ -7,7 +7,7 @@ import { artifactAdoptInputSchema, artifactEditInputSchema, artifactExportInputS
   type ArtifactAdoptInput, type ArtifactCommandResult, type ArtifactEditInput, type ArtifactExportInput, type ArtifactExportResult, type ArtifactList, type ArtifactListInput,
   type ArtifactVersionDetail, type ArtifactVersionInput, type CodeCandidateList, type CodeContent } from '../../shared/schemas/artifact';
 import { parseArtifact } from '../../shared/schemas/artifactParse';
-import { affectedNumbers, artifactView, contentOf, isEffective, rebasedSources, represented, sourceViews, versionView } from './view';
+import { affectedNumbers, artifactView, contentOf, isEffective, lastExportAt, rebasedSources, represented, sourceViews, versionView } from './view';
 import { jsonExport, markdownExport, type ExportMeta } from './exportText';
 
 type Notifier = { notifyArtifact(runId: string, payload: { artifactId: string; versionId: string; status: 'adopted' | 'edited' | 'exported' }): void };
@@ -136,7 +136,7 @@ export class ArtifactService {
       if (!version) return [];
       const content = contentOf('code', version) as CodeContent;
       return [{ runId, roomId: artifact.roomId, artifactId: artifact.id, versionId: version.id, versionNumber: version.number,
-        status: version.exports.length ? 'exported' as const : 'valid' as const, affected: affectedNumbers(snapshot, version.sources).length > 0,
+        status: lastExportAt(version) ? 'exported' as const : 'valid' as const, affected: affectedNumbers(snapshot, version.sources).length > 0,
         title: content.title, summary: content.summary, files: content.files, notes: content.notes, sourceMessageIds: version.sources,
         adoptedAt: version.adoptedAt ?? version.createdAt }];
     });
