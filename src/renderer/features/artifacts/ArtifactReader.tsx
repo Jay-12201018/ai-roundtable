@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Copy, Download, FilePen, RefreshCw, Square } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Download, FilePen, FolderInput, RefreshCw, Square } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { artifactKindLabels, artifactSkeletons, artifactStatusLabels, type ArtifactIssue, type ArtifactSummary, type ArtifactVersion, type ArtifactVersionDetail } from '../../../shared/schemas/artifact';
 import { parseArtifact } from '../../../shared/schemas/artifactParse';
@@ -9,6 +9,7 @@ import { ArtifactContentView } from './ArtifactContent';
 import { requestFailureText } from '../timeline';
 import type { RequestCharge } from '../../../shared/schemas/budget';
 import type { ArtifactCommands } from './useArtifacts';
+import { CodeExportDialog } from '../codeExport';
 
 const originLabels: Record<ArtifactVersion['origin'], string> = { generate: '生成', regenerate: '重新生成', edit: '你修改的' };
 const statusTone: Record<ArtifactVersion['status'], string> = { generating: 'is-live', failed: 'is-danger', invalid: 'is-danger', candidate: 'is-warn', valid: 'is-ok', exported: 'is-ok', empty: '' };
@@ -31,7 +32,10 @@ function statusText(version: ArtifactVersion, label: string, charge?: RequestCha
     case 'invalid': return `格式检查没有通过：${version.issues.length} 处问题。原始输出完整保留，没有自动重试；可以修改后保存为新版本，或重新生成（会再发送 1 次请求）。`;
     case 'candidate': return '模型整理的候选版本，已通过格式检查。请核对内容，没问题就采用；采用之后才能复制和导出。';
     case 'valid': return version.origin === 'edit' ? '你修改的版本，已通过格式检查，可以复制和导出。' : `已采用（${when(version.adoptedAt!)}），可以复制和导出。`;
-    case 'exported': return `有效，最近一次导出在 ${when(version.exportedAt!)}。`;
+    case 'exported': {
+      const written = version.codeWrites?.filter(entry => entry.written > 0).at(-1);
+      return written && written.at === version.exportedAt ? `有效，最近一次在 ${when(written.at)} 写入了 ${written.written} 个文件。` : `有效，最近一次导出在 ${when(version.exportedAt!)}。`;
+    }
     case 'empty': return `模型说明这场讨论里没有可以整理成${label}的内容（原因见下）。这不是模型出错，但这一版不能采用、复制或导出；在讨论里补充之后可以重新生成，也可以自己写一版。`;
   }
 }
@@ -101,6 +105,7 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<View>('content');
   const [saveMenu, setSaveMenu] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const { getVersion } = commands;
   useEffect(() => {
     let live = true;
@@ -110,6 +115,9 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
   useEffect(() => { setEditing(false); setSaveMenu(false); setView(version.status === 'invalid' || version.status === 'failed' || version.status === 'generating' || version.status === 'empty' ? 'raw' : 'content'); }, [version.versionId, version.status]);
   const shown = detail?.version.versionId === version.versionId ? detail : undefined;
   const effective = version.status === 'valid' || version.status === 'exported';
+  // R15 writes only the version R14 hands over: the latest effective one (D123).
+  const latestEffective = [...artifact.versions].reverse().find(item => item.status === 'valid' || item.status === 'exported');
+  const writable = artifact.kind === 'code' && effective && version.versionId === latestEffective?.versionId && commands.codeExport !== undefined;
   const label = artifactKindLabels[artifact.kind];
   const pendingKey = commands.pending;
   const busy = pendingKey !== undefined;
@@ -131,6 +139,8 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
     {effective && <>
       <Button icon={Copy} disabled={busy} onClick={() => void commands.copy(version.versionId, 'markdown')}>复制 Markdown</Button>
       <Button icon={Copy} disabled={busy} onClick={() => void commands.copy(version.versionId, 'json')}>复制 JSON</Button>
+      {artifact.kind === 'code' && commands.codeExport && <Button variant="danger" icon={FolderInput} disabled={busy || !writable || shown?.content?.kind !== 'code'}
+        onClick={() => setExporting(true)}>写入文件夹…</Button>}
       {artifact.kind !== 'code' && <span className="art-save">
         <Button icon={Download} disabled={busy} aria-expanded={saveMenu} onClick={() => setSaveMenu(value => !value)}>另存为…</Button>
         {saveMenu && <span className="art-save-menu" role="group" aria-label="另存为">
@@ -140,7 +150,7 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
     </>}
   </>;
 
-  return <Modal title={`${label} · 第 ${version.number} 版`} onClose={onClose} className="artifact-reader" footer={footer}
+  return <><Modal title={`${label} · 第 ${version.number} 版`} onClose={onClose} className="artifact-reader" footer={footer}
     below={<div className="art-head">
       <label className="art-version"><span className="sr-only">版本</span>
         <select className="select" aria-label="版本" value={version.versionId} onChange={event => choose(event.target.value)}>
@@ -157,7 +167,13 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
     {version.status === 'empty' && version.emptyReason && <div className="art-empty"><p className="art-label">模型的说明</p><p>{version.emptyReason}</p></div>}
     {notice && <p role="status" className="ok-text small">{notice.message}</p>}
     {error && <p role="alert" className="field-error">{error.message}</p>}
-    {artifact.kind === 'code' && effective && <p className="small muted">代码候选不能在这里存成文件：写入磁盘会在后续版本提供，并且逐个文件确认。现在可以复制。</p>}
+    {artifact.kind === 'code' && effective && <>
+      <p className="small muted">{!commands.codeExport ? '这个版本的应用不能把代码写成文件，可以复制。'
+        : writable ? '“写入文件夹…”会先逐个文件列出新建、覆盖和差异，只写你勾选的文件；不会运行任何代码。'
+          : `只能写入最新的有效版本（第 ${latestEffective?.number} 版）。`}</p>
+      {version.codeWrites && version.codeWrites.length > 0 && <ul className="art-writes" aria-label="写入记录">{version.codeWrites.slice(-3).reverse().map(entry =>
+        <li key={entry.exportId}>{when(entry.at)} · <code>{entry.folder}</code> · {entry.written ? `写入 ${entry.written} 个` : '没有写入'}{entry.failed ? `，${entry.failed} 个没有写入` : ''}{entry.skipped ? `，跳过 ${entry.skipped} 个` : ''}</li>)}</ul>}
+    </>}
     {loadFailed && !shown ? <p role="alert" className="field-error">读取这一版失败。<button type="button" className="link-btn" onClick={() => setLoadFailed(false)}>重试</button></p>
       : !shown ? <p role="status" className="muted">正在读取…</p>
       : editing ? <Editor key={shown.version.versionId} detail={shown} commands={commands} onCancel={() => setEditing(false)}
@@ -179,6 +195,8 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
             </>}
         </div>
       </>}
-  </Modal>;
+  </Modal>
+  {exporting && shown?.content?.kind === 'code' && commands.codeExport && <CodeExportDialog api={commands.codeExport} runId={snapshot.runId} versionId={version.versionId}
+    versionNumber={version.number} files={shown.content.data.files} affected={version.affectedNumbers.length > 0} onClose={() => setExporting(false)} />}
+  </>;
 }
-

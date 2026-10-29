@@ -80,7 +80,7 @@ const fenced = (language: string | null, content: string) => {
 };
 function Code({ data }: { data: CodeContent }) {
   return <>
-    <p className="art-safe"><ShieldCheck aria-hidden size={16} />这些代码只在这里预览：不会执行，也不会写入任何文件。</p>
+    <p className="art-safe"><ShieldCheck aria-hidden size={16} />这些代码不会被执行。采用之后可以写入你选的文件夹，写之前会逐个文件列出差异，由你勾选。</p>
     <Section title="说明"><Markdown text={data.summary} /></Section>
     <Section title="文件" count={data.files.length}>
       {data.files.map(file => <article key={file.path} className="art-file">

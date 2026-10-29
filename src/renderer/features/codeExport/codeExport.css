@@ -1,0 +1,72 @@
+/* R15 writing a code candidate into a folder. Colors come from the theme tokens only; an overwrite is the one red thing. */
+dialog.modal.code-export { width: min(860px, calc(100vw - 32px)); height: min(820px, calc(100dvh - 32px)); }
+.code-export .modal-body > p { margin: 0 0 12px; line-height: 22px; }
+.code-export .note { margin-bottom: 12px; }
+.cx-steps { margin: 0 0 14px; padding-left: 22px; line-height: 24px; color: var(--text-2); }
+.cx-folder { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
+.cx-folder > svg { flex: none; color: var(--text-2); }
+.cx-folder-path { flex: 1 1 240px; min-width: 0; font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+.cx-folder-actions { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.cx-summary { font-size: 14px; }
+.cx-warn-line { margin: 0 0 10px; color: var(--danger); }
+.code-export .link-btn { margin: 0 0 8px; }
+
+.cx-files { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.cx-file { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); }
+.cx-file.is-overwrite { border-color: var(--danger-line); }
+.cx-file.is-picked.is-overwrite { background: var(--danger-soft); }
+.cx-file.is-picked.is-create { border-color: var(--accent); }
+.cx-file-head { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; }
+.cx-file-main { flex: 1; min-width: 0; }
+.cx-file-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.cx-path { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+.cx-meta { margin: 2px 0 0; color: var(--text-2); overflow-wrap: anywhere; }
+.cx-meta.is-warn { color: var(--warn); }
+.cx-pick { flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 64px; padding: 2px 0; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.cx-pick input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.cx-pick.is-danger { color: var(--danger); font-weight: 600; }
+.cx-pick.is-danger input { accent-color: var(--danger); }
+.cx-pick.is-none { color: var(--text-3); justify-content: flex-start; padding-left: 1px; cursor: default; }
+.cx-outcome { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; margin-top: 2px; border-radius: 50%; background: var(--surface-2); color: var(--text-3); }
+.cx-outcome.is-written { color: var(--success); background: var(--accent-soft); }
+.cx-outcome.is-failed { color: var(--danger); background: var(--danger-soft); }
+
+/* File content and diffs: numbered, wrapped, never wider than the dialog. */
+.cx-code, .cx-hunk { margin: 0; padding: 8px 0; max-height: 360px; overflow: auto; border-top: 1px solid var(--line); background: var(--surface-2);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cx-code > span { display: block; padding: 0 12px 0 52px; position: relative; }
+.cx-code > span > i { position: absolute; left: 0; width: 40px; text-align: right; font-style: normal; color: var(--text-3); user-select: none; }
+.cx-diff { border-top: 1px solid var(--line); }
+.cx-diff .cx-hunk { border-top: 0; max-height: none; }
+.cx-diff .cx-hunk + .cx-hunk { border-top: 1px dashed var(--line); }
+.cx-hunk-head { display: block; padding: 0 12px 4px; color: var(--text-3); font-size: 12px; user-select: none; }
+.cx-line { display: block; position: relative; padding: 0 12px 0 104px; }
+.cx-line > i { position: absolute; width: 36px; text-align: right; font-style: normal; color: var(--text-3); user-select: none; }
+.cx-line > i:first-child { left: 0; }
+.cx-line > i:nth-child(2) { left: 40px; }
+.cx-line > b { position: absolute; left: 86px; font-weight: 600; user-select: none; }
+.cx-line.is-add { background: var(--accent-soft); }
+.cx-line.is-add > b { color: var(--success); }
+.cx-line.is-remove { background: var(--danger-soft); }
+.cx-line.is-remove > b { color: var(--danger); }
+.cx-note { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--text-2); }
+
+.cx-result-head { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--accent-soft); }
+.cx-result-head > svg { flex: none; margin-top: 2px; color: var(--success); }
+.cx-result-head.is-partial { background: var(--warn-soft); }
+.cx-result-head.is-partial > svg { color: var(--warn); }
+.cx-result-head p { margin: 2px 0 0; overflow-wrap: anywhere; }
+
+/* The reader: the write entry and its history. */
+.art-writes { margin: 0 0 12px; padding: 0; list-style: none; font-size: 13px; line-height: 20px; color: var(--text-2); }
+.art-writes li { overflow-wrap: anywhere; }
+.art-writes code { font-family: var(--font-mono); font-size: 12.5px; }
+
+@media (max-width: 860px) {
+  dialog.modal.code-export { height: calc(100dvh - 24px); width: calc(100vw - 24px); }
+  .code-export .modal-foot { justify-content: flex-start; }
+  .cx-line { padding-left: 92px; }
+  .cx-line > i { width: 30px; }
+  .cx-line > i:nth-child(2) { left: 34px; }
+  .cx-line > b { left: 76px; }
+}

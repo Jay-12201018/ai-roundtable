@@ -224,7 +224,7 @@ export function App() {
   useEffect(() => setSummaryTarget(undefined), [snapshot?.runId]);
   const openSummary = useCallback((summaryId?: string) => { setPanelDrawer(false); setSummaryTarget(summaryId ? { summaryId } : {}); }, []);
   // R14: artifacts of the selected Run — the generate dialog, the reader, and going back to a message it cites.
-  const artifactCommands = useArtifacts(api.artifact, snapshot?.runId, snapshot?.sequence);
+  const artifactCommands = useArtifacts(api.artifact, snapshot?.runId, snapshot?.sequence, api.codeExport);
   const [generateTarget, setGenerateTarget] = useState<{ kind: ArtifactKind; artifactId?: string }>();
   const [readerTarget, setReaderTarget] = useState<{ artifactId: string; versionId?: string }>();
   const [reveal, setReveal] = useState<{ key: string; nonce: number }>();

@@ -1,6 +1,6 @@
 import { Code, FileText, ListChecks, NotebookPen, type LucideIcon } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
-import { artifactKindLabels, artifactKindValues, type ArtifactKind } from '../../../shared/schemas/artifact';
+import { artifactKindLabels, artifactKindValues, type ArtifactKind, type ArtifactSummary } from '../../../shared/schemas/artifact';
 import { Button } from '../../components/ui';
 import { kindDescriptions } from './GenerateDialog';
 import { StatusPill } from './ArtifactReader';
@@ -8,6 +8,11 @@ import type { ArtifactCommands } from './useArtifacts';
 
 const icons: Record<ArtifactKind, LucideIcon> = { prd: FileText, minutes: NotebookPen, actions: ListChecks, code: Code };
 const settled = ['paused', 'completed', 'error', 'cancelled', 'interrupted'];
+
+const when = (iso: string) => new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+/** R15: the latest write of any version that put at least one file on disk. */
+const lastWrite = (artifact: ArtifactSummary) => artifact.versions.flatMap(version => version.codeWrites ?? []).filter(entry => entry.written > 0)
+  .reduce<NonNullable<ArtifactSummary['versions'][number]['codeWrites']>[number] | undefined>((latest, entry) => !latest || entry.at > latest.at ? entry : latest, undefined);
 
 /** Why nothing can be generated right now, in the host's words; undefined when it can. */
 export function generationBlocked(snapshot: RunSnapshot, commands: ArtifactCommands): string | undefined {
@@ -37,7 +42,8 @@ export function ArtifactsPanel({ snapshot, commands, onGenerate, onOpen }: { sna
               aria-label={`打开${artifactKindLabels[kind]}：第 ${latest.number} 版`}>
               <span className="art-entry-title">{latest.title ?? [...artifact.versions].reverse().find(version => version.title)?.title ?? `第 ${latest.number} 版`}</span>
               <span className="art-entry-meta"><StatusPill version={latest} />{latest.affectedNumbers.length > 0 && <span className="tag is-warn">受影响</span>}
-                <span className="small muted">共 {artifact.versions.length} 版</span></span>
+                <span className="small muted">共 {artifact.versions.length} 版</span>
+                {(() => { const write = lastWrite(artifact); return write && <span className="small muted">已写入 {write.written} 个文件 · {when(write.at)}</span>; })()}</span>
             </button>; })}
         </div>
         {existing.length === 0 && <Button size="sm" disabled={blocked !== undefined || commands.pending !== undefined} onClick={() => onGenerate(kind)}>生成…</Button>}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ArtifactApiContract } from '../../../shared/contracts/app';
+import type { ArtifactApiContract, CodeExportApiContract } from '../../../shared/contracts/app';
 import type { ArtifactKind, ArtifactList, ArtifactPreview } from '../../../shared/schemas/artifact';
 import { copyText } from '../../components/ui';
 import { ledgerErrorMessage } from '../usage';
@@ -10,9 +10,10 @@ const newRequestId = () => globalThis.crypto?.randomUUID?.() ?? `artifact-${Date
 /**
  * R14: the selected Run's artifacts and the host's artifact commands. The list is re-read whenever the Run's event
  * sequence moves (an `artifact_updated` event moves it) and, while a version is generating, about once a second so
- * the received length stays current. Each click gets its own clientRequestId.
+ * the received length stays current. Each click gets its own clientRequestId. `codeExport` (R15) is passed through for
+ * the reader's 写入文件夹; a page without it offers copying only.
  */
-export function useArtifacts(api: ArtifactApiContract | undefined, runId: string | undefined, sequence: number | undefined) {
+export function useArtifacts(api: ArtifactApiContract | undefined, runId: string | undefined, sequence: number | undefined, codeExport?: CodeExportApiContract) {
   const [list, setList] = useState<ArtifactList>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState<string>();
@@ -67,6 +68,6 @@ export function useArtifacts(api: ArtifactApiContract | undefined, runId: string
     if (result) setNotice({ key: 'save', message: result.saved ? `已保存为“${result.fileName}”。` : '已取消保存。' });
   }, [act, api, runId]);
 
-  return { available: Boolean(api && runId), artifacts: current, loadFailed, reload: load, preview, generate, adopt, edit, getVersion, copy, save, pending, error, notice };
+  return { available: Boolean(api && runId), artifacts: current, loadFailed, reload: load, preview, generate, adopt, edit, getVersion, copy, save, pending, error, notice, codeExport };
 }
 export type ArtifactCommands = ReturnType<typeof useArtifacts>;
