@@ -6,6 +6,8 @@ import { parseArtifact } from '../../../shared/schemas/artifactParse';
 import { Button, Modal, Note, Tabs, cx } from '../../components/ui';
 import type { HostCommands } from '../host/useHostCommands';
 import { ArtifactContentView } from './ArtifactContent';
+import { requestFailureText } from '../timeline';
+import type { RequestCharge } from '../../../shared/schemas/budget';
 import type { ArtifactCommands } from './useArtifacts';
 
 const originLabels: Record<ArtifactVersion['origin'], string> = { generate: '生成', regenerate: '重新生成', edit: '你修改的' };
@@ -18,11 +20,14 @@ export function StatusPill({ version }: { version: ArtifactVersion }) {
   return <span className={cx('pill', statusTone[version.status])}>{version.status === 'generating' && <span className="dot" />}{artifactStatusLabels[version.status]}</span>;
 }
 
-function statusText(version: ArtifactVersion, label: string): string {
+function statusText(version: ArtifactVersion, label: string, charge?: RequestCharge): string {
   switch (version.status) {
     case 'generating': return `正在生成：已收到 ${version.outputChars.toLocaleString('zh-CN')} 个字符。完成后会自动检查格式。`;
-    case 'failed': return version.request?.status === 'interrupted' ? '应用退出时这次请求还没完成，已标为中断，没有自动重发。下面是已收到的部分。'
-      : version.request?.status === 'aborted' ? '这次请求已中止，没有自动重试。下面是已收到的部分。' : '这次请求失败了，没有自动重试。下面是已收到的部分。';
+    case 'failed': {
+      const request = version.request!;
+      const text = requestFailureText({ status: request.status === 'interrupted' ? 'interrupted' : request.status === 'aborted' ? 'aborted' : 'failed', errorCode: request.errorCode, charge });
+      return `${text}${version.outputChars ? '下面是已收到的部分。' : ''}`;
+    }
     case 'invalid': return `格式检查没有通过：${version.issues.length} 处问题。原始输出完整保留，没有自动重试；可以修改后保存为新版本，或重新生成（会再发送 1 次请求）。`;
     case 'candidate': return '模型整理的候选版本，已通过格式检查。请核对内容，没问题就采用；采用之后才能复制和导出。';
     case 'valid': return version.origin === 'edit' ? '你修改的版本，已通过格式检查，可以复制和导出。' : `已采用（${when(version.adoptedAt!)}），可以复制和导出。`;
@@ -116,8 +121,9 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
       onClick={() => void host.send('abort', { kind: 'abortGeneration' }, '已中止生成，已收到的部分保留。')}>中止生成</Button>}
     {version.status !== 'generating' && <>
       {version.status === 'empty' && <Button icon={FilePen} disabled={busy || !shown} onClick={() => { setEditing(true); setView('content'); }}>自己写一版…</Button>}
-      <Button variant={version.status === 'empty' ? 'primary' : 'quiet'} icon={RefreshCw} disabled={busy} onClick={onRegenerate}>重新生成…</Button>
-      {version.status !== 'empty' && <Button variant={version.status === 'invalid' || version.status === 'failed' ? 'primary' : 'secondary'} icon={FilePen} disabled={busy || !shown}
+      {/* A failed request is fixed by asking again; an invalid output by editing what came back. */}
+      <Button variant={version.status === 'empty' || version.status === 'failed' ? 'primary' : 'quiet'} icon={RefreshCw} disabled={busy} onClick={onRegenerate}>重新生成…</Button>
+      {version.status !== 'empty' && <Button variant={version.status === 'invalid' ? 'primary' : 'secondary'} icon={FilePen} disabled={busy || !shown}
         onClick={() => { setEditing(true); setView('content'); }}>{version.status === 'invalid' || version.status === 'failed' ? '修改为有效版本…' : '修改…'}</Button>}
     </>}
     {version.status === 'candidate' && <Button variant="primary" icon={Check} disabled={busy} onClick={() => void commands.adopt(version.versionId)}>
@@ -144,7 +150,7 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
       <StatusPill version={version} />
       {version.firstNumber !== undefined && <span className="small muted">依据第 {version.firstNumber}–{version.lastNumber} 条发言</span>}
     </div>}>
-    <p className={cx('art-status-text', version.status === 'invalid' || version.status === 'failed' ? 'is-bad' : undefined)} role="status">{statusText(version, label)}</p>
+    <p className={cx('art-status-text', version.status === 'invalid' || version.status === 'failed' ? 'is-bad' : undefined)} role="status">{statusText(version, label, snapshot.charges?.find(item => item.requestId === version.request?.requestId))}</p>
     {version.affectedNumbers.length > 0 && version.status !== 'generating' && <Note icon={AlertTriangle}
       action={<Button size="sm" disabled={busy} onClick={onRegenerate}>重新生成…</Button>}>
       <b>受影响：</b>依据的第 {version.affectedNumbers.join('、')} 条发言在这一版写成后被修改或重新生成，内容可能已经过时。可以重新生成，或者自己修改。</Note>}

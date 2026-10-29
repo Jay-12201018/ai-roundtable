@@ -19,6 +19,7 @@ export { Markdown, markdownSchema, safeHref } from './Markdown';
 export { Timeline, VIRTUALIZE_AT, type TimelineItem } from './Timeline';
 export { RunNotices, ContextHint } from './RunNotices';
 export { SummaryDialog } from './SummaryDialog';
+export { requestFailureText } from './failure';
 export { SummaryCard } from './SummaryCard';
 export { AgentMessage, HostMessage, SlotItem } from './MessageItem';
 export { providerNamesFrom, modelLabel, providerLabel, type ProviderNames } from './model';

@@ -9,6 +9,7 @@ import type { HostCommands } from '../host/useHostCommands';
 import type { SummaryCommands } from '../host/useSummaryCommands';
 import { chargeOfMessage, type LedgerCommands } from '../usage';
 import { Markdown } from './Markdown';
+import { requestFailureText } from './failure';
 import { CopyButton, EditForm, RequestDetails, VersionSwitch, useVersions } from './MessageItem';
 import { chargeLabel, memberOf } from './model';
 
@@ -58,6 +59,8 @@ export function SummaryCard({ slot, snapshot, commands, summaries, ledger, onReg
       <Tag tone={used ? 'accent' : pendingConfirm ? 'warn' : 'neutral'}>{used && <Check aria-hidden />}{state}</Tag></div>
     {editing ? <div className="summary-body"><EditForm label="修改摘要内容" help="修改摘要（保存为新版本，并按修改后的内容确认使用；原版本保留）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} /></div>
       : <div className="summary-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted">{request?.status === 'generating' ? '等待输出…' : '（没有生成内容）'}</p>}</div>}
+    {request && (request.status === 'failed' || request.status === 'aborted' || request.status === 'interrupted') && <Note icon={TriangleAlert}>
+      {requestFailureText({ status: request.status, errorCode: request.errorCode, charge })}</Note>}
     {pendingConfirm && <Note tone="info" icon={Check} action={<Button size="sm" variant="primary" disabled={disabled} onClick={() => void summaries.confirm(shown.messageId)}>确认使用</Button>}>
       请先读一遍：确认后，之后的发言会用这份摘要代替{range}原文（原文不会删除）；也可以修改后再用。
     </Note>}
