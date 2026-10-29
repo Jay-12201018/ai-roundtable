@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { messageStatusValues, runStatusValues, turnStatusValues } from '../types/run';
 import { idSchema, PROTOCOL_VERSION, sequenceSchema, timestampSchema, workflowSnapshotSchema } from './common';
-import { apiErrorSchema } from './error';
+import { apiErrorSchema, errorCodeSchema } from './error';
 import { executionMetadataSchema, attemptSnapshotSchema } from './persistence';
 
 import { workflowConfigSchema, workflowProgressSchema } from './workflow';
@@ -108,7 +108,9 @@ export const runEventSchema = z.discriminatedUnion('type', [
   // R13B: run-level ledger and summary notifications; a summary has no Turn, so its text streams as run-level deltas.
   z.object({ ...base, ...runIdentity, type: z.literal('budget_updated'), payload: z.object({ reason: z.enum(['top_up', 'write_off']) }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('summary_updated'), payload: z.object({ summaryId: idSchema, messageId: idSchema,
-    status: z.enum([...summaryRequestStatusValues, 'confirmed']) }).strict() }).strict(),
+    status: z.enum([...summaryRequestStatusValues, 'confirmed']),
+    // D125: the public error code of a failed or stopped summary request; migration 9 stays unchanged.
+    errorCode: errorCodeSchema.optional() }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('summary_delta'), payload: z.object({ summaryId: idSchema, messageId: idSchema, text: z.string() }).strict() }).strict(),
   // R14 (D120): an artifact version changed (generating, completed, failed, adopted, edited, exported). Artifacts are
   // read with artifact.list; the event only tells the page to read again.

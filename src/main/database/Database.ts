@@ -21,6 +21,7 @@ import { reconciliationInputSchema, reconciliationAuditSchema, reconciliationEvi
 import { trialRecordSchema, type TrialRecord } from '../providers/controlledTrial/record';
 import { ContractError } from '../../shared/contracts/errors';
 import type { ArtifactIssue, ArtifactKind } from '../../shared/schemas/artifact';
+import { errorCodeSchema, type ErrorCode } from '../../shared/schemas/error';
 import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions } from '../../shared/schemas/configuration';
 import type { RoomInput,RoomConfiguration,AgentInput,AgentConfiguration,ProviderInput,ProviderConfiguration,ProviderSummary,RoomMessagePageInput,RoomMessagePage,RoomRunPageInput,RoomRunPage } from '../../shared/contracts/configuration';
 import { migration2 } from './migrations/v2';
@@ -84,12 +85,13 @@ export type ChargePricingInput = { period: PricePeriod; startedAt: string; finis
   cacheHitMicroPerMillion: number; cacheMissMicroPerMillion: number; outputMicroPerMillion: number; evidence: string };
 export type LedgerRow = { runId: string; agentId: string; charge: RequestCharge };
 export type SummaryRequestRecord = { requestId: string; summaryId: string; runId: string; messageId: string; clientRequestId: string; agentId: string;
-  status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; inputSnapshot: StreamChatInputRecord; createdAt: string };
+  status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; inputSnapshot: StreamChatInputRecord; createdAt: string;
+  /** D125: from the request's summary_updated event (migration 9 has no column for it). */ errorCode?: ErrorCode };
 export type SummaryRecord = { id: string; runId: string; clientRequestId: string; agentId: string; covered: string[]; basedOnSummaryId?: string; createdAt: string;
   requests: SummaryRequestRecord[]; confirmedMessageIds: string[] };
 
 /** R14: one artifact and its versions, oldest first. */
-export type ArtifactRequestRecord = { requestId: string; status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; createdAt: string };
+export type ArtifactRequestRecord = { requestId: string; status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; errorCode?: ErrorCode; createdAt: string };
 export type ArtifactVersionRecord = { id: string; artifactId: string; runId: string; number: number; origin: 'generate' | 'regenerate' | 'edit'; parentVersionId?: string;
   clientRequestId: string; agentId?: string; validation: 'pending' | 'valid' | 'invalid' | 'empty'; rawOutput: string; contentJson: string | null; issuesJson: string | null; emptyReason: string | null;
   createdAt: string; updatedAt: string; request?: ArtifactRequestRecord; sources: string[]; adoptedAt?: string;
@@ -594,7 +596,12 @@ export class Database {
       .all(runId) as Array<Omit<SummaryRecord, 'covered' | 'requests' | 'confirmedMessageIds' | 'basedOnSummaryId'> & { covered: string; basedOnSummaryId: string | null }>;
     return summaries.map(({ covered, basedOnSummaryId, ...summary }) => ({ ...summary, covered: z.array(idSchema).parse(JSON.parse(covered)),
       ...(basedOnSummaryId === null ? {} : { basedOnSummaryId }),
-      requests: (this.db.prepare(`${summaryRequestSelect} WHERE summary_id=? ORDER BY created_at,rowid`).all(summary.id) as RawSummaryRequest[]).map(summaryRequestFrom),
+      requests: (this.db.prepare(`${summaryRequestSelect} WHERE summary_id=? ORDER BY created_at,rowid`).all(summary.id) as RawSummaryRequest[]).map(summaryRequestFrom).map(request => {
+        if (request.status !== 'failed' && request.status !== 'aborted') return request;
+        const code = errorCodeSchema.safeParse(this.db.prepare(`SELECT json_extract(payload_json,'$.errorCode') FROM run_events WHERE run_id=? AND type='summary_updated'
+          AND json_extract(payload_json,'$.messageId')=? AND json_extract(payload_json,'$.errorCode') IS NOT NULL ORDER BY sequence DESC LIMIT 1`).pluck().get(runId, request.messageId));
+        return code.success ? { ...request, errorCode: code.data } : request;
+      }),
       confirmedMessageIds: this.db.prepare('SELECT message_id FROM summary_confirmations WHERE summary_id=? ORDER BY created_at,rowid').pluck().all(summary.id) as string[] }));
   }
 
@@ -655,9 +662,11 @@ export class Database {
     this.db.prepare('UPDATE artifact_versions SET raw_output=?,updated_at=? WHERE id=?').run(rawOutput, now(), versionId);
   }
 
-  finishArtifactRequest(requestId: string, status: 'completed' | 'failed' | 'aborted', finishReason?: 'stop' | 'length'): void {
+  finishArtifactRequest(requestId: string, status: 'completed' | 'failed' | 'aborted', finishReason?: 'stop' | 'length', errorCode?: ErrorCode): void {
     this.assertInitialized();
-    const result = this.db.prepare("UPDATE artifact_requests SET status=?,finish_reason=?,updated_at=? WHERE request_id=? AND status='generating'").run(status, finishReason ?? null, now(), requestId);
+    if (errorCode !== undefined) errorCodeSchema.parse(errorCode);
+    const result = this.db.prepare("UPDATE artifact_requests SET status=?,finish_reason=?,error_code=?,updated_at=? WHERE request_id=? AND status='generating'")
+      .run(status, finishReason ?? null, status === 'completed' ? null : errorCode ?? null, now(), requestId);
     if (result.changes !== 1) throw new Error('Artifact request is not generating');
   }
 
@@ -712,9 +721,10 @@ export class Database {
       const versions = this.db.prepare(`SELECT id,artifact_id AS artifactId,run_id AS runId,version_number AS number,origin,parent_version_id AS parentVersionId,client_request_id AS clientRequestId,
         agent_id AS agentId,validation,raw_output AS rawOutput,content_json AS contentJson,issues_json AS issuesJson,empty_reason AS emptyReason,created_at AS createdAt,updated_at AS updatedAt
         FROM artifact_versions WHERE run_id=? ORDER BY artifact_id,version_number`).all(runId) as RawArtifactVersion[];
-      const requests = new Map((this.db.prepare(`SELECT request_id AS requestId,version_id AS versionId,status,finish_reason AS finishReason,created_at AS createdAt FROM artifact_requests WHERE run_id=?`)
-        .all(runId) as Array<{ requestId: string; versionId: string; status: ArtifactRequestRecord['status']; finishReason: 'stop' | 'length' | null; createdAt: string }>)
-        .map(({ versionId, finishReason, ...request }) => [versionId, { ...request, ...(finishReason === null ? {} : { finishReason }) }]));
+      const requests = new Map((this.db.prepare(`SELECT request_id AS requestId,version_id AS versionId,status,finish_reason AS finishReason,error_code AS errorCode,created_at AS createdAt FROM artifact_requests WHERE run_id=?`)
+        .all(runId) as Array<{ requestId: string; versionId: string; status: ArtifactRequestRecord['status']; finishReason: 'stop' | 'length' | null; errorCode: string | null; createdAt: string }>)
+        .map(({ versionId, finishReason, errorCode, ...request }) => [versionId, { ...request, ...(finishReason === null ? {} : { finishReason }),
+          ...(errorCode === null ? {} : { errorCode: errorCodeSchema.parse(errorCode) }) }]));
       const sources = new Map<string, string[]>();
       for (const row of this.db.prepare('SELECT version_id AS versionId,message_id AS messageId FROM artifact_sources WHERE run_id=? ORDER BY version_id,position').all(runId) as Array<{ versionId: string; messageId: string }>) {
         sources.set(row.versionId, [...(sources.get(row.versionId) ?? []), row.messageId]);

@@ -10,6 +10,7 @@ import { reconciliationAuditSchema } from '../../providers/controlledTrial/recon
 import { budgetBlockSchema, requestChargeSchema } from '../../../shared/schemas/budget';
 import { artifactContentSchemas, artifactIssueSchema, artifactKindSchema, artifactNothingKinds } from '../../../shared/schemas/artifact';
 import { streamChatInputSchema } from '../../../shared/schemas/provider';
+import { errorCodeSchema } from '../../../shared/schemas/error';
 
 export type DatabaseValidation = { schemaVersion: number; counts: { runs: number; turns: number; messages: number; events: number }; evidenceSha256: string };
 
@@ -274,7 +275,8 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (row.content !== null && !artifactContentSchemas[kind].safeParse(JSON.parse(row.content)).success) throw new Error('Invalid artifact content');
         if (row.issues !== null && !(JSON.parse(row.issues) as unknown[]).every(issue => artifactIssueSchema.safeParse(issue).success)) throw new Error('Invalid artifact issues');
       }
-      for (const row of db.prepare('SELECT request_id,input_snapshot FROM artifact_requests').iterate() as Iterable<{ request_id: string; input_snapshot: string }>) {
+      for (const row of db.prepare('SELECT request_id,input_snapshot,error_code FROM artifact_requests').iterate() as Iterable<{ request_id: string; input_snapshot: string; error_code: string | null }>) {
+        if (row.error_code !== null && !errorCodeSchema.safeParse(row.error_code).success) throw new Error('Invalid artifact request error');
         const input = streamChatInputSchema.safeParse(JSON.parse(row.input_snapshot));
         if (!input.success || input.data.requestId !== row.request_id) throw new Error('Invalid artifact request input');
       }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { idSchema, sequenceSchema, timestampSchema } from './common';
+import { errorCodeSchema } from './error';
 
 const count = sequenceSchema;
 const position = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
@@ -53,6 +54,8 @@ export const contextSummarySchema = z.object({
   requests: z.array(z.object({
     requestId: idSchema, messageId: idSchema, status: z.enum(summaryRequestStatusValues),
     finishReason: z.enum(['stop', 'length']).optional(), createdAt: timestampSchema,
+    /** D125: why a failed or stopped request ended, as recorded with its summary_updated event. */
+    errorCode: errorCodeSchema.optional(),
   }).strict()).min(1).max(256),
   confirmedMessageIds: z.array(idSchema).max(512),
   /** D109: covered messages edited or regenerated after the effective version was written; they are sent themselves. */

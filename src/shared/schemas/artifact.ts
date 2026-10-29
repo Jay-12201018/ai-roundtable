@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { idSchema, sequenceSchema, timestampSchema } from './common';
+import { errorCodeSchema } from './error';
 
 /**
  * R14 structured artifacts (D118–D123). A model writes one of four documents as JSON; Main parses it with the strict
@@ -143,7 +144,9 @@ export const artifactSourceSchema = z.object({
 export const artifactVersionSchema = z.object({
   versionId: idSchema, artifactId: idSchema, number: position, origin: z.enum(artifactOriginValues), status: z.enum(artifactVersionStatusValues),
   parentVersionId: idSchema.optional(), agentId: idSchema.optional(),
-  request: z.object({ requestId: idSchema, status: z.enum(artifactRequestStatusValues), finishReason: z.enum(['stop', 'length']).optional() }).strict().optional(),
+  /** D125: a failed or stopped request names its public error code (never a response body or a Key). */
+  request: z.object({ requestId: idSchema, status: z.enum(artifactRequestStatusValues), finishReason: z.enum(['stop', 'length']).optional(),
+    errorCode: errorCodeSchema.optional() }).strict().optional(),
   /** The document title once valid; otherwise absent. */
   title: z.string().max(200).optional(),
   issues: z.array(artifactIssueSchema).max(MAX_ARTIFACT_ISSUES),

@@ -105,6 +105,8 @@ CREATE TABLE artifact_requests (
   agent_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('generating','completed','failed','aborted','interrupted')),
   finish_reason TEXT CHECK(finish_reason IS NULL OR (finish_reason IN ('stop','length') AND status='completed')),
+  -- D125: the public error code of a failed or stopped request (Main writes only PublicError codes; no response text).
+  error_code TEXT CHECK(error_code IS NULL OR (status IN ('failed','aborted') AND length(error_code) BETWEEN 1 AND 64 AND error_code NOT GLOB '*[^a-z_]*')),
   input_snapshot TEXT NOT NULL CHECK(json_valid(input_snapshot) AND json_type(input_snapshot)='object' AND json_extract(input_snapshot,'$.requestId')=request_id),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -118,7 +120,7 @@ END;
 CREATE TRIGGER artifact_request_identity_immutable BEFORE UPDATE OF request_id,version_id,run_id,agent_id,input_snapshot,created_at ON artifact_requests BEGIN
   SELECT RAISE(ABORT,'Artifact request identity is immutable');
 END;
-CREATE TRIGGER artifact_request_finish_once BEFORE UPDATE OF status,finish_reason ON artifact_requests BEGIN
+CREATE TRIGGER artifact_request_finish_once BEFORE UPDATE OF status,finish_reason,error_code ON artifact_requests BEGIN
   SELECT CASE WHEN OLD.status <> 'generating' OR NEW.status = 'generating' THEN RAISE(ABORT,'Invalid artifact request transition') END;
 END;
 CREATE TRIGGER artifact_request_no_delete BEFORE DELETE ON artifact_requests BEGIN
