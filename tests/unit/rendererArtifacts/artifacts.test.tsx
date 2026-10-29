@@ -47,9 +47,11 @@ describe('artifact reader (R14)', () => {
     const c = commands({ v1: detail('code', v, text(validDocuments.code), validDocuments.code) });
     render(<ArtifactReader snapshot={snapshot()} artifact={summary('code', [v])} commands={c} host={host} onClose={() => {}} onRegenerate={() => {}} onReveal={() => {}} />);
     await screen.findByText('src/order/validate.ts');
-    expect(screen.getByText('这些代码只在这里预览：不会执行，也不会写入任何文件。')).toBeTruthy();
+    expect(screen.getByText('这些代码不会被执行。采用之后可以写入你选的文件夹，写之前会逐个文件列出差异，由你勾选。')).toBeTruthy();
     expect(screen.queryByText('另存为…')).toBeNull();
-    expect(screen.getByText(/代码候选不能在这里存成文件/u)).toBeTruthy();
+    // Without the R15 interface the page says so honestly and offers copying only.
+    expect(screen.getByText('这个版本的应用不能把代码写成文件，可以复制。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '写入文件夹…' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '复制 JSON' }));
     expect(c.copy).toHaveBeenCalledWith('v1', 'json');
   });
