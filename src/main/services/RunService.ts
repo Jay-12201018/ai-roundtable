@@ -5,7 +5,7 @@ import { assertRunCommand, canRetryTurn, transitionRun, transitionTurn } from '.
 import type { StartRunInput } from '../../shared/contracts/run';
 import type { InterruptedRunDecision } from '../../shared/types/run';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
-import { publicError } from '../../shared/schemas/error';
+import { publicError, type ErrorCode } from '../../shared/schemas/error';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT, interruptedRunDecisionSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
 import { compileWorkflow, nextWorkflowStep, readWorkflowSnapshot } from '../workflow';
 import type { WorkflowConfig, WorkflowSnapshot, WorkflowStep } from '../workflow';
@@ -277,7 +277,7 @@ export class RunService {
         ...(revised.length ? { revisedSlotIds: revised } : {}),
         ...(record.basedOnSummaryId ? { basedOnSummaryId: record.basedOnSummaryId } : {}),
         requests: record.requests.map(request => ({ requestId: request.requestId, messageId: request.messageId, status: request.status,
-          ...(request.finishReason ? { finishReason: request.finishReason } : {}), createdAt: request.createdAt })),
+          ...(request.finishReason ? { finishReason: request.finishReason } : {}), ...(request.errorCode ? { errorCode: request.errorCode } : {}), createdAt: request.createdAt })),
         confirmedMessageIds: record.confirmedMessageIds, createdAt: record.createdAt };
     });
   }
@@ -963,9 +963,9 @@ export class RunService {
         }
         this.appendEvent(context.runId, 'artifact_updated', { artifactId, versionId, status: 'completed' });
       },
-      ended: (content, aborted) => {
+      ended: (content, aborted, errorCode) => {
         this.database.setArtifactOutput(versionId, content);
-        this.database.finishArtifactRequest(requestId, aborted ? 'aborted' : 'failed');
+        this.database.finishArtifactRequest(requestId, aborted ? 'aborted' : 'failed', undefined, errorCode);
         this.appendEvent(context.runId, 'artifact_updated', { artifactId, versionId, status: aborted ? 'aborted' : 'failed' });
       },
     });
@@ -987,10 +987,11 @@ export class RunService {
         if (request.regenerate) this.database.activateVersion(messageId);
         this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: 'completed' });
       },
-      ended: (content, aborted) => {
+      ended: (content, aborted, errorCode) => {
         this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
         this.database.finishSummaryRequest(requestId, aborted ? 'aborted' : 'failed');
-        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: aborted ? 'aborted' : 'failed' });
+        // D125: migration 9 has no column for the reason, so the request's own event carries it.
+        this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: aborted ? 'aborted' : 'failed', errorCode });
       },
     });
   }
@@ -1000,7 +1001,7 @@ export class RunService {
    * from evidence in the same transaction as the outcome. A failed or stopped request keeps its partial text.
    */
   private async streamSideRequest(context: RunContext, member: MemberSnapshot, request: { requestId: string; input: StreamChatInput; quote?: RequestQuote },
-    hooks: { text(content: string, delta: string): void; completed(content: string, reason: 'stop' | 'length'): void; ended(content: string, aborted: boolean): void }): Promise<void> {
+    hooks: { text(content: string, delta: string): void; completed(content: string, reason: 'stop' | 'length'): void; ended(content: string, aborted: boolean, errorCode: ErrorCode): void }): Promise<void> {
     const { requestId, quote } = request;
     const signal = context.abortController.signal;
     let content = '';
@@ -1059,7 +1060,8 @@ export class RunService {
       const code = toPublicError(error).code;
       const aborted = context.stopRequested || context.timedOut || code === 'cancelled' || code === 'timeout';
       this.database.transaction(() => {
-        hooks.ended(content, aborted);
+        // Only the public code is kept: never the response body, headers or anything that could hold a Key.
+        hooks.ended(content, aborted, code);
         settle();
         this.persistElapsed(context);
       });
