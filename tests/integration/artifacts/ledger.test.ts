@@ -43,6 +43,18 @@ describe('artifact requests are budgeted and settled like Turns (D120)', () => {
     expect(usage.csv().text.split('\r\n').find(line => line.startsWith(result.requestId!))).toContain(',产物,');
   });
 
+  it('keeps a dropped connection as network_error with the charge unknown at its cap (D125)', async () => {
+    const f = await deepSeekFixture({ modes: ['ok', 'ok', 'network'] });
+    const { runId } = await f.start({ maxTurns: 2 }); await f.run.waitForIdle(runId);
+    const result = f.run.generateArtifact({ runId, clientRequestId: 'g1', kind: 'prd', agentId: 'a2' });
+    await f.run.waitForIdle(runId);
+    const version = new ArtifactService(f.db, f.run).getVersion({ runId, versionId: result.versionId }).version;
+    expect(version).toMatchObject({ status: 'failed', request: { status: 'failed', errorCode: 'network_error' }, outputChars: 0 });
+    const charge = f.run.getSnapshot(runId).charges!.find(item => item.requestId === result.requestId)!;
+    expect(charge).toMatchObject({ kind: 'artifact', state: 'unknown', chargedMicro: charge.reservedMicro });
+    expect(f.transport.mock.calls.length).toBe(3);
+  });
+
   it('counts a stopped artifact request as unknown at its cap; a write-off applies to it like any request', async () => {
     const f = await deepSeekFixture({ modes: ['ok', 'ok', 'hang'], reply: body => isArtifact(body) ? '{"title"' : undefined });
     const { runId } = await f.start({ maxTurns: 2 }); await f.run.waitForIdle(runId);

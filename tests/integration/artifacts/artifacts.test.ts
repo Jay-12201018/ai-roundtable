@@ -137,6 +137,53 @@ describe('structured artifacts (D118–D123)', () => {
     expect(f.run.getSnapshot(runId).status).toBe('completed');
   });
 
+  it('records the public error code of a failed or stopped request, and retries nothing (D125)', async () => {
+    const f = setup();
+    const runId = await finished(f);
+    for (const code of ['network_error', 'rate_limited', 'authentication_failed', 'invalid_response', 'internal_error'] as const) {
+      f.provider.outcomes.set(f.provider.inputs.length, { error: code });
+      const before = f.provider.inputs.length;
+      const { version } = await generate(f, runId, 'prd', `g-${code}`, '{"title": "半');
+      expect(version().version).toMatchObject({ status: 'failed', request: { status: 'failed', errorCode: code } });
+      expect(version().rawOutput).toBe('{"title": "半');
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(f.provider.inputs.length).toBe(before + 1);
+    }
+    // A provider timeout ends the request as stopped, with its code; a host stop says cancelled.
+    f.provider.outcomes.set(f.provider.inputs.length, { error: 'timeout' });
+    expect((await generate(f, runId, 'actions', 'g-timeout')).version().version.request).toMatchObject({ status: 'aborted', errorCode: 'timeout' });
+    const index = f.provider.inputs.length;
+    f.provider.hold.add(index);
+    const held = f.run.generateArtifact({ runId, clientRequestId: 'g-stop', kind: 'code', agentId: 'a' });
+    await f.provider.started(index);
+    await f.command({ runId, kind: 'abortGeneration' });
+    await f.run.waitForIdle(runId);
+    expect(f.artifacts.getVersion({ runId, versionId: held.versionId }).version.request).toMatchObject({ status: 'aborted', errorCode: 'cancelled' });
+    // The database keeps only a public code, and only on a request that ended without a result.
+    const raw = (f.db as unknown as { db: Sqlite.Database }).db;
+    expect(() => raw.prepare("UPDATE artifact_requests SET error_code='rate_limited' WHERE error_code='network_error'").run()).toThrow(/Invalid artifact request transition/u);
+    // The CHECK refuses anything that is not a code on a request that ended without a result.
+    const run = raw.prepare('SELECT run_id FROM artifact_requests LIMIT 1').pluck().get() as string;
+    raw.exec('DROP TRIGGER artifact_request_finish_once');
+    expect(() => raw.prepare("UPDATE artifact_requests SET error_code='Upstream said: sk-secret' WHERE error_code='network_error'").run()).toThrow(/CHECK constraint failed/u);
+    expect(() => raw.prepare("UPDATE artifact_requests SET status='completed' WHERE error_code='network_error'").run()).toThrow(/CHECK constraint failed/u);
+    expect(run).toBe(runId);
+  });
+
+  it('records why a summary request failed in its event, without changing migration 9 (D125)', async () => {
+    const f = setup();
+    const runId = await finished(f);
+    const preview = f.run.previewSummary({ runId });
+    f.provider.outcomes.set(f.provider.inputs.length, { error: 'rate_limited' });
+    const result = f.run.generateSummary({ runId, clientRequestId: 's1', agentId: preview.agentId!, throughSlotId: preview.throughSlotId! });
+    await f.run.waitForIdle(runId);
+    const snapshot = f.run.getSnapshot(runId);
+    expect(snapshot.summaries![0].requests[0]).toMatchObject({ requestId: result.requestId, status: 'failed', errorCode: 'rate_limited' });
+    expect(runSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    const events = f.db.listRunEvents(runId, 0).filter(event => event.type === 'summary_updated');
+    expect(events.at(-1)!.payload).toEqual({ summaryId: result.summaryId, messageId: result.messageId, status: 'failed', errorCode: 'rate_limited' });
+  });
+
   it('marks a version affected when a source message is edited, and an edit re-records its sources', async () => {
     const f = setup();
     const runId = await finished(f);

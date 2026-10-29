@@ -10,7 +10,7 @@ import { deepSeekModelPolicy } from '../../../src/main/providers/modelPolicies/d
 import { settlementClock } from '../../../src/main/usage/pricing';
 import type { HostCommand } from '../../../src/shared/schemas/host';
 
-export type Mode = 'ok' | 'no-usage' | 'hang';
+export type Mode = 'ok' | 'no-usage' | 'hang' | 'network';
 /** Beijing local time as an instant (UTC+8). Friday 2026-10-23 10:00 is peak; 21:00 is off-peak. */
 export const beijing = (local: string) => new Date(`${local}+08:00`);
 export const PEAK = '2026-10-23T10:00:00';
@@ -52,6 +52,8 @@ export async function deepSeekFixture(options: { modes?: Mode[]; clock?: string;
       return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(text)}\n\n`)); void hanging; } }), { headers: { 'content-type': 'text/event-stream' } });
     }
     if (mode === 'no-usage') return sse([text, stop]);
+    // R14 (D125): the connection drops after the request left; the body never arrives.
+    if (mode === 'network') throw new TypeError('fetch failed');
     return sse([text, stop, { choices: [], usage: { prompt_tokens: 300, completion_tokens: 6, ...split } }]);
   });
   const registry = new ProviderRegistry(db, keys, { policyResolver: deepSeekModelPolicy, transportFactory: guard => async (url, init) => { guard(); return transport(url, init); } });

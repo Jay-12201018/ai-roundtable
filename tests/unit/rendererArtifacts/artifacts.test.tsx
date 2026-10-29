@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ArtifactReader, ArtifactsPanel, GenerateDialog, type ArtifactCommands } from '../../../src/renderer/features/artifacts';
+import { requestFailureText } from '../../../src/renderer/features/timeline';
+import type { RequestCharge } from '../../../src/shared/schemas/budget';
 import type { HostCommands } from '../../../src/renderer/features/host/useHostCommands';
 import type { ArtifactKind, ArtifactSummary, ArtifactVersion, ArtifactVersionDetail, ArtifactPreview } from '../../../src/shared/schemas/artifact';
 import type { RunSnapshot } from '../../../src/shared/types/run';
@@ -96,6 +98,38 @@ describe('artifact reader (R14)', () => {
     fireEvent.click(within(document.querySelector('.note') as HTMLElement).getByRole('button', { name: '重新生成…' }));
     expect(onRegenerate).toHaveBeenCalled();
     expect(screen.getAllByText('未知').length).toBeGreaterThanOrEqual(2); // A2 owner and due
+  });
+});
+
+const charge = (overrides: Partial<RequestCharge>): RequestCharge => ({ requestId: 'r1', providerId: 'p', modelId: 'deepseek-flash', currency: 'CNY', state: 'unknown',
+  inputTokenBound: 1000, outputTokenLimit: 4096, inputMicroPerToken: 2, outputMicroPerToken: 8, reservedMicro: 34_768, inputTokens: null, outputTokens: null, accountedMicro: null,
+  chargedMicro: 34_768, priceReviewedAt: null, createdAt: time, updatedAt: time, kind: 'artifact', ...overrides });
+
+describe('why a request ended without a result (D125)', () => {
+  it('says the cause, what it cost and what to do, in plain words', () => {
+    expect(requestFailureText({ status: 'failed', errorCode: 'network_error', charge: charge({}) }))
+      .toBe('请求失败：网络中断或连不上服务。请求可能已经发出，费用暂记为未知（按上限 ¥0.0348 计）；可以到服务商控制台核对后，在用量页核销。没有自动重试，可以重新生成。');
+    expect(requestFailureText({ status: 'failed', errorCode: 'rate_limited', charge: charge({ state: 'not_sent', chargedMicro: 0 }) }))
+      .toBe('请求失败：服务商限流（请求太频繁）。请求没有发出，不收费。稍等一会儿再重新生成。');
+    expect(requestFailureText({ status: 'failed', errorCode: 'authentication_failed' })).toBe('请求失败：Key 无效或已过期。请到“设置”检查 Key，再重新生成。');
+    expect(requestFailureText({ status: 'aborted', errorCode: 'cancelled' })).toBe('这次请求已中止。没有自动重试，可以重新生成。');
+    expect(requestFailureText({ status: 'interrupted' })).toBe('应用退出时这次请求还没完成，已标为中断。没有自动重试，可以重新生成。');
+    expect(requestFailureText({ status: 'failed', charge: charge({ writeOffs: [{ writeOffId: 'w', amountMicro: 100, basis: '控制台', createdAt: time }], chargedMicro: 100 }) }))
+      .toBe('请求失败（原因没有记录）。费用已按你核销的 ¥0.0001 计。没有自动重试，可以重新生成。');
+    for (const text of [requestFailureText({ status: 'failed', errorCode: 'internal_error', charge: charge({}) })]) expect(text).not.toMatch(/sk-|Key：|upstream/u);
+  });
+
+  it('shows the reason on a failed version, with regenerate as the next step', async () => {
+    const v = version({ status: 'failed', outputChars: 0, request: { requestId: 'r1', status: 'failed', errorCode: 'network_error' } });
+    const snap = { ...snapshot(), charges: [charge({})] } as RunSnapshot;
+    const onRegenerate = vi.fn();
+    render(<ArtifactReader snapshot={snap} artifact={summary('prd', [v])} commands={commands({ v1: detail('prd', v, '') })} host={host} onClose={() => {}} onRegenerate={onRegenerate} onReveal={() => {}} />);
+    await screen.findByText(/请求失败：网络中断或连不上服务。请求可能已经发出，费用暂记为未知/u);
+    expect(screen.queryByText(/下面是已收到的部分/u)).toBeNull();
+    const regenerate = screen.getByRole('button', { name: '重新生成…' });
+    expect(regenerate.className).toContain('primary');
+    fireEvent.click(regenerate);
+    expect(onRegenerate).toHaveBeenCalled();
   });
 });
 

@@ -11,7 +11,7 @@ import { config, members, roomId } from '../../unit/workflows/fixtures';
 import { parseDiscussion } from '../../unit/context/discussion';
 
 export { roomId, members };
-export type Outcome = 'stop' | 'fail' | 'length';
+export type Outcome = 'stop' | 'fail' | 'length' | { error: import('../../../src/shared/schemas/error').ErrorCode };
 
 /** Records every request; individual calls can be held open, failed or answered with chosen text. */
 export class ScriptedProvider extends MockProvider {
@@ -41,7 +41,8 @@ export class ScriptedProvider extends MockProvider {
     });
     if (signal?.aborted) { yield { type: 'error', requestId: input.requestId, error: publicError('cancelled') }; return; }
     const outcome = this.outcomes.get(index) ?? 'stop';
-    if (outcome === 'fail') yield { type: 'error', requestId: input.requestId, error: publicError('internal_error') };
+    if (typeof outcome === 'object') yield { type: 'error', requestId: input.requestId, error: publicError(outcome.error) };
+    else if (outcome === 'fail') yield { type: 'error', requestId: input.requestId, error: publicError('internal_error') };
     else yield { type: 'finish', requestId: input.requestId, reason: outcome };
   }
 }
