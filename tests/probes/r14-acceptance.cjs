@@ -58,7 +58,7 @@ const code = json({ title: '订单费用计算', summary: '按基础费 2 元和
 ], notes: ['没有处理节假日', '金额精确到分'] });
 // The first code request finds no code in this discussion and says so (D124); the regeneration then writes some.
 const nothingCode = json({ nothing: '讨论记录中没有出现任何代码设计或实现要求，没有可整理的代码候选。' });
-const artifactReplies = { '需求文档（PRD）': [prd(), prd('2 栋宿舍楼')], 会议纪要: [invalidMinutes], 行动清单: [actions], 代码候选: [nothingCode, code] };
+const artifactReplies = { '需求文档（PRD）': [prd(), prd('2 栋宿舍楼')], 会议纪要: [invalidMinutes], 行动清单: [actions, actions], 代码候选: [nothingCode, code] };
 const artifactKind = body => /整理「([^」]+)」。只输出 JSON 对象。$/u.exec(body.messages.at(-1).content)?.[1];
 fixture.reply = body => {
   const kind = artifactKind(body);
@@ -206,6 +206,24 @@ async function main() {
     check(actionsText.includes('2 项没有明确负责人，标为“未知”') && actionsText.includes('第 2 周前') && actionsText.includes('受阻'), 'Unknown owners stay unknown; dates as said');
     await capture('actions-candidate', '行动清单：事项、负责人、截止时间、状态、来源。讨论里没指派的负责人和没说的截止时间显示为“未知”，顶部提示“2 项没有明确负责人”；截止时间照抄讨论原话“第 2 周前”，没有换算成日期。', 'dialog.artifact-reader');
     await click('采用这一版'); await readerHas('已采用');
+    // D125: a request that ends without a result says why, what it cost and what to do; nothing is retried.
+    await click('重新生成…');
+    await until(`[...document.querySelectorAll('dialog[open] h2')].some(e => e.textContent === '重新生成行动清单')`, 'actions regenerate dialog');
+    fixture.mode = 'hang';
+    await click('生成（发送 1 次请求）', { which: 'last' });
+    await readerHas('正在生成：已收到', 30000);
+    await click('中止生成');
+    await readerHas('这次请求已中止。', 30000);
+    fixture.mode = 'ok'; fixture.release();
+    const stoppedText = await reader();
+    check(stoppedText.includes('请求可能已经发出，费用暂记为未知（按上限 ¥') && stoppedText.includes('可以到服务商控制台核对后，在用量页核销。') && stoppedText.includes('没有自动重试，可以重新生成。'), 'A stopped request says why, its cost and the next step');
+    check(await js(`[...document.querySelectorAll('dialog.artifact-reader .modal-foot button')].find(e => e.textContent.includes('重新生成'))?.className.includes('primary')`), 'Regenerate is the next step');
+    const stopped = (await artifactsOf()).find(item => item.kind === 'actions').versions.at(-1);
+    check(stopped.status === 'failed' && stopped.request.status === 'aborted' && stopped.request.errorCode === 'cancelled', 'The public code is recorded: cancelled');
+    const afterStop = fixture.requests.length;
+    await sleep(1500);
+    check(fixture.requests.length === afterStop, 'Nothing is retried after a stop');
+    await capture('actions-stopped', '在行动清单里点“重新生成…”，生成到一半点“中止生成”：第 2 版写明“这次请求已中止。请求可能已经发出，费用暂记为未知（按上限 ¥… 计）；可以到服务商控制台核对后，在用量页核销。没有自动重试，可以重新生成。”——原因、费用和下一步都说清，“重新生成…”是主按钮。网络中断、限流、Key 失效等失败按同样的格式写出各自的原因（只用脱敏的公开错误码）。第 1 版仍然有效。', 'dialog.artifact-reader');
     await key('Escape');
     await panelOpen();
     await click('生成…', { scope: '.artifact', which: 0 });
@@ -305,7 +323,8 @@ async function main() {
   await panelOpen();
   const list = await artifactsOf();
   const states = list.map(item => `${item.kind}:${item.versions.map(version => `${version.number}${version.origin[0]}-${version.status}`).join('/')}`).join(' ');
-  check(states === 'prd:1g-exported/2r-exported minutes:1g-invalid/2e-valid actions:1g-valid code:1g-empty/2r-valid', 'Artifacts, versions and states after restart: ' + states);
+  check(states === 'prd:1g-exported/2r-exported minutes:1g-invalid/2e-valid actions:1g-valid/2r-failed code:1g-empty/2r-valid', 'Artifacts, versions and states after restart: ' + states);
+  check(list.find(item => item.kind === 'actions').versions[1].request.errorCode === 'cancelled', 'The recorded error code survives the restart');
   check(list.find(item => item.kind === 'prd').versions[0].affectedNumbers.join() === '1', 'The affected mark survives');
   await capture('restart-panel', '重启应用后重新打开这场讨论：四份产物、各自的版本和状态（有效 · 已导出、你修改的版本、受影响）都在。', '.art-panel');
   await click('打开会议纪要', { prefix: true });
@@ -318,8 +337,10 @@ async function main() {
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
     check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 12, 'Migration 12');
-    check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 7 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 6
-      && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='settled'").pluck().get() === 6, 'Seven versions, six settled artifact requests');
+    check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 8 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 7
+      && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='settled'").pluck().get() === 6 && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='unknown'").pluck().get() === 1,
+      'Eight versions; six settled artifact requests and the stopped one unknown');
+    check(db.prepare("SELECT error_code FROM artifact_requests WHERE status='aborted'").pluck().all().join() === 'cancelled', 'Only the public code is stored');
     check(db.prepare("SELECT empty_reason FROM artifact_versions WHERE validation='empty'").pluck().all().join() === '讨论记录中没有出现任何代码设计或实现要求，没有可整理的代码候选。', 'The empty answer and its reason are stored');
     check(db.prepare("SELECT COUNT(*) FROM artifact_exports WHERE target='file'").pluck().get() === 1, 'One file export');
   } finally { db.close(); }
