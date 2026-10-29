@@ -10,6 +10,7 @@ const { pathToFileURL } = require('node:url');
 const { app, session, safeStorage, dialog } = require('electron');
 const http = require('node:http');
 const { syncBuiltinESMExports } = require('node:module');
+const { holdFocus, emulateFocus, imeInput } = require('./ime-input.cjs');
 
 function isolate(prefix, reuse) {
   assert.equal(app.isReady(), false, 'Isolation must precede readiness/Main');
@@ -135,10 +136,12 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
     const preferences = contents.getLastWebPreferences();
     assert.equal(preferences.sandbox, true); assert.equal(preferences.contextIsolation, true); assert.equal(preferences.nodeIntegration, false);
     window.setContentSize(width, height);
+    holdFocus(window);
     failureShot = async () => { fs.writeFileSync(join(directory, 'failure.png'), (await contents.capturePage()).toPNG()); result.failureText = await contents.executeJavaScript('document.body.innerText'); };
     if (screens && !keepScreens) { fs.mkdirSync(screens, { recursive: true }); for (const old of fs.readdirSync(screens)) if (/^\d\d-.*\.png$/u.test(old)) fs.rmSync(join(screens, old)); }
     const cdp = contents.debugger; cdp.attach('1.3');
     const send = (method, params = {}) => cdp.sendCommand(method, params);
+    await emulateFocus(send);
     const js = code => contents.executeJavaScript(code);
     const until = async (code, message, timeout = 60000) => {
       const deadline = Date.now() + timeout;
@@ -157,7 +160,7 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
       if (!e) return null;
       if (!o.noScroll) e.scrollIntoView({ block: 'center' });
       const r = e.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, left: r.left, top: r.top, disabled: e.disabled === true || e.getAttribute('aria-disabled') === 'true' };
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, left: r.left, top: r.top, disabled: e.disabled === true || e.getAttribute('aria-disabled') === 'true', focused: e === document.activeElement };
     }; true`;
     const ensureLocator = () => js(locator);
     await ensureLocator();
@@ -169,7 +172,12 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
     };
     const click = async (name, options) => { const { x, y } = await point(name, options); await sleep(60); await mouse(x, y); await sleep(160); };
-    const field = (name, options = {}) => click(name, { selector: 'textarea,input,select', ...options });
+    // A click on a field ends with the caret in it.
+    const field = async (name, options = {}) => {
+      const located = { selector: 'textarea,input,select', ...options };
+      await click(name, located);
+      await until(`(window.__r16(${JSON.stringify(name)}, ${JSON.stringify({ ...located, noScroll: true })}) || {}).focused`, 'focus in ' + name, 5000);
+    };
     const keys = {
       Enter: { code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' }, Escape: { code: 'Escape', windowsVirtualKeyCode: 27 }, Tab: { code: 'Tab', windowsVirtualKeyCode: 9 },
       ArrowDown: { code: 'ArrowDown', windowsVirtualKeyCode: 40 }, ArrowUp: { code: 'ArrowUp', windowsVirtualKeyCode: 38 }, a: { code: 'KeyA', windowsVirtualKeyCode: 65 },
@@ -182,19 +190,8 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
       await send('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code: map.code, windowsVirtualKeyCode: map.windowsVirtualKeyCode, modifiers });
       await sleep(140);
     };
-    const selectAll = () => key('a', 4);
     // Chinese arrives as an IME delivers it: a pinyin composition, optionally an Enter that only confirms, then the commit.
-    const ime = async (pinyin, committed, { enterWhileComposing = false } = {}) => {
-      await send('Input.imeSetComposition', { text: pinyin, selectionStart: pinyin.length, selectionEnd: pinyin.length });
-      await sleep(120);
-      if (enterWhileComposing) {
-        await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 });
-        await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229 });
-        await sleep(120);
-      }
-      await send('Input.insertText', { text: committed });
-      await sleep(140);
-    };
+    const { selectAll, ime } = imeInput({ send, js, until, key });
     const type = text => send('Input.insertText', { text }).then(() => sleep(120));
     let shot = firstShot;
     const capture = async (file, caption, focus) => {

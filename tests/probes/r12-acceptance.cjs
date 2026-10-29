@@ -55,6 +55,7 @@ assert.equal(safeStorage.encryptString, fake.encryptString); assert.equal(safeSt
 const http = require('node:http');
 const https = require('node:https');
 const { syncBuiltinESMExports } = require('node:module');
+const { holdFocus, emulateFocus, imeInput } = require('./ime-input.cjs');
 http.request = http.get = () => { result.nodeNetworkAttempts.push('http blocked'); throw new Error('HTTP blocked'); };
 https.request = https.get = () => { result.nodeNetworkAttempts.push('https blocked'); throw new Error('HTTPS blocked'); };
 globalThis.fetch = async () => { result.nodeNetworkAttempts.push('global fetch blocked'); throw new Error('Remote fetch blocked'); };
@@ -96,6 +97,8 @@ async function main() {
   };
   // The content size set above settles asynchronously; aim the first click only once the layout has it.
   await until(`window.innerWidth === 1440 && window.innerHeight === 900`, 'window size applied'); await sleep(300);
+  // The window stops taking key status so another window cannot end an open IME composition; the page still acts focused.
+  holdFocus(window); await emulateFocus(send);
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r12 = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
@@ -126,9 +129,10 @@ async function main() {
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code: map.code, windowsVirtualKeyCode: map.windowsVirtualKeyCode, modifiers });
     await sleep(120);
   };
-  const selectAll = () => key('a', 4);
   // Chinese text arrives the way an IME delivers it: a composition (pinyin) that is then committed.
-  // Each step waits for the state the page reports (composition events and the field value), never a fixed delay.
+  const { selectAll, ime } = imeInput({ send, js, until, key });
+  // Path 2 drives one composition by hand; each step waits for the state the page reports (composition events and the
+  // field value), never a fixed delay.
   const trackIme = () => js(`(() => { const e = document.activeElement; if (!e || e.__imeTracked) return true; e.__imeTracked = true;
     window.__ime = { start: 0, end: 0 }; e.addEventListener('compositionstart', () => window.__ime.start++); e.addEventListener('compositionend', () => window.__ime.end++); return true; })()`);
   // The text around the selection the composition replaces, so the expected value is exact.
@@ -138,12 +142,6 @@ async function main() {
     const ends = await js('window.__ime.end');
     await send('Input.insertText', { text: committed });
     await until(`window.__ime.end > ${ends} && document.activeElement.value === ${JSON.stringify(prefix + committed + suffix)}`, 'composition committed: ' + committed);
-  };
-  const ime = async (pinyin, committed) => {
-    await trackIme(); const context = await around();
-    await send('Input.imeSetComposition', { text: pinyin, selectionStart: pinyin.length, selectionEnd: pinyin.length });
-    await composing(context, pinyin);
-    await commit(context, committed);
   };
   let shot = 0;
   const capture = async (name, caption, focus) => {

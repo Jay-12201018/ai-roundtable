@@ -52,6 +52,7 @@ for (const [name, implementation] of Object.entries(fake)) { safeStorage[name] =
 
 const http = require('node:http');
 const { syncBuiltinESMExports } = require('node:module');
+const { holdFocus, emulateFocus, imeInput } = require('./ime-input.cjs');
 const fakeKey = 'premerge-fake-deepseek-key';
 // Synthetic look-alike of a pasted DeepSeek key, typed into the model ID field; never a real credential.
 const pastedKey = 'sk-premerge0fake0key0for0probe0only';
@@ -145,6 +146,8 @@ async function main() {
   };
   // The content size set above settles asynchronously; aim the first click only once the layout has it.
   await until(`window.innerWidth === 1440 && window.innerHeight === 900`, 'window size applied'); await sleep(300);
+  // The window stops taking key status so another window cannot end an open IME composition; the page still acts focused.
+  holdFocus(window); await emulateFocus(send);
   // Locates a visible control by accessible name (aria-label, own text or enclosing label) and scrolls it into view.
   await js(`window.__r13a = (name, o = {}) => {
     const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
@@ -182,14 +185,8 @@ async function main() {
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code: map.code, windowsVirtualKeyCode: map.windowsVirtualKeyCode, modifiers });
     await sleep(120);
   };
-  const selectAll = () => key('a', 4);
   // Chinese text arrives the way an IME delivers it: a composition (pinyin) that is then committed.
-  const ime = async (pinyin, committed) => {
-    await send('Input.imeSetComposition', { text: pinyin, selectionStart: pinyin.length, selectionEnd: pinyin.length });
-    await sleep(120);
-    await send('Input.insertText', { text: committed });
-    await sleep(120);
-  };
+  const { selectAll, ime } = imeInput({ send, js, until, key });
   let shot = restarting ? fs.readdirSync(screens).filter(file => /^\d\d-.*\.png$/u.test(file)).length : 0;
   const capture = async (name, caption, focus) => {
     if (typeof focus === 'number') await js(`document.querySelectorAll('.thread-item')[${focus}]?.scrollIntoView({ block: 'center' }); true`);
