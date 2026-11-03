@@ -166,9 +166,10 @@ export class CodeExportService {
       const choice = selected.find(file => file.path === binding.path);
       const action: CodeExportFileResult['action'] = binding.status === 'create' || binding.status === 'overwrite' ? binding.status : 'none';
       const skip = (outcome: 'skipped' | 'failed', reason: CodeExportReason) => ({ binding, action, outcome, reason } as const);
-      if (!choice) return skip('skipped', 'not_selected');
+      // A file that could not be ticked is skipped for its own reason, not as "not selected".
       if (binding.status === 'same') return skip('skipped', 'unchanged');
-      if (binding.status === 'conflict' || binding.status === 'invalid') return skip('failed', 'not_writable');
+      if (binding.status === 'conflict' || binding.status === 'invalid') return choice ? skip('failed', 'not_writable') : skip('skipped', binding.reason!);
+      if (!choice) return skip('skipped', 'not_selected');
       if (binding.status === 'overwrite' && !choice.overwrite) return skip('failed', 'not_confirmed');
       return { binding, action, outcome: 'write' as const };
     });

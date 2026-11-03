@@ -171,8 +171,10 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
       <p className="small muted">{!commands.codeExport ? '这个版本的应用不能把代码写成文件，可以复制。'
         : writable ? '“写入文件夹…”会先逐个文件列出新建、覆盖和差异，只写你勾选的文件；不会运行任何代码。'
           : `只能写入最新的有效版本（第 ${latestEffective?.number} 版）。`}</p>
-      {version.codeWrites && version.codeWrites.length > 0 && <ul className="art-writes" aria-label="写入记录">{version.codeWrites.slice(-3).reverse().map(entry =>
-        <li key={entry.exportId}>{when(entry.at)} · <code>{entry.folder}</code> · {entry.written ? `写入 ${entry.written} 个` : '没有写入'}{entry.failed ? `，${entry.failed} 个没有写入` : ''}{entry.skipped ? `，跳过 ${entry.skipped} 个` : ''}</li>)}</ul>}
+      {/* The status line already names the latest write, so the history stays out of the way until asked for. */}
+      {version.codeWrites && version.codeWrites.length > 0 && <details className="art-writes-box"><summary>写入记录（{version.codeWrites.length} 次）</summary>
+        <ul className="art-writes" aria-label="写入记录">{version.codeWrites.slice(-20).reverse().map(entry => <li key={entry.exportId}>{when(entry.at)} · <code>{entry.folder}</code> · {
+          [entry.written ? `写入 ${entry.written} 个` : '', entry.failed ? `${entry.failed} 个没有写入` : '', entry.skipped ? `跳过 ${entry.skipped} 个` : ''].filter(Boolean).join('，')}</li>)}</ul></details>}
     </>}
     {loadFailed && !shown ? <p role="alert" className="field-error">读取这一版失败。<button type="button" className="link-btn" onClick={() => setLoadFailed(false)}>重试</button></p>
       : !shown ? <p role="status" className="muted">正在读取…</p>

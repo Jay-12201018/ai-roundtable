@@ -178,7 +178,7 @@ describe('writing only what the host ticked', () => {
     writeFileSync(join(t.root, 'same.txt'), 's\n');
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
-    const result = await t.write(preview, [{ path: 'src/a.ts', overwrite: false }, { path: 'same.txt', overwrite: false }]);
+    const result = await t.write(preview, [{ path: 'src/a.ts', overwrite: false }]);
     expect(t.outcome(result)).toEqual({ 'src/a.ts': 'written', 'src/b.ts': 'skipped:not_selected', 'docs/c.md': 'skipped:not_selected', 'same.txt': 'skipped:unchanged' });
     expect(result).toMatchObject({ written: 1, skipped: 3, failed: 0, duplicate: false, root: { displayPath: '~/project', name: 'project' } });
     expect(readdirSync(t.root).sort()).toEqual(['same.txt', 'src']);
@@ -318,6 +318,14 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
     await expect(t.service.preview({ runId: t.runId, versionId: edited.versionId, rootId: root!.rootId })).rejects.toMatchObject({ detail: { code: 'not_found' } });
     expect(readdirSync(t.root)).toEqual([]);
     expect(readdirSync(join(t.base, 'project-moved'))).toEqual([]);
+  });
+
+  it('a file that could not be ticked is reported with its own reason, not as unselected', async () => {
+    const t = await setup([{ path: 'CON', content: 'x\n' }, { path: 'link/x.ts', content: 'x\n' }, { path: 'ok.ts', content: 'ok\n' }]); t.adopt();
+    symlinkSync(t.outside, join(t.root, 'link'));
+    const { root } = await t.choose();
+    const result = await t.write(await t.previewOf(root!.rootId), [{ path: 'ok.ts', overwrite: false }]);
+    expect(t.outcome(result)).toEqual({ CON: 'skipped:reserved_name', 'link/x.ts': 'skipped:symlink_parent', 'ok.ts': 'written' });
   });
 
   it('a name that differs only by case from what is on disk is a conflict, not a silent merge', async () => {

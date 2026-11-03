@@ -23,7 +23,9 @@ const errorText = (failure: unknown, step: 'choose' | 'preview' | 'write') => {
   if (code === 'transport_error') return '与主进程的连接失败，请重试。';
   return step === 'write' ? '写入没有完成，请重新检查后再试。' : '操作没有完成，请重试。';
 };
-const statusTone: Record<CodeExportPreviewFile['status'], string> = { create: 'is-ok', overwrite: 'is-danger', same: '', conflict: 'is-warn', invalid: 'is-warn' };
+/** A row that can be ticked says what it does on its tick; the others carry a pill. */
+const statusTone: Record<CodeExportPreviewFile['status'], string> = { create: '', overwrite: '', same: '', conflict: 'is-warn', invalid: 'is-warn' };
+const outcomeOrder = { failed: 0, written: 1, skipped: 2 } as const;
 
 function Lines({ content }: { content: string }) {
   const lines = content.replace(/\n$/u, '').split('\n');
@@ -65,11 +67,12 @@ function FileRow({ file, content, picked, disabled, onPick }: { file: CodeExport
       {pickable ? <label className={cx('cx-pick', file.status === 'overwrite' && 'is-danger')}>
         <input type="checkbox" checked={picked} disabled={disabled} onChange={event => onPick(event.target.checked)}
           aria-label={file.status === 'overwrite' ? `覆盖 ${file.path}` : `新建 ${file.path}`} />
-        <span aria-hidden>{file.status === 'overwrite' ? '覆盖' : '写入'}</span>
+        <span aria-hidden>{codeExportStatusLabels[file.status]}</span>
       </label> : <span className="cx-pick is-none" aria-hidden><Minus size={14} /></span>}
       <div className="cx-file-main">
-        <div className="cx-file-title"><code className="cx-path">{file.path}</code><span className={cx('pill', statusTone[file.status])}>{codeExportStatusLabels[file.status]}</span></div>
+        <div className="cx-file-title"><code className="cx-path">{file.path}</code>{!pickable && <span className={cx('pill', statusTone[file.status])}>{codeExportStatusLabels[file.status]}</span>}</div>
         <p className={cx('cx-meta small', (file.status === 'conflict' || file.status === 'invalid') && 'is-warn')}>{meta}</p>
+        {pickable && file.path.split('/').some(segment => segment.startsWith('.')) && <p className="cx-meta small is-warn">隐藏文件或文件夹：有些工具会自动读取或运行这里的内容，请先确认。</p>}
       </div>
       {canOpen && <Button size="sm" variant="quiet" icon={open ? ChevronDown : ChevronRight} aria-expanded={open} onClick={() => setOpen(value => !value)}>
         {open ? '收起' : file.status === 'overwrite' ? '查看差异' : '查看内容'}</Button>}
@@ -198,7 +201,7 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
       </div>
       {stale && <Note icon={AlertTriangle} action={root && <Button size="sm" onClick={() => void check(root)}>重新检查</Button>}>
         有文件在检查之后发生了变化，为了不覆盖你没看过的内容，这些文件没有写入。重新检查后再确认。</Note>}
-      <ul className="cx-files is-result" aria-label="写入结果">{result.files.map(file => <li key={file.path} className={cx('cx-file', `is-${file.outcome}`)}>
+      <ul className="cx-files is-result" aria-label="写入结果">{[...result.files].sort((a, b) => outcomeOrder[a.outcome] - outcomeOrder[b.outcome]).map(file => <li key={file.path} className={cx('cx-file', `is-${file.outcome}`)}>
         <div className="cx-file-head">
           <span className={cx('cx-outcome', `is-${file.outcome}`)} aria-hidden>{file.outcome === 'written' ? <Check size={14} /> : file.outcome === 'failed' ? <X size={14} /> : <Minus size={14} />}</span>
           <div className="cx-file-main">
@@ -211,7 +214,7 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
       <p className="small muted">只有标“已新建”“已覆盖”的文件写到了磁盘上。本应用不会运行它们，之后也不会再改动它们。</p>
     </>;
     footer = <>
-      {root && <Button icon={RefreshCw} onClick={() => void check(root)}>重新检查</Button>}
+      {root && !stale && <Button icon={RefreshCw} onClick={() => void check(root)}>重新检查</Button>}
       <Button variant="primary" onClick={onClose} data-autofocus>完成</Button>
     </>;
   }

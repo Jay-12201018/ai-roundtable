@@ -93,6 +93,8 @@ describe('the write dialog', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
     const overwrite = screen.getByRole('checkbox', { name: '覆盖 src/fee.ts' });
     expect(overwrite.closest('label')!.className).toContain('is-danger');
+    expect(overwrite.closest('label')!.textContent).toBe('覆盖');
+    expect(screen.getByRole('checkbox', { name: '新建 src/new.ts' }).closest('label')!.textContent).toBe('新建');
     expect(screen.getByRole('group', { name: '与现有文件的差异' }).textContent).toContain('export const RATE = 0.15;');
     expect(screen.getByText(/系统保留的名字/u)).toBeTruthy();
     fireEvent.click(screen.getByRole('checkbox', { name: '新建 src/new.ts' }));
@@ -122,6 +124,7 @@ describe('the write dialog', () => {
     expect((screen.getByRole('checkbox', { name: '新建 src/new.ts' }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('checkbox', { name: '覆盖 src/fee.ts' }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText(/会新建文件夹 lib/u)).toBeTruthy();
+    expect(screen.queryByText(/隐藏文件或文件夹/u)).toBeNull();
   });
 
   it('closing, cancelling the folder dialog or a refused folder writes nothing', async () => {
@@ -150,7 +153,10 @@ describe('the write dialog', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '新建 src/new.ts' }));
     fireEvent.click(screen.getByRole('button', { name: '写入 2 个文件（含覆盖 1 个）' }));
     await screen.findByText('写入了 1 个文件，1 个没有写入');
-    expect(screen.getByText(/目标在预览之后有变化，没有覆盖/u)).toBeTruthy();
+    expect(screen.getByText(/目标在检查之后有变化，没有覆盖/u)).toBeTruthy();
+    // What did not get written comes first, and 重新检查 appears once, right beside the explanation.
+    expect(within(screen.getByRole('list', { name: '写入结果' })).getAllByRole('listitem')[0].textContent).toContain('src/fee.ts');
+    expect(screen.getAllByRole('button', { name: '重新检查' })).toHaveLength(1);
     expect(screen.getByText(/为了不覆盖你没看过的内容/u)).toBeTruthy();
     fireEvent.click(within(screen.getByRole('note')).getByRole('button', { name: '重新检查' }));
     await waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2));
@@ -169,6 +175,13 @@ describe('the write dialog', () => {
     expect(lost.preview).toHaveBeenCalledWith({ runId: 'run', versionId: 'v1', rootId: 'root-1' });
     expect(lost.chooseRoot).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '选择文件夹…' })).toBeTruthy();
+  });
+
+  it('warns about hidden paths that other tools may read or run on their own', async () => {
+    const api = exportApi({ preview: vi.fn(async () => ({ ...preview, files: [{ path: '.github/workflows/ci.yml', status: 'create' as const, bytes: 1, lines: 1, createsDirectories: ['.github', '.github/workflows'] }] })) });
+    open(api);
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }));
+    await screen.findByText('隐藏文件或文件夹：有些工具会自动读取或运行这里的内容，请先确认。');
   });
 
   it('a folder the app cannot write to is said up front', async () => {

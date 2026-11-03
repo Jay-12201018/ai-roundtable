@@ -58,7 +58,9 @@ dialog.modal.code-export { width: min(860px, calc(100vw - 32px)); height: min(82
 .cx-result-head p { margin: 2px 0 0; overflow-wrap: anywhere; }
 
 /* The reader: the write entry and its history. */
-.art-writes { margin: 0 0 12px; padding: 0; list-style: none; font-size: 13px; line-height: 20px; color: var(--text-2); }
+.art-writes-box { margin: 0 0 12px; font-size: 13px; line-height: 20px; color: var(--text-2); }
+.art-writes-box > summary { cursor: pointer; }
+.art-writes { margin: 6px 0 0; padding: 0; list-style: none; }
 .art-writes li { overflow-wrap: anywhere; }
 .art-writes code { font-family: var(--font-mono); font-size: 12.5px; }
 
