@@ -82,7 +82,7 @@ function FileRow({ file, content, picked, disabled, onPick }: { file: CodeExport
   </li>;
 }
 
-type Phase = { kind: 'start' } | { kind: 'busy'; label: string } | { kind: 'preview'; preview: CodeExportPreview } | { kind: 'result'; preview: CodeExportPreview; result: CodeExportWriteResult };
+type Phase = { kind: 'start' } | { kind: 'busy'; label: string; writing?: true } | { kind: 'preview'; preview: CodeExportPreview } | { kind: 'result'; preview: CodeExportPreview; result: CodeExportWriteResult };
 
 /**
  * R15 (D126–D131): write an adopted code version into a folder. The host picks the folder in Main's dialog; a
@@ -131,7 +131,7 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
   const write = async (preview: CodeExportPreview) => {
     const selected = preview.files.filter(file => picks[file.path] && (file.status === 'create' || file.status === 'overwrite'));
     if (!selected.length) return;
-    setError(undefined); setPhase({ kind: 'busy', label: `正在写入 ${selected.length} 个文件…` });
+    setError(undefined); setPhase({ kind: 'busy', label: `正在写入 ${selected.length} 个文件…`, writing: true });
     try {
       const result = await api.write({ runId, clientRequestId: newRequestId(), previewId: preview.previewId,
         files: selected.map(file => ({ path: file.path, overwrite: file.status === 'overwrite' })) });
@@ -140,6 +140,8 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
   };
 
   const busy = phase.kind === 'busy';
+  // Checking only reads, and a huge file takes a while to hash, so the host can always walk away; only a write holds the dialog.
+  const writing = phase.kind === 'busy' && phase.writing === true;
   const folderBar = root && <div className="cx-folder">
     <FolderOpen aria-hidden size={16} /><span className="cx-folder-path" title={root.displayPath}>{root.displayPath}</span>
     <span className="cx-folder-actions">
@@ -163,7 +165,7 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
       {busy && <p role="status" className="muted">{phase.label}</p>}
     </>;
     footer = <>
-      <Button onClick={onClose} disabled={busy}>取消</Button>
+      <Button onClick={onClose} disabled={writing}>取消</Button>
       <Button variant="primary" icon={FolderOpen} disabled={busy} onClick={() => void choose()}>{root ? '换一个文件夹…' : '选择文件夹…'}</Button>
     </>;
   } else if (phase.kind === 'preview') {
@@ -219,7 +221,7 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
     </>;
   }
 
-  return <Modal title={`写入文件夹 · 代码候选第 ${versionNumber} 版`} onClose={onClose} busy={busy} className="code-export" footer={footer}>
+  return <Modal title={`写入文件夹 · 代码候选第 ${versionNumber} 版`} onClose={onClose} busy={writing} className="code-export" footer={footer}>
     {phase.kind !== 'preview' && error && <p role="alert" className="field-error">{error}</p>}
     {body}
   </Modal>;

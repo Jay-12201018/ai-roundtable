@@ -184,6 +184,27 @@ describe('the write dialog', () => {
     await screen.findByText('隐藏文件或文件夹：有些工具会自动读取或运行这里的内容，请先确认。');
   });
 
+  it('can be closed while it only checks, but not while it writes', async () => {
+    const onClose = vi.fn();
+    let finishCheck: (value: CodeExportPreview) => void = () => {};
+    let finishWrite: (value: CodeExportWriteResult) => void = () => {};
+    const api = exportApi({ preview: vi.fn(() => new Promise<CodeExportPreview>(resolve => { finishCheck = resolve; })),
+      write: vi.fn(() => new Promise<CodeExportWriteResult>(resolve => { finishWrite = resolve; })) });
+    render(<CodeExportDialog api={api} runId="run" versionId="v1" versionNumber={1} files={code.files} affected={false} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }));
+    await screen.findByText('正在检查…');
+    expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: '关闭' }) as HTMLButtonElement).disabled).toBe(false);
+    finishCheck(preview);
+    fireEvent.click(await screen.findByRole('checkbox', { name: '新建 src/new.ts' }));
+    fireEvent.click(screen.getByRole('button', { name: '写入 1 个文件' }));
+    await screen.findByText('正在写入 1 个文件…');
+    expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '关闭' }) as HTMLButtonElement).disabled).toBe(true);
+    finishWrite(written([{ path: 'src/new.ts', action: 'create', outcome: 'written' }]));
+    await screen.findByText('已写入 1 个文件');
+  });
+
   it('a folder the app cannot write to is said up front', async () => {
     const api = exportApi({ preview: vi.fn(async () => ({ ...preview, writable: false })) });
     open(api);

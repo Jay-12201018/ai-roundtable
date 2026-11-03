@@ -3,11 +3,14 @@
 // outside the chosen folder prove nothing outside it changes.
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, chmodSync, closeSync, constants as fsConstants, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import Sqlite from 'better-sqlite3';
 import { closeFixtures, hostFixture, startFree } from '../host/fixtures';
+import { MAX_DIFF_INPUT_BYTES } from '../../../src/main/export/diff';
 import { ArtifactService } from '../../../src/main/artifact/ArtifactService';
 import { CodeExportService, type ExportFs, type ExportHooks } from '../../../src/main/export/CodeExportService';
 import { validateDatabase } from '../../../src/main/database/recovery/validateDatabase';
@@ -417,6 +420,146 @@ describe('a direct write on a file system without hard links', () => {
     const preview = await t.previewOf(root!.rootId);
     expect(t.outcome(await t.write(preview, [{ path: 'a.ts', overwrite: false }]))).toEqual({ 'a.ts': 'failed:no_space' });
     expect(readdirSync(t.root)).toEqual([]);
+  });
+});
+
+/** A file handle whose calls can be watched or replaced, with everything else passed through. */
+function wrapHandle(handle: fsp.FileHandle, overrides: Record<string, (target: fsp.FileHandle, ...args: never[]) => unknown>) {
+  return new Proxy(handle, { get: (target, key) => {
+    if (typeof key === 'string' && overrides[key]) return (...args: never[]) => overrides[key](target, ...args);
+    const value = target[key as keyof typeof target];
+    return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+  } });
+}
+const noSpace = (matches: (path: string) => boolean): Partial<ExportFs> => ({ open: async (path, flags, mode) => {
+  const handle = await fsp.open(path, flags, mode);
+  return matches(path) ? wrapHandle(handle, { writeFile: async () => { throw Object.assign(new Error('No space left'), { code: 'ENOSPC' }); } }) : handle;
+} });
+
+describe('existing files are never read whole unless they are small (D128)', () => {
+  /** A file system that records how every target file is read. */
+  const watched = () => {
+    const record = { readFile: 0, reads: [] as number[] };
+    const fs: Partial<ExportFs> = { open: async (path, flags, mode) => wrapHandle(await fsp.open(path, flags, mode), {
+      readFile: (target) => { record.readFile++; return target.readFile(); },
+      read: (target, ...args) => { record.reads.push((args as unknown as [Buffer, number, number])[2]); return (target.read as (...values: unknown[]) => unknown)(...args); },
+    }) };
+    return { record, fs };
+  };
+  const big = (size: number) => 'x'.repeat(99).concat('\n').repeat(Math.ceil(size / 100)).slice(0, size);
+
+  it('a file over the diff limit is hashed in small pieces: its status and diff are right, in preview and in the check before writing', async () => {
+    const { record, fs } = watched();
+    const t = await setup([{ path: 'big.log', content: 'small now\n' }], { fs }); t.adopt();
+    const size = 5 * 1024 * 1024;
+    writeFileSync(join(t.root, 'big.log'), big(size));
+    const { root } = await t.choose();
+    const preview = await t.previewOf(root!.rootId);
+    expect(preview.files[0]).toMatchObject({ status: 'overwrite', existing: { bytes: size }, diff: { kind: 'unavailable', reason: 'too_large' } });
+    const previewReads = record.reads.length;
+    expect(previewReads).toBeGreaterThan(50);
+    expect(t.outcome(await t.write(preview, [{ path: 'big.log', overwrite: true }]))).toEqual({ 'big.log': 'written' });
+    expect(record.reads.length).toBeGreaterThanOrEqual(previewReads * 2);
+    expect(record.readFile).toBe(0);
+    expect(Math.max(...record.reads)).toBeLessThanOrEqual(64 * 1024);
+    expect(readFileSync(join(t.root, 'big.log'), 'utf8')).toBe('small now\n');
+  });
+
+  it('the limit itself: up to it there is a line diff, one byte over there is none', async () => {
+    const t = await setup([{ path: 'at.txt', content: 'new\n' }, { path: 'over.txt', content: 'new\n' }]); t.adopt();
+    writeFileSync(join(t.root, 'at.txt'), 'y'.repeat(MAX_DIFF_INPUT_BYTES));
+    writeFileSync(join(t.root, 'over.txt'), 'y'.repeat(MAX_DIFF_INPUT_BYTES + 1));
+    const { root } = await t.choose();
+    const preview = await t.previewOf(root!.rootId);
+    expect(preview.files.map(file => file.diff?.kind)).toEqual(['lines', 'unavailable']);
+  });
+
+  it.each([['big', 3 * 1024 * 1024], ['small', 1024]] as const)('a %s file edited after the preview is found by its content, even with the same size and time', async (_label, size) => {
+    const t = await setup([{ path: 'data.txt', content: 'replacement\n' }]); t.adopt();
+    const path = join(t.root, 'data.txt');
+    const original = big(size);
+    writeFileSync(path, original); utimesSync(path, 1_700_000_000, 1_700_000_000);
+    const { root } = await t.choose();
+    const preview = await t.previewOf(root!.rootId);
+    expect(preview.files[0].status).toBe('overwrite');
+    const edited = `Z${original.slice(1)}`;
+    writeFileSync(path, edited); utimesSync(path, 1_700_000_000, 1_700_000_000);
+    expect(lstatSync(path, { bigint: true }).mtimeNs).toBe(1_700_000_000_000_000_000n);
+    expect(t.outcome(await t.write(preview, [{ path: 'data.txt', overwrite: true }]))).toEqual({ 'data.txt': 'failed:target_changed' });
+    expect(readFileSync(path, 'utf8')).toBe(edited);
+  });
+
+  it('a file that grows while it is being read counts as changed, and reading stops at its size', async () => {
+    let appended = false;
+    const reads: number[] = [];
+    const t = await setup([{ path: 'grow.log', content: 'new\n' }], { fs: { open: async (path, flags, mode) => wrapHandle(await fsp.open(path, flags, mode), {
+      read: async (target, ...args) => {
+        reads.push((args as unknown as [Buffer, number, number])[2]);
+        if (!appended) { appended = true; appendFileSync(path, 'x'.repeat(1024 * 1024)); }
+        return (target.read as (...values: unknown[]) => unknown)(...args);
+      },
+    }) } }); t.adopt();
+    writeFileSync(join(t.root, 'grow.log'), 'old\n');
+    const { root } = await t.choose();
+    expect(t.status(await t.previewOf(root!.rootId))).toEqual({ 'grow.log': 'conflict:target_changed' });
+    expect(reads.length).toBeLessThanOrEqual(2);
+  });
+
+  it('a path swapped for a FIFO after the check does not hang: opening does not wait for a writer', async () => {
+    const decoy = { path: '' };
+    const t = await setup([{ path: 'pipe.txt', content: 'new\n' }], { fs: {
+      // lstat still sees the regular file it saw before the swap.
+      lstat: path => path.endsWith('pipe.txt') ? fsp.lstat(decoy.path, { bigint: true }) : fsp.lstat(path, { bigint: true }),
+    } }); t.adopt();
+    decoy.path = join(t.base, 'decoy.txt'); writeFileSync(decoy.path, 'old\n');
+    const pipe = join(t.root, 'pipe.txt');
+    execFileSync('mkfifo', [pipe]);
+    const { root } = await t.choose();
+    // If opening ever blocks, this valve frees the file-system thread so the failure is an assertion, not a stuck test run.
+    let blocked = false;
+    const valve = setTimeout(() => { blocked = true; closeSync(openSync(pipe, fsConstants.O_RDWR | fsConstants.O_NONBLOCK)); }, 3000);
+    try { expect(t.status(await t.previewOf(root!.rootId))).toEqual({ 'pipe.txt': 'conflict:target_changed' }); }
+    finally { clearTimeout(valve); }
+    expect(blocked).toBe(false);
+  });
+});
+
+describe('folders created for a write that did not happen', () => {
+  it('removes the folders this write created when they stayed empty, deepest first', async () => {
+    const t = await setup([{ path: 'a/b/c/x.ts', content: 'x\n' }], { fs: noSpace(path => path.endsWith('.roundtable-tmp')) }); t.adopt();
+    const { root } = await t.choose();
+    expect(t.outcome(await t.write(await t.previewOf(root!.rootId), [{ path: 'a/b/c/x.ts', overwrite: false }]))).toEqual({ 'a/b/c/x.ts': 'failed:no_space' });
+    expect(readdirSync(t.root)).toEqual([]);
+  });
+
+  it('keeps a created folder another written file now lives in, and every folder that was already there', async () => {
+    let opens = 0;
+    const t = await setup([{ path: 'new/x.ts', content: 'x\n' }, { path: 'new/y.ts', content: 'y\n' }, { path: 'old/made/z.ts', content: 'z\n' }, { path: 'old/kept/w.ts', content: 'w\n' }],
+      { fs: noSpace(path => path.endsWith('.roundtable-tmp') && (++opens === 1 || opens === 3 || opens === 4)) }); t.adopt();
+    mkdirSync(join(t.root, 'old/kept'), { recursive: true });
+    const { root } = await t.choose();
+    const preview = await t.previewOf(root!.rootId);
+    expect(t.outcome(await t.write(preview, preview.files.map(file => ({ path: file.path, overwrite: false }))))).toEqual({
+      'new/x.ts': 'failed:no_space', 'new/y.ts': 'written', 'old/made/z.ts': 'failed:no_space', 'old/kept/w.ts': 'failed:no_space' });
+    expect(readdirSync(join(t.root, 'new'))).toEqual(['y.ts']);
+    expect(readdirSync(join(t.root, 'old'))).toEqual(['kept']);
+    expect(readdirSync(join(t.root, 'old/kept'))).toEqual([]);
+  });
+
+  it('leaves a folder someone else put a file in, or replaced with their own', async () => {
+    let race: () => void = () => undefined;
+    const t = await setup([{ path: 'mine/x.ts', content: 'x\n' }, { path: 'theirs/y.ts', content: 'y\n' }], { hooks: { beforeCommit: () => race() } }); t.adopt();
+    const { root } = await t.choose();
+    const preview = await t.previewOf(root!.rootId);
+    let step = 0;
+    race = () => {
+      if (++step === 1) writeFileSync(join(t.root, 'mine/x.ts'), 'someone else\n');
+      else { renameSync(join(t.root, 'theirs'), join(t.base, 'moved')); mkdirSync(join(t.root, 'theirs')); }
+    };
+    const result = await t.write(preview, preview.files.map(file => ({ path: file.path, overwrite: false })));
+    expect(result.written).toBe(0);
+    expect(readFileSync(join(t.root, 'mine/x.ts'), 'utf8')).toBe('someone else\n');
+    expect(lstatSync(join(t.root, 'theirs')).isDirectory()).toBe(true);
   });
 });
 

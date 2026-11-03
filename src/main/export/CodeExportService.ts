@@ -23,13 +23,14 @@ export type ExportFs = {
   access(path: string, mode: number): Promise<void>;
   open(path: string, flags: number, mode?: number): Promise<fsp.FileHandle>;
   mkdir(path: string, mode: number): Promise<void>;
+  rmdir(path: string): Promise<void>;
   link(existing: string, target: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   unlink(path: string): Promise<void>;
 };
 const nodeFs: ExportFs = {
   lstat: path => fsp.lstat(path, { bigint: true }), realpath: path => fsp.realpath(path), readdir: path => fsp.readdir(path), access: (path, mode) => fsp.access(path, mode),
-  open: (path, flags, mode) => fsp.open(path, flags, mode), mkdir: async (path, mode) => { await fsp.mkdir(path, { mode }); }, link: (a, b) => fsp.link(a, b),
+  open: (path, flags, mode) => fsp.open(path, flags, mode), mkdir: async (path, mode) => { await fsp.mkdir(path, { mode }); }, rmdir: path => fsp.rmdir(path), link: (a, b) => fsp.link(a, b),
   rename: (a, b) => fsp.rename(a, b), unlink: path => fsp.unlink(path),
 };
 export type ExportHooks = {
@@ -46,9 +47,15 @@ type Root = { rootId: string; real: string; dev: bigint; ino: bigint; displayPat
 /** What a target was at preview time; a write goes ahead only while it still is. */
 type TargetState = { kind: 'missing' } | { kind: 'file'; dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; mode: number; sha256: string };
 type Binding = { path: string; segments: string[]; status: CodeExportPreviewFile['status']; reason?: CodeExportReason; content: Buffer; sha256: string; target: TargetState };
+/** A folder this write created, to remove again if it stays empty. */
+type CreatedFolder = { path: string; dev: bigint; ino: bigint };
 type PreviewRecord = { previewId: string; runId: string; versionId: string; artifactId: string; rootId: string; files: Binding[] };
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+// O_NONBLOCK: a path swapped for a FIFO after its check must not hang here waiting for a writer; fstat then refuses it.
+const READ_FLAGS = constants.O_RDONLY | NOFOLLOW | (constants.O_NONBLOCK ?? 0);
+const READ_CHUNK_BYTES = 64 * 1024;
+const targetChanged = () => Object.assign(new Error('Target changed'), { code: 'ECHANGED' });
 const MAX_KEPT = 16;
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const errno = (error: unknown) => (error as NodeJS.ErrnoException | undefined)?.code;
@@ -189,17 +196,19 @@ export class CodeExportService {
     if (!blocked && !(await this.rootIntact(root))) blocked = 'root_changed';
 
     const results: Array<CodeExportFileResult & { record: CodeExportFileRecord }> = [];
+    const created: CreatedFolder[] = [];
     for (const item of planned) {
       let outcome: CodeExportFileResult['outcome'], reason: CodeExportReason | undefined;
       if (item.outcome !== 'write') ({ outcome, reason } = item);
       else if (blocked) { outcome = 'failed'; reason = blocked; }
       else {
-        reason = await this.writeOne(root, item.binding);
+        reason = await this.writeOne(root, item.binding, created);
         outcome = reason ? 'failed' : 'written';
       }
       const entry = { path: item.binding.path, action: item.action, outcome, ...(reason ? { reason } : {}) };
       results.push({ ...entry, record: { ...entry, contentSha256: item.binding.sha256, bytes: item.binding.content.length } });
     }
+    await this.removeEmptyFolders(created);
     const exportId = randomUUID();
     const createdAt = this.database.insertCodeExport({ id: exportId, versionId: preview.versionId, runId, clientRequestId, rootPath: root.real, files: results.map(item => item.record) });
     this.runs.notifyArtifact(runId, { artifactId: preview.artifactId, versionId: preview.versionId, status: 'exported' });
@@ -294,29 +303,43 @@ export class CodeExportService {
       if (!info.isFile()) return refuse('conflict', 'target_special');
       // A file the host made read-only stays as it is.
       try { await this.fs.access(next, constants.W_OK); } catch { return refuse('conflict', 'permission_denied'); }
-      let existing: Buffer;
-      try { existing = await this.readExact(next, info); }
+      let existing: Awaited<ReturnType<CodeExportService['readTarget']>>;
+      try { existing = await this.readTarget(next, info); }
       catch (error) { return refuse('conflict', errno(error) === 'ECHANGED' ? 'target_changed' : failureReason(error)); }
-      const state: TargetState = { kind: 'file', dev: info.dev, ino: info.ino, size: info.size, mtimeNs: info.mtimeNs, mode: Number(info.mode & 0o777n), sha256: sha256(existing) };
+      const state: TargetState = { kind: 'file', dev: info.dev, ino: info.ino, size: info.size, mtimeNs: info.mtimeNs, mode: Number(info.mode & 0o777n), sha256: existing.sha256 };
       binding.target = state;
-      const existingView = { bytes: existing.length, modifiedAt: new Date(Number(info.mtimeMs)).toISOString() };
+      const existingView = { bytes: Number(info.size), modifiedAt: new Date(Number(info.mtimeMs)).toISOString() };
       if (state.sha256 === binding.sha256) { binding.status = 'same'; return { binding, view: { ...base, status: 'same', existing: existingView } }; }
       binding.status = 'overwrite';
-      const diff = existing.length > MAX_DIFF_INPUT_BYTES ? { kind: 'unavailable' as const, reason: 'too_large' as const }
-        : isBinary(existing) ? { kind: 'unavailable' as const, reason: 'binary' as const } : lineDiff(existing.toString('utf8'), text);
+      const diff = !existing.bytes ? { kind: 'unavailable' as const, reason: 'too_large' as const }
+        : isBinary(existing.bytes) ? { kind: 'unavailable' as const, reason: 'binary' as const } : lineDiff(existing.bytes.toString('utf8'), text);
       return { binding, view: { ...base, status: 'overwrite', existing: existingView, diff } };
     }
     binding.status = 'create';
     return { binding, view: { ...base, status: 'create' } };
   }
 
-  /** Reads a regular file without following a link, and only if it is still the file `expected` describes. */
-  private async readExact(path: string, expected: BigIntStats): Promise<Buffer> {
-    const handle = await this.fs.open(path, constants.O_RDONLY | NOFOLLOW);
+  /**
+   * The hash of a regular file, read without following a link and only if it is still the file `expected` describes.
+   * Memory stays bounded whatever the file's size (D128): the bytes are kept only for a file small enough to diff, and
+   * reading stops one byte past the expected size, so a file growing without end counts as changed.
+   */
+  private async readTarget(path: string, expected: BigIntStats): Promise<{ sha256: string; bytes?: Buffer }> {
+    const handle = await this.fs.open(path, READ_FLAGS);
     try {
       const info = await handle.stat({ bigint: true });
-      if (!info.isFile() || info.ino !== expected.ino || info.dev !== expected.dev) throw Object.assign(new Error('Target changed'), { code: 'ECHANGED' });
-      return await handle.readFile();
+      if (!info.isFile() || info.ino !== expected.ino || info.dev !== expected.dev || info.size !== expected.size) throw targetChanged();
+      const size = Number(info.size), small = size <= MAX_DIFF_INPUT_BYTES;
+      const hash = createHash('sha256'), chunk = Buffer.allocUnsafe(READ_CHUNK_BYTES), kept: Buffer[] = [];
+      for (let total = 0; ;) {
+        const { bytesRead } = await handle.read(chunk, 0, Math.min(READ_CHUNK_BYTES, size - total + 1));
+        if (bytesRead === 0) { if (total !== size) throw targetChanged(); break; }
+        total += bytesRead;
+        if (total > size) throw targetChanged();
+        hash.update(chunk.subarray(0, bytesRead));
+        if (small) kept.push(Buffer.from(chunk.subarray(0, bytesRead)));
+      }
+      return { sha256: hash.digest('hex'), ...(small ? { bytes: Buffer.concat(kept, size) } : {}) };
     } finally { await handle.close(); }
   }
 
@@ -328,15 +351,15 @@ export class CodeExportService {
     if (state.kind === 'missing' || !info.isFile() || info.isSymbolicLink()) return false;
     if (info.dev !== state.dev || info.ino !== state.ino || info.size !== state.size || info.mtimeNs !== state.mtimeNs) return false;
     if (!readContent) return true;
-    try { return sha256(await this.readExact(path, info)) === state.sha256; } catch { return false; }
+    try { return (await this.readTarget(path, info)).sha256 === state.sha256; } catch { return false; }
   }
 
   /** One file, checked again and put in place; undefined when written, otherwise why not. */
-  private async writeOne(root: Root, binding: Binding): Promise<CodeExportReason | undefined> {
-    try { return await this.checkAndPlace(root, binding); } catch (error) { return failureReason(error); }
+  private async writeOne(root: Root, binding: Binding, created: CreatedFolder[]): Promise<CodeExportReason | undefined> {
+    try { return await this.checkAndPlace(root, binding, created); } catch (error) { return failureReason(error); }
   }
 
-  private async checkAndPlace(root: Root, binding: Binding): Promise<CodeExportReason | undefined> {
+  private async checkAndPlace(root: Root, binding: Binding, created: CreatedFolder[]): Promise<CodeExportReason | undefined> {
     // The folder chain again: each existing part a real folder, each missing part created here, one level at a time.
     let parent = root.real;
     for (const segment of binding.segments.slice(0, -1)) {
@@ -346,9 +369,11 @@ export class CodeExportService {
       try { info = await this.fs.lstat(next); }
       catch (error) { if (errno(error) !== 'ENOENT') return failureReason(error); }
       if (!info) {
+        let made = true;
         try { await this.fs.mkdir(next, 0o755); }
-        catch (error) { if (errno(error) !== 'EEXIST') return failureReason(error); }
+        catch (error) { if (errno(error) !== 'EEXIST') return failureReason(error); made = false; }
         try { info = await this.fs.lstat(next); } catch (error) { return failureReason(error); }
+        if (made && info.isDirectory()) created.push({ path: next, dev: info.dev, ino: info.ino });
       }
       if (info.isSymbolicLink()) return 'symlink_parent';
       if (!info.isDirectory()) return 'parent_not_directory';
@@ -398,6 +423,20 @@ export class CodeExportService {
     }
     await this.syncDirectory(parent);
     return undefined;
+  }
+
+  /**
+   * D129: a failed file must not leave its new folders behind. Runs after every file of the write (a later file may
+   * have needed the folder), deepest first, and only removes the very folder this write made, if it is still empty;
+   * rmdir refuses anything else. If this fails too, an empty folder stays: harmless, and nothing else is affected.
+   */
+  private async removeEmptyFolders(created: readonly CreatedFolder[]): Promise<void> {
+    for (const folder of [...created].reverse()) {
+      try {
+        const info = await this.fs.lstat(folder.path);
+        if (info.isDirectory() && info.dev === folder.dev && info.ino === folder.ino) await this.fs.rmdir(folder.path);
+      } catch { /* not empty, or no longer there */ }
+    }
   }
 
   private async syncDirectory(path: string): Promise<void> {
