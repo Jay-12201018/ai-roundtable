@@ -17,7 +17,7 @@ export function modelOptions(providers: readonly ProviderSummary[], readiness: r
       const state = row?.models.find(model => model.modelId === modelId);
       const name = provider.kind === 'mock' ? '演示' : provider.customModels.find(model => model.id === modelId)?.name ?? modelId;
       return { value: `${provider.id}${SEPARATOR}${modelId}`, providerId: provider.id, modelId, mock: provider.kind === 'mock',
-        label: provider.kind === 'mock' ? `${provider.name}（不联网、不花钱）` : `${provider.name} · ${name}（${modelId}）`, usable: state?.usable, reason: modelBlockText(state) };
+        label: provider.kind === 'mock' ? `${provider.name}（不联网）` : `${provider.name} · ${name}（${modelId}）`, usable: state?.usable, reason: modelBlockText(state) };
     });
   });
 }
@@ -69,8 +69,8 @@ export function MemberDialog({ agent, roomId, order, providers, readiness, onSav
         {stale && <option value={model}>原来的选择已不可用（服务已删除或停用）</option>}
         {options.map(option => <option key={option.value} value={option.value}>{option.label}{option.reason ? ` — ${option.reason}` : ''}</option>)}
       </select>}</Field>
-      <p className="model-state" role="status">{selected?.mock ? <span className="status-text muted"><FlaskConical aria-hidden />演示成员不联网、不花钱，回复是预先写好的示例，不代表真实模型的水平。</span>
-        : selected?.usable ? <span className="status-text ok-text"><Check aria-hidden />可以使用：Key 已保存，价格已核对。</span>
+      <p className="model-state" role="status">{selected?.mock ? <span className="status-text muted"><FlaskConical aria-hidden />演示成员不联网，回复是预先写好的示例，不代表真实模型的水平。</span>
+        : selected?.usable ? <span className="status-text ok-text"><Check aria-hidden />可以使用：Key 已保存，地址已确认。</span>
           : selected ? <span className="status-text warn-text"><CircleAlert aria-hidden />暂时不能参与讨论：{selected.reason || '状态未知'}。<button type="button" className="link-btn" onClick={onOpenSettings}>去设置</button></span>
             : <span className="status-text warn-text"><CircleAlert aria-hidden />{agent?.withheldModelId ? '之前填的模型名像 API Key，已隐藏且不会使用；请重新选择。' : stale ? '原来选的服务已删除或停用，请重新选择。' : '还没选模型，暂时不会参与讨论。'}
               {options.length === 0 && <> 还没有可用的服务，<button type="button" className="link-btn" onClick={onOpenSettings}>去连接一个</button>。</>}</span>}</p>

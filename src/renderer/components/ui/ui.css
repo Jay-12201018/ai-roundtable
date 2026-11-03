@@ -57,7 +57,6 @@
 .note-body { flex: 1; min-width: 0; }
 .note-body b { font-weight: 600; }
 .note-action { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; justify-content: flex-end; flex: none; max-width: 100%; }
-.note-cost { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .note.is-info { background: var(--info-soft); border-left-color: var(--info); }
 .note.is-info > svg { color: var(--info); }
 .note.is-danger { background: var(--danger-soft); border-left-color: var(--danger); }
@@ -87,12 +86,6 @@
 .input, .select, .textarea { width: 100%; min-width: 0; min-height: 36px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--text); }
 .input[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--danger); }
 .textarea { min-height: 84px; line-height: 21px; resize: vertical; }
-.money-input { display: inline-flex; align-items: center; height: 36px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface); padding: 0 10px; gap: 6px; }
-.money-input:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
-.money-input input { width: 72px; border: 0; background: transparent; outline: none; font-variant-numeric: tabular-nums; padding: 0; }
-.money-input input:focus-visible { outline: none; }
-.money-input span { color: var(--text-3); }
-.money-input[data-invalid="true"] { border-color: var(--danger); }
 .check-label { display: inline-flex; align-items: center; gap: 8px; }
 .check-label input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 

@@ -15,10 +15,10 @@ export function Welcome({ onConnect, onDemo, demoBusy, demoError }: { onConnect:
     <p className="welcome-sub">你是主持人：定目标、点名、插话、随时暂停。先连接一个模型服务，或者用演示成员试一场。</p>
     <div className="start-cards">
       <section className="start-card is-primary" aria-labelledby="welcome-connect"><h2 id="welcome-connect"><Plug aria-hidden size={18} />连接模型服务</h2>
-        <p>{availabilityText()}用你自己的 API Key，费用由服务商直接收取。</p>
+        <p>{availabilityText()}用你自己的 API Key，费用由服务商收取，这里不估算。</p>
         <Button variant="primary" onClick={onConnect}>连接…</Button></section>
       <section className="start-card" aria-labelledby="welcome-demo"><h2 id="welcome-demo"><FlaskConical aria-hidden size={18} />先试玩演示</h2>
-        <p>用三位演示成员跑一场完整讨论，体验暂停、插话和点名。不联网、不需要 Key、不花钱；回复是预先写好的示例，不代表真实模型的水平。</p>
+        <p>用三位演示成员跑一场完整讨论，体验暂停、插话和点名。不联网、不需要 Key；回复是预先写好的示例，不代表真实模型的水平。</p>
         <Button disabled={demoBusy} onClick={onDemo}>{demoBusy ? '正在准备…' : '开始试玩'}</Button></section>
     </div>
     {demoError && <p className="field-error" role="alert">{demoError}</p>}

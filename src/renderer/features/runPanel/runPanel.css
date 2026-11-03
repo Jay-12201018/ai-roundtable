@@ -9,25 +9,6 @@
 .ctx-lead { margin-top: -4px !important; }
 .ctx-note { margin: 8px 2px 0 !important; }
 
-.budget-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
-.budget-card.is-warn { border-color: var(--warn-line); background: var(--warn-soft); }
-.budget-big { font-size: 20px; line-height: 28px; font-weight: 600; }
-.budget-big small { font-size: 13px; font-weight: 400; color: var(--text-3); }
-.budget-bar { display: flex; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
-.budget-bar i { display: block; height: 100%; background: var(--accent); }
-.budget-card.is-warn .budget-bar i { background: var(--warn); }
-.budget-bar i.is-reserved { background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 6px); opacity: .7; }
-.budget-rows { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; margin: 0; font-size: 13px; color: var(--text-2); }
-.budget-rows dd { margin: 0; color: var(--text); text-align: right; }
-.budget-rows .is-danger { color: var(--danger); }
-.budget-blocked { margin: 0 !important; font-size: 13px; color: var(--warn); }
-.budget-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.budget-add .field-help { flex-basis: 100%; }
-.budget-history { font-size: 13px; color: var(--text-2); }
-.budget-history summary { cursor: pointer; color: var(--accent); }
-.budget-history ol { margin: 4px 0; padding-left: 20px; font-variant-numeric: tabular-nums; }
-.budget-history p { margin: 0 !important; }
-.budget-notice { margin: 0 !important; font-size: 13px; color: var(--success); }
 
 .steps { list-style: none; margin: 0 0 8px; padding: 0; }
 .steps li { position: relative; display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; padding: 0 0 14px; }

@@ -34,7 +34,6 @@ function useAutosize(ref: RefObject<HTMLTextAreaElement | null>, value: string) 
 }
 
 export type TaskSettings = {
-  budgetText: string; setBudgetText: (value: string) => void; budgetValid: boolean;
   outputLimitText: string; setOutputLimitText: (value: string) => void; outputLimitValid: boolean;
   stepMode: boolean; setStepMode: (value: boolean) => void;
   workflowLabel: string; onOpenWorkflow?: () => void;
@@ -49,34 +48,27 @@ export function TaskComposer({ draft, setDraft, canStart, starting, onStart, set
   const composing = useRef(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const popover = useRef<HTMLDivElement>(null), trigger = useRef<HTMLDivElement>(null);
-  const invalid = !settings.budgetValid || !settings.outputLimitValid;
+  const invalid = !settings.outputLimitValid;
   // An invalid value keeps its field open, so the reason the start button is disabled stays visible.
   const open = moreOpen || invalid;
   const close = useCallback(() => setMoreOpen(false), []);
   useDismiss(moreOpen && !invalid, close, [popover, trigger]);
   useAutosize(area, draft);
   const panelId = useId();
-  const budgetLabel = settings.budgetValid ? `预算 ¥${Number(settings.budgetText.trim()).toFixed(Math.max(2, (settings.budgetText.trim().split('.')[1] ?? '').length))}` : '预算有误';
   return <div className="dock">
     <div className="dock-inner">
       {notices}
       {open && <div ref={popover} id={panelId} className="popover settings-pop" role="group" aria-label="更多设置">
-        <label className="field"><span>本次预算</span>
-          <span className="money-input" data-invalid={!settings.budgetValid || undefined}><span aria-hidden>¥</span>
-            <input aria-label="本次运行预算（元）" inputMode="decimal" value={settings.budgetText} aria-invalid={!settings.budgetValid} onChange={event => settings.setBudgetText(event.target.value)} /></span>
-          {settings.budgetValid ? <span className="field-help">花到上限就停下，已有发言都保留，之后可以追加。每次发言前按上限预留，结束后按实际用量结算。</span>
-            : <span className="field-error" role="alert">请输入 0.000001 到 1000 之间的金额，最多 6 位小数。</span>}
-        </label>
         <label className="field"><span>单次发言上限</span>
           <span className="inline-field"><input className="input" style={{ width: 110 }} aria-label="单次输出上限（token）" inputMode="numeric" value={settings.outputLimitText}
             aria-invalid={!settings.outputLimitValid} aria-describedby="output-limit-help" onChange={event => settings.setOutputLimitText(event.target.value)} /><span className="muted small">tokens</span></span>
-          {settings.outputLimitValid ? <span id="output-limit-help" className="field-help">每位成员每次最多写这么长（4096 约 3,000 汉字）。每次请求按这个上限预留费用，实际按用量结算；写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）。</span>
+          {settings.outputLimitValid ? <span id="output-limit-help" className="field-help">每位成员每次最多写这么长（8192 约 6,000 汉字），模型的思考也算在内。写到上限会保留并标注，可以续写。超过某位成员模型的最大输出时，按那个模型的上限发送；最大输出可以在“设置 › 模型服务”里改。</span>
             : <span id="output-limit-help" className="field-error" role="alert">单次输出上限请输入 1 到 65536 之间的整数。</span>}
         </label>
       </div>}
       <div className="composer">
         <div className="composer-text">
-          <textarea ref={area} aria-label={label} value={draft} rows={2} placeholder={placeholder ?? '这场讨论要解决什么？写下目标和约束，例如范围、预算、要交付什么…'}
+          <textarea ref={area} aria-label={label} value={draft} rows={2} placeholder={placeholder ?? '这场讨论要解决什么？写下目标和约束，例如范围、时间、要交付什么…'}
             onChange={event => setDraft(event.target.value)}
             onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
             onKeyDown={event => {
@@ -87,7 +79,6 @@ export function TaskComposer({ draft, setDraft, canStart, starting, onStart, set
         <div className="composer-row">
           <div className="chips" ref={trigger}>
             {settings.onOpenWorkflow && <button type="button" className="chip" onClick={settings.onOpenWorkflow} aria-label={`讨论方式：${settings.workflowLabel}`} title="选择谁在什么时候发言"><Workflow aria-hidden size={15} />{settings.workflowLabel}<ChevronDown aria-hidden size={14} /></button>}
-            <button type="button" className={cx('chip', !settings.budgetValid && 'is-warn')} aria-expanded={open} aria-controls={panelId} onClick={() => setMoreOpen(value => !value)}><JapaneseYen aria-hidden size={15} />{budgetLabel}<ChevronDown aria-hidden size={14} /></button>
             <label className={cx('chip', 'chip-check', settings.stepMode && 'is-on')} title="每位成员说完一次就停下，方便你插话或点名，再点「下一步」或「继续」">
               <input type="checkbox" checked={settings.stepMode} onChange={event => settings.setStepMode(event.target.checked)} />每回合后暂停</label>
             <IconButton icon={Ellipsis} label="更多设置" className="chip-icon" aria-expanded={open} aria-controls={panelId} onClick={() => setMoreOpen(value => !value)} />
@@ -97,7 +88,7 @@ export function TaskComposer({ draft, setDraft, canStart, starting, onStart, set
           </div>
         </div>
       </div>
-      <div className="dock-hint">{hint ?? <><span><span className="kbd">{modifier}</span> <span className="kbd">Enter</span> 开始</span><span aria-hidden>·</span><span>每次发言前按预算预留费用，结束后按实际用量结算</span></>}</div>
+      <div className="dock-hint">{hint ?? <><span><span className="kbd">{modifier}</span> <span className="kbd">Enter</span> 开始</span><span aria-hidden>·</span><span>调用模型的费用由服务商收取，这里不估算</span></>}</div>
     </div>
   </div>;
 }
@@ -106,7 +97,7 @@ export type RunControls = {
   status: RunSnapshot['status']; pause: { enabled: boolean; run: () => void }; resume: { enabled: boolean; run: () => void };
   step: { enabled: boolean; run: () => void }; stop: { enabled: boolean; run: () => void };
   /** A request is out; stopping may already be billed. */
-  inFlight: boolean; inFlightCost?: string; speaker?: string;
+  inFlight: boolean; speaker?: string;
 };
 
 /** D098: 停止 | 下一步 | 暂停/继续 — the primary slot keeps its place and width; stopping asks once, above it. */
@@ -122,7 +113,7 @@ function LiveControls({ controls }: { controls: RunControls }) {
       onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setConfirming(false); stopButton.current?.focus(); } }}>
       <h3>停止这次讨论？</h3>
       <p>{controls.inFlight
-        ? `${controls.speaker ? `${controls.speaker}正在发言，` : ''}停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限${controls.inFlightCost ? ` ${controls.inFlightCost} ` : ''}计入本次花费。`
+        ? `${controls.speaker ? `${controls.speaker}正在发言，` : ''}停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，服务商可能已经计入用量。`
         : '停止会结束本次运行，后续回合不再执行。已有发言都会保留。'}停止后不会自动继续。</p>
       <div className="stop-actions">
         <Button autoFocus onClick={() => { setConfirming(false); stopButton.current?.focus(); }}>不停止</Button>
@@ -157,12 +148,12 @@ function MentionMenu({ id, options, query, active, onPick, onHover, continuing }
  * 运行中: the box is the interjection box. Enter sends, Shift+Enter adds a line, `@` names the next speaker (D4),
  * and 设为持续指令 turns the text into a standing instruction. The run controls sit at its right.
  */
-export function HostComposer({ snapshot, commands, controls, settledSlot, notices, instructionsWritable, continueApi, onContinued, onOpenBudget }: {
+export function HostComposer({ snapshot, commands, controls, settledSlot, notices, instructionsWritable, continueApi, onContinued }: {
   snapshot: RunSnapshot; commands: HostCommands; controls?: RunControls;
   /** For a Run that is no longer live: what sits in the primary slot instead of the run controls. */
   settledSlot?: ReactNode; notices?: ReactNode; instructionsWritable: boolean;
   /** D111: with these, a finished discussion is continued in place from this box. */
-  continueApi?: Pick<RunApiContract, 'previewContinuation' | 'continueDiscussion'>; onContinued?: () => void; onOpenBudget?: () => void;
+  continueApi?: Pick<RunApiContract, 'previewContinuation' | 'continueDiscussion'>; onContinued?: () => void;
 }) {
   const key = snapshot.runId;
   const [text, setTextState] = useState(() => interjectionDrafts.get(key) ?? '');
@@ -251,14 +242,12 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
     event.preventDefault(); void send();
   };
   const placeholder = continuing ? '在这场讨论里继续：写下你的问题或要求，所有成员按顺序各回应一次；输入 @ 只让一位成员回应…'
-    : status === 'error' && snapshot.budget?.blocked ? '仍然可以插话；追加预算后，下一位会看到'
     : ['error', 'cancelled', 'interrupted'].includes(status) ? '插话会在重试或恢复后被成员看到；要讨论新问题，点「新讨论」'
     : '插话，所有成员从下一回合起可见；输入 @ 点名下一位…';
   const hint = status === 'paused' ? <><span><span className="kbd">Enter</span> 发送插话</span><span aria-hidden>·</span><span>下一步：只让下一位说一次</span><span aria-hidden>·</span><span>继续：恢复自动轮流</span></>
     : status === 'pausing' ? <span>当前回合说完后会停下</span>
     : status === 'cancelling' ? <span>等待当前请求中止，已生成的文字会保留</span>
     : status === 'running' ? <><span>暂停会等{controls?.speaker ?? '当前成员'}说完再停</span><span aria-hidden>·</span><span>停止会立即中止当前发言</span></>
-    : snapshot.budget?.blocked && status === 'error' ? <span>预算不足：在上方追加预算后继续；已有发言都保留</span>
     : continuing ? <><span><span className="kbd">Enter</span> 发送并继续讨论</span><span aria-hidden>·</span><span><span className="kbd">Shift</span> <span className="kbd">Enter</span> 换行</span><span aria-hidden>·</span><span>讨论新问题，点「新讨论」</span></>
     : <><span><span className="kbd">Enter</span> 发送</span><span aria-hidden>·</span><span><span className="kbd">Shift</span> <span className="kbd">Enter</span> 换行</span></>;
   return <div className="dock">
@@ -267,9 +256,7 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
       {menu && <MentionMenu id={menuId} options={filtered} query={menu.query} active={active} onPick={pick} onHover={setActive} continuing={continuing} />}
       {continuing && <div className="next-strip" role="status" aria-label="继续后谁回应">
         <Clock aria-hidden size={14} />
-        <span>{plan ? <>{plan.text}{plan.warn && <span className="strip-warn">{plan.warn}</span>}</> : continuation.previewFailed ? '没有读到预计花费；发送前每次发言仍按预算预留。' : '正在估算谁回应、最多花多少…'}</span>
-        {plan?.warn && onOpenBudget && continuation.preview?.cost.kind === 'priced' && (continuation.preview.reason === 'budget_insufficient' || continuation.preview.cost.maxMicro > continuation.preview.cost.remainingMicro)
-          && <button type="button" className="link-btn" onClick={onOpenBudget}>追加预算</button>}
+        <span>{plan ? <>{plan.text}{plan.warn && <span className="strip-warn">{plan.warn}</span>}</> : continuation.previewFailed ? '没有读到谁会回应；发送后按成员顺序回应。' : '正在确认谁回应…'}</span>
       </div>}
       {!continuing && (next || override) && <div className="next-strip" role="status" aria-label="下一位">
         <Clock aria-hidden size={14} />

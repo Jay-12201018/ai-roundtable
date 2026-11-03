@@ -1,13 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { Check, X } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
-import { formatYuan } from '../../../shared/schemas/budget';
 import { Avatar, Button, IconButton, Pill, Tabs, cx } from '../../components/ui';
 import { statusLabels } from '../../locales/zhCN';
 import { HostTextArea } from '../host/HostTextArea';
 import { canContinueRun, canDirectRun, isContinuationTurn, nextSpeaker, nextSpeakerText, overrideCandidates, planTurnCount, scheduledNext, summaryWritable, timelineSlots, usedSummary } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
-import { parseBudgetYuan, yuanShort, type LedgerCommands } from '../usage';
+import { runTokenTotals } from '../usage';
 import { workflowProgressForFeature, workflowTemplateLabels } from '../workflows/productionAdapter';
 import { modelLabel, type ProviderNames } from '../timeline/model';
 import './runPanel.css';
@@ -15,49 +14,6 @@ import './runPanel.css';
 export type PanelTab = 'progress' | 'members' | 'instructions' | 'artifacts';
 const clock = (iso: string) => new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 const duration = (ms: number) => { const seconds = Math.round(ms / 1000); return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`; };
-
-/** Run-level spend: limit (with top-ups), what is spent and how, what is left; a top-up is one click away. */
-export function BudgetCard({ snapshot, ledger }: { snapshot: RunSnapshot; ledger?: LedgerCommands }) {
-  const [adding, setAdding] = useState(false);
-  const [amount, setAmount] = useState('1');
-  const budget = snapshot.budget;
-  if (!budget) return <p className="muted small">这次讨论没有预算记录（较早版本创建，或只用内置 Mock）。</p>;
-  const written = budget.writtenOffMicro ?? 0;
-  const spent = budget.settledMicro + budget.unknownMicro + written;
-  const topUps = budget.topUps ?? [];
-  const added = topUps.reduce((total, topUp) => total + topUp.amountMicro, 0);
-  const micro = parseBudgetYuan(amount);
-  const blockedHere = budget.blocked?.reason === 'insufficient' && snapshot.status === 'error';
-  const percent = (value: number) => `${Math.min(100, budget.limitMicro ? value / budget.limitMicro * 100 : 0)}%`;
-  const warn = budget.blocked !== undefined || budget.overrunMicro > 0;
-  return <section className={cx('budget-card', warn && 'is-warn')} aria-label="运行预算">
-    <div className="budget-big tabular">{formatYuan(spent)} <small>/ {yuanShort(budget.limitMicro)}{added > 0 ? `（含追加 ${yuanShort(added)}）` : ''}</small></div>
-    <div className="budget-bar" aria-hidden><i style={{ width: percent(spent) }} />{budget.reservedMicro > 0 && <i className="is-reserved" style={{ width: percent(budget.reservedMicro) }} />}</div>
-    <dl className="budget-rows tabular">
-      <dt>剩余额度</dt><dd>{formatYuan(budget.remainingMicro)}</dd>
-      <dt>进行中预留</dt><dd>{budget.reservedMicro > 0 ? formatYuan(budget.reservedMicro) : '—'}</dd>
-      <dt>未知费用（按上限计）</dt><dd>{budget.unknownMicro > 0 ? formatYuan(budget.unknownMicro) : '无'}</dd>
-      {(written > 0 || (snapshot.charges ?? []).some(charge => charge.writeOffs?.length)) && <><dt>已核销</dt><dd>{formatYuan(written)}</dd></>}
-      {budget.overrunMicro > 0 && <><dt>超出</dt><dd className="is-danger">{formatYuan(budget.overrunMicro)}</dd></>}
-    </dl>
-    {budget.blocked && <p className="budget-blocked">{budget.blocked.reason === 'insufficient' ? '已因预算不足停止发送，可以在讨论末尾追加并继续。' : '已因用量超出上限停止。'}</p>}
-    {ledger?.available && !blockedHere && !adding && <Button size="sm" onClick={() => setAdding(true)}>追加预算</Button>}
-    {ledger?.available && !blockedHere && adding && <form className="budget-add" onSubmit={event => { event.preventDefault(); if (micro !== undefined) void ledger.addBudget(micro, false).then(result => { if (result) setAdding(false); }); }}>
-      <span className="money-input" data-invalid={micro === undefined || undefined}><span aria-hidden>¥</span>
-        <input aria-label="追加预算（元）" inputMode="decimal" value={amount} aria-invalid={micro === undefined} autoFocus onChange={event => setAmount(event.target.value)} /></span>
-      <Button type="submit" size="sm" variant="primary" disabled={micro === undefined || ledger.pending !== undefined}>追加</Button>
-      <Button size="sm" variant="quiet" onClick={() => setAdding(false)}>取消</Button>
-      <p className="field-help">只能追加、不能减少；每次追加单独记录。</p>
-    </form>}
-    {topUps.length > 0 && <details className="budget-history">
-      <summary>追加记录（{topUps.length}）</summary>
-      <ol>{topUps.map(topUp => <li key={topUp.topUpId}>+{formatYuan(topUp.amountMicro)} · {clock(topUp.createdAt)}</li>)}</ol>
-      <p>开始时 {formatYuan(budget.initialLimitMicro ?? budget.limitMicro - added)}，之后共追加 {formatYuan(added)}。</p>
-    </details>}
-    {ledger?.notice?.key === 'budget' && !blockedHere && <p role="status" className="budget-notice">{ledger.notice.message}</p>}
-    {ledger?.error?.key === 'budget' && !blockedHere && <p role="alert" className="field-error">{ledger.error.message}</p>}
-  </section>;
-}
 
 /** D110/D111: Turns the host inserted (named or asked to continue) are counted apart from the plan's turns. */
 function insertedText(snapshot: RunSnapshot): string {
@@ -68,19 +24,20 @@ function insertedText(snapshot: RunSnapshot): string {
   return ` · 另有 ${inserted.length} 轮插入（${[named ? `点名 ${named}` : '', continued ? `继续讨论 ${continued}` : ''].filter(Boolean).join('、')}）`;
 }
 
-function ProgressTab({ snapshot, ledger, onSummarize, onOpenWorkflow }: { snapshot: RunSnapshot; ledger?: LedgerCommands; onSummarize?: () => void; onOpenWorkflow?: () => void }) {
+function ProgressTab({ snapshot, onSummarize, onOpenWorkflow }: { snapshot: RunSnapshot; onSummarize?: () => void; onOpenWorkflow?: () => void }) {
   const progress = workflowProgressForFeature(snapshot);
   const workflow = snapshot.workflow;
   const used = usedSummary(snapshot);
   const numbered = (timelineSlots(snapshot)?.filter(slot => slot.number !== undefined).length ?? 0);
   const writable = summaryWritable(snapshot);
-  // The demo members never reach a service: what this page says about prices and requests would be untrue for them.
+  // The demo members never reach a service: what this page says about requests would be untrue for them.
   const members = snapshot.execution?.membersSnapshot ?? [];
   const demoOnly = members.length > 0 && members.every(member => member.modelId === 'mock');
+  const totals = runTokenTotals(snapshot);
   return <>
-    <section className="ctx-sec"><h3>预算</h3>
-      <BudgetCard snapshot={snapshot} ledger={ledger} />
-      <p className="small muted ctx-note">{demoOnly ? '演示成员不联网、不花钱，这里的额度不会被用掉。' : '按官方单价估算，DeepSeek 空闲时段按半价；实际扣费以服务商控制台为准。'}</p>
+    <section className="ctx-sec"><h3>用量</h3>
+      <p className="small muted ctx-note tabular">{demoOnly ? '演示成员不联网，没有用量。' : totals.requests === 0 ? '还没有发出请求。'
+        : `输入 ${totals.inputTokens.toLocaleString('zh-CN')} / 输出 ${totals.outputTokens.toLocaleString('zh-CN')} tokens · ${totals.requests} 次请求${totals.unknownRequests ? `，其中 ${totals.unknownRequests} 次没拿到完整用量` : ''}。费用由服务商收取，这里不估算。`}</p>
     </section>
     <section className="ctx-sec"><h3>讨论方式{onOpenWorkflow && <button type="button" className="link-btn" aria-label="查看讨论方式" onClick={onOpenWorkflow}>查看</button>}</h3>
       {progress && workflow ? <>
@@ -95,7 +52,7 @@ function ProgressTab({ snapshot, ledger, onSummarize, onOpenWorkflow }: { snapsh
     </section>
     {onSummarize && <section className="ctx-sec"><h3>讨论摘要</h3>
       <p className="small muted">{used ? `之后的发言正在用摘要代替第 1–${used.lastNumber} 条原文。讨论再变长时，可以在此基础上续写摘要。`
-        : `讨论变长、快放不进上下文时，可以把较早的发言整理成摘要。${demoOnly ? '演示成员写的是预先准备的示例，不花钱' : '生成是一次真实请求，会按预算预留和结算'}；不会自动生成。`}</p>
+        : `讨论变长、快放不进上下文时，可以把较早的发言整理成摘要。${demoOnly ? '演示成员写的是预先准备的示例' : '生成会发送一次真实请求'}；不会自动生成。`}</p>
       <Button size="sm" disabled={!writable || numbered < 2} onClick={onSummarize}>生成讨论摘要…</Button>
       {!writable && <p className="small muted">暂停运行或等当前请求结束后可以生成摘要。</p>}
     </section>}
@@ -171,8 +128,8 @@ function InstructionsTab({ snapshot, commands }: { snapshot: RunSnapshot; comman
 }
 
 /** 本场信息: for looking things up; acting stays in the composer and on the messages themselves. */
-export function RunPanel({ snapshot, commands, ledger, providers, tab, onTab, onClose, onSummarize, onOpenWorkflow, syncLabel, artifacts, artifactCount }: {
-  snapshot: RunSnapshot | undefined; commands: HostCommands; ledger?: LedgerCommands; providers?: ProviderNames;
+export function RunPanel({ snapshot, commands, providers, tab, onTab, onClose, onSummarize, onOpenWorkflow, syncLabel, artifacts, artifactCount }: {
+  snapshot: RunSnapshot | undefined; commands: HostCommands; providers?: ProviderNames;
   tab: PanelTab; onTab: (tab: PanelTab) => void; onClose: () => void; onSummarize?: () => void; onOpenWorkflow?: () => void; syncLabel: string;
   /** R14: the artifacts tab, assembled by the App (it owns the artifact dialogs). */ artifacts?: ReactNode; artifactCount?: number;
 }) {
@@ -183,8 +140,8 @@ export function RunPanel({ snapshot, commands, ledger, providers, tab, onTab, on
     <Tabs idPrefix="ctx" label="本场信息" value={tab} onChange={onTab} tabs={[{ id: 'progress', label: '进度' }, { id: 'members', label: '成员', count: members },
       { id: 'instructions', label: '指令', count: instructions }, { id: 'artifacts', label: '产物', count: artifactCount }]} />
     <div className="ctx-body" id={`ctx-panel-${tab}`} role="tabpanel" aria-labelledby={`ctx-tab-${tab}`}>
-      {!snapshot ? <p className="small muted">开始讨论后，这里会显示这场讨论的预算和花费、讨论方式的进度、成员状态和持续指令。</p>
-        : tab === 'progress' ? <ProgressTab snapshot={snapshot} ledger={ledger} onSummarize={onSummarize} onOpenWorkflow={onOpenWorkflow} />
+      {!snapshot ? <p className="small muted">开始讨论后，这里会显示这场讨论的用量、讨论方式的进度、成员状态和持续指令。</p>
+        : tab === 'progress' ? <ProgressTab snapshot={snapshot} onSummarize={onSummarize} onOpenWorkflow={onOpenWorkflow} />
         : tab === 'members' ? <MembersTab snapshot={snapshot} commands={commands} providers={providers} />
         : tab === 'instructions' ? <InstructionsTab snapshot={snapshot} commands={commands} />
         : artifacts ?? <p className="small muted">这个版本的应用没有产物功能。</p>}

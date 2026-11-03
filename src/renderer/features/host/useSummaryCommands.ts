@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SummaryApiContract } from '../../../shared/contracts/app';
-import { ledgerErrorMessage } from '../usage';
+import { commandErrorMessage } from '../usage';
 
 type SummaryApi = { summary: SummaryApiContract };
 let fallbackCounter = 0;
@@ -18,7 +18,7 @@ export function useSummaryCommands(api: SummaryApi | undefined, runId: string | 
     if (!api || !runId || inFlight.current) return false;
     inFlight.current = true; setPending(key); setError(undefined);
     try { await work(newRequestId()); onApplied(); return true; }
-    catch (failure) { if (alive.current) setError({ key, message: ledgerErrorMessage(failure) }); return false; }
+    catch (failure) { if (alive.current) setError({ key, message: commandErrorMessage(failure) }); return false; }
     finally { inFlight.current = false; if (alive.current) setPending(undefined); }
   }, [api, runId, onApplied]);
   // Stable callbacks: the summary dialog re-reads its preview only when its inputs or the Run change.

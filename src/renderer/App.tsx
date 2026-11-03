@@ -10,7 +10,7 @@ import { ConnectWizard, SettingsPage, isUserAddress, useReadiness, type Connecte
 import { Welcome, startDemo } from './features/onboarding';
 import type { ProviderConfiguration, ProviderReadiness } from '../shared/contracts/configuration';
 import { timelineSlots, useHostCommands, useSummaryCommands } from './features/host';
-import { UsagePage, chargeOfMessage, parseBudgetYuan, useLedgerCommands } from './features/usage';
+import { UsagePage } from './features/usage';
 import { DiscussionTimeline, RunNotices, SummaryDialog, providerNamesFrom } from './features/timeline';
 import { HostComposer, TaskComposer, interjectionBoxFor, type RunControls } from './features/composer/Composer';
 import { RunPanel, type PanelTab } from './features/runPanel/RunPanel';
@@ -22,8 +22,6 @@ import { Avatar, Button, Drawer, Pill } from './components/ui';
 import { useLayout, useTheme } from './theme/useTheme';
 import { statusLabels } from './locales/zhCN';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT } from '../shared/schemas/run';
-import { formatYuan } from '../shared/schemas/budget';
-import { yuanShort } from './features/usage';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
 import { createRendererSession } from './subscriptions/rendererSession';
 import './features/shell/shell.css';
@@ -35,13 +33,13 @@ export function parseOutputLimit(text: string): number | undefined {
 }
 
 type Page = 'discussion' | 'rooms' | 'settings' | 'usage';
-const pageTitles: Record<Exclude<Page, 'discussion'>, string> = { rooms: '房间', usage: '用量与花费', settings: '设置' };
+const pageTitles: Record<Exclude<Page, 'discussion'>, string> = { rooms: '房间', usage: '用量', settings: '设置' };
 const codeOf = (error: unknown) => { const value = error && typeof error === 'object' ? error as { code?: unknown; detail?: { code?: unknown } } : undefined; const parsed = errorCodeSchema.safeParse(value?.detail?.code ?? value?.code); return parsed.success ? parsed.data : 'internal_error'; };
 /** Why Main would not compile a discussion mode for the current members, in words (D116). */
 const workflowRefusal = (error: unknown) => {
   const code = codeOf(error);
   return code === 'invalid_input' ? '按现在的成员和限制排不出这个流程：检查每个阶段的成员和轮数，总回合数不能超过“最多回合”。'
-    : code === 'invalid_state' || code === 'unsupported' || code === 'forbidden' ? '流程里有成员现在不能发言（还没选模型、模型价格未审核或服务地址未确认），到房间里看看成员。'
+    : code === 'invalid_state' || code === 'unsupported' || code === 'forbidden' ? '流程里有成员现在不能发言（还没选模型，或服务地址未确认），到房间里看看成员。'
       : code === 'not_found' ? '这个房间已经不存在。' : '没能核对讨论方式，请稍后再试。';
 };
 const remembered = (key: string, fallback: boolean) => { try { const value = localStorage.getItem(key); return value === null ? fallback : value === 'true'; } catch { return fallback; } };
@@ -67,8 +65,6 @@ export function App() {
   const [panelTab, setPanelTab] = useState<PanelTab>('progress');
   // D099: a remembered per-viewer preference; the Run's own mode stays authoritative in Main.
   const [stepMode, setStepMode] = useState(() => remembered('roundtable.stepMode', false));
-  const [budgetText, setBudgetText] = useState('1');
-  const budgetMicroCny = parseBudgetYuan(budgetText);
   const [outputLimitText, setOutputLimitText] = useState(String(DEFAULT_OUTPUT_TOKEN_LIMIT));
   const outputTokenLimit = parseOutputLimit(outputLimitText);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
@@ -173,7 +169,7 @@ export function App() {
     setWorkflowVersion(version => version + 1); setWorkflowNotice(undefined); setLostWorkflow(undefined); return true;
   };
   const startRun = async () => {
-    if (!roomId || budgetMicroCny === undefined || outputTokenLimit === undefined || startChecking) return;
+    if (!roomId || outputTokenLimit === undefined || startChecking) return;
     const task = draft.trim(); const room = roomId;
     setWorkflowNotice(undefined);
     let workflow: { workflowConfig: ReturnType<typeof workflowConfigFromDraft>; workflowPreviewId: string } | undefined;
@@ -192,7 +188,7 @@ export function App() {
       finally { setStartChecking(false); }
       if (session.store.getState().roomId !== room) return;
     }
-    void session.startRun(workflow, { budgetMicroCny, outputTokenLimit, mode: stepMode ? 'step' : 'automatic' })
+    void session.startRun(workflow, { outputTokenLimit, mode: stepMode ? 'step' : 'automatic' })
       .then(() => {
         // Once the goal has become a Run, the box is empty for the next one, so a finished discussion is not restarted by accident.
         const state = session.store.getState();
@@ -217,8 +213,7 @@ export function App() {
   const readiness = useReadiness(settingsApi, providers);
   const synchronizeHost = useCallback(() => { void session.synchronize(); }, [session]);
   const hostCommands = useHostCommands(api.host, snapshot?.runId, synchronizeHost);
-  // R13B: budget top-ups, write-offs and summaries of the selected Run (D104/D105/D107).
-  const ledger = useLedgerCommands(api, snapshot?.runId, synchronizeHost);
+  // Summaries of the selected Run (D107).
   const summaryCommands = useSummaryCommands(api, snapshot?.runId, synchronizeHost);
   const [summaryTarget, setSummaryTarget] = useState<{ summaryId?: string }>();
   useEffect(() => setSummaryTarget(undefined), [snapshot?.runId]);
@@ -237,14 +232,11 @@ export function App() {
   }, [snapshot]);
 
   const runStatus = snapshot?.status;
-  // A budget stop is a deliberate guard, not a model failure; say so in the header.
-  const budgetStopped = snapshot?.status === 'error' && snapshot.budget?.blocked !== undefined;
   // D098: while a Run is live, the start button turns into its controls in place, so the host never chases them.
   const runActive = liveStatuses.includes(runStatus ?? '') || stopEnabled;
   const activeTurn = snapshot?.turns.find(turn => turn.turnId === snapshot.currentTurnId) ?? snapshot?.turns.find(turn => turn.status === 'running');
   const speaker = snapshot?.execution?.membersSnapshot?.find(member => member.agentId === activeTurn?.agentId)?.displayName;
-  const activeCharge = activeTurn?.messageId ? chargeOfMessage(snapshot, activeTurn.messageId) : undefined;
-  // Stop ends the Run and may abort a request already billed; it asks once, without covering Pause.
+  // Stop ends the Run and may abort a request already sent; it asks once, without covering Pause.
   const requestInFlight = runStatus === 'running' || runStatus === 'pausing' || runStatus === 'cancelling' || Boolean(snapshot?.host?.generation);
 
   // Main runs one discussion at a time (a paused one included). Remember the live one while the host looks elsewhere,
@@ -289,17 +281,16 @@ export function App() {
     }).catch(() => {});
     return () => { current = false; };
   }, [api, roomId, latestRun, stored]);
-  const [monthSpend, setMonthSpend] = useState<string>();
-  const [runCosts, setRunCosts] = useState<ReadonlyMap<string, string>>(new Map());
+  const [monthTokens, setMonthTokens] = useState<string>();
   const settledKey = liveStatuses.includes(runStatus ?? '') ? 'live' : `${snapshot?.runId ?? ''}:${runStatus ?? ''}:${page}`;
   useEffect(() => {
     let current = true;
     void Promise.resolve().then(() => api.usage.getReport()).then(report => {
       if (!current || !report?.byDate) return;
       const month = new Date().toLocaleDateString('sv-SE').slice(0, 7);
-      setMonthSpend(formatYuan(report.byDate.filter(row => row.date.startsWith(month)).reduce((total, row) => total + row.totalMicro, 0)));
-      setRunCosts(new Map((report.byRun ?? []).filter(row => row.totalMicro > 0).map(row => [row.runId, formatYuan(row.totalMicro)])));
-    }).catch(() => { if (current) setMonthSpend(undefined); });
+      const tokens = report.byDate.filter(row => row.date.startsWith(month)).reduce((total, row) => total + row.inputTokens + row.outputTokens, 0);
+      setMonthTokens(tokens ? `${tokens.toLocaleString('zh-CN')} tokens` : undefined);
+    }).catch(() => { if (current) setMonthTokens(undefined); });
     return () => { current = false; };
   }, [api, settledKey]);
 
@@ -323,7 +314,6 @@ export function App() {
 
   const statusPill = (() => {
     if (!snapshot) return undefined;
-    if (budgetStopped) return <Pill tone="warn" icon={TriangleAlert}>已因预算停止</Pill>;
     const label = statusLabels[snapshot.status] ?? '未知状态';
     const tone = ['running', 'pausing', 'cancelling'].includes(snapshot.status) ? 'live' : snapshot.status === 'completed' ? 'ok' : snapshot.status === 'error' ? 'danger' : snapshot.status === 'interrupted' ? 'warn' : 'neutral';
     return <Pill tone={tone} dot={tone !== 'ok'} icon={tone === 'ok' ? Check : undefined}>{label}</Pill>;
@@ -339,14 +329,9 @@ export function App() {
     syncStatus === 'syncing' ? '正在同步运行状态' : undefined,
     pending ? '操作已发送，等待确认' : undefined,
   ].filter(Boolean).join(' · ');
-  const budget = snapshot?.budget;
-  const spent = budget ? budget.settledMicro + budget.unknownMicro + (budget.writtenOffMicro ?? 0) : 0;
-  const budgetChip = budget ? { spent: formatYuan(spent), limit: yuanShort(budget.limitMicro), percent: budget.limitMicro ? spent / budget.limitMicro * 100 : 0,
-    warn: budget.blocked !== undefined || budget.overrunMicro > 0, title: `已花 ${formatYuan(spent)}，上限 ${formatYuan(budget.limitMicro)}，剩余 ${formatYuan(budget.remainingMicro)}`, onClick: () => showPanel('progress') } : undefined;
 
   const controls: RunControls | undefined = runActive && runStatus ? {
     status: runStatus, inFlight: requestInFlight, speaker,
-    inFlightCost: activeCharge?.state === 'reserved' ? formatYuan(activeCharge.reservedMicro) : undefined,
     pause: { enabled: pauseEnabled, run: () => void session.control('pause') }, resume: { enabled: resumeEnabled, run: () => void session.control('resumeRun') },
     step: { enabled: stepEnabled, run: () => void session.control('step') }, stop: { enabled: stopEnabled, run: () => void session.control('stop') },
   } : undefined;
@@ -371,29 +356,28 @@ export function App() {
     if (page !== 'discussion') return null;
     if (snapshot && interjectionBoxFor(snapshot, runActive)) return <HostComposer key={snapshot.runId} snapshot={snapshot} commands={hostCommands} controls={controls}
       instructionsWritable={snapshot.status !== 'idle' && snapshot.status !== 'cancelling'} notices={<>{syncNotices}{otherLive && !runActive ? taskNotices : undefined}</>}
-      continueApi={api.run} onContinued={synchronizeHost} onOpenBudget={() => showPanel('progress')}
-      settledSlot={budgetStopped ? <Button variant="primary" className="slot" disabled title="预算不足，先在上方追加预算">继续</Button>
-        : <Button className="slot" icon={Plus} disabled={!bootReady} onClick={() => newDiscussion(snapshot.roomId)}>新讨论</Button>} />;
+      continueApi={api.run} onContinued={synchronizeHost}
+      settledSlot={<Button className="slot" icon={Plus} disabled={!bootReady} onClick={() => newDiscussion(snapshot.roomId)}>新讨论</Button>} />;
     return <TaskComposer draft={draft} setDraft={value => session.store.getState().setDraft(value)}
-      canStart={startEnabled && modeReady && !otherLive && !startChecking && !room?.archivedAt && budgetMicroCny !== undefined && outputTokenLimit !== undefined}
+      canStart={startEnabled && modeReady && !otherLive && !startChecking && !room?.archivedAt && outputTokenLimit !== undefined}
       starting={pending?.command === 'start' || startChecking} onStart={() => void startRun()} notices={<>{syncNotices}{taskNotices}</>}
       placeholder={snapshot ? '在这个房间开始新的讨论，写下目标和约束…' : undefined}
-      settings={{ budgetText, setBudgetText, budgetValid: budgetMicroCny !== undefined, outputLimitText, setOutputLimitText, outputLimitValid: outputTokenLimit !== undefined,
+      settings={{ outputLimitText, setOutputLimitText, outputLimitValid: outputTokenLimit !== undefined,
         stepMode, setStepMode, workflowLabel, onOpenWorkflow: roomId ? () => setWorkflowOpen(true) : undefined }} />;
   })();
 
   const recentTasks = [...new Set(directory.runs.map(run => run.task).filter((task): task is string => Boolean(task?.trim())))].slice(0, 3);
   const discussionBody = (() => {
-    if (snapshot) return <DiscussionTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} ledger={ledger} summaries={summaryCommands}
+    if (snapshot) return <DiscussionTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} summaries={summaryCommands}
       onRegenerateSummary={openSummary} reveal={reveal}
       header={<><div className="goal-card"><div className="label">讨论目标</div><p>{snapshot.execution?.task?.trim() || '历史任务（目标未记录）'}</p></div>
-        <div className="sys-line">{snapshot.workflow ? workflowTemplateLabels[snapshot.workflow.templateId] : '按顺序轮流发言'}{runMembers?.length ? ` · ${runMembers.join(' → ')}` : ''}{budget ? ` · 预算 ${yuanShort(budget.initialLimitMicro ?? budget.limitMicro)}` : ''}</div></>}
-      footer={<RunNotices snapshot={snapshot} error={error} syncFailed={syncStatus === 'error'} onRetrySync={synchronizeHost} budgetStopped={budgetStopped}
-        ledger={ledger} retry={{ enabled: retryEnabled, run: () => void session.repeat('retryTurn') }} resume={{ enabled: continueEnabled, run: () => void session.repeat('continueMessage') }}
+        <div className="sys-line">{snapshot.workflow ? workflowTemplateLabels[snapshot.workflow.templateId] : '按顺序轮流发言'}{runMembers?.length ? ` · ${runMembers.join(' → ')}` : ''}</div></>}
+      footer={<RunNotices snapshot={snapshot} error={error} syncFailed={syncStatus === 'error'} onRetrySync={synchronizeHost}
+        retry={{ enabled: retryEnabled, run: () => void session.repeat('retryTurn') }} resume={{ enabled: continueEnabled, run: () => void session.repeat('continueMessage') }}
         recover={{ inspect: { enabled: inspectEnabled, run: () => void session.recover('inspect') }, resume: { enabled: recoverEnabled, run: () => void session.recover('resume') }, discard: { enabled: inspectEnabled, run: () => void session.recover('discard') } }}
         onSummarize={() => openSummary()} summaryOpen={summaryTarget !== undefined} />} />;
     if (runId) return <div className="discussion-empty"><div className="empty-room">
-      {syncStatus === 'error' ? <RunNotices snapshot={undefined} error={error} syncFailed onRetrySync={synchronizeHost} budgetStopped={false} ledger={ledger}
+      {syncStatus === 'error' ? <RunNotices snapshot={undefined} error={error} syncFailed onRetrySync={synchronizeHost}
         retry={{ enabled: false, run: () => {} }} resume={{ enabled: false, run: () => {} }} recover={{ inspect: { enabled: false, run: () => {} }, resume: { enabled: false, run: () => {} }, discard: { enabled: false, run: () => {} } }}
         onSummarize={() => {}} summaryOpen={false} /> : <p role="status">正在读取这场讨论…</p>}</div></div>;
     if (!roomId) return <div className="discussion-empty"><div className="empty-room">
@@ -439,7 +423,7 @@ export function App() {
     return `${stored.draft.phases.map(phase => `${phase.title}：${names(phase.participants)}`).join(' → ')} · ${limit}`;
   })() : '没有单独设置：参与讨论的成员按顺序轮流发言，共 3 回合。';
   const pageBody: Record<Exclude<Page, 'discussion' | 'settings'>, () => ReactNode> = {
-    rooms: () => room ? <RoomPage key={room.id} api={api.rooms} room={room} providers={providers} readiness={readiness.rows} runs={directory.runs} runCosts={runCosts}
+    rooms: () => room ? <RoomPage key={room.id} api={api.rooms} room={room} providers={providers} readiness={readiness.rows} runs={directory.runs}
       workflow={{ label: workflowLabel, detail: modeDetail, onChange: () => setWorkflowOpen(true) }}
       onNewDiscussion={() => newDiscussion(room.id)} onOpenRun={selectRun} onOpenSettings={() => openSettings()}
       onChanged={() => { void directory.reload(); setWorkflowVersion(version => version + 1); }}
@@ -449,13 +433,13 @@ export function App() {
   };
 
   const sidebar = (drawer: boolean) => <Sidebar rooms={directory.rooms} archived={directory.archived} counts={directory.counts} runs={directory.runs} failed={directory.failed} runsFailed={directory.runsFailed} onRetry={() => void directory.reload()}
-    roomId={roomId} runId={snapshot?.runId ?? runId} page={page} ready={bootReady} monthSpend={monthSpend}
+    roomId={roomId} runId={snapshot?.runId ?? runId} page={page} ready={bootReady} monthTokens={monthTokens}
     emptyText={providers.length === 0 ? '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。' : undefined}
     noRealProvider={providerLoadState === 'ready' && !providers.some(provider => provider.kind !== 'mock' && provider.kind !== null && provider.enabled)}
     onOpenRoom={openRoom} onSelectRun={selectRun} onNewDiscussion={() => newDiscussion()} onNewRoom={() => { setNavOpen(false); setRoomDialog(true); }}
     onOpenUsage={() => { setPage('usage'); setNavOpen(false); }} onOpenSettings={() => openSettings()} onHome={goDiscussion}
     onCollapse={drawer ? undefined : () => collapseSidebar(true)} onClose={drawer ? () => setNavOpen(false) : undefined} />;
-  const panel = <RunPanel snapshot={snapshot} commands={hostCommands} ledger={ledger} providers={providerNames} tab={panelTab} onTab={setPanelTab}
+  const panel = <RunPanel snapshot={snapshot} commands={hostCommands} providers={providerNames} tab={panelTab} onTab={setPanelTab}
     onClose={() => { if (layout === 'wide') { setPanelPinned(false); remember('roundtable.panelOpen', false); } else setPanelDrawer(false); }}
     onSummarize={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setWorkflowOpen(true); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'}
     artifactCount={artifactCommands.artifacts?.length}
@@ -471,7 +455,7 @@ export function App() {
       </> : page === 'discussion' ? <>
         <Topbar title={snapshot ? title : roomId ? '新讨论' : 'AI 圆桌'} status={statusPill ?? (roomName ? <span>{roomName}</span> : undefined)}
           detail={statusDetail || (!snapshot && enabledMembers ? `${roomName ? '· ' : ''}${enabledMembers.length} 位成员` : undefined)}
-          budget={budgetChip} members={layout === 'narrow' ? undefined : runMembers}
+          members={layout === 'narrow' ? undefined : runMembers}
           panel={panelAvailable ? { open: panelOpen, onToggle: togglePanel, controls: 'run-panel' } : undefined}
           onMenu={layout === 'narrow' ? () => setNavOpen(true) : undefined} onExpandSidebar={layout !== 'narrow' && sidebarCollapsed ? () => collapseSidebar(false) : undefined} />
         {discussionBody}
@@ -503,8 +487,8 @@ export function App() {
       initialVersionId={readerTarget?.versionId} onClose={() => setReaderTarget(undefined)} onReveal={revealNumber}
       onRegenerate={() => setGenerateTarget({ kind: readerArtifact.kind, artifactId: readerArtifact.artifactId })} />}
     {snapshot && generateTarget && <GenerateDialog key={`${generateTarget.kind}:${generateTarget.artifactId ?? 'new'}`} snapshot={snapshot} kind={generateTarget.kind}
-      artifactId={generateTarget.artifactId} commands={artifactCommands} ledger={ledger} onClose={() => setGenerateTarget(undefined)}
+      artifactId={generateTarget.artifactId} commands={artifactCommands} onClose={() => setGenerateTarget(undefined)}
       onStarted={result => { setGenerateTarget(undefined); setReaderTarget({ artifactId: result.artifactId, versionId: result.versionId }); }} />}
-    {snapshot && summaryTarget && <SummaryDialog key={summaryTarget.summaryId ?? 'new'} snapshot={snapshot} summaries={summaryCommands} ledger={ledger} summaryId={summaryTarget.summaryId} onClose={() => setSummaryTarget(undefined)} />}
+    {snapshot && summaryTarget && <SummaryDialog key={summaryTarget.summaryId ?? 'new'} snapshot={snapshot} summaries={summaryCommands} summaryId={summaryTarget.summaryId} onClose={() => setSummaryTarget(undefined)} />}
   </div>;
 }

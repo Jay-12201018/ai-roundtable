@@ -1,19 +1,19 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Ellipsis, Info, Pencil, RefreshCw, Scissors, Sparkles, Square, TriangleAlert } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
-import type { RequestCharge } from '../../../shared/schemas/budget';
+import type { RequestUsage } from '../../../shared/schemas/usage';
 import { Avatar, Button, IconButton, Note, Tag, copyText, cx } from '../../components/ui';
 import { HostTextArea } from '../host/HostTextArea';
 import { isContinuationTurn, originLabels, type TimelineSlot } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
-import { WriteOffForm, chargeOfMessage, type LedgerCommands } from '../usage';
+import { usageOfMessage } from '../usage';
 import { Markdown } from './Markdown';
-import { chargeDetail, chargeLabel, memberOf, messageStatusText, modelLabel, providerLabel, repeatCost, slotAbilities, upstream, type ProviderNames } from './model';
+import { usageDetail, usageLabel, memberOf, messageStatusText, modelLabel, providerLabel, slotAbilities, upstream, type ProviderNames } from './model';
 import { useTimelineHold } from './hold';
 import { stageOfTurn } from '../workflows/productionAdapter';
 
 export type SlotProps = {
-  slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames; ledger?: LedgerCommands;
+  slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames;
   coveredBy?: { firstNumber: number; lastNumber: number }; revisedAfterSummary?: boolean;
 };
 
@@ -55,27 +55,22 @@ export function EditForm({ label, help, initial, disabled, onSave, onCancel }: {
   </form>;
 }
 
-/** The amount is a button, not a hover: it opens the request details, where an unknown cost can be written off. */
-export function RequestDetails({ id, charge, lines, runId, ledger }: { id: string; charge?: RequestCharge; lines: Array<[string, string]>; runId: string; ledger?: LedgerCommands }) {
-  const [writing, setWriting] = useState(false);
-  const writeOff = charge?.writeOffs?.at(-1);
-  const canWriteOff = charge?.state === 'unknown' && charge.currency === 'CNY' && ledger !== undefined;
+/** The token count is a button, not a hover: it opens the request details. */
+export function RequestDetails({ id, usage, lines }: { id: string; usage?: RequestUsage; lines: Array<[string, string]> }) {
   return <div id={id} className="msg-details" role="region" aria-label="请求详情">
     <dl>{lines.map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}
-      {charge && <div><dt>费用</dt><dd data-charge-state={writeOff ? 'written_off' : charge.state}>{chargeDetail(charge)}</dd></div>}</dl>
-    {canWriteOff && !writing && <Button size="sm" onClick={() => setWriting(true)}>{writeOff ? '更正核销' : '核销'}</Button>}
-    {canWriteOff && writing && <WriteOffForm charge={charge!} runId={runId} ledger={ledger!} onDone={() => setWriting(false)} />}
+      {usage && <div><dt>用量</dt><dd data-usage-state={usage.state}>{usageDetail(usage)}</dd></div>}</dl>
   </div>;
 }
 
-function CostButton({ charge, open, onToggle, controls }: { charge: RequestCharge | undefined; open: boolean; onToggle: () => void; controls: string }) {
-  if (!charge) return null;
-  const { text, tone } = chargeLabel(charge);
-  return <button type="button" className={cx('cost', tone === 'warn' && 'is-warn')} aria-expanded={open} aria-controls={controls} title="查看用量、计价方式和请求详情" onClick={onToggle}>{text}</button>;
+function UsageButton({ usage, open, onToggle, controls }: { usage: RequestUsage | undefined; open: boolean; onToggle: () => void; controls: string }) {
+  if (!usage) return null;
+  const { text, tone } = usageLabel(usage);
+  return <button type="button" className={cx('usage-tag', tone === 'warn' && 'is-warn')} aria-expanded={open} aria-controls={controls} title="查看用量和请求详情" onClick={onToggle}>{text}</button>;
 }
 
 /** One member reply: identity line, notes only when something needs the host, then a light footer. */
-export function AgentMessage({ slot, snapshot, commands, providers, ledger, coveredBy, revisedAfterSummary }: SlotProps) {
+export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, revisedAfterSummary }: SlotProps) {
   const { index, shown, setViewing } = useVersions(slot);
   const [editing, setEditing] = useState(false);
   const [details, setDetails] = useState(false);
@@ -84,11 +79,10 @@ export function AgentMessage({ slot, snapshot, commands, providers, ledger, cove
   const member = memberOf(snapshot, can.turn?.agentId);
   const name = member?.displayName ?? shown.message.senderName;
   const disabled = !commands.available || commands.pending !== undefined;
-  const charge = chargeOfMessage(snapshot, shown.messageId);
+  const usage = usageOfMessage(snapshot, shown.messageId);
   // D109: a covered message revised after the summary is sent itself, so it is not shown as replaced.
   const replaced = coveredBy && !revisedAfterSummary;
   const streaming = shown.message.status === 'streaming';
-  const cost = repeatCost(snapshot, shown.messageId, member);
   const regenerate = () => void commands.send(`regenerate:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId }, '已发送重新生成请求。');
   const save = (content: string) => void commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content }, '已保存为新版本。')
     .then(ok => { if (ok) { setEditing(false); setViewing(undefined); } });
@@ -106,12 +100,12 @@ export function AgentMessage({ slot, snapshot, commands, providers, ledger, cove
     </div>
     {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留；之后的发言会标出受影响）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
       : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? '等待输出…' : '（没有生成文字）'}</p>}</div>}
-    {can.truncated && <Note icon={Scissors} cost={shown.active && slot.author === 'agent' ? cost : undefined}
+    {can.truncated && <Note icon={Scissors}
       action={shown.active && slot.author === 'agent' ? <Button size="sm" disabled={disabled || !can.continue} title={can.continue ? undefined : '运行暂停或结束后可以续写'}
         onClick={() => void commands.send(`continue:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId, mode: 'continue' }, '已发送续写请求：会生成一个新版本，并按新请求预留和结算费用。')}>续写</Button> : undefined}>
-      <b>写到单次上限停下了</b>{charge?.outputTokens ? ` · ${charge.outputTokens.toLocaleString('zh-CN')} tokens` : ''}，内容可能不完整。续写会生成一个新版本，按新请求计费。{shown.active && !can.continue ? '运行暂停或结束后可以续写。' : ''}
+      <b>写到单次上限停下了</b>{usage?.outputTokens ? ` · ${usage.outputTokens.toLocaleString('zh-CN')} tokens` : ''}，内容可能不完整。续写会生成一个新版本，按新请求计费。{shown.active && !can.continue ? '运行暂停或结束后可以续写。' : ''}
     </Note>}
-    {shown.affectedBy.length > 0 && <Note icon={TriangleAlert} cost={can.regenerate ? cost : undefined}
+    {shown.affectedBy.length > 0 && <Note icon={TriangleAlert}
       action={can.regenerate ? <Button size="sm" disabled={disabled} onClick={regenerate}>重新生成</Button> : undefined}>
       <b>受影响</b> · 写这条时依据的{upstream(snapshot, shown.affectedBy)}已被修改、重新生成或本身受影响，内容可能过时。{can.regenerate ? '' : '运行暂停或结束后可以重新生成。'}
     </Note>}
@@ -120,10 +114,10 @@ export function AgentMessage({ slot, snapshot, commands, providers, ledger, cove
     </Note>}
     {status && !streaming && <Note tone={shown.message.status === 'failed' ? 'danger' : 'neutral'} icon={Info} role="note">{status}</Note>}
     <div className="msg-foot" role="group" aria-label={`${name} 的消息操作`}>
-      {streaming ? <span className="typing"><Sparkles aria-hidden size={14} />正在发言{charge?.state === 'reserved' ? ` · ${chargeLabel(charge).text}` : ''}</span> : <>
+      {streaming ? <span className="typing"><Sparkles aria-hidden size={14} />正在发言</span> : <>
         <VersionSwitch slot={slot} index={index} onView={setViewing} />
         {slot.versions.length > 1 && <span>{originLabels[shown.origin]}{shown.active ? (shown.message.status === 'completed' || streaming ? '' : ' · 当前版本（未完成）') : ' · 未生效的历史版本'}</span>}
-        <CostButton charge={charge} open={details} onToggle={() => setDetails(value => !value)} controls={detailsId} />
+        <UsageButton usage={usage} open={details} onToggle={() => setDetails(value => !value)} controls={detailsId} />
       </>}
       <span className="grow" />
       {can.select && <Button size="sm" disabled={disabled} onClick={() => void commands.send(`select:${slot.slotId}`, { kind: 'selectVersion', messageId: shown.messageId }, '已切换当前有效版本。').then(ok => { if (ok) setViewing(undefined); })}>设为当前版本</Button>}
@@ -133,7 +127,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, ledger, cove
       {can.regenerate && shown.affectedBy.length === 0 && <IconButton size="sm" icon={RefreshCw} label="重新生成" disabled={disabled} onClick={regenerate} />}
       <IconButton size="sm" icon={Ellipsis} label="请求详情" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails(value => !value)} />
     </div>
-    {details && <RequestDetails id={detailsId} charge={charge} runId={snapshot.runId} ledger={ledger}
+    {details && <RequestDetails id={detailsId} usage={usage}
       lines={[['角色', member?.roleTemplateId || '未记录'], ['服务', providerLabel(member, providers)], ['模型 ID', member?.modelId ?? '未记录']]} />}
   </article>;
 }

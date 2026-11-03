@@ -1,8 +1,7 @@
 import type { ProviderSummary } from '../../../shared/contracts/configuration';
-import { formatYuan, type RequestCharge } from '../../../shared/schemas/budget';
+import type { RequestUsage } from '../../../shared/schemas/usage';
 import type { RunSnapshot } from '../../../shared/types/run';
 import type { MemberSnapshot } from '../../../shared/schemas/persistence';
-import { chargeOfMessage, pricingLabel, writeOffSummary } from '../usage';
 import { runIdle, type TimelineSlot } from '../host/model';
 
 /** Provider names and model names known to the Renderer now; a frozen member snapshot keeps only stable ids. */
@@ -61,33 +60,22 @@ export function slotAbilities(snapshot: RunSnapshot, slot: TimelineSlot, shown: 
   };
 }
 
-/** The most a repeat of this message's request may cost: its last reservation, which a new request reserves again. */
-export function repeatCost(snapshot: RunSnapshot, messageId: string, member?: Pick<MemberSnapshot, 'providerId' | 'modelId'>): string | undefined {
-  if (member && !member.providerId && member.modelId === 'mock') return '内置 Mock，不花钱';
-  const charge = chargeOfMessage(snapshot, messageId);
-  return charge && charge.currency === 'CNY' ? `最多约 ${formatYuan(charge.reservedMicro)}` : undefined;
+/** One short label for a request's token usage on a message footer. */
+export function usageLabel(usage: RequestUsage): { text: string; tone: 'plain' | 'warn' } {
+  if (usage.state === 'reported') return { text: `${((usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)).toLocaleString('zh-CN')} tokens`, tone: 'plain' };
+  if (usage.state === 'in_flight') return { text: '生成中', tone: 'plain' };
+  if (usage.state === 'unknown') return { text: '用量未知', tone: 'warn' };
+  return { text: '未发出', tone: 'plain' };
 }
-
-/** The short amount in a message footer, and whether it needs the host's attention. */
-export function chargeLabel(charge: RequestCharge): { text: string; tone: 'plain' | 'warn' } {
-  const writeOff = charge.writeOffs?.at(-1);
-  if (charge.state === 'settled') return { text: formatYuan(charge.chargedMicro), tone: 'plain' };
-  if (charge.state === 'reserved') return { text: `已预留最高 ${formatYuan(charge.reservedMicro)}`, tone: 'plain' };
-  if (charge.state === 'unknown' && writeOff) return { text: `已核销 ${formatYuan(writeOff.amountMicro)}`, tone: 'plain' };
-  if (charge.state === 'unknown') return { text: `费用未知 · 按上限 ${formatYuan(charge.reservedMicro)}`, tone: 'warn' };
-  return { text: '未发出，未计费', tone: 'plain' };
-}
-/** The full wording behind the amount: usage and its price, or why the cost is unknown, held or written off. */
-export function chargeDetail(charge: RequestCharge): string {
-  const hit = charge.settlement?.cacheHitTokens;
-  const tokens = charge.inputTokens !== null && charge.outputTokens !== null
-    ? `输入 ${charge.inputTokens.toLocaleString('zh-CN')}${hit ? `（缓存命中 ${hit.toLocaleString('zh-CN')}）` : ''} / 输出 ${charge.outputTokens.toLocaleString('zh-CN')} tokens` : undefined;
-  const writeOff = charge.writeOffs?.at(-1);
-  return charge.state === 'settled' ? `${tokens} · 花费 ${formatYuan(charge.chargedMicro, 6)} · ${pricingLabel(charge)}`
-    : charge.state === 'reserved' ? `生成中 · 已预留最高 ${formatYuan(charge.reservedMicro, 6)}，结束后按实际用量结算`
-    : charge.state === 'unknown' && writeOff ? `已核销 ${writeOffSummary(writeOff.amountMicro, charge.reservedMicro)} · 依据：${writeOff.basis}`
-    : charge.state === 'unknown' ? `费用未知（按上限计 ${formatYuan(charge.reservedMicro, 6)}）${tokens ? ` · 已观察 ${tokens}` : ' · 服务商未返回用量'}。可以到服务商控制台核对后核销。`
-    : '请求未发出，未计费';
+/** The full wording behind the label: the provider's usage, or why there is none. */
+export function usageDetail(usage: RequestUsage): string {
+  const hit = usage.cacheHitTokens;
+  const tokens = usage.inputTokens !== null && usage.outputTokens !== null
+    ? `输入 ${usage.inputTokens.toLocaleString('zh-CN')}${hit ? `（缓存命中 ${hit.toLocaleString('zh-CN')}）` : ''} / 输出 ${usage.outputTokens.toLocaleString('zh-CN')} tokens` : '';
+  return usage.state === 'reported' ? tokens
+    : usage.state === 'in_flight' ? '生成中，结束后显示服务商返回的用量'
+    : usage.state === 'unknown' ? `没拿到完整用量${tokens ? `（已观察 ${tokens}）` : ''}：请求已发出，但中途停止、断网或服务商没有返回用量。服务商可能已经计入，请到服务商控制台查看。`
+    : '请求没有发出。';
 }
 
 export const messageStatusText: Record<string, string> = { streaming: '正在发言', failed: '生成失败，已保留部分文字', aborted: '已中止 · 保留部分文字' };

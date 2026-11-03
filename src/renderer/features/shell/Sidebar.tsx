@@ -52,14 +52,14 @@ export function useRoomDirectory(api: RoomManagementApiContract, roomId: string 
 
 type Props = {
   rooms?: RoomConfiguration[]; archived?: RoomConfiguration[]; counts?: ReadonlyMap<string, number>; runs: RunSummary[]; failed: boolean; runsFailed?: boolean; onRetry: () => void;
-  roomId?: string; runId?: string; page: string; ready: boolean; monthSpend?: string; noRealProvider?: boolean; emptyText?: string;
+  roomId?: string; runId?: string; page: string; ready: boolean; monthTokens?: string; noRealProvider?: boolean; emptyText?: string;
   onOpenRoom: (id: string) => void; onSelectRun: (id: string) => void; onNewDiscussion: () => void; onNewRoom: () => void;
   onOpenUsage: () => void; onOpenSettings: () => void; onHome?: () => void;
   onCollapse?: () => void; onClose?: () => void;
 };
 
 /** Left navigation: rooms with their member counts and, under the current room, its discussions; usage and settings at the bottom. */
-export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed, onRetry, roomId, runId, page, ready, monthSpend, noRealProvider, emptyText, onOpenRoom, onSelectRun, onNewDiscussion, onNewRoom, onOpenUsage, onOpenSettings, onHome, onCollapse, onClose }: Props) {
+export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed, onRetry, roomId, runId, page, ready, monthTokens, noRealProvider, emptyText, onOpenRoom, onSelectRun, onNewDiscussion, onNewRoom, onOpenUsage, onOpenSettings, onHome, onCollapse, onClose }: Props) {
   const [showAll, setShowAll] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   useEffect(() => setShowAll(false), [roomId]);
@@ -100,7 +100,7 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed
       </div>}
     </div>
     <div className="sb-foot">
-      <button type="button" className="sb-item" aria-current={page === 'usage' ? 'page' : undefined} aria-label="用量" aria-describedby={monthSpend ? 'sb-month' : undefined} onClick={onOpenUsage}><ChartColumn aria-hidden size={16} /><span className="t">用量</span>{monthSpend && <span className="meta" id="sb-month" aria-hidden>本月 {monthSpend}</span>}</button>
+      <button type="button" className="sb-item" aria-current={page === 'usage' ? 'page' : undefined} aria-label="用量" aria-describedby={monthTokens ? 'sb-month' : undefined} onClick={onOpenUsage}><ChartColumn aria-hidden size={16} /><span className="t">用量</span>{monthTokens && <span className="meta" id="sb-month" aria-hidden>本月 {monthTokens}</span>}</button>
       <button type="button" className="sb-item" aria-current={page === 'settings' ? 'page' : undefined} aria-label="设置" aria-describedby={noRealProvider ? 'sb-no-model' : undefined} onClick={onOpenSettings}><Settings2 aria-hidden size={16} /><span className="t">设置</span>{noRealProvider && <span className="meta warn-text" id="sb-no-model" aria-hidden>未连接模型</span>}</button>
     </div>
   </nav>;

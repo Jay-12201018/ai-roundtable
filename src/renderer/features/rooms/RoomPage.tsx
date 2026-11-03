@@ -32,14 +32,14 @@ export function memberLine(agent: AgentConfiguration, providers: readonly Provid
 
 export type RoomPageProps = {
   api: RoomManagementApiContract; room: RoomConfiguration; providers: readonly ProviderSummary[]; readiness: readonly ProviderReadiness[] | undefined;
-  runs: RunSummary[]; runCosts?: ReadonlyMap<string, string>; workflow: { label: string; detail: string; onChange: () => void };
+  runs: RunSummary[]; workflow: { label: string; detail: string; onChange: () => void };
   onNewDiscussion: () => void; onOpenRun: (runId: string) => void; onOpenSettings: () => void;
   /** Members, names or archive state changed: the sidebar and discussion header reload. */
   onChanged: () => void; onDeleted: () => void;
 };
 
 /** 房间: one page — the room, its members (order, on/off, menu), its discussion mode, its discussions, and archive or delete. */
-export function RoomPage({ api, room, providers, readiness, runs, runCosts, workflow, onNewDiscussion, onOpenRun, onOpenSettings, onChanged, onDeleted }: RoomPageProps) {
+export function RoomPage({ api, room, providers, readiness, runs, workflow, onNewDiscussion, onOpenRun, onOpenSettings, onChanged, onDeleted }: RoomPageProps) {
   const [agents, setAgents] = useState<AgentConfiguration[]>(); const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [editor, setEditor] = useState<AgentConfiguration | 'new'>(); const [editingRoom, setEditingRoom] = useState(false);
@@ -136,7 +136,7 @@ export function RoomPage({ api, room, providers, readiness, runs, runCosts, work
       {runs.length === 0 ? <p className="muted small">还没有讨论。写下目标就能开始第一场。</p>
         : <ul className="card run-list">{runs.map(run => <li key={run.id} className="card-row">
           <span className={cx('run-dot', liveStatuses.includes(run.status) && 'is-live', run.status === 'error' && 'is-warn')} aria-hidden />
-          <div className="grow"><b>{run.task ?? '旧任务（目标未记录）'}</b><small>{statusLabels[run.status] ?? run.status} · {when(run.createdAt)}{runCosts?.get(run.id) ? ` · ${runCosts.get(run.id)}` : ''}</small></div>
+          <div className="grow"><b>{run.task ?? '旧任务（目标未记录）'}</b><small>{statusLabels[run.status] ?? run.status} · {when(run.createdAt)}</small></div>
           <Button size="sm" variant="quiet" onClick={() => onOpenRun(run.id)}>打开</Button></li>)}</ul>}
     </section>
 

@@ -2,10 +2,8 @@ import { CircleStop, History, Layers, RefreshCw, TriangleAlert } from 'lucide-re
 import type { RunSnapshot } from '../../../shared/types/run';
 import { Button, Note, NoticeCard } from '../../components/ui';
 import { canContinueRun, summaryWritable } from '../host/model';
-import { BudgetStopNotice, type LedgerCommands } from '../usage';
-import { repeatCost } from './model';
 
-/** D107: the moment to summarize is the host's call; this only says how full the context is and what waiting costs. */
+/** D107: the moment to summarize is the host's call; this only says how full the context is. */
 export function ContextHint({ snapshot, onSummarize }: { snapshot: RunSnapshot; onSummarize: () => void }) {
   const pressure = snapshot.contextPressure;
   if (!pressure || pressure.level === 'ok') return null;
@@ -22,12 +20,12 @@ export function ContextHint({ snapshot, onSummarize }: { snapshot: RunSnapshot; 
 type Repeat = { enabled: boolean; run: () => void };
 type Props = {
   snapshot: RunSnapshot | undefined; error?: string; syncFailed: boolean; onRetrySync: () => void;
-  budgetStopped: boolean; ledger: LedgerCommands; retry: Repeat; resume: Repeat;
+  retry: Repeat; resume: Repeat;
   recover: { inspect: Repeat; resume: Repeat; discard: Repeat }; onSummarize: () => void; summaryOpen: boolean;
 };
 
 /** Everything that ends or blocks a Run sits right after the last message it describes, with its one way forward. */
-export function RunNotices({ snapshot, error, syncFailed, onRetrySync, budgetStopped, ledger, retry, resume, recover, onSummarize, summaryOpen }: Props) {
+export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, resume, recover, onSummarize, summaryOpen }: Props) {
   if (syncFailed) return <div className="run-notices"><NoticeCard tone="danger" icon={RefreshCw} title="同步运行状态失败">
     <p>{error ?? '已保留当前文本。'}</p>
     <div className="notice-row"><Button variant="primary" onClick={onRetrySync}>重试同步</Button></div>
@@ -36,13 +34,11 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, budgetSto
   const lastTurn = snapshot.turns.at(-1);
   const lastAttempt = snapshot.attempts?.filter(attempt => attempt.turnId === lastTurn?.turnId).at(-1);
   const member = snapshot.execution?.membersSnapshot?.find(item => item.agentId === lastTurn?.agentId);
-  const cost = lastAttempt ? repeatCost(snapshot, lastAttempt.messageId, member) : undefined;
   const repeatable = retry.enabled || resume.enabled;
   const repeatButtons = repeatable && <>
     <div className="notice-row">
       {retry.enabled && <Button variant="primary" onClick={retry.run}>重试当前回合</Button>}
       {resume.enabled && <Button onClick={resume.run}>续写部分回复</Button>}
-      {cost && <span className="note-cost">{cost}</span>}
     </div>
     <p className="notice-hint">重试和续写会重新发送请求，可能再次计费。</p>
   </>;
@@ -59,11 +55,10 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, budgetSto
     {snapshot.status === 'cancelled' && <NoticeCard tone="info" icon={CircleStop} title="已停止 · 已生成的文字都保留" role="status">
       <p>后续回合不会再进行，也不会自动继续。{canContinueRun(snapshot) ? '要接着讨论，在下方输入框写下你的话：所有成员各回应一次，或用 @ 只让一位回应。' : ''}</p>{repeatButtons}
     </NoticeCard>}
-    {snapshot.status === 'error' && !budgetStopped && <NoticeCard tone="danger" icon={TriangleAlert} title="运行失败">
+    {snapshot.status === 'error' && <NoticeCard tone="danger" icon={TriangleAlert} title="运行失败">
       <p>{error ?? '运行失败，历史输出已保留。'}</p>{repeatButtons}
     </NoticeCard>}
-    {budgetStopped && <BudgetStopNotice snapshot={snapshot} ledger={ledger} />}
-    {error && !budgetStopped && snapshot.status !== 'error' && <p className="run-error" role="alert">{error}</p>}
+    {error && snapshot.status !== 'error' && <p className="run-error" role="alert">{error}</p>}
     {!summaryOpen && <ContextHint snapshot={snapshot} onSummarize={onSummarize} />}
     {snapshot.status === 'completed' && <div className="sys-line">讨论已完成{snapshot.workflow?.limitReason ? ` · ${snapshot.workflow.limitReason === 'max_turns' ? '回合数到限' : '累计时长到限'}` : ''} · 可以在下方继续这场讨论，或开始新讨论</div>}
   </div>;

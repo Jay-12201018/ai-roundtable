@@ -7,7 +7,7 @@ import { Button, Modal, Note, Tabs, cx } from '../../components/ui';
 import type { HostCommands } from '../host/useHostCommands';
 import { ArtifactContentView } from './ArtifactContent';
 import { requestFailureText } from '../timeline';
-import type { RequestCharge } from '../../../shared/schemas/budget';
+import type { RequestUsage } from '../../../shared/schemas/usage';
 import type { ArtifactCommands } from './useArtifacts';
 import { CodeExportDialog } from '../codeExport';
 
@@ -21,12 +21,12 @@ export function StatusPill({ version }: { version: ArtifactVersion }) {
   return <span className={cx('pill', statusTone[version.status])}>{version.status === 'generating' && <span className="dot" />}{artifactStatusLabels[version.status]}</span>;
 }
 
-function statusText(version: ArtifactVersion, label: string, charge?: RequestCharge): string {
+function statusText(version: ArtifactVersion, label: string, usage?: RequestUsage): string {
   switch (version.status) {
     case 'generating': return `正在生成：已收到 ${version.outputChars.toLocaleString('zh-CN')} 个字符。完成后会自动检查格式。`;
     case 'failed': {
       const request = version.request!;
-      const text = requestFailureText({ status: request.status === 'interrupted' ? 'interrupted' : request.status === 'aborted' ? 'aborted' : 'failed', errorCode: request.errorCode, charge });
+      const text = requestFailureText({ status: request.status === 'interrupted' ? 'interrupted' : request.status === 'aborted' ? 'aborted' : 'failed', errorCode: request.errorCode, usage });
       return `${text}${version.outputChars ? '下面是已收到的部分。' : ''}`;
     }
     case 'invalid': return `格式检查没有通过：${version.issues.length} 处问题。原始输出完整保留，没有自动重试；可以修改后保存为新版本，或重新生成（会再发送 1 次请求）。`;
@@ -160,7 +160,7 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
       <StatusPill version={version} />
       {version.firstNumber !== undefined && <span className="small muted">依据第 {version.firstNumber}–{version.lastNumber} 条发言</span>}
     </div>}>
-    <p className={cx('art-status-text', version.status === 'invalid' || version.status === 'failed' ? 'is-bad' : undefined)} role="status">{statusText(version, label, snapshot.charges?.find(item => item.requestId === version.request?.requestId))}</p>
+    <p className={cx('art-status-text', version.status === 'invalid' || version.status === 'failed' ? 'is-bad' : undefined)} role="status">{statusText(version, label, snapshot.usage?.find(item => item.requestId === version.request?.requestId))}</p>
     {version.affectedNumbers.length > 0 && version.status !== 'generating' && <Note icon={AlertTriangle}
       action={<Button size="sm" disabled={busy} onClick={onRegenerate}>重新生成…</Button>}>
       <b>受影响：</b>依据的第 {version.affectedNumbers.join('、')} 条发言在这一版写成后被修改或重新生成，内容可能已经过时。可以重新生成，或者自己修改。</Note>}

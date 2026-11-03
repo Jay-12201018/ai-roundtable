@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, CircleAlert, FlaskConical, Info, Lock, Plus, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleAlert, FlaskConical, Info, Lock, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import type { ProviderConfiguration, ProviderKeyState, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
 import { providerBaseUrlSchema } from '../../../shared/schemas/configuration';
+import { DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS, DEFAULT_MODEL_MAX_OUTPUT_TOKENS, MAX_MODEL_LIMIT_TOKENS, MIN_MODEL_CONTEXT_WINDOW_TOKENS } from '../../../shared/schemas/provider';
 import { Button, Field, IconButton, Pill, Switch, Tag, cx } from '../../components/ui';
 import { presetOf, targetOf } from './presets';
-import { errorMessage, modelBlockText, modelIdProblem, serviceStatus, shortDate } from './model';
+import { errorMessage, modelBlockText, modelIdProblem, serviceStatus } from './model';
+
+/** D134: why these limits cannot be saved; Main's schema refuses the same values. */
+function limitsError({ context, output }: { context: string; output: string }): string | undefined {
+  const whole = (text: string) => /^\d{1,9}$/u.test(text.trim()) ? Number(text.trim()) : undefined;
+  const window = whole(context); const max = whole(output);
+  if (window === undefined || window < MIN_MODEL_CONTEXT_WINDOW_TOKENS || window > MAX_MODEL_LIMIT_TOKENS) return `上下文长度请输入 ${MIN_MODEL_CONTEXT_WINDOW_TOKENS} 到 ${MAX_MODEL_LIMIT_TOKENS} 之间的整数。`;
+  if (max === undefined || max < 1) return '最大输出请输入正整数。';
+  return max > window ? '最大输出不能超过上下文长度。' : undefined;
+}
 
 type Props = {
   api: ProviderSettingsApiContract; providers: readonly ProviderSummary[]; loadState: 'loading' | 'ready' | 'error';
@@ -43,6 +53,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
   const [adding, setAdding] = useState<'manual' | 'listed'>(); const [newModel, setNewModel] = useState('');
   const [listed, setListed] = useState<Array<{ id: string; name: string }>>();
   const [draft, setDraft] = useState<{ name: string; baseUrl: string }>({ name: summary.name, baseUrl: '' });
+  const [limitsOf, setLimitsOf] = useState<string>(); const [limitsDraft, setLimitsDraft] = useState<{ context: string; output: string }>();
   const [confirming, setConfirming] = useState<'key' | 'service'>();
   const alive = useRef(true); const lock = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -92,7 +103,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
       const auth = (await api.testConnection({ providerId: config.id, level: 'authentication' })).result;
       if (!alive.current) return;
       setCheck(auth.ok ? { tone: 'ok', text: 'Key 有效', at }
-        : auth.error.code === 'unsupported' ? { tone: 'info', text: '地址和配置没问题；这个服务没有免费检查 Key 的接口，可以试发一条确认', at }
+        : auth.error.code === 'unsupported' ? { tone: 'info', text: '地址和配置没问题；这个服务没有模型列表接口，可以试发一条确认', at }
           : { tone: 'warn', text: errorMessage(auth.error), at });
     });
   }
@@ -110,6 +121,20 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
     if (problem) { setError(problem); return; }
     if (!value || !config || models.some(model => model.id === value)) { setError(value ? '这个模型已经在列表里了。' : '请填写模型名。'); return; }
     void save({ customModels: [...config.customModels, { id: value, name: name.trim() || value }], defaultModelId: config.defaultModelId ?? value }, `已添加 ${value}`).then(() => { if (alive.current) { setNewModel(''); setAdding(undefined); setListed(undefined); } });
+  }
+  function openLimits(id: string, state: { contextWindowTokens: number; maxOutputTokens: number } | undefined) {
+    if (limitsOf === id) { setLimitsOf(undefined); return; }
+    setLimitsOf(id); setLimitsDraft({ context: String(state?.contextWindowTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS), output: String(state?.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS) });
+  }
+  const limitsProblem = limitsDraft ? limitsError(limitsDraft) : undefined;
+  /** D134: limits live on the model's entry; a default model without an entry gets one here. */
+  function saveLimits(model: { id: string; name: string }, reset = false) {
+    if (!config || !limitsDraft || !reset && limitsProblem) return;
+    const { contextWindowTokens: _context, maxOutputTokens: _output, ...plain } = config.customModels.find(item => item.id === model.id) ?? { id: model.id, name: model.name };
+    const next = reset ? plain : { ...plain, contextWindowTokens: Number(limitsDraft.context), maxOutputTokens: Number(limitsDraft.output) };
+    const others = config.customModels.filter(item => item.id !== model.id);
+    void save({ customModels: config.customModels.some(item => item.id === model.id) ? config.customModels.map(item => item.id === model.id ? next : item) : [...others, next] },
+      reset ? `${model.name} 已恢复默认上限。` : `${model.name} 的上限已保存。`).then(() => { if (alive.current) setLimitsOf(undefined); });
   }
   function fetchList() {
     if (!config) return;
@@ -156,10 +181,19 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
         {models.map(model => {
           const state = readiness?.models.find(item => item.modelId === model.id);
           return <div className="model-row" key={model.id}><b>{model.name}</b><code>{model.id}</code>{config.defaultModelId === model.id && <Tag tone="accent">默认</Tag>}
-            <span className="push small muted">{state?.price === 'reviewed' ? `价格已核对 · ${shortDate(state.priceReviewedAt)}` : '价格尚未审核 · 暂时不能用于讨论'}</span>
+            <span className="push small muted tabular">{state ? `上下文 ${state.contextWindowTokens.toLocaleString('zh-CN')} · 最大输出 ${state.maxOutputTokens.toLocaleString('zh-CN')}` : ''}</span>
+            <IconButton size="sm" icon={SlidersHorizontal} label={`${model.name} 的上限`} aria-expanded={limitsOf === model.id} disabled={busy || !state} onClick={() => openLimits(model.id, state)} />
             {config.defaultModelId !== model.id && <Button size="sm" variant="quiet" disabled={busy} onClick={() => void save({ defaultModelId: model.id }, `默认模型改为 ${model.name}`)}>设为默认</Button>}
             {config.defaultModelId !== model.id && <IconButton size="sm" icon={X} label={`移除 ${model.name}`} disabled={busy} onClick={() => void save({ customModels: config.customModels.filter(item => item.id !== model.id) }, `已移除 ${model.name}`)} />}
-            {state && !state.usable && state.blockedBy !== 'price' && <span className="sr-only">{modelBlockText(state)}</span>}
+            {state && !state.usable && <span className="sr-only">{modelBlockText(state)}</span>}
+            {limitsOf === model.id && limitsDraft && <form className="model-limits" aria-label={`${model.name} 的上限`} onSubmit={event => { event.preventDefault(); saveLimits(model); }}>
+              <label className="field"><span>上下文长度</span><input className="input" inputMode="numeric" aria-label="上下文长度（token）" value={limitsDraft.context} aria-invalid={limitsProblem !== undefined} onChange={event => setLimitsDraft({ ...limitsDraft, context: event.target.value })} /></label>
+              <label className="field"><span>最大输出</span><input className="input" inputMode="numeric" aria-label="最大输出（token）" value={limitsDraft.output} aria-invalid={limitsProblem !== undefined} onChange={event => setLimitsDraft({ ...limitsDraft, output: event.target.value })} /></label>
+              <p className="small muted">照服务商文档填写。默认 {DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS.toLocaleString('zh-CN')} / {DEFAULT_MODEL_MAX_OUTPUT_TOKENS.toLocaleString('zh-CN')}，比多数模型的真实上限保守：讨论放不下时会提示生成摘要，改大可以放下更多。</p>
+              {limitsProblem && <p role="alert" className="field-error">{limitsProblem}</p>}
+              <div className="inline-fields"><Button size="sm" type="submit" variant="primary" disabled={busy || limitsProblem !== undefined}>保存</Button>
+                <Button size="sm" variant="quiet" disabled={busy} onClick={() => saveLimits(model, true)}>恢复默认</Button><Button size="sm" variant="quiet" onClick={() => setLimitsOf(undefined)}>取消</Button></div>
+            </form>}
           </div>;
         })}
         <div className="model-row">
@@ -169,17 +203,17 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
             <Button size="sm" type="submit" variant="primary" disabled={busy || !newModel.trim()}>添加</Button><Button size="sm" variant="quiet" onClick={() => { setAdding(undefined); setNewModel(''); }}>取消</Button>
           </form> : <>
             <Button size="sm" variant="quiet" icon={Plus} disabled={busy} onClick={() => setAdding('manual')}>手动添加模型</Button>
-            {(summary.kind === 'openai' || summary.kind === 'anthropic' || summary.kind === 'gemini' || userAddress) && <Button size="sm" variant="quiet" disabled={busy || !readiness?.targetConfirmed} title={readiness?.targetConfirmed ? '向服务商要一份模型列表；不生成内容' : '先填写 Key 并确认地址'} onClick={fetchList}>从服务商获取列表</Button>}
+            {<Button size="sm" variant="quiet" disabled={busy || !readiness?.targetConfirmed} title={readiness?.targetConfirmed ? '向服务商要一份模型列表；不生成内容' : '先填写 Key 并确认地址'} onClick={fetchList}>从服务商获取列表</Button>}
             <span className="small muted">名字照服务商文档填写；列表里没有的也可以手动加。</span></>}
         </div>
         {modelIdProblem(newModel) && <p className="field-error svc-pad" role="alert">{modelIdProblem(newModel)}</p>}
-        {adding === 'listed' && listed && listed.length > 0 && <div className="svc-listed"><p className="small muted">服务商返回的模型（列在这里不代表价格已审核、可以用于讨论）：</p>
+        {adding === 'listed' && listed && listed.length > 0 && <div className="svc-listed"><p className="small muted">服务商返回的模型：</p>
           <ul>{listed.filter(model => !models.some(item => item.id === model.id)).slice(0, 60).map(model => <li key={model.id}><code>{model.id}</code><Button size="sm" variant="quiet" disabled={busy} onClick={() => addModel(model.id, model.name)}>添加</Button></li>)}</ul>
           <Button size="sm" variant="quiet" onClick={() => { setAdding(undefined); setListed(undefined); }}>收起</Button></div>}
       </div>}
       {config && <div className="model-row svc-checks">
-        <Button size="sm" disabled={busy || !config.enabled} onClick={runCheck}>检查连接</Button><span className="small muted">免费，不生成内容</span>
-        {readiness?.models.some(item => item.usable) && <><Button size="sm" disabled={busy} onClick={tryGeneration}>试发一条</Button><span className="small muted">{mock ? '演示，不花钱' : '约 ¥0.0001，不计入用量页'}</span></>}
+        <Button size="sm" disabled={busy || !config.enabled} onClick={runCheck}>检查连接</Button><span className="small muted">不生成内容</span>
+        {readiness?.models.some(item => item.usable) && <><Button size="sm" disabled={busy} onClick={tryGeneration}>试发一条</Button><span className="small muted">{mock ? '演示，不联网' : '发送一条很短的消息，不计入用量页'}</span></>}
         <span className="push" role="status" aria-live="polite">
           {check && <span className={cx('status-text', check.tone === 'ok' ? 'ok-text' : check.tone === 'warn' ? 'warn-text' : 'muted')}>{check.tone === 'ok' ? <Check aria-hidden /> : check.tone === 'warn' ? <CircleAlert aria-hidden /> : <Info aria-hidden />}上次检查：{check.text} · {check.at}</span>}
           {trial && <span className={cx('status-text', trial.tone === 'ok' ? 'ok-text' : 'warn-text')}> 试发：{trial.text}</span>}</span>

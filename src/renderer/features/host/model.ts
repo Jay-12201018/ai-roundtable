@@ -160,10 +160,10 @@ export function turnSettled(snapshot: RunSnapshot, turn: RunSnapshot['turns'][nu
 }
 /**
  * D111: a finished discussion continues in place — completed, or stopped with every Turn settled (a stopped Turn is
- * retried or continued instead; a budget stop is topped up and resumed). Display only; Main rechecks every condition.
+ * retried or continued instead). Display only; Main rechecks every condition.
  */
 export const canContinueRun = (snapshot: RunSnapshot | undefined) => !!snapshot?.execution && runIdle(snapshot)
-  && ['completed', 'cancelled', 'error'].includes(snapshot.status) && !(snapshot.status === 'error' && snapshot.budget?.blocked)
+  && ['completed', 'cancelled', 'error'].includes(snapshot.status)
   && snapshot.turns.every(turn => turnSettled(snapshot, turn));
 /** Version edits/regenerations wait for the in-flight request; Main rechecks every condition. */
 export const runIdle = (snapshot: RunSnapshot | undefined) => !!snapshot && !snapshot.currentTurnId && !snapshot.host?.generation

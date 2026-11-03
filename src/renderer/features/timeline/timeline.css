@@ -25,9 +25,9 @@
 .msg-foot .icon-btn { color: var(--text-3); }
 .msg-foot .icon-btn:hover:enabled { color: var(--text); }
 .ver { display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
-.cost { padding: 0 2px; border: 0; border-bottom: 1px dotted var(--text-3); background: none; color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; border-radius: 0; }
-.cost:hover { color: var(--text); }
-.cost.is-warn { color: var(--warn); border-bottom-color: var(--warn); }
+.usage-tag { padding: 0 2px; border: 0; border-bottom: 1px dotted var(--text-3); background: none; color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; border-radius: 0; }
+.usage-tag:hover { color: var(--text); }
+.usage-tag.is-warn { color: var(--warn); border-bottom-color: var(--warn); }
 .typing { display: inline-flex; gap: 6px; align-items: center; color: var(--text-3); font-size: 13px; }
 .typing svg { animation: ui-pulse 1.6s ease-in-out infinite; }
 .msg-details { margin: 8px 0 0 36px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: 13px; line-height: 20px; display: grid; gap: 8px; justify-items: start; }
@@ -35,7 +35,6 @@
 .msg-details dl > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
 .msg-details dt { color: var(--text-3); }
 .msg-details dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.msg-details .writeoff-form { width: 100%; margin: 0; }
 .msg-edit { display: grid; gap: 8px; margin: 8px 0 0 36px; }
 .msg.is-host .msg-edit { margin-left: 0; width: min(100%, 560px); }
 .msg-edit .textarea { min-height: 120px; font-size: 15px; line-height: 24px; }
@@ -66,7 +65,7 @@
 .run-notices:empty { display: none; }
 .run-error { margin: 0; color: var(--danger); }
 .summary-fields { display: grid; gap: 16px; margin-bottom: 16px; }
-.summary-cost { font-variant-numeric: tabular-nums; margin: 0 0 8px; }
+.summary-send { font-variant-numeric: tabular-nums; margin: 0 0 8px; }
 .summary-reason { color: var(--warn); margin: 0 0 8px; }
 
 /* Markdown */

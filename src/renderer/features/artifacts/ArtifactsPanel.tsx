@@ -28,7 +28,7 @@ export function ArtifactsPanel({ snapshot, commands, onGenerate, onOpen }: { sna
   onGenerate: (kind: ArtifactKind) => void; onOpen: (artifactId: string) => void }) {
   const blocked = generationBlocked(snapshot, commands);
   return <section className="ctx-sec art-panel"><h3>整理成…</h3>
-    <p className="small muted ctx-lead">把这场讨论整理成可以直接用的东西。每次生成发送 1 次请求，开始前会显示预计最高花费；模型写的版本要你采用后才算数。</p>
+    <p className="small muted ctx-lead">把这场讨论整理成可以直接用的东西。每次生成发送 1 次请求；模型写的版本要你采用后才算数。</p>
     {blocked && <p className="small art-blocked" role="note">{blocked}</p>}
     {commands.loadFailed && !commands.artifacts && <p role="alert" className="field-error small">产物读取失败。<button type="button" className="link-btn" onClick={() => void commands.reload()}>重试</button></p>}
     {artifactKindValues.map(kind => {

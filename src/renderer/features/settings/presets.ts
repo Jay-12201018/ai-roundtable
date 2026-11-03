@@ -7,53 +7,47 @@ export type ServicePreset = {
   baseUrl: string | null;
   models: Array<{ id: string; name: string; hint?: string }>;
   description: string; keyHelp: string; recommended?: boolean;
-  /** Static: no reviewed price exists in Main for this kind, so Main refuses its discussion requests (D114). */
-  priceUnreviewed: boolean;
 };
 
 /**
- * Built-in services for the connect wizard (README「十个已知体验问题」1, PROVIDER_CATALOG_PLAN). Addresses are the
- * official ones Main also enforces; only DeepSeek Flash has a reviewed price, so the others say so before setup.
+ * Built-in services for the connect wizard. Addresses are the official ones Main also enforces. Model IDs were read from
+ * the official documentation on 2026-11-03 (D134); any other model can be typed in or picked from the service's list.
+ * - DeepSeek: https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+ * - OpenAI: https://developers.openai.com/api/docs/models
+ * - Anthropic: https://platform.claude.com/docs/en/about-claude/models/overview
+ * - Gemini: https://aistudio.google.com/docs/models
  */
 export const presets: ServicePreset[] = [
-  { id: 'deepseek', name: 'DeepSeek', logo: 'DS', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', recommended: true, priceUnreviewed: false,
-    models: [{ id: 'deepseek-flash', name: 'DeepSeek Flash', hint: '快、便宜，适合多数讨论' }],
-    description: '中文好、价格低。DeepSeek Flash 已按官方价格核对，可以用于讨论。',
+  { id: 'deepseek', name: 'DeepSeek', logo: 'DS', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', recommended: true,
+    models: [{ id: 'deepseek-flash', name: 'DeepSeek Flash', hint: '快，适合多数讨论' }, { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' }],
+    description: '中文好，官方接口。',
     keyHelp: '在 DeepSeek 开放平台的「API Keys」页面创建并复制。' },
-  { id: 'openai', name: 'OpenAI', logo: 'AI', kind: 'openai', baseUrl: 'https://api.openai.com/v1', priceUnreviewed: true,
-    models: [{ id: 'gpt-4o-mini', name: 'GPT-4o mini' }],
-    description: '官方接口。价格尚未审核，暂时不能用于讨论。',
+  { id: 'openai', name: 'OpenAI', logo: 'AI', kind: 'openai', baseUrl: 'https://api.openai.com/v1',
+    models: [{ id: 'gpt-6-astra', name: 'GPT-6 Astra', hint: '官方推荐的起点' }, { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }, { id: 'gpt-6-luna', name: 'GPT-6 Luna', hint: '高效，适合大量请求' }],
+    description: '官方接口。',
     keyHelp: '在 OpenAI 控制台的「API keys」页面创建并复制。' },
-  { id: 'anthropic', name: 'Anthropic Claude', logo: 'An', kind: 'anthropic', baseUrl: 'https://api.anthropic.com', priceUnreviewed: true,
-    models: [{ id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' }],
-    description: '官方接口。价格尚未审核，暂时不能用于讨论。',
+  { id: 'anthropic', name: 'Anthropic Claude', logo: 'An', kind: 'anthropic', baseUrl: 'https://api.anthropic.com',
+    models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5', hint: '官方推荐的起点' }, { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', hint: '速度和能力均衡' }, { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', hint: '最快' }],
+    description: '官方接口。',
     keyHelp: '在 Anthropic Console 的「API Keys」页面创建并复制。' },
-  { id: 'gemini', name: 'Google Gemini', logo: 'G', kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', priceUnreviewed: true,
-    models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
-    description: '官方接口。价格尚未审核，暂时不能用于讨论。',
+  { id: 'gemini', name: 'Google Gemini', logo: 'G', kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    models: [{ id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' }, { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', hint: '最快' }],
+    description: '官方接口。',
     keyHelp: '在 Google AI Studio 的「Get API key」页面创建并复制。' },
-  { id: 'compatible', name: '其他兼容服务', logo: '⋯', kind: 'openai-compatible', baseUrl: null, priceUnreviewed: true,
+  { id: 'compatible', name: '其他兼容服务', logo: '⋯', kind: 'openai-compatible', baseUrl: null,
     models: [],
-    description: 'Kimi、通义千问、硅基流动等兼容 OpenAI 接口的服务，需要填写地址。价格尚未审核，暂时不能用于讨论。',
+    description: 'Kimi、通义千问、智谱、硅基流动等兼容 OpenAI 接口的服务，需要填写地址和模型名。',
     keyHelp: '在这个服务的控制台创建并复制 API Key。' },
-  { id: 'mock', name: '演示（Mock）', logo: '', kind: 'mock', baseUrl: null, priceUnreviewed: false,
+  { id: 'mock', name: '演示（Mock）', logo: '', kind: 'mock', baseUrl: null,
     models: [{ id: 'mock', name: '演示' }],
-    description: '不联网、不花钱，回复是预先写好的示例，不代表真实模型的水平。',
+    description: '不联网，回复是预先写好的示例，不代表真实模型的水平。',
     keyHelp: '' },
 ];
 
-const listed = (names: string[]) => names.length > 1 ? `${names.slice(0, -1).join('、')} 和${names.at(-1)}` : names[0] ?? '';
-/**
- * What can be used for a discussion today, from the presets' review state (the same fact D114 reports per saved model),
- * so opening a new service changes this sentence without anyone rewriting it.
- */
+/** What can be used for a discussion, from the same list the wizard offers. */
 export function availabilityText(): string {
-  const real = presets.filter(preset => preset.kind !== 'mock');
-  const ready = real.filter(preset => !preset.priceUnreviewed).map(preset => preset.name);
-  const pending = real.filter(preset => preset.priceUnreviewed).map(preset => preset.name);
-  if (!ready.length) return `${listed(pending)}可以先连接；价格审核前，暂时都不能用于讨论。`;
-  if (!pending.length) return `可以用于讨论：${listed(ready)}。`;
-  return `目前可以用于讨论的是 ${listed(ready)}；${listed(pending)}可以先连接，价格审核后开放讨论。`;
+  const names = presets.filter(preset => preset.kind !== 'mock' && preset.id !== 'compatible').map(preset => preset.name);
+  return `支持 ${names.join('、')}，以及其他兼容 OpenAI 接口的服务。三位成员可以各用一家。`;
 }
 
 const normalize = (url: string | null | undefined) => url ? url.replace(/\/+$/u, '') : url;

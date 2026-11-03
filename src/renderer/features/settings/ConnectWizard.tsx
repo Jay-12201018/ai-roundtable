@@ -4,7 +4,7 @@ import type { KeyStorageStatus, ProviderConfiguration, ProviderReadiness, Provid
 import { providerBaseUrlSchema } from '../../../shared/schemas/configuration';
 import { Button, Choice, Field, Modal, Stepper } from '../../components/ui';
 import { presets, presetOf, targetOf, type ServicePreset } from './presets';
-import { errorMessage, modelIdProblem, shortDate } from './model';
+import { errorMessage, modelIdProblem } from './model';
 
 /** What the app did after a connection (D6-A): the room it created for the first real service, if any. */
 export type ConnectedRoom = { roomName: string; memberNames: string[]; modelName: string | null };
@@ -107,14 +107,14 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   async function runChecks(provider: ProviderConfiguration) {
     setChecking(true); setChecks([]); setTrial({ state: 'idle' });
     const next: Check[] = [];
-    if (provider.kind === 'mock') next.push({ tone: 'ok', title: '演示服务已添加', detail: '不联网、不花钱；回复是预先写好的示例，不代表真实模型的水平。' });
+    if (provider.kind === 'mock') next.push({ tone: 'ok', title: '演示服务已添加', detail: '不联网；回复是预先写好的示例，不代表真实模型的水平。' });
     else {
       next.push({ tone: 'ok', title: '已保存', detail: `${storage?.mode === 'memory' ? 'Key 只在这次运行期间有效' : 'Key 已存进系统钥匙串'}，请求地址 ${targetOf(provider)} 已确认。` });
       try {
         const result = (await api.testConnection({ providerId: provider.id, level: 'authentication' })).result;
         const code = result.ok ? undefined : result.error.code;
-        next.push(result.ok ? { tone: 'ok', title: 'Key 有效', detail: '已用免费的模型列表接口检查，没有生成内容、没有产生费用。' }
-          : code === 'unsupported' ? { tone: 'info', title: 'Key 还没有核对', detail: '这个服务没有免费检查 Key 的接口。地址和配置没有问题；Key 是否有效，要等第一次讨论或“试发一条”时才知道。' }
+        next.push(result.ok ? { tone: 'ok', title: 'Key 有效', detail: '已用模型列表接口检查，没有生成内容。' }
+          : code === 'unsupported' ? { tone: 'info', title: 'Key 还没有核对', detail: '这个服务没有提供模型列表接口。地址和配置没有问题；Key 是否有效，要等第一次讨论或“试发一条”时才知道。' }
             : { tone: 'warn', title: code === 'authentication_failed' ? 'Key 无效' : 'Key 没能核对', detail: errorMessage(result.error) });
       } catch (cause) { next.push({ tone: 'warn', title: 'Key 没能核对', detail: errorMessage(cause) }); }
     }
@@ -123,8 +123,8 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     const model = current?.models.find(item => item.modelId === provider.defaultModelId) ?? current?.models[0];
     const label = provider.customModels.find(item => item.id === model?.modelId)?.name ?? model?.modelId;
     if (model && provider.kind !== 'mock') next.push(model.usable
-      ? { tone: 'ok', title: `${label} 可以用于讨论`, detail: `价格已核对${model.priceReviewedAt ? `（${shortDate(model.priceReviewedAt)}）` : ''}，讨论时按官方单价预留和结算。` }
-      : { tone: 'warn', title: `${label} 暂时不能用于讨论`, detail: model.blockedBy === 'price' ? '价格尚未审核。Key 已保存，价格核对之后就能用；在那之前不会发送讨论请求，避免花费算不清。' : errorMessage({ code: model.blockedBy === 'key' ? 'authentication_failed' : 'forbidden' }) });
+      ? { tone: 'ok', title: `${label} 可以用于讨论`, detail: '每位成员都可以单独换模型。调用模型的费用由服务商收取，这里不估算。' }
+      : { tone: 'warn', title: `${label} 暂时不能用于讨论`, detail: errorMessage({ code: model.blockedBy === 'key' ? 'authentication_failed' : 'forbidden' }) });
     if (!alive.current) return;
     setChecks(next); setReadiness(current);
     if (!rekey && onConnected) {
@@ -148,7 +148,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   const title = step === 0 ? '连接模型服务' : step === 1 ? (mock ? '添加演示服务' : rekey ? `更换 ${displayName} 的 API Key` : compatible ? '连接兼容 OpenAI 接口的服务' : `填写 ${displayName} 的 API Key`)
     : checking ? '正在检查…' : usable ? `${displayName} 已连接` : `${displayName} 已保存`;
   const description = step === 0 ? '选一个你有账号的服务。只需要做一次。'
-    : step === 1 ? (mock ? '演示成员不联网、不花钱，适合先熟悉怎么主持一场讨论。' : `费用由 ${displayName} 直接从你的账户扣除；AI 圆桌不收取任何费用。`)
+    : step === 1 ? (mock ? '演示成员不联网，适合先熟悉怎么主持一场讨论。' : `费用由 ${displayName} 直接从你的账户收取；AI 圆桌不收费，也不估算费用。`)
       : usable ? '可以开始讨论了。' : '还不能用于讨论，原因写在下面。';
 
   const footer = step === 0 ? <><span className="is-left">之后可以在「设置 → 模型服务」里添加更多。</span><Button onClick={close}>取消</Button><Button variant="primary" onClick={() => setStep(1)}>下一步</Button></>
@@ -166,7 +166,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
         {presets.map(item => <Choice key={item.id} selected={preset.id === item.id} onSelect={() => choose(item)} title={item.name}
           icon={<span className="svc-logo is-sm" aria-hidden>{item.id === 'mock' ? <FlaskConical /> : item.logo}</span>} badge={item.recommended ? '推荐' : undefined}>{item.description}</Choice>)}
       </div>
-      <p className="small muted wizard-foot-note">“价格尚未审核”的服务可以保存 Key、检查连接，但在价格核对之前不会发送讨论请求，避免花费算不清。</p>
+      <p className="small muted wizard-foot-note">可以连接多个服务，让三位成员各用一家的模型，互相交叉审计。</p>
     </>}
     {step === 1 && <form id="connect-form" className="form-stack" onSubmit={submit} onChange={() => setError('')} noValidate>
       {compatible && !rekey && <>
@@ -182,10 +182,10 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
       {mock && <div className="callout"><Info aria-hidden /><span className="grow">演示服务没有地址，也不需要 Key。演示成员的回复是预先写好的示例，不代表真实模型的水平，也不会出现在用量里。</span></div>}
       {!rekey && !mock && (compatible
         ? <div className="form-grid">
-          <Field label="模型名">{props => <input {...props} className="input mono" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)} placeholder="例如 moonshot-v1-8k" autoComplete="off" spellCheck={false} aria-invalid={Boolean(modelIdProblem(modelId)) || undefined} />}</Field>
+          <Field label="模型名">{props => <input {...props} className="input mono" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)} placeholder="照服务商文档填写，例如 kimi-k2" autoComplete="off" spellCheck={false} aria-invalid={Boolean(modelIdProblem(modelId)) || undefined} />}</Field>
           <Field label="显示名" optional>{props => <input {...props} className="input" value={modelName} disabled={busy} onChange={event => setModelName(event.target.value)} />}</Field>
         </div>
-        : <Field label="默认模型" help={`新成员默认用这个模型，每位成员也可以单独换。${preset.priceUnreviewed ? '这个模型的价格尚未审核，暂时不能用于讨论。' : ''}`}>
+        : <Field label="默认模型" help="新成员默认用这个模型，每位成员也可以单独换。">
           {props => <select {...props} className="select input" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)}>
             {preset.models.map(model => <option key={model.id} value={model.id}>{model.name}（{model.id}）{model.hint ? ` · ${model.hint}` : ''}</option>)}</select>}</Field>)}
       {!rekey && !mock && <details className="adv"><summary>高级：服务名称、更多模型</summary><div className="form-stack">
@@ -197,12 +197,12 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
       {error && <p className="field-error" role="alert">{error}</p>}
     </form>}
     {step === 2 && <div className="form-stack" aria-busy={checking}>
-      {checking && checks.length === 0 && <p role="status" className="muted">正在检查，不会生成内容、不会产生费用…</p>}
+      {checking && checks.length === 0 && <p role="status" className="muted">正在检查，不会生成内容…</p>}
       <ul className="check-list" aria-live="polite">{checks.map(check => <li key={check.title}>
         {check.tone === 'ok' ? <Check aria-hidden className="ok" /> : check.tone === 'warn' ? <CircleAlert aria-hidden className="warn" /> : <Info aria-hidden className="muted-icon" />}
         <span><b>{check.title}</b><small>{check.detail}</small></span></li>)}</ul>
       {!checking && readiness?.models.some(model => model.usable) && <div className="callout"><Info aria-hidden /><span className="grow">
-        想确认真的能生成？可以试发一条很短的消息，约 ¥0.0001（直接扣在你的账户上，不计入用量页）。{' '}
+        想确认真的能生成？可以试发一条很短的消息，费用由服务商收取，不计入用量页。{' '}
         <Button size="sm" disabled={trial.state === 'sending'} onClick={tryGeneration}>{trial.state === 'sending' ? '正在试发…' : '试发一条'}</Button>
         {trial.text && <span role="status" className={trial.state === 'ok' ? 'ok-text' : 'warn-text'}> {trial.text}</span>}</span></div>}
       {room && <div className="callout is-accent"><Users aria-hidden /><span className="grow">下一步：已为你建好房间「{room.roomName}」，{room.memberNames.length} 位成员（{room.memberNames.join('、')}）{room.modelName ? `都使用 ${room.modelName}` : '还没选模型，到房间里为他们选一个能用的模型'}。</span></div>}

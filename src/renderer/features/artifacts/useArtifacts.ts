@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ArtifactApiContract, CodeExportApiContract } from '../../../shared/contracts/app';
 import type { ArtifactKind, ArtifactList, ArtifactPreview } from '../../../shared/schemas/artifact';
 import { copyText } from '../../components/ui';
-import { ledgerErrorMessage } from '../usage';
+import { commandErrorMessage } from '../usage';
 
 let fallbackCounter = 0;
 const newRequestId = () => globalThis.crypto?.randomUUID?.() ?? `artifact-${Date.now()}-${++fallbackCounter}`;
@@ -44,7 +44,7 @@ export function useArtifacts(api: ArtifactApiContract | undefined, runId: string
     if (!api || !runId || inFlight.current) return;
     inFlight.current = true; setPending(key); setError(undefined); setNotice(undefined);
     try { const result = await work(newRequestId()); void load(); return result; }
-    catch (failure) { if (alive.current) setError({ key, message: ledgerErrorMessage(failure) }); return undefined; }
+    catch (failure) { if (alive.current) setError({ key, message: commandErrorMessage(failure) }); return undefined; }
     finally { inFlight.current = false; if (alive.current) setPending(undefined); }
   }, [api, runId, load]);
 

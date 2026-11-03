@@ -33,12 +33,12 @@ export function Avatar({ name, size = 'md', host }: { name: string; size?: 'sm' 
   return <span className={cx('avatar', size === 'sm' && 'is-sm', host && 'is-host')} aria-hidden>{[...name.trim()][0] ?? '?'}</span>;
 }
 
-/** 提示条: a single reason with at most one next step and what it may cost. */
-export function Note({ tone = 'warn', icon: Icon, children, action, cost, role = 'note' }: { tone?: 'warn' | 'info' | 'danger' | 'neutral'; icon: IconType; children: ReactNode; action?: ReactNode; cost?: ReactNode; role?: string }) {
+/** 提示条: a single reason with at most one next step. */
+export function Note({ tone = 'warn', icon: Icon, children, action, role = 'note' }: { tone?: 'warn' | 'info' | 'danger' | 'neutral'; icon: IconType; children: ReactNode; action?: ReactNode; role?: string }) {
   return <div className={cx('note', tone !== 'warn' && `is-${tone}`)} role={role}>
     <Icon aria-hidden strokeWidth={1.8} />
     <div className="note-body">{children}</div>
-    {(action || cost) && <div className="note-action">{action}{cost && <span className="note-cost">{cost}</span>}</div>}
+    {action && <div className="note-action">{action}</div>}
   </div>;
 }
 export function NoticeCard({ tone = 'warn', icon: Icon, title, children, role = 'alert', label }: { tone?: 'warn' | 'danger' | 'info'; icon: IconType; title: ReactNode; children?: ReactNode; role?: string; label?: string }) {
