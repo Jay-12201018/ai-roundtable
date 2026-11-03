@@ -19,7 +19,7 @@ export type CodeExportRoot = z.infer<typeof codeExportRootSchema>;
 
 export const codeExportChooseRootInputSchema = z.object({ runId: idSchema, versionId: idSchema }).strict();
 /** Folders Main refuses to write into at all. */
-export const codeExportRootRefusalValues = ['filesystem_root', 'app_data', 'not_directory'] as const;
+export const codeExportRootRefusalValues = ['filesystem_root', 'app_data', 'git_dir', 'not_directory'] as const;
 export const codeExportChooseRootResultSchema = z.object({
   runId: idSchema, versionId: idSchema,
   /** Absent when the host cancelled the dialog or the folder was refused. */
@@ -111,6 +111,7 @@ export const codeExportStatusLabels: Record<CodeExportFileStatus, string> = { cr
 export const codeExportRootRefusalLabels: Record<(typeof codeExportRootRefusalValues)[number], string> = {
   filesystem_root: '不能直接写进磁盘的根目录，请选一个具体的文件夹。',
   app_data: '这是本应用自己的数据文件夹，不能写入。请另选一个文件夹。',
+  git_dir: '这个文件夹在 .git 里面：那里的文件可能被 Git 自动执行，不能写入。请另选一个文件夹。',
   not_directory: '选中的不是文件夹。',
 };
 /** Why, in the host's words. */
@@ -119,15 +120,15 @@ export const codeExportReasonLabels: Record<CodeExportReason, string> = {
   drive: '带有盘符（如 C:），只能写相对路径',
   unc: '是网络路径（\\\\server\\share），只能写相对路径',
   backslash: '用了反斜杠 \\，路径只能用 / 分隔',
-  traversal: '含有 .. 或 .，可能跳出所选文件夹',
+  traversal: '含有 .. 或 .（包括全角等写法），可能跳出所选文件夹',
   empty_segment: '含有空的一段（//）',
   control_char: '含有控制字符',
-  invisible_char: '含有看不见的字符（零宽或改变文字方向的字符），显示的名字可能和实际不同',
-  reserved_char: '含有文件名不允许的字符 : * ? " < > |',
-  reserved_name: '用了系统保留的名字（如 CON、NUL、COM1）',
+  invisible_char: '含有看不见的字符（零宽、软连字符或改变文字方向的字符等），显示的名字可能和实际不同',
+  reserved_char: '含有文件名不允许的字符 : * ? " < > | 或全角的路径分隔符',
+  reserved_name: '用了系统保留的名字（如 CON、NUL、COM1，包括全角写法）',
   trailing_dot_space: '某一段以点或空格结尾，在 Windows 上会被改名',
   segment_too_long: '某一段名字太长（超过 255 字节）',
-  git_dir: '在 .git 文件夹里：那里的文件可能被 Git 自动执行，不能写入',
+  git_dir: '指向 .git 文件夹（包括 git~1、全角等写法）：那里的文件可能被 Git 自动执行，不能写入',
   app_data: '在本应用自己的数据文件夹里，不能写入',
   case_collision: '和这份候选里的另一个文件只差大小写，写入后会互相覆盖',
   symlink_parent: '路径上有一段是符号链接，可能指向所选文件夹以外',
