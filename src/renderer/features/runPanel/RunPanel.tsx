@@ -74,10 +74,13 @@ function ProgressTab({ snapshot, ledger, onSummarize, onOpenWorkflow }: { snapsh
   const used = usedSummary(snapshot);
   const numbered = (timelineSlots(snapshot)?.filter(slot => slot.number !== undefined).length ?? 0);
   const writable = summaryWritable(snapshot);
+  // The demo members never reach a service: what this page says about prices and requests would be untrue for them.
+  const members = snapshot.execution?.membersSnapshot ?? [];
+  const demoOnly = members.length > 0 && members.every(member => member.modelId === 'mock');
   return <>
     <section className="ctx-sec"><h3>预算</h3>
       <BudgetCard snapshot={snapshot} ledger={ledger} />
-      <p className="small muted ctx-note">按官方单价估算，DeepSeek 空闲时段按半价；实际扣费以服务商控制台为准。</p>
+      <p className="small muted ctx-note">{demoOnly ? '演示成员不联网、不花钱，这里的额度不会被用掉。' : '按官方单价估算，DeepSeek 空闲时段按半价；实际扣费以服务商控制台为准。'}</p>
     </section>
     <section className="ctx-sec"><h3>讨论方式{onOpenWorkflow && <button type="button" className="link-btn" aria-label="查看讨论方式" onClick={onOpenWorkflow}>查看</button>}</h3>
       {progress && workflow ? <>
@@ -92,7 +95,7 @@ function ProgressTab({ snapshot, ledger, onSummarize, onOpenWorkflow }: { snapsh
     </section>
     {onSummarize && <section className="ctx-sec"><h3>讨论摘要</h3>
       <p className="small muted">{used ? `之后的发言正在用摘要代替第 1–${used.lastNumber} 条原文。讨论再变长时，可以在此基础上续写摘要。`
-        : '讨论变长、快放不进上下文时，可以把较早的发言整理成摘要。生成是一次真实请求，会按预算预留和结算；不会自动生成。'}</p>
+        : `讨论变长、快放不进上下文时，可以把较早的发言整理成摘要。${demoOnly ? '演示成员写的是预先准备的示例，不花钱' : '生成是一次真实请求，会按预算预留和结算'}；不会自动生成。`}</p>
       <Button size="sm" disabled={!writable || numbered < 2} onClick={onSummarize}>生成讨论摘要…</Button>
       {!writable && <p className="small muted">暂停运行或等当前请求结束后可以生成摘要。</p>}
     </section>}
