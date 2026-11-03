@@ -170,7 +170,8 @@ async function probe() {
     // R13B added the summary and usage groups: typed methods only, still no generic invoke/send.
     // R16 batch 2 added network (saved proxy settings, a keyless proxy check) and app (relaunch), typed methods only (D115).
     // R14 added artifact: typed methods only; a file export asks Main's save dialog, the page never passes a path.
-    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app', 'artifact', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
+    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app', 'artifact', 'codeExport', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
+    check(JSON.stringify(Object.keys(api.codeExport)) === JSON.stringify(['chooseRoot', 'preview', 'write']), 'Unexpected code export surface');
     check(JSON.stringify(Object.keys(api.artifact)) === JSON.stringify(['preview', 'generate', 'list', 'getVersion', 'adopt', 'edit', 'export', 'listCodeCandidates'])
       && Object.values(api.artifact).every(value => typeof value === 'function') && !('invoke' in api.artifact) && !('send' in api.artifact), 'Unexpected artifact API');
     check(JSON.stringify(Object.keys(api.network)) === JSON.stringify(['getSettings', 'saveSettings', 'testProxy']) && JSON.stringify(Object.keys(api.app)) === JSON.stringify(['relaunch'])

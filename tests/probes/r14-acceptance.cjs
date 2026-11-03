@@ -111,10 +111,10 @@ async function main() {
     // ── 2. 本场信息 › 产物 ────────────────────────────────────────────────────
     await panelOpen();
     const panel = await js(`document.querySelector('.art-panel').innerText`);
-    for (const piece of ['整理成…', '需求文档（PRD）', '会议纪要', '行动清单', '代码候选', '每次生成发送 1 次请求', '模型写的版本要你采用后才算数', '只预览文件路径和代码；不会执行，也不会写入磁盘'])
+    for (const piece of ['整理成…', '需求文档（PRD）', '会议纪要', '行动清单', '代码候选', '每次生成发送 1 次请求', '模型写的版本要你采用后才算数', '文件路径和代码，不会执行；采用后可以逐个文件确认，写入你选的文件夹'])
       check(panel.includes(piece), 'Panel says: ' + piece);
     check(!panel.includes('即将推出') && !/R1[45]/u.test(panel), 'No placeholder or development terms');
-    await capture('panel-light', '讨论结束后打开“本场信息 › 产物”：四类产物各一行，写明它是什么；顶部说明每次生成发送 1 次请求、开始前显示预计最高花费、模型写的版本要主持人采用后才算数。“代码候选”写明只预览、不执行、不写盘。', '.art-panel');
+    await capture('panel-light', '讨论结束后打开“本场信息 › 产物”：四类产物各一行，写明它是什么；顶部说明每次生成发送 1 次请求、开始前显示预计最高花费、模型写的版本要主持人采用后才算数。“代码候选”写明不会执行、采用后可以逐个文件确认写入主持人选的文件夹。', '.art-panel');
 
     // ── 3. PRD: preview, generate, candidate, adopt ─────────────────────────
     const sent = fixture.requests.length;
@@ -242,15 +242,15 @@ async function main() {
     await click('生成（发送 1 次请求）', { which: 'last' });
     await readerHas('第 2 版', 30000); await readerHas('候选 · 待采用', 30000);
     const codeText = await reader();
-    check(codeText.includes('这些代码只在这里预览：不会执行，也不会写入任何文件。') && codeText.includes('src/pilot/fee.ts') && codeText.includes('riderIncome'), 'Code preview with path and code');
-    await capture('code-candidate', '代码候选：顶部写明“只在这里预览：不会执行，也不会写入任何文件”；每个文件显示相对路径、语言和行数，代码用净化后的代码块显示（可复制）。', 'dialog.artifact-reader');
+    check(codeText.includes('这些代码不会被执行。采用之后可以写入你选的文件夹，写之前会逐个文件列出差异，由你勾选。') && codeText.includes('src/pilot/fee.ts') && codeText.includes('riderIncome'), 'Code preview with path and code');
+    await capture('code-candidate', '代码候选：顶部写明“这些代码不会被执行”，采用之后才能写入主持人选的文件夹、写之前逐个文件列出差异；每个文件显示相对路径、语言和行数，代码用净化后的代码块显示（可复制）。', 'dialog.artifact-reader');
     await click('采用这一版'); await readerHas('已采用');
     const codeAdopted = await reader();
-    check(!codeAdopted.includes('另存为…') && codeAdopted.includes('代码候选不能在这里存成文件'), 'No file save for code, and the reader says why');
+    check(!codeAdopted.includes('另存为…') && codeAdopted.includes('写入文件夹…') && codeAdopted.includes('“写入文件夹…”会先逐个文件列出新建、覆盖和差异'), 'No plain file save for code; R15 writing is offered and explained');
     const candidates = await api('artifact.listCodeCandidates', { runId: (await runSnapshot()).runId });
     check(candidates.candidates.length === 1 && candidates.candidates[0].files[0].path === 'src/pilot/fee.ts' && candidates.candidates[0].status === 'valid', 'R15 sees the adopted code candidate');
     check(fs.readdirSync(exportsDir).length === 0 && !fs.existsSync(join(probe.directory, 'src')), 'Nothing written to disk for code');
-    await capture('code-adopted', '采用后代码候选有效：可以“复制 Markdown / JSON”，但没有“另存为…”，并写明写入磁盘会在后续版本提供、逐个文件确认。供后续写盘功能读取的接口只列出这份已采用、通过校验的候选；磁盘上没有任何新文件。', 'dialog.artifact-reader');
+    await capture('code-adopted', '采用后代码候选有效：可以“复制 Markdown / JSON”；没有“另存为…”，取而代之的是红色的“写入文件夹…”（R15），并写明会先逐个文件列出新建、覆盖和差异、只写勾选的文件。供后续写盘功能读取的接口只列出这份已采用、通过校验的候选；磁盘上没有任何新文件。', 'dialog.artifact-reader');
     await key('Escape');
 
     // ── 6. A source message edited → affected → regenerate ──────────────────
@@ -336,7 +336,7 @@ async function main() {
   const Sqlite = require('better-sqlite3');
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
-    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 12, 'Migration 12');
+    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 13, 'Migration 13');
     check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 8 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 7
       && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='settled'").pluck().get() === 6 && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='unknown'").pluck().get() === 1,
       'Eight versions; six settled artifact requests and the stopped one unknown');

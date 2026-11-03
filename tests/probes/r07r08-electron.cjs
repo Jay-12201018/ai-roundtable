@@ -110,7 +110,8 @@ async function main() {
     // R13B added the summary and usage groups (typed methods only).
     // R16 batch 2 added network and app (saved proxy settings, a keyless proxy check, relaunch; D115).
     // R14 added artifact (typed methods only; a file export asks Main's save dialog).
-    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app','artifact','host','network','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['app','artifact','codeExport','host','network','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    check(JSON.stringify(Object.keys(api.codeExport)) === JSON.stringify(['chooseRoot','preview','write']), 'Unexpected code export surface');
     check(JSON.stringify(Object.keys(api.artifact)) === JSON.stringify(['preview','generate','list','getVersion','adopt','edit','export','listCodeCandidates']), 'Unexpected artifact surface');
     check(JSON.stringify(Object.keys(api.network)) === JSON.stringify(['getSettings','saveSettings','testProxy']) && JSON.stringify(Object.keys(api.app)) === JSON.stringify(['relaunch']), 'Unexpected network/app surface');
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview','generate','confirm']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport','writeOff','exportCsv']), 'Unexpected summary/usage surface');
