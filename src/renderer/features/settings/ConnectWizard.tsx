@@ -24,7 +24,7 @@ const storageText = (storage: KeyStorageStatus | null) => storage?.mode === 'mem
   : '保存后存进系统钥匙串；';
 
 /**
- * Connect a service (D136): pick one, paste the Key, pick a model, save. Saving is all it takes; the address the Key goes to
+ * Connect a service (D136): pick one, paste the Key, pick or type a model, save. Saving is all it takes; the address the Key goes to
  * is written above it. 测试连接 is there for whoever wants it, and nothing waits for it.
  */
 export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onStart }: ConnectWizardProps) {
@@ -34,7 +34,6 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   const [address, setAddress] = useState('');
   const [kind, setKind] = useState<ProviderKind>('openai-compatible');
   const [modelId, setModelId] = useState(() => presets[0]!.models[0]?.id ?? '');
-  const [extraModel, setExtraModel] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [storage, setStorage] = useState<KeyStorageStatus | null>(null);
@@ -51,12 +50,12 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   const type = interfaceTypes.find(item => item.kind === kind)!;
   const typed = custom && !rekey && address.trim() ? providerBaseUrlSchema.safeParse(address) : undefined;
   const target = rekey ? targetOf(rekey) : custom ? (typed?.success ? typed.data.replace(/\/+$/u, '') : address.trim() ? null : targetOf({ kind, baseUrl: null })) : preset.baseUrl;
-  const chosenModel = custom ? modelId.trim() : modelId;
-  const modelProblem = modelIdProblem(chosenModel) ?? modelIdProblem(extraModel);
+  const chosenModel = modelId.trim();
+  const modelProblem = modelIdProblem(chosenModel);
   const displayName = rekey?.name ?? (name.trim() || preset.name);
 
   function choose(next: ServicePreset) {
-    setPreset(next); setName(next.id === 'custom' ? '' : next.name); setModelId(next.models[0]?.id ?? ''); setAddress(''); setKind('openai-compatible'); setExtraModel(''); setError(''); setTest(undefined);
+    setPreset(next); setName(next.id === 'custom' ? '' : next.name); setModelId(next.models[0]?.id ?? ''); setAddress(''); setKind('openai-compatible'); setError(''); setTest(undefined);
     setPicking(false);
   }
   function close() { clearSecret(); onClose(); }
@@ -71,10 +70,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
 
   /** Create (or, after a first attempt, update) the service; mock needs nothing else. */
   async function saveConfiguration(): Promise<ProviderConfiguration> {
-    const models = mock ? [] : [...new Map([
-      ...(custom ? [{ id: chosenModel, name: chosenModel }] : preset.models.map(model => ({ id: model.id, name: model.name }))),
-      ...(extraModel.trim() ? [{ id: extraModel.trim(), name: extraModel.trim() }] : []),
-    ].map(model => [model.id, model])).values()];
+    const models = mock ? [] : [...new Map([{ id: chosenModel, name: chosenModel }, ...preset.models.map(model => ({ id: model.id, name: model.name }))].map(model => [model.id, model])).values()];
     const hasDefault = providers.some(provider => provider.isDefault && provider.enabled && provider.kind !== 'mock');
     const input = { name: displayName, kind: custom ? kind : preset.kind, baseUrl: mock ? null : custom ? (address.trim() || null) : preset.baseUrl,
       enabled: true, isDefault: !mock && !hasDefault, defaultModelId: mock ? 'mock' : chosenModel || null, customModels: models };
@@ -156,15 +152,11 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
         {props => <input {...props} ref={secret} className="input mono" type="password" autoComplete="off" spellCheck={false} disabled={busy} autoFocus={!custom || Boolean(rekey)} placeholder={keySaved ? '已保存；要更换就重新粘贴' : undefined}
           onChange={event => setHasKey(event.target.value.length > 0)} />}</Field>}
       {mock && <div className="callout"><Info aria-hidden /><span className="grow">演示服务没有地址，也不需要 Key。演示成员的回复是预先写好的示例，不代表真实模型的水平，也不会出现在用量里。</span></div>}
-      {!rekey && !mock && (custom
-        ? <Field label="模型名" help="照服务商文档填写。">{props => <input {...props} className="input mono" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)} placeholder="服务商文档里的模型 ID" autoComplete="off" spellCheck={false} aria-invalid={Boolean(modelIdProblem(modelId)) || undefined} />}</Field>
-        : <Field label="模型" help="每位成员可以单独换模型。">
-          {props => <select {...props} className="select input" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)}>
-            {preset.models.map(model => <option key={model.id} value={model.id}>{model.name}（{model.id}）{model.hint ? ` · ${model.hint}` : ''}</option>)}</select>}</Field>)}
-      {!rekey && !mock && !custom && <details className="adv"><summary>更多：服务名称、其他模型</summary><div className="form-stack">
+      {!rekey && !mock && <Field label="模型名" help={custom ? '照服务商文档填写。' : '可以选建议的模型，也可以照服务商文档手填。每位成员可以单独换模型。'}>
+        {props => <><input {...props} className="input mono" list={custom ? undefined : 'wizard-models'} value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)} placeholder="服务商文档里的模型 ID" autoComplete="off" spellCheck={false} aria-invalid={Boolean(modelProblem) || undefined} />
+          {!custom && <datalist id="wizard-models">{preset.models.map(model => <option key={model.id} value={model.id}>{model.name}{model.hint ? ` · ${model.hint}` : ''}</option>)}</datalist>}</>}</Field>}
+      {!rekey && !mock && !custom && <details className="adv"><summary>更多：服务名称</summary><div className="form-stack">
         <Field label="服务名称">{props => <input {...props} className="input" value={name} disabled={busy} onChange={event => setName(event.target.value)} />}</Field>
-        <Field label="再加一个模型" optional help="名字照服务商文档填写；列表里没有的也可以以后在设置里加。">
-          {props => <input {...props} className="input mono" value={extraModel} disabled={busy} onChange={event => setExtraModel(event.target.value)} autoComplete="off" spellCheck={false} aria-invalid={Boolean(modelIdProblem(extraModel)) || undefined} />}</Field>
       </div></details>}
       {modelProblem && <p className="field-error" role="alert">{modelProblem}</p>}
       {error && <p className="field-error" role="alert">{error}</p>}

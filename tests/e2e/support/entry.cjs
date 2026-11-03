@@ -97,9 +97,7 @@ app.whenReady().then(() => {
   });
 });
 
-const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.moonshot.cn': 'kimi', 'https://dashscope.aliyuncs.com': 'qwen', 'https://open.bigmodel.cn': 'glm',
-  'https://ark.cn-beijing.volces.com': 'doubao', 'https://api.minimax.cn': 'minimax', 'https://models.e2e.invalid': 'compatible', 'https://anthropic-gateway.e2e.invalid': 'anthropic',
-  'https://gemini-gateway.e2e.invalid': 'gemini', 'https://api.openai.com': 'openai', 'https://api.anthropic.com': 'anthropic', 'https://generativelanguage.googleapis.com': 'gemini' };
+const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://models.e2e.invalid': 'compatible', 'https://anthropic-gateway.e2e.invalid': 'anthropic', 'https://gemini-gateway.e2e.invalid': 'gemini' };
 const build = process.env.ROUNDTABLE_E2E_BUILD ? resolve(process.env.ROUNDTABLE_E2E_BUILD) : resolve(__dirname, '../../../out');
 import(pathToFileURL(join(build, 'main/index.js')).href).then(({ ProviderRegistry }) => {
   const transport = ProviderRegistry.prototype.createTransport;

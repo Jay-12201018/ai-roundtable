@@ -87,6 +87,22 @@ it('D134 a second service works right after its Key is saved, and does not take 
   expect(database.listProviderSummaries().find(item => item.name === 'Kimi')).toMatchObject({ isDefault: false, defaultModelId: 'kimi-k3.1-pro' });
 });
 
+it('D142 a built-in service is only a shortcut: any model name can be typed, and the suggestions stay', async () => {
+  const { database, registry, api } = fixture();
+  const { onClose } = open(api);
+  pick(/^Kimi/u);
+  const model = screen.getByLabelText('模型名') as HTMLInputElement;
+  expect(model.value).toBe('kimi-k3.1-pro');
+  fireEvent.change(model, { target: { value: 'typed-by-hand' } });
+  fireEvent.change(keyInput(), { target: { value: 'owned-fake-typed-key' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
+  const provider = database.listProviderSummaries()[0];
+  expect(provider).toMatchObject({ kind: 'openai-compatible', defaultModelId: 'typed-by-hand' });
+  expect(database.getProviderConfiguration(provider.id)!.customModels.map(item => item.id)).toEqual(['typed-by-hand', 'kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed']);
+  expect(usable(registry, provider.id, 'typed-by-hand')).toBe(true);
+});
+
 it('D142 a custom service takes a name, an interface type, a safe address, a Key and any model name', async () => {
   const { database, registry, api } = fixture();
   const { onClose } = open(api);

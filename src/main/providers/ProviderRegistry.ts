@@ -17,7 +17,6 @@ import type { ProviderMessage } from './types';
 import { createNativeSafeFetch, createSafeFetch } from './network';
 import type { DiagnosticObserver } from './diagnostics';
 import type { ProxyResolver } from './proxyTunnel';
-import { compatibleCapabilities } from './serviceProfiles';
 
 type Options = {
   /** D137: how a request reaches its target now; absent means directly. */
@@ -33,6 +32,11 @@ const officialCapabilities: ChatCompletionCapabilities = { outputTokenParameter:
 type RegistryCapabilities = Omit<ChatCompletionCapabilities, 'outputTokenParameter'> & { outputTokenParameter: 'max_tokens' | 'max_completion_tokens' | 'maxOutputTokens' | null };
 /** D135: a long reply from a slow model must not be cut off; the Run's duration limit is what bounds a discussion. */
 const STREAM_TIMEOUT_MS = 600_000;
+/**
+ * D135: every OpenAI-compatible address gets the same request; there is no per-service branch. `max_tokens` is what these
+ * services have in common. Usage is asked for, and a stream that does not report it still completes, with its usage unknown.
+ */
+const compatibleCapabilities = { outputTokenParameter: 'max_tokens', streamUsage: true, listModels: true, authentication: 'models' } as const;
 const officialTargets = { openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' } as const;
 
 // D136: saving a service is what lets its Key go to its address; Renderer and model names cannot change where it goes.
@@ -74,7 +78,7 @@ export class ProviderRegistry {
       streamUsage: true, listModels: true, authentication: 'models',
     };
     if (configuration.kind === 'openai') return officialCapabilities;
-    return this.options.capabilitiesResolver?.(configuration) ?? compatibleCapabilities(this.target(configuration));
+    return this.options.capabilitiesResolver?.(configuration) ?? compatibleCapabilities;
   }
   createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch {
     return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics, this.options.proxy);

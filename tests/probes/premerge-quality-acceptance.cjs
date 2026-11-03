@@ -402,7 +402,7 @@ async function main() {
   // The reviewer saw the drafter's reply as quoted discussion on the user side, never as its own assistant turn.
   check(reviewer.filter(m => m.role !== 'system').map(m => m.role).join(',') === 'user', 'The reviewer request has one user block and no assistant message');
   check(reviewer.at(-1).content.includes('【成员「起草者」· 起草】\n> DeepSeek 夹具回复 1') && reviewer.at(-1).content.includes('现在由你（成员「审查者」· 审查）发言'), 'Labelled, quoted drafter reply and the turn cue');
-  check(requests.every(r => r.keyMatches && r.model === 'deepseek-flash' && r.thinking?.type === 'disabled'), 'Requests carried the saved Key, the approved model and thinking disabled');
+  check(requests.every(r => r.keyMatches && r.model === 'deepseek-flash' && r.thinking === undefined), 'Requests carried the saved Key, the approved model and thinking disabled');
   result.reviewerMessages = reviewer;
 
   await js(`document.querySelectorAll('.thread-item [aria-label=请求详情]').forEach(button => button.click()); true`);

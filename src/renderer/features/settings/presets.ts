@@ -10,9 +10,9 @@ export type ServicePreset = {
 };
 
 /**
- * Built-in services for the connect wizard, all reached through their OpenAI-compatible endpoints. Addresses and model IDs
- * were read from each service's official documentation on 2026-11-03 (D142); any other model can be typed in or picked from
- * the service's list.
+ * The connect wizard's shortcuts (D142): a name, an address and suggested model names for the one OpenAI-compatible adapter,
+ * nothing else. Any model name can be typed instead. Addresses and suggestions were read from each service's official
+ * documentation on 2026-11-03:
  * - DeepSeek: https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
  * - Kimi: https://platform.kimi.com/docs/guide/start-using-kimi-api
  * - 通义千问: https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope , https://help.aliyun.com/zh/model-studio/models

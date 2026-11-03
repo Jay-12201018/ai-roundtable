@@ -68,7 +68,7 @@ describe('one discussion across DeepSeek, OpenAI, Anthropic and Gemini (D134, D1
 
     const [deepseek, openai, anthropic, gemini] = f.seen;
     expect(deepseek.url).toBe('https://api.deepseek.com/chat/completions');
-    expect(deepseek.body).toMatchObject({ model: 'deepseek-v4-pro', stream: true, max_tokens: 8192, thinking: { type: 'disabled' }, stream_options: { include_usage: true } });
+    expect(deepseek.body).toMatchObject({ model: 'deepseek-v4-pro', stream: true, max_tokens: 8192, stream_options: { include_usage: true } });
     expect(deepseek.body).not.toHaveProperty('max_completion_tokens');
     expect(deepseek.headers.get('authorization')).toBe('Bearer owned-fake-ds-key');
 

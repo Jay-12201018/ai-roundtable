@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server, type ServerRespons
 import type { AddressInfo } from 'node:net';
 
 export type FixtureMode = 'ok' | 'hang';
-export type FixtureService = 'deepseek' | 'kimi' | 'qwen' | 'glm' | 'doubao' | 'minimax' | 'openai' | 'anthropic' | 'gemini' | 'compatible';
+export type FixtureService = 'deepseek' | 'anthropic' | 'gemini' | 'compatible';
 type Message = { role: string; content: string };
 export type FixtureRequest = { path?: string; service: FixtureService; model: string; maxTokens: number; mode: FixtureMode; messages: Message[]; headers: IncomingHttpHeaders; raw: Record<string, any> };
 type ReplyBody = { model: string; max_tokens: number; service: FixtureService; messages: Message[] };
@@ -12,7 +12,7 @@ function normalized(service: FixtureService, url: string, raw: Record<string, an
   if (service === 'gemini') return { model: /models\/([^:]+):/u.exec(url)?.[1] ?? '', max_tokens: raw.generationConfig?.maxOutputTokens,
     messages: (raw.contents as Array<{ role: string; parts: Array<{ text: string }> }>).map(content => ({ role: content.role, content: content.parts.map(part => part.text).join('') })) };
   if (service === 'anthropic') return { model: raw.model, max_tokens: raw.max_tokens, messages: raw.messages };
-  return { model: raw.model, max_tokens: raw.max_completion_tokens ?? raw.max_tokens, messages: raw.messages };
+  return { model: raw.model, max_tokens: raw.max_tokens, messages: raw.messages };
 }
 
 /** A loopback server speaking each service's SSE, run by the test process; the app reaches it only through entry.cjs's redirect. */
@@ -34,7 +34,7 @@ export class DeepSeekFixture {
       const parts: Buffer[] = [];
       for await (const part of req) parts.push(part as Buffer);
       const service = /^\/([a-z]+)\//u.exec(req.url ?? '')?.[1] as FixtureService;
-      const models = { deepseek: ['deepseek-flash', 'deepseek-v4-pro'], openai: ['gpt-6-astra'], anthropic: ['claude-opus-5-5'], gemini: ['gemini-3.8-flash'], kimi: ['kimi-k3.1-pro'], qwen: ['qwen3.7-plus'], glm: ['glm-5.3'], doubao: ['doubao-seed-2-1-pro-260915'], minimax: ['MiniMax-M3'], compatible: ['company-model'] }[service] ?? [];
+      const models = { deepseek: ['deepseek-flash', 'deepseek-v4-pro'], anthropic: ['gateway-a'], gemini: ['gateway-b'], compatible: ['company-model'] }[service] ?? [];
       if (req.method === 'GET') {
         this.requests.push({ path: req.url, service, model: '', maxTokens: 0, mode: 'ok', messages: [], headers: req.headers, raw: {} });
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -80,7 +80,7 @@ export class DeepSeekFixture {
         return;
       }
       emit({ id: 'e2e-fixture', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
-      emit({ id: 'e2e-fixture', choices: [], usage: service === 'openai' ? { prompt_tokens: 100, completion_tokens: 5 } : { prompt_tokens: 300, completion_tokens: 6, prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 200 } });
+      emit({ id: 'e2e-fixture', choices: [], usage: { prompt_tokens: 300, completion_tokens: 6, prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 200 } });
       if (!res.destroyed) res.end('data: [DONE]\n\n');
     });
     // A proxy check asks for a tunnel and goes no further; the test never sends anything through it.

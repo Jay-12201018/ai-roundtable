@@ -478,7 +478,7 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Shared `schemas/summary.ts` | `contextSummary.revokedMessageIds?`；发给模型的摘要标签改为 `【讨论摘要 · 覆盖第 a–b 条】` | 可选字段 |
 | Shared `schemas/artifact.ts`、`schemas/configuration.ts` | 版本状态去掉 `candidate`、`adoptedAt`；`providerReadiness` 用 `baseUrl` 取代 `targetConfirmed`/`confirmedBaseUrl`；`customModels` 条目可带上下文长度和最大输出 | 破坏性，只有 Renderer 使用 |
 | IPC / Preload | 删除 `settings.confirmTarget`、`artifact.adopt`、`run.addBudget`、`run.resumeAfterBudget`、`usage.writeOff`、`app.relaunch` 和整个 `app` 分组；增加 `summary.revoke`；`summary.confirm` 改为恢复使用；`network.testProxy` 接受 `ProxySettings` | 破坏性，只有 Renderer 使用；仍然只有 typed 方法 |
-| Main | `providers/serviceProfiles.ts`（按地址的请求参数）、`providers/proxyTunnel.ts`（原 `loopbackProxy.ts`，任意目标按域名 CONNECT）、`NetworkSettingsService(directory, resolveSystemProxy)`；`RunService` 不再预留，单次输出按成员夹紧，演示成员不记用量 | 内部 |
+| Main | 所有 OpenAI 兼容地址共用一组能力（`ProviderRegistry.compatibleCapabilities`，D135）；`providers/proxyTunnel.ts`（原 `loopbackProxy.ts`，任意目标按域名 CONNECT）、`NetworkSettingsService(directory, resolveSystemProxy)`；`RunService` 不再预留，单次输出按成员夹紧，演示成员不记用量 | 内部 |
 | Renderer | 向导去掉步骤；`features/settings/presets.ts` 只列国内服务和自定义服务；`NetworkPanel` 一个开关；`useArtifacts`/`SummaryCard` 一键生成和撤销；`ConnectWizard.onStart` 带上刚建好的房间 ID | 内部 |
 
 安全影响：Key 仍只在 Main，不进日志和 Renderer；地址格式校验、`redirect: 'error'`、TLS 校验、直连的保留地址防护、写文件的路径和符号链接防护及写入前重查都未放宽；中断的请求不自动重发；模型输出没有主持人权限，不执行生成的代码；停止按钮的确认保留。去掉的是地址确认和“采用”这两步人工确认，理由见 D136、D139。

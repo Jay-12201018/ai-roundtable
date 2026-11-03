@@ -26,15 +26,10 @@ export interface ChatCompletionCapabilities {
   streamUsage: boolean;
   listModels: boolean;
   authentication: 'models' | 'unsupported';
-  /** D135: the service thinks by default; a discussion turn asks it not to. */
-  disableThinking?: boolean;
-  /** D142: a request field a service documents, sent as it is. */
-  extraBody?: Record<string, unknown>;
 }
 const capabilitySchema = z.object({
   outputTokenParameter: z.enum(['max_tokens', 'max_completion_tokens']).nullable(),
   streamUsage: z.boolean(), listModels: z.boolean(), authentication: z.enum(['models', 'unsupported']),
-  disableThinking: z.boolean().optional(), extraBody: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const completionChunk = z.object({
@@ -128,8 +123,6 @@ export class ChatCompletionProvider implements ProviderAdapter {
         model: parsed.modelId, messages: parsed.messages, stream: true,
         [outputParameter]: parsed.outputTokenLimit,
         ...(this.capabilities.streamUsage ? { stream_options: { include_usage: true } } : {}),
-        ...(this.capabilities.disableThinking ? { thinking: { type: 'disabled' } } : {}),
-        ...this.capabilities.extraBody,
       };
       const response = await scope.wait(() => client.chat.completions.create(body, { signal: scope.signal, maxRetries: 0 }).asResponse());
       scope.check();
