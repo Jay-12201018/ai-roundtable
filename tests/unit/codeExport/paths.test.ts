@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { checkCandidatePath, collisionKey, findCollisions, isWithin } from '../../../src/main/export/paths';
+import { checkCandidatePath, collisionKey, findCollisions, insideGitDir, isWithin } from '../../../src/main/export/paths';
 import { candidatePathSchema } from '../../../src/shared/schemas/artifact';
 import { codeExportReasonLabels } from '../../../src/shared/schemas/codeExport';
 
@@ -43,6 +43,47 @@ describe('candidate paths, as text (D127)', () => {
       expect(candidatePathSchema.safeParse(path).success).toBe(true);
       expect(reason(path)).not.toBe('ok');
     }
+  });
+});
+
+describe('names a file system or a reader would take for something else (D127, as Git after CVE-2014-9390)', () => {
+  it.each([
+    // NTFS short names of .git.
+    ['git~1', 'git_dir'], ['GIT~1', 'git_dir'], ['Git~2/hooks/pre-commit', 'git_dir'], ['sub/git~10/config', 'git_dir'],
+    // Full-width and other compatibility forms that normalize to .git.
+    ['\uff0egit', 'git_dir'], ['.\uff47\uff49\uff54/config', 'git_dir'], ['\uff0e\uff27\uff29\uff34', 'git_dir'], ['\ufe52git/hooks/x', 'git_dir'], ['\uff47\uff49\uff54~\uff11', 'git_dir'],
+    // Characters that normalize to a trailing dot or space after .git, and dotless i that upper-cases to I.
+    ['.\uff47it\uff0e', 'git_dir'], ['.git\u00a0', 'git_dir'], ['.git\u3000', 'git_dir'], ['.g\u0131t', 'git_dir'],
+    // Forms that normalize to . or ..
+    ['\uff0e', 'traversal'], ['\uff0e\uff0e', 'traversal'], ['a/\uff0e\uff0e/b', 'traversal'], ['\u2024', 'traversal'], ['\u2025', 'traversal'], ['\ufe52\ufe52/x', 'traversal'], ['\u2026', 'traversal'],
+    // Separators hidden in a compatibility form, with and without a traversal behind them.
+    ['\uff0e\uff0e\uff0fetc', 'traversal'], ['a\uff3c\uff0e\uff0e\uff3cb', 'traversal'], ['a\uff0fb', 'reserved_char'], ['a\uff3cb', 'reserved_char'], ['\uff0e\uff47it\uff0fhooks', 'git_dir'],
+    // Compatibility forms of reserved names.
+    ['\uff23\uff2f\uff2e', 'reserved_name'], ['\uff4e\uff55\uff4c.txt', 'reserved_name'], ['\uff23\uff2f\uff2d\uff11', 'reserved_name'], ['src/\uff41\uff55\uff58.ts', 'reserved_name'], ['\uff2c\uff30\uff34\uff19.log', 'reserved_name'],
+  ])('%j → %s', (path, expected) => {
+    expect(reason(path)).toBe(expected);
+  });
+
+  // Every code point a file system may ignore or a renderer shows as nothing: the HFS+ list Git keeps
+  // (U+200C–200F, U+202A–202E, U+206A–206F, U+FEFF) and the rest of Default_Ignorable_Code_Point and Cf.
+  it.each(['\u00ad', '\u034f', '\u061c', '\u115f', '\u1160', '\u17b4', '\u180b', '\u180e', '\u200b', '\u200c', '\u200d', '\u200e', '\u200f', '\u202a', '\u202e', '\u2060', '\u2064', '\u2065',
+    '\u206a', '\u206b', '\u206c', '\u206d', '\u206e', '\u206f', '\u3164', '\ufe00', '\ufe0f', '\ufeff', '\uffa0', '\ufff0', '\u0600', '\u06dd', '\u2028', '\u2029', '\ud83d', '\udc00',
+    '\u{e0001}', '\u{e0100}', '\u{1d173}'])('%j is refused anywhere in a name, also inside .git', character => {
+    expect(reason(`.g${character}it/hooks/x`)).toBe('invisible_char');
+    expect(reason(`src/a${character}b.ts`)).toBe('invisible_char');
+    expect(reason(`${character}.git`)).toBe('invisible_char');
+  });
+
+  it('finds a .git folder anywhere in a chosen folder\'s path', () => {
+    for (const path of ['/Users/u/proj/.git', '/Users/u/proj/.GIT/hooks', '/Users/u/\uff0egit/x']) expect(insideGitDir(path, '/')).toBe(true);
+    expect(insideGitDir('C:\\proj\\git~1\\hooks', '\\')).toBe(true);
+    for (const path of ['/Users/u/proj', '/Users/u/.github', '/Users/u/git~/x', '/Users/u/proj.git']) expect(insideGitDir(path, '/')).toBe(false);
+  });
+
+  it('keeps names that only look unusual: real Chinese file names and names that merely resemble the refused ones', () => {
+    for (const path of ['说明：第一版.md', '问题？.md', '笔记（草稿）/第１章.md', '１.txt', 'ｓｒｃ/ａ.ts', '．hidden', '…md', 'git', 'git~', 'git~a', 'mygit~1', 'git~1x', '.gitignore', '.github/x.yml', '.gitmodules',
+      '.git-blame-ignore-revs', 'sub.git/config', 'caf\u00e9.ts', 'cafe\u0301.ts', '日本語/ファイル.ts', 'حساب.ts', 'emoji\u{1f600}.md'])
+      expect(reason(path)).toBe('ok');
   });
 });
 

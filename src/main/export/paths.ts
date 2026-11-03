@@ -10,9 +10,45 @@ export type PathCheck = { ok: true; segments: string[] } | { ok: false; reason: 
 
 /** Windows device names, with or without an extension (CON, con.txt, COM1.tar.gz, COM¹). */
 const reservedName = /^(con|prn|aux|nul|conin\$|conout\$|clock\$|(com|lpt)[0-9¹²³])(\..*)?$/iu;
-// Zero-width characters and bidi controls make a shown name differ from the real one (txt.exe shown as exe.txt).
-const invisible = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/u;
+/**
+ * Code points that show as nothing or change how a name reads (txt.exe shown as exe.txt), and that a file system may
+ * drop when it compares names. A Unicode property rather than a hand-kept list: Default_Ignorable_Code_Point is
+ * Unicode's own definition of "renderers show nothing" and contains everything HFS+ ignores (U+200C–200F, U+202A–202E,
+ * U+206A–206F, U+FEFF, the list Git keeps since CVE-2014-9390) as well as U+00AD, U+034F, U+061C, U+180E, variation
+ * selectors and tag characters. Cf adds the remaining format controls, Zl/Zp the line separators, Cs a lone surrogate
+ * (it would be written as U+FFFD, a different name from the one shown). The price is that a few real names are refused
+ * (emoji joined with ZWJ, Persian with ZWNJ); the host can rename them after writing.
+ */
+const invisible = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u;
 const control = /[\u0000-\u001f\u007f-\u009f]/u;
+
+/** `.git`, or one of its NTFS short names (git~1), compared as a case-insensitive file system would. */
+const isDotGit = (name: string) => name.toLowerCase() === '.git' || name.toUpperCase() === '.GIT' || /^git~\d+$/iu.test(name);
+
+/** What a plain name would really address, once the trailing dots and spaces Windows drops are gone. */
+function nameIssue(form: string): CodeExportReason | undefined {
+  const name = form.replace(/[. ]+$/u, '');
+  if (name === '') return 'traversal';
+  if (isDotGit(name)) return 'git_dir';
+  return reservedName.test(name) ? 'reserved_name' : undefined;
+}
+
+/**
+ * The same questions asked of the NFKC form (which also covers NFC): full-width dots and letters, one-dot leaders and
+ * the like must not read as `.git`, `..` or a reserved name, and must not hide a separator. Only these outcomes are
+ * refused: full-width `：` and `？` are ordinary in Chinese file names and no file system treats them as `:` and `?`.
+ */
+function compatibilityIssue(segment: string): CodeExportReason | undefined {
+  const parts = segment.normalize('NFKC').split(/[\\/]/u);
+  for (const part of parts) {
+    const issue = part === '' ? undefined : nameIssue(part);
+    if (issue) return issue;
+  }
+  return parts.length > 1 ? 'reserved_char' : undefined;
+}
+
+/** True when a folder's own path runs through a `.git` folder (a host choosing `.git/hooks` would run what is written). */
+export const insideGitDir = (path: string, separator: string) => path.split(separator).some(part => part !== '' && isDotGit(part.normalize('NFKC').replace(/[. ]+$/u, '')));
 
 export function checkCandidatePath(path: string): PathCheck {
   if (path.length === 0) return { ok: false, reason: 'empty_segment' };
@@ -31,10 +67,10 @@ export function checkCandidatePath(path: string): PathCheck {
   for (const segment of segments) {
     if (/[:*?"<>|]/u.test(segment)) return { ok: false, reason: 'reserved_char' };
     if (/[. ]$/u.test(segment)) return { ok: false, reason: 'trailing_dot_space' };
-    if (reservedName.test(segment.trimEnd())) return { ok: false, reason: 'reserved_name' };
-    if (Buffer.byteLength(segment, 'utf8') > 255) return { ok: false, reason: 'segment_too_long' };
     // Git runs hooks from .git; writing there is running code later.
-    if (segment.toLowerCase() === '.git') return { ok: false, reason: 'git_dir' };
+    const issue = nameIssue(segment) ?? compatibilityIssue(segment);
+    if (issue) return { ok: false, reason: issue };
+    if (Buffer.byteLength(segment, 'utf8') > 255) return { ok: false, reason: 'segment_too_long' };
   }
   return { ok: true, segments };
 }

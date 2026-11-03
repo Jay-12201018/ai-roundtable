@@ -11,7 +11,7 @@ import {
   type CodeExportChooseRootInput, type CodeExportChooseRootResult, type CodeExportFileResult, type CodeExportPreview, type CodeExportPreviewFile,
   type CodeExportPreviewInput, type CodeExportReason, type CodeExportRoot, type CodeExportWriteInput, type CodeExportWriteResult,
 } from '../../shared/schemas/codeExport';
-import { checkCandidatePath, collisionKey, findCollisions, isWithin } from './paths';
+import { checkCandidatePath, collisionKey, findCollisions, insideGitDir, isWithin } from './paths';
 import { isBinary, lineDiff, MAX_DIFF_INPUT_BYTES, splitLines } from './diff';
 import { folderDisplay } from '../artifact/view';
 
@@ -111,6 +111,7 @@ export class CodeExportService {
     if (parsePath(real).root === real) return { ...result, refused: 'filesystem_root' };
     // A folder that contains the app's data is allowed (its data folder is refused file by file); one inside it is not.
     if (this.options.protectedDirs.some(dir => isWithin(dir, real, sep, this.caseInsensitive))) return { ...result, refused: 'app_data' };
+    if (insideGitDir(real, sep)) return { ...result, refused: 'git_dir' };
     const root: Root = { rootId: randomUUID(), real, dev: info.dev, ino: info.ino, ...this.displayOf(real) };
     keep(this.roots, root.rootId, root);
     return { ...result, root: this.rootView(root) };

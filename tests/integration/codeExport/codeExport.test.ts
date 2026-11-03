@@ -96,6 +96,10 @@ describe('choosing the folder', () => {
     expect((await t.choose(join(t.appData, 'inner'))).refused).toBe('app_data');
     expect((await t.choose(join(t.base, 'sentinel.txt'))).refused).toBe('not_directory');
     expect((await t.choose(join(t.base, 'missing'))).refused).toBe('not_directory');
+    // Choosing a folder inside .git would make whatever is written there run with Git.
+    mkdirSync(join(t.root, '.GIT/hooks'), { recursive: true });
+    expect((await t.choose(join(t.root, '.GIT/hooks'))).refused).toBe('git_dir');
+    expect((await t.choose(join(t.root, '.GIT'))).refused).toBe('git_dir');
     // A link to a folder resolves to the folder itself; the reference keeps the real path.
     symlinkSync(t.root, join(t.base, 'link-to-project'));
     expect((await t.choose(join(t.base, 'link-to-project'))).root).toMatchObject({ displayPath: '~/project' });
