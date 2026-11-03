@@ -111,7 +111,7 @@ export const runEventSchema = z.discriminatedUnion('type', [
   // D133: nothing emits this any more; old Runs keep these events and recovery still has to read them.
   z.object({ ...base, ...runIdentity, type: z.literal('budget_updated'), payload: z.object({ reason: z.enum(['top_up', 'write_off']) }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('summary_updated'), payload: z.object({ summaryId: idSchema, messageId: idSchema,
-    status: z.enum([...summaryRequestStatusValues, 'confirmed']),
+    status: z.enum([...summaryRequestStatusValues, 'confirmed', 'revoked']),
     // D125: the public error code of a failed or stopped summary request; migration 9 stays unchanged.
     errorCode: errorCodeSchema.optional() }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('summary_delta'), payload: z.object({ summaryId: idSchema, messageId: idSchema, text: z.string() }).strict() }).strict(),

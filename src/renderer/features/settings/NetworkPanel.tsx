@@ -1,27 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, Info, RotateCw } from 'lucide-react';
-import type { NetworkApiContract, AppLifecycleApiContract } from '../../../shared/contracts/app';
-import type { NetworkSettings, ProxySettings, ProxyTestResult } from '../../../shared/schemas/network';
-import { Button, Switch, cx } from '../../components/ui';
+import { Check, CircleAlert } from 'lucide-react';
+import type { NetworkApiContract } from '../../../shared/contracts/app';
+import type { NetworkSettings, ProxyStatus, ProxyTestResult } from '../../../shared/schemas/network';
+import { Button, Switch } from '../../components/ui';
 import { errorMessage } from './model';
 
 const failures: Record<NonNullable<ProxyTestResult['failure']>, string> = {
-  refused: '这个端口上没有代理在运行：请确认代理软件已打开，端口填的是“HTTP 代理端口”或“混合端口”。',
-  rejected: '代理拒绝了连接：请在代理软件里检查规则，或换一个端口。',
-  timeout: '代理没有在 8 秒内回应。',
+  refused: '连接不上，请检查网络和地址。', rejected: '代理拒绝了连接，请检查代理设置。', timeout: '8 秒内没有回应，请检查网络和地址。',
+  unsupported: '现在的代理类型不支持，可以在高级选项里手动填写 HTTP 代理地址。',
 };
-const describe = (effective: NetworkSettings['effective']) => effective.proxy
-  ? `已开启 ${effective.proxy.host === '::1' ? '[::1]' : effective.proxy.host}:${effective.proxy.port}${effective.source === 'environment' ? '（来自环境变量 ROUNDTABLE_CONNECT_PROXY）' : '（来自这个页面的设置）'}`
-  : '直连，没有使用代理';
+const schemeNames = { socks: 'SOCKS', https: 'HTTPS', other: '其他类型' } as const;
+export function statusText(status: ProxyStatus): string {
+  switch (status.state) {
+    case 'off': return '未开启，直接连接。';
+    case 'direct': return '系统没有设置代理，将直接连接。';
+    case 'proxy': return status.source === 'system' ? `已检测到系统代理 ${status.host}:${status.port}` : `使用手动填写的代理 ${status.host}:${status.port}`;
+    default: return `系统代理是 ${schemeNames[status.scheme]}，这个应用现在不支持，请求不会发出。可以在高级选项里手动填写 HTTP 代理地址。`;
+  }
+}
 
-/**
- * 设置 › 网络与代理 (D3-B / D115): the choice is saved for the next launch; the launch that is running keeps what it
- * started with. Only a loopback proxy, only with "由代理解析域名" ticked, only for the fixed official targets (D093).
- */
-export function NetworkPanel({ network, lifecycle }: { network?: NetworkApiContract; lifecycle?: AppLifecycleApiContract }) {
+/** 设置 › 网络 (D137): one switch that reads the system's setting; an address by hand only for when that cannot be read. */
+export function NetworkPanel({ network }: { network?: NetworkApiContract }) {
   const [settings, setSettings] = useState<NetworkSettings>(); const [failed, setFailed] = useState(false);
-  const [draft, setDraft] = useState<{ enabled: boolean; host: ProxySettings['host']; port: string; trustProxyDns: boolean }>({ enabled: false, host: '127.0.0.1', port: '7890', trustProxyDns: false });
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [host, setHost] = useState(''); const [port, setPort] = useState('');
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [test, setTest] = useState<{ ok: boolean; text: string }>();
   const alive = useRef(true);
   useEffect(() => {
@@ -29,68 +31,53 @@ export function NetworkPanel({ network, lifecycle }: { network?: NetworkApiContr
     if (network) void network.getSettings().then(value => {
       if (!alive.current) return;
       setSettings(value);
-      const from = value.saved ?? (value.effective.source === 'environment' && value.effective.proxy ? { enabled: true, ...value.effective.proxy, trustProxyDns: true } : undefined);
-      if (from) setDraft({ enabled: from.enabled, host: from.host, port: String(from.port), trustProxyDns: from.trustProxyDns });
+      if (value.saved.manual) { setHost(value.saved.manual.host); setPort(String(value.saved.manual.port)); }
     }, () => { if (alive.current) setFailed(true); });
     return () => { alive.current = false; };
   }, [network]);
 
-  const port = /^\d{1,5}$/u.test(draft.port) ? Number(draft.port) : NaN;
-  const portValid = Number.isInteger(port) && port >= 1 && port <= 65535;
-  const environment = settings?.effective.source === 'environment';
-  const normal = (value: { enabled: boolean; host: string; port: number; trustProxyDns: boolean } | null | undefined) => value?.enabled ? JSON.stringify([value.host, value.port, value.trustProxyDns]) : 'off';
-  const dirty = settings !== undefined && normal(settings.saved) !== normal({ ...draft, port });
-  const blocked = draft.enabled && (!portValid ? '端口是 1–65535 之间的数字。' : !draft.trustProxyDns ? '要使用代理，需要勾选“由代理解析域名”。' : '');
+  const portNumber = /^\d{1,5}$/u.test(port) ? Number(port) : NaN;
+  const portValid = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
+  const hostValid = /^(?:[A-Za-z0-9.-]+|\[?[0-9A-Fa-f:]+\]?)$/u.test(host.trim());
+  const manualProblem = (host.trim() || port) && !(hostValid && portValid) ? '填写代理的地址和端口，例如 127.0.0.1 和 7890。' : '';
 
   async function act(work: () => Promise<void>) {
-    setBusy(true); setError(''); setNotice('');
+    setBusy(true); setError(''); setTest(undefined);
     try { await work(); } catch (cause) { if (alive.current) setError(errorMessage(cause)); }
     finally { if (alive.current) setBusy(false); }
   }
-  const save = () => network && !blocked && act(async () => {
-    const value = await network.saveSettings({ enabled: draft.enabled, host: draft.host, port: portValid ? port : 7890, trustProxyDns: draft.trustProxyDns });
-    if (alive.current) { setSettings(value); setNotice(value.restartRequired ? '已保存，重启应用后生效。' : '已保存。'); }
+  const save = (next: NetworkSettings['saved']) => network && act(async () => { const value = await network.saveSettings(next); if (alive.current) setSettings(value); });
+  const check = () => network && settings && act(async () => {
+    const result = await network.testProxy(settings.saved);
+    if (alive.current) setTest(result.ok ? { ok: true, text: '连接正常。' } : { ok: false, text: failures[result.failure!] });
   });
-  const check = () => network && portValid && act(async () => {
-    const result = await network.testProxy({ host: draft.host, port });
-    if (alive.current) setTest(result.ok ? { ok: true, text: `可以通过代理连到 ${result.target}` } : { ok: false, text: failures[result.failure!] });
-  });
-  const restart = () => lifecycle && act(async () => { await lifecycle.relaunch(); });
 
   if (!network) return <p className="muted">这个窗口不能修改网络设置。</p>;
   return <>
-    <div className="page-head"><div className="grow"><h1>网络与代理</h1><p>在国内访问部分服务时需要通过代理。这里只支持你电脑上运行的代理软件（例如 Clash、Surge 的本机端口）。</p></div></div>
+    <div className="page-head"><div className="grow"><h1>网络</h1><p>如果你的网络环境需要通过代理连接，在这里打开。</p></div></div>
     {failed && <p role="alert" className="field-error">网络设置没有读出来，请重新打开设置。</p>}
     {settings && <section className="card net-card" aria-label="代理设置">
-      <div className="card-row"><span className="grow"><b>通过本机代理连接</b><small>只用于 DeepSeek、Claude、Gemini 的官方地址，其他服务直连。</small></span>
-        <Switch label="通过本机代理连接" checked={draft.enabled} disabled={busy} onChange={value => { setDraft(previous => ({ ...previous, enabled: value })); setTest(undefined); setNotice(''); }} /></div>
+      <div className="card-row"><span className="grow"><b>使用系统代理</b><small role="status">{statusText(settings.status)}</small></span>
+        <Switch label="使用系统代理" checked={settings.saved.enabled} disabled={busy} onChange={value => void save({ ...settings.saved, enabled: value })} /></div>
       <div className="net-body form-stack">
-        <div className="field"><span id="net-address">代理地址</span>
-          <div className="inline-fields" role="group" aria-labelledby="net-address">
-            <select className="select input net-host" aria-label="代理主机" value={draft.host} disabled={busy} onChange={event => { setDraft(previous => ({ ...previous, host: event.target.value as ProxySettings['host'] })); setTest(undefined); }}>
-              <option value="127.0.0.1">127.0.0.1</option><option value="::1">[::1]</option></select>
-            <span className="muted" aria-hidden>:</span>
-            <input className="input net-port" aria-label="端口" inputMode="numeric" value={draft.port} disabled={busy} aria-invalid={!portValid || undefined}
-              onChange={event => { setDraft(previous => ({ ...previous, port: event.target.value.trim() })); setTest(undefined); }} />
-          </div>
-          <span className="field-help">在代理软件里找“HTTP 代理端口”或“混合端口”。只能填本机地址。</span></div>
-        <label className="check-label net-trust"><input type="checkbox" checked={draft.trustProxyDns} disabled={busy} onChange={event => setDraft(previous => ({ ...previous, trustProxyDns: event.target.checked }))} />
-          <span><b>由代理解析域名</b><span className="field-help">很多代理需要这样才能连通。代理会知道你访问了哪个服务，但看不到 Key 和讨论内容：连接仍然加密，并校验服务器证书。</span></span></label>
         <div className="inline-fields">
-          <Button size="sm" disabled={busy || !portValid} onClick={() => void check()}>检测代理</Button>
+          <Button size="sm" disabled={busy} onClick={() => void check()}>测试连接</Button>
           {test ? <span role="status" className={test.ok ? 'status-text ok-text' : 'status-text warn-text'}>{test.ok ? <Check aria-hidden /> : <CircleAlert aria-hidden />}{test.text}</span>
             : <span className="small muted">只做一次连接握手，不发送 Key 或内容。</span>}
         </div>
-        {blocked && <p className="field-error" role="alert">{blocked}</p>}
-        <div className="inline-fields"><Button variant="primary" size="sm" disabled={busy || !dirty || Boolean(blocked)} onClick={() => void save()}>保存设置</Button>
-          {notice && <span role="status" className="small ok-text">{notice}</span>}{error && <span role="alert" className="field-error">{error}</span>}</div>
+        {error && <p role="alert" className="field-error">{error}</p>}
+        <details className="adv" open={Boolean(settings.saved.manual) || undefined}><summary>高级：手动填写地址</summary><div className="form-stack">
+          <p className="small muted">系统代理读不到时使用。填写后，开关打开时优先用这个地址。</p>
+          <div className="inline-fields">
+            <input className="input net-host" aria-label="代理地址" placeholder="127.0.0.1" value={host} disabled={busy} autoComplete="off" spellCheck={false} onChange={event => setHost(event.target.value.trim())} />
+            <span className="muted" aria-hidden>:</span>
+            <input className="input net-port" aria-label="端口" inputMode="numeric" placeholder="7890" value={port} disabled={busy} aria-invalid={Boolean(port) && !portValid || undefined} onChange={event => setPort(event.target.value.trim())} />
+            <Button size="sm" disabled={busy || Boolean(manualProblem) || !host.trim()} onClick={() => void save({ ...settings.saved, manual: { host: host.trim(), port: portNumber } })}>保存</Button>
+            {settings.saved.manual && <Button size="sm" variant="quiet" disabled={busy} onClick={() => { setHost(''); setPort(''); void save({ ...settings.saved, manual: null }); }}>清除</Button>}
+          </div>
+          {manualProblem && <p className="field-error" role="alert">{manualProblem}</p>}
+        </div></details>
       </div>
-      {/* Calm while what runs is what was saved; the warning tint only while a saved change waits for a restart. */}
-      <div className={cx('card-row net-effect', (settings.restartRequired || settings.savedInvalid) && 'is-pending')}><Info aria-hidden size={16} /><div className="grow small">
-        {environment ? <>当前生效：{describe(settings.effective)}。环境变量优先，这里保存的设置不会生效，直到去掉环境变量后重启。</>
-          : settings.restartRequired ? <>保存的改动在<b>重启应用</b>后生效。当前生效：{describe(settings.effective)}。{settings.savedInvalid ? '保存的设置文件无法读取，已按直连处理。' : ''}</>
-          : <>当前生效：{describe(settings.effective)}。{settings.savedInvalid ? '保存的设置文件无法读取，已按直连处理。' : '改动保存后，重启应用才会生效。'}</>}</div>
-        {!environment && settings.restartRequired && lifecycle && <Button size="sm" icon={RotateCw} disabled={busy} onClick={() => void restart()}>立即重启</Button>}</div>
     </section>}
   </>;
 }

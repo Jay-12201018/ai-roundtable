@@ -24,7 +24,7 @@ function insertedText(snapshot: RunSnapshot): string {
   return ` · 另有 ${inserted.length} 轮插入（${[named ? `点名 ${named}` : '', continued ? `继续讨论 ${continued}` : ''].filter(Boolean).join('、')}）`;
 }
 
-function ProgressTab({ snapshot, onSummarize, onOpenWorkflow }: { snapshot: RunSnapshot; onSummarize?: () => void; onOpenWorkflow?: () => void }) {
+function ProgressTab({ snapshot, onSummarize, onChooseSummary, onOpenWorkflow }: { snapshot: RunSnapshot; onSummarize?: () => void; onChooseSummary?: () => void; onOpenWorkflow?: () => void }) {
   const progress = workflowProgressForFeature(snapshot);
   const workflow = snapshot.workflow;
   const used = usedSummary(snapshot);
@@ -53,7 +53,8 @@ function ProgressTab({ snapshot, onSummarize, onOpenWorkflow }: { snapshot: RunS
     {onSummarize && <section className="ctx-sec"><h3>讨论摘要</h3>
       <p className="small muted">{used ? `之后的发言正在用摘要代替第 1–${used.lastNumber} 条原文。讨论再变长时，可以在此基础上续写摘要。`
         : `讨论变长、快放不进上下文时，可以把较早的发言整理成摘要。${demoOnly ? '演示成员写的是预先准备的示例' : '生成会发送一次真实请求'}；不会自动生成。`}</p>
-      <Button size="sm" disabled={!writable || numbered < 2} onClick={onSummarize}>生成讨论摘要…</Button>
+      <div className="inline-fields"><Button size="sm" disabled={!writable || numbered < 2} onClick={onSummarize}>生成讨论摘要</Button>
+        {onChooseSummary && <button type="button" className="link-btn small" disabled={!writable || numbered < 2} onClick={onChooseSummary}>选择范围和成员…</button>}</div>
       {!writable && <p className="small muted">暂停运行或等当前请求结束后可以生成摘要。</p>}
     </section>}
   </>;
@@ -128,9 +129,9 @@ function InstructionsTab({ snapshot, commands }: { snapshot: RunSnapshot; comman
 }
 
 /** 本场信息: for looking things up; acting stays in the composer and on the messages themselves. */
-export function RunPanel({ snapshot, commands, providers, tab, onTab, onClose, onSummarize, onOpenWorkflow, syncLabel, artifacts, artifactCount }: {
+export function RunPanel({ snapshot, commands, providers, tab, onTab, onClose, onSummarize, onChooseSummary, onOpenWorkflow, syncLabel, artifacts, artifactCount }: {
   snapshot: RunSnapshot | undefined; commands: HostCommands; providers?: ProviderNames;
-  tab: PanelTab; onTab: (tab: PanelTab) => void; onClose: () => void; onSummarize?: () => void; onOpenWorkflow?: () => void; syncLabel: string;
+  tab: PanelTab; onTab: (tab: PanelTab) => void; onClose: () => void; onSummarize?: () => void; onChooseSummary?: () => void; onOpenWorkflow?: () => void; syncLabel: string;
   /** R14: the artifacts tab, assembled by the App (it owns the artifact dialogs). */ artifacts?: ReactNode; artifactCount?: number;
 }) {
   const instructions = snapshot?.host?.instructions.filter(item => item.status === 'active').length ?? 0;
@@ -141,7 +142,7 @@ export function RunPanel({ snapshot, commands, providers, tab, onTab, onClose, o
       { id: 'instructions', label: '指令', count: instructions }, { id: 'artifacts', label: '产物', count: artifactCount }]} />
     <div className="ctx-body" id={`ctx-panel-${tab}`} role="tabpanel" aria-labelledby={`ctx-tab-${tab}`}>
       {!snapshot ? <p className="small muted">开始讨论后，这里会显示这场讨论的用量、讨论方式的进度、成员状态和持续指令。</p>
-        : tab === 'progress' ? <ProgressTab snapshot={snapshot} onSummarize={onSummarize} onOpenWorkflow={onOpenWorkflow} />
+        : tab === 'progress' ? <ProgressTab snapshot={snapshot} onSummarize={onSummarize} onChooseSummary={onChooseSummary} onOpenWorkflow={onOpenWorkflow} />
         : tab === 'members' ? <MembersTab snapshot={snapshot} commands={commands} providers={providers} />
         : tab === 'instructions' ? <InstructionsTab snapshot={snapshot} commands={commands} />
         : artifacts ?? <p className="small muted">这个版本的应用没有产物功能。</p>}

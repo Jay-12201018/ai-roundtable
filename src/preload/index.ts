@@ -43,13 +43,13 @@ const api: RoundtableApiContract = {
     preview: (input) => invoke('summary.preview', input),
     generate: (input) => invoke('summary.generate', input),
     confirm: (input) => invoke('summary.confirm', input),
+    revoke: (input) => invoke('summary.revoke', input),
   },
   artifact: {
     preview: (input) => invoke('artifact.preview', input),
     generate: (input) => invoke('artifact.generate', input),
     list: (input) => invoke('artifact.list', input),
     getVersion: (input) => invoke('artifact.getVersion', input),
-    adopt: (input) => invoke('artifact.adopt', input),
     edit: (input) => invoke('artifact.edit', input),
     export: (input) => invoke('artifact.export', input),
     listCodeCandidates: (input) => invoke('artifact.listCodeCandidates', input),
@@ -86,7 +86,6 @@ const api: RoundtableApiContract = {
     getProviderConfiguration: (input) => invoke('settings.getProviderConfiguration', input),
     listProviderSummaries: () => invoke('settings.listProviderSummaries', undefined),
     deleteProvider: (input) => invoke('settings.deleteProvider', input),
-    confirmTarget: (input) => invoke('settings.confirmTarget', input),
     setKey: (input) => invoke('settings.setKey', input),
     deleteKey: (input) => invoke('settings.deleteKey', input),
     getProviderKeyState: (input) => invoke('settings.getProviderKeyState', input),
@@ -99,9 +98,6 @@ const api: RoundtableApiContract = {
     getSettings: () => invoke('network.getSettings', undefined),
     saveSettings: (input) => invoke('network.saveSettings', input),
     testProxy: (input) => invoke('network.testProxy', input),
-  },
-  app: {
-    relaunch: () => invoke('app.relaunch', undefined),
   },
   run: {
     previewWorkflow: (input) => invoke('run.previewWorkflow', input),

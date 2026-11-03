@@ -1,6 +1,6 @@
 // D133: the cost feature is gone. Token usage moves to request_usage; every price, reservation, budget, top-up, write-off
-// and controlled-trial table is dropped (the verified backup taken before this migration still holds them). Migrations
-// 1–13 remain unchanged. A Run the old budget stopped gets a plain stop reason in place of one naming amounts.
+// and controlled-trial table is dropped (the verified backup taken before this migration still holds them). D136, D139 and
+// D140 drop the steps a common client does not ask for. Migrations 1–13 remain unchanged. A Run the old budget stopped gets a plain stop reason in place of one naming amounts.
 export const migration14 = `
 CREATE TABLE request_usage (
   request_id TEXT PRIMARY KEY,
@@ -63,6 +63,55 @@ END;
 
 UPDATE workflow_runs SET last_error='这场讨论是旧版本按预算限制停下的，已有发言都保留。现在不再设预算，可以接着讨论。'
   WHERE id IN (SELECT run_id FROM run_budgets WHERE blocked_json IS NOT NULL) AND status='error';
+
+-- D136: a Key and its address need no separate confirmation any more.
+DROP TABLE provider_target_approvals;
+
+-- D139: a version that passed validation is usable at once. The same rules as migrations 12 and 13, without adoption.
+DROP TRIGGER artifact_export_insert;
+CREATE TRIGGER artifact_export_insert BEFORE INSERT ON artifact_exports BEGIN
+  SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM artifact_versions v JOIN artifacts a ON a.id=v.artifact_id
+      WHERE v.id=NEW.version_id AND v.run_id=NEW.run_id AND v.validation='valid'
+        AND (NEW.target <> 'file' OR a.kind <> 'code'))
+  THEN RAISE(ABORT,'Invalid artifact export') END;
+END;
+DROP TRIGGER code_export_insert;
+CREATE TRIGGER code_export_insert BEFORE INSERT ON code_exports BEGIN
+  SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM artifact_versions v JOIN artifacts a ON a.id=v.artifact_id
+      WHERE v.id=NEW.version_id AND v.run_id=NEW.run_id AND a.kind='code' AND v.validation='valid')
+  THEN RAISE(ABORT,'Invalid code export') END;
+END;
+DROP TABLE artifact_adoptions;
+
+-- D140: a summary takes effect when it is complete; the ones still waiting for a confirmation take effect now. The host
+-- can stop using a version and use it again; every change is one row and the latest one counts.
+INSERT INTO summary_confirmations(message_id,summary_id,run_id,client_request_id,created_at)
+  SELECT s.active_message_id,c.id,c.run_id,NULL,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  FROM context_summaries c JOIN message_slots s ON s.slot_id=c.id JOIN messages m ON m.id=s.active_message_id JOIN message_versions v ON v.message_id=m.id
+  WHERE m.status='completed' AND length(trim(m.content))>0 AND v.origin<>'edit'
+    AND NOT EXISTS(SELECT 1 FROM summary_confirmations k WHERE k.message_id=m.id);
+CREATE TABLE summary_use_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id TEXT NOT NULL REFERENCES messages(id),
+  summary_id TEXT NOT NULL REFERENCES context_summaries(id),
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  client_request_id TEXT NOT NULL,
+  in_use INTEGER NOT NULL CHECK(in_use IN (0,1)),
+  created_at TEXT NOT NULL,
+  UNIQUE(run_id, client_request_id)
+);
+CREATE INDEX idx_summary_use_events_summary ON summary_use_events(summary_id, id);
+CREATE TRIGGER summary_use_event_insert BEFORE INSERT ON summary_use_events BEGIN
+  SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM messages m JOIN message_versions v ON v.message_id=m.id
+      WHERE m.id=NEW.message_id AND m.run_id=NEW.run_id AND m.sender_type='system' AND v.slot_id=NEW.summary_id)
+  THEN RAISE(ABORT,'Invalid summary use') END;
+END;
+CREATE TRIGGER summary_use_event_immutable BEFORE UPDATE ON summary_use_events BEGIN
+  SELECT RAISE(ABORT,'Summary use is append-only');
+END;
+CREATE TRIGGER summary_use_event_no_delete BEFORE DELETE ON summary_use_events BEGIN
+  SELECT RAISE(ABORT,'Summary use is append-only');
+END;
 
 DROP TABLE charge_writeoffs;
 DROP TABLE charge_pricing;

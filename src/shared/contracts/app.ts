@@ -4,11 +4,11 @@ import type { RunApiContract } from './run';
 import type { RoomManagementApiContract, ProviderSettingsApiContract } from './configuration';
 import type { HostCommand, HostCommandResult } from '../schemas/host';
 import type { SummaryCommandResult, SummaryConfirmInput, SummaryGenerateInput, SummaryPreview, SummaryPreviewInput } from '../schemas/summary';
-import type { ArtifactAdoptInput, ArtifactCommandResult, ArtifactEditInput, ArtifactExportInput, ArtifactExportResult, ArtifactGenerateInput, ArtifactList, ArtifactListInput,
+import type { ArtifactCommandResult, ArtifactEditInput, ArtifactExportInput, ArtifactExportResult, ArtifactGenerateInput, ArtifactList, ArtifactListInput,
   ArtifactPreview, ArtifactPreviewInput, ArtifactVersionDetail, ArtifactVersionInput, CodeCandidateList } from '../schemas/artifact';
 import type { CodeExportChooseRootInput, CodeExportChooseRootResult, CodeExportPreview, CodeExportPreviewInput, CodeExportWriteInput, CodeExportWriteResult } from '../schemas/codeExport';
 import type { UsageExportResult, UsageRange, UsageReport } from '../schemas/usage';
-import type { NetworkSettings, ProxyEndpoint, ProxySettings, ProxyTestResult } from '../schemas/network';
+import type { NetworkSettings, ProxySettings, ProxyTestResult } from '../schemas/network';
 
 export type RoomMessage = z.infer<typeof roomMessageSchema>;
 export type CreateDemoResult = z.infer<typeof createDemoResultSchema>;
@@ -30,15 +30,17 @@ export interface UsageApiContract {
 export interface SummaryApiContract {
   preview(input: SummaryPreviewInput): Promise<SummaryPreview>;
   generate(input: SummaryGenerateInput): Promise<SummaryCommandResult>;
+  /** D140: use this version again after it was revoked. */
   confirm(input: SummaryConfirmInput): Promise<SummaryCommandResult>;
+  /** D140: stop using this version; requests go back to the originals. */
+  revoke(input: SummaryConfirmInput): Promise<SummaryCommandResult>;
 }
-/** R14 structured artifacts: generation is an explicit request; a model's version needs the host's adoption. */
+/** R14 structured artifacts: generation is an explicit request; a valid version can be used at once (D139). */
 export interface ArtifactApiContract {
   preview(input: ArtifactPreviewInput): Promise<ArtifactPreview>;
   generate(input: ArtifactGenerateInput): Promise<ArtifactCommandResult>;
   list(input: ArtifactListInput): Promise<ArtifactList>;
   getVersion(input: ArtifactVersionInput): Promise<ArtifactVersionDetail>;
-  adopt(input: ArtifactAdoptInput): Promise<ArtifactCommandResult>;
   edit(input: ArtifactEditInput): Promise<ArtifactCommandResult>;
   /** Clipboard returns the text to copy; a file is saved by Main to the path the host picks (never for code). */
   export(input: ArtifactExportInput): Promise<ArtifactExportResult>;
@@ -46,7 +48,7 @@ export interface ArtifactApiContract {
   listCodeCandidates(input: ArtifactListInput): Promise<CodeCandidateList>;
 }
 /**
- * R15: writing an adopted code candidate into a folder. Only Main's dialog chooses the folder; the preview reads and
+ * R15: writing a code candidate into a folder. Only Main's dialog chooses the folder; the preview reads and
  * writes nothing; a write touches only the files the host ticked in that preview, each checked again first.
  */
 export interface CodeExportApiContract {
@@ -58,12 +60,8 @@ export interface CodeExportApiContract {
 export interface NetworkApiContract {
   getSettings(): Promise<NetworkSettings>;
   saveSettings(input: ProxySettings): Promise<NetworkSettings>;
-  /** One CONNECT handshake to the fixed DeepSeek host through the given loopback proxy; no Key, no request body. */
-  testProxy(input: ProxyEndpoint): Promise<ProxyTestResult>;
-}
-/** D115: restart the app so saved network settings apply; refused while a discussion is running. */
-export interface AppLifecycleApiContract {
-  relaunch(): Promise<void>;
+  /** D137: one connection attempt the way these settings would connect; no Key, no request body. */
+  testProxy(input: ProxySettings): Promise<ProxyTestResult>;
 }
 export interface RoundtableApiContract {
   room: RoomApiContract;
@@ -79,7 +77,6 @@ export interface RoundtableApiContract {
   settings: ProviderSettingsApiContract;
   /** Optional (D115): Preload always provides them; a page without them hides the network settings. */
   network?: NetworkApiContract;
-  app?: AppLifecycleApiContract;
 }
 
 export type RunSessionApiContract = Pick<RoundtableApiContract, 'room' | 'run'>;

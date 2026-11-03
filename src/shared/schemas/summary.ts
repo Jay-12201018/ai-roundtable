@@ -7,7 +7,7 @@ const position = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
 /**
  * R13B conversation summaries (D107). A summary is a visible, editable timeline message that stands in for public
- * messages 1..N in later requests, but only after the host confirms it. Originals are never changed or hidden.
+ * messages 1..N in later requests, from when it is complete (D140). Originals are never changed or hidden.
  */
 export const summaryPreviewInputSchema = z.object({
   runId: idSchema, agentId: idSchema.optional(), throughSlotId: idSchema.optional(), summaryId: idSchema.optional(),
@@ -53,6 +53,8 @@ export const contextSummarySchema = z.object({
     errorCode: errorCodeSchema.optional(),
   }).strict()).min(1).max(256),
   confirmedMessageIds: z.array(idSchema).max(512),
+  /** D140: versions the host stopped using; later requests go back to the originals. */
+  revokedMessageIds: z.array(idSchema).max(512).optional(),
   /** D109: covered messages edited or regenerated after the effective version was written; they are sent themselves. */
   revisedSlotIds: z.array(idSchema).max(4096).optional(),
   createdAt: timestampSchema,

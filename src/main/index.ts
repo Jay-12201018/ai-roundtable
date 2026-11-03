@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
-import { app, dialog, BrowserWindow } from 'electron';
+import { app, dialog, session, BrowserWindow } from 'electron';
 import { Database } from './database/Database';
 import { createElectronKeyBackend } from './security/electronSafeStorage';
 import { KeyService } from './security/KeyService';
@@ -68,9 +68,9 @@ if (!hasLock) {
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
-      // D115: the launch-time proxy comes from the environment or, when that is unset, the settings page.
-      networkSettings = new NetworkSettingsService(app.getPath('userData'), process.env);
-      const providers = new ProviderRegistry(database, keyService, { proxy: networkSettings.proxy });
+      // D137: read for each request, from the settings page and the operating system; off by default.
+      networkSettings = new NetworkSettingsService(app.getPath('userData'), url => session.defaultSession.resolveProxy(url));
+      const providers = new ProviderRegistry(database, keyService, { proxy: networkSettings.route });
       settingsService = new ProviderSettingsService(database, keyService, providers);
       const modelBudget = (modelId: string | null, member: { providerId: string | null }) =>
         member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined;
@@ -118,7 +118,7 @@ function createAppWindow(): void {
         return result.canceled || !result.filePath ? undefined : result.filePath;
       }, range),
     }, artifacts: {
-      list: input => artifacts.list(input), getVersion: input => artifacts.getVersion(input), adopt: input => artifacts.adopt(input), edit: input => artifacts.edit(input),
+      list: input => artifacts.list(input), getVersion: input => artifacts.getVersion(input), edit: input => artifacts.edit(input),
       listCodeCandidates: input => artifacts.listCodeCandidates(input),
       // R14: only the file the host picks in this dialog is written; a code candidate is never saved here (R15).
       export: (owner, input) => artifacts.export(input, async (defaultName, format) => {
@@ -134,12 +134,7 @@ function createAppWindow(): void {
           properties: ['openDirectory', 'createDirectory'] });
         return result.canceled ? undefined : result.filePaths[0];
       }),
-    }, network: networkSettings, lifecycle: { relaunch: () => {
-      // A restart stops nothing silently: refuse while a discussion is still running.
-      if (runService?.hasActiveRuns()) throw new ContractError('invalid_state');
-      // Answer this call first (registerIpc checks the sender again before replying); quitting destroys the window.
-      setImmediate(() => { app.relaunch(); app.quit(); });
-    } } });
+    }, network: networkSettings });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
       if (shutdownRequested || !runService?.hasActiveRuns()) return;

@@ -9,7 +9,7 @@ export function ContextHint({ snapshot, onSummarize }: { snapshot: RunSnapshot; 
   if (!pressure || pressure.level === 'ok') return null;
   const percent = Math.min(100, Math.round(pressure.usedTokens / Math.max(1, pressure.inputBudgetTokens) * 100));
   const writable = summaryWritable(snapshot);
-  return <div className="context-hint"><Note tone="info" icon={Layers} role="status" action={<Button size="sm" onClick={onSummarize} disabled={!writable}>生成摘要…</Button>}>
+  return <div className="context-hint"><Note tone="info" icon={Layers} role="status" action={<Button size="sm" onClick={onSummarize} disabled={!writable}>生成摘要</Button>}>
     {pressure.level === 'over'
       ? `讨论已超过上下文上限：下一次请求有 ${pressure.omittedMessages} 条较早的发言放不下，不会发给模型（原文仍保留）。生成摘要后，后续发言能看到它们的要点。`
       : `讨论已接近上下文上限：下一次请求约占可用输入的 ${percent}%。再继续下去，较早的发言会放不下。可以生成摘要，用摘要代替较早的发言。`}

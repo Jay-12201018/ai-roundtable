@@ -5,7 +5,7 @@ import { isIP, type LookupFunction } from 'node:net';
 import { z } from 'zod';
 import type { DiagnosticEvent, DiagnosticObserver } from './diagnostics';
 import { ContractError } from '../../shared/contracts/errors';
-import { assertProxyTarget, LoopbackProxyAgent, proxyTargetHost, type LoopbackProxy, type ProxyTargetKind } from './loopbackProxy';
+import { ProxyTunnelAgent, type ProxyResolver } from './proxyTunnel';
 
 const nativeText = z.object({ text: z.string() }).strict();
 const positiveTokens = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -21,7 +21,8 @@ const geminiBody = z.object({
 }).strict();
 
 /** Native protocols add an exact credential boundary on top of DNS-pinned/TLS transport. */
-export function createNativeSafeFetch(kind: 'anthropic' | 'gemini', transport: typeof fetch, guard?: () => void): typeof fetch {
+export function createNativeSafeFetch(kind: 'anthropic' | 'gemini', baseUrl: string, transport: typeof fetch, guard?: () => void): typeof fetch {
+  const base = new URL(`${baseUrl}/`);
   return async (input, init = {}) => {
     guard?.();
     try {
@@ -34,19 +35,21 @@ export function createNativeSafeFetch(kind: 'anthropic' | 'gemini', transport: t
       const otherKey = kind === 'anthropic' ? 'x-goog-api-key' : 'x-api-key';
       const key = headers.get(keyHeader);
       if (!key || /\s|\p{Cc}/u.test(key) || headers.has(otherKey)) throw new Error();
+      // Exactly the request shapes the adapter sends, relative to the address this service was saved with.
+      if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) throw new Error();
+      const path = url.pathname.slice(base.pathname.length);
       const entries = [...url.searchParams];
       if (new Set(entries.map(([name]) => name)).size !== entries.length) throw new Error();
       let listing = false; let generation = false;
       if (kind === 'anthropic') {
-        if (url.origin !== 'https://api.anthropic.com' || headers.get('anthropic-version') !== '2023-06-01') throw new Error();
-        listing = method === 'GET' && url.pathname === '/v1/models' && url.searchParams.get('limit') === '1000'
+        if (headers.get('anthropic-version') !== '2023-06-01') throw new Error();
+        listing = method === 'GET' && path === 'v1/models' && url.searchParams.get('limit') === '1000'
           && entries.every(([name, value]) => name === 'limit' || name === 'after_id' && value.length > 0 && value.length <= 4096);
-        generation = method === 'POST' && url.pathname === '/v1/messages' && !url.search;
+        generation = method === 'POST' && path === 'v1/messages' && !url.search;
       } else {
-        if (url.origin !== 'https://generativelanguage.googleapis.com') throw new Error();
-        listing = method === 'GET' && url.pathname === '/v1beta/models' && url.searchParams.get('pageSize') === '100'
+        listing = method === 'GET' && path === 'models' && url.searchParams.get('pageSize') === '100'
           && entries.every(([name, value]) => name === 'pageSize' || name === 'pageToken' && value.length > 0 && value.length <= 4096);
-        generation = method === 'POST' && /^\/v1beta\/models\/[a-zA-Z0-9][a-zA-Z0-9._-]*:streamGenerateContent$/u.test(url.pathname)
+        generation = method === 'POST' && /^models\/[a-zA-Z0-9][a-zA-Z0-9._-]*:streamGenerateContent$/u.test(path)
           && entries.length === 1 && url.searchParams.get('alt') === 'sse';
       }
       if (listing ? init.body !== undefined && init.body !== null : !generation) throw new Error();
@@ -82,8 +85,11 @@ function loopback(address: string): boolean {
   return isIP(address) === 4 && address.startsWith('127.') || address === '::1';
 }
 
-/** Main-only transport: pin public DNS directly, or use the explicitly trusted, narrowly scoped proxy. */
-export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver, proxy?: LoopbackProxy, proxyKind: ProxyTargetKind = 'deepseek'): typeof fetch {
+/**
+ * Main-only transport: pin public DNS directly, or tunnel through the proxy this request's route names (D137). A proxy
+ * resolves names itself, so only literal addresses can be checked here; TLS to the target is always verified.
+ */
+export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver, resolveProxy?: ProxyResolver): typeof fetch {
   return async (input, init = {}) => {
     if (typeof input !== 'string' && !(input instanceof URL)) throw new TypeError('Unsupported request');
     const raw = String(input);
@@ -100,7 +106,12 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     const signal = init.signal;
     const abortReason = () => signal?.reason instanceof Error ? signal.reason : new DOMException('Request aborted', 'AbortError');
     signal?.throwIfAborted(); guard?.();
-    if (proxy) assertProxyTarget(url, method, proxyKind);
+    // A service on this computer is reached directly, whatever the proxy setting says.
+    const route = local || !resolveProxy ? { kind: 'direct' as const } : await resolveProxy(url);
+    signal?.throwIfAborted(); guard?.();
+    if (route.kind === 'unsupported') { observe?.({ stage: 'proxy', category: 'proxy_rejected' }); throw new ContractError('proxy_unsupported'); }
+    const proxy = route.kind === 'http' ? route : undefined;
+    if (proxy && isIP(hostname) && !publicAddress(hostname)) { observe?.({ stage: 'proxy', category: 'target_rejected' }); throw new ContractError('target_rejected'); }
     observe?.({ stage: 'network_client', evidence: 'client_invoked' });
     signal?.throwIfAborted();
     let selected: { address: string; family: number } | undefined;
@@ -123,7 +134,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     } finally { signal?.removeEventListener('abort', stopDns); }
     signal?.throwIfAborted();
     if (addresses.length === 0 || addresses.some(value => value.family !== isIP(value.address) || !(local ? loopback(value.address) : publicAddress(value.address)))) {
-      observe?.({ stage: 'dns', category: 'target_rejected' }); throw new TypeError('Unsafe network target');
+      observe?.({ stage: 'dns', category: 'target_rejected' }); throw new ContractError('target_rejected');
     }
     selected = addresses[0];
     }
@@ -134,10 +145,10 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     return await new Promise<Response>((resolve, reject) => {
       let request: ClientRequest | undefined; let response: IncomingMessage | undefined;
       let phase: 'tcp' | 'proxy' | 'tls' | 'request' | 'response' = 'tcp';
-      const agent = proxy ? new LoopbackProxyAgent(proxy, guard, signal, event => {
+      const agent = proxy ? new ProxyTunnelAgent(proxy, guard, signal, event => {
         if (event.stage === 'tcp' || event.stage === 'proxy' || event.stage === 'tls') phase = event.stage;
         observe?.(event);
-      }, proxyTargetHost(proxyKind)) : undefined;
+      }, hostname, url.port ? Number(url.port) : 443) : undefined;
       const diagnose = (error: unknown) => {
         const code = nativeCode(error);
         let category: DiagnosticEvent['category'];

@@ -33,6 +33,7 @@ const modelListSchema = z.object({
 /** Text-only native Gemini REST, using R09 transport and the existing Shared Adapter contract. */
 export class GeminiProvider implements ProviderAdapter {
   private readonly configuration: ProviderConfiguration;
+  private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly streamTimeoutMs: number;
   private readonly resolveKey: GeminiOptions['resolveKey'];
@@ -41,8 +42,8 @@ export class GeminiProvider implements ProviderAdapter {
     try {
       this.configuration = providerConfigurationSchema.parse(options.configuration);
       if (this.configuration.kind !== 'gemini' || !this.configuration.enabled) throw new ContractError('invalid_state');
-      if (normalizeBase(this.configuration.baseUrl ?? officialBaseUrl) !== officialBaseUrl
-        || normalizeBase(options.confirmedBaseUrl) !== officialBaseUrl) throw new ContractError('invalid_input');
+      this.baseUrl = normalizeBase(this.configuration.baseUrl ?? officialBaseUrl);
+      if (normalizeBase(options.confirmedBaseUrl) !== this.baseUrl) throw new ContractError('invalid_input');
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
       this.streamTimeoutMs = z.number().int().min(1).max(2147483647).parse(options.streamTimeoutMs ?? this.timeoutMs);
       this.resolveKey = options.resolveKey;
@@ -141,7 +142,7 @@ export class GeminiProvider implements ProviderAdapter {
   private request(scope: RequestScope, path: string, key: string, body?: string): Promise<Response> {
     return scope.wait(async () => {
       scope.check();
-      const response = await this.fetcher(`${officialBaseUrl}${path}`, {
+      const response = await this.fetcher(`${this.baseUrl}${path}`, {
         method: body === undefined ? 'GET' : 'POST', headers: { 'x-goog-api-key': key, 'content-type': 'application/json', accept: body === undefined ? 'application/json' : 'text/event-stream' },
         ...(body === undefined ? {} : { body }), signal: scope.signal, redirect: 'error',
       });

@@ -10,8 +10,8 @@ import { compareRunPositions } from '../schemas/configuration';
 import { hostCommandResultSchema, hostCommandSchema } from '../schemas/host';
 import { summaryCommandResultSchema, summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, summaryPreviewSchema } from '../schemas/summary';
 import { usageExportResultSchema, usageReportInputSchema, usageReportSchema } from '../schemas/usage';
-import { networkSettingsSchema, proxyEndpointSchema, proxySettingsSchema, proxyTestResultSchema } from '../schemas/network';
-import { artifactAdoptInputSchema, artifactCommandResultSchema, artifactEditInputSchema, artifactExportInputSchema, artifactExportResultSchema, artifactGenerateInputSchema,
+import { networkSettingsSchema, proxySettingsSchema, proxyTestResultSchema } from '../schemas/network';
+import { artifactCommandResultSchema, artifactEditInputSchema, artifactExportInputSchema, artifactExportResultSchema, artifactGenerateInputSchema,
   artifactListInputSchema, artifactListSchema, artifactPreviewInputSchema, artifactPreviewSchema, artifactVersionDetailSchema, artifactVersionInputSchema, codeCandidateListSchema } from '../schemas/artifact';
 import { codeExportChooseRootInputSchema, codeExportChooseRootResultSchema, codeExportPreviewInputSchema, codeExportPreviewSchema, codeExportWriteInputSchema,
   codeExportWriteResultSchema } from '../schemas/codeExport';
@@ -45,18 +45,18 @@ export const ipcContracts = {
   'usage.exportCsv': { input: usageReportInputSchema, output: usageExportResultSchema },
   'summary.preview': { input: summaryPreviewInputSchema, output: summaryPreviewSchema },
   'summary.generate': { input: summaryGenerateInputSchema, output: summaryCommandResultSchema },
+  'summary.revoke': { input: summaryConfirmInputSchema, output: summaryCommandResultSchema },
   'summary.confirm': { input: summaryConfirmInputSchema, output: summaryCommandResultSchema },
-  // R14: structured artifacts. Generation is an explicit request the host clicks; adopt/edit/export are trusted host writes.
+  // R14: structured artifacts. Generation is an explicit request the host clicks; edit/export are trusted host writes.
   'artifact.preview': { input: artifactPreviewInputSchema, output: artifactPreviewSchema },
   'artifact.generate': { input: artifactGenerateInputSchema, output: artifactCommandResultSchema },
   'artifact.list': { input: artifactListInputSchema, output: artifactListSchema },
   'artifact.getVersion': { input: artifactVersionInputSchema, output: artifactVersionDetailSchema },
-  'artifact.adopt': { input: artifactAdoptInputSchema, output: artifactCommandResultSchema },
   'artifact.edit': { input: artifactEditInputSchema, output: artifactCommandResultSchema },
   'artifact.export': { input: artifactExportInputSchema, output: artifactExportResultSchema },
   // D123: the validated code candidates R15 may consume; read-only.
   'artifact.listCodeCandidates': { input: artifactListInputSchema, output: codeCandidateListSchema },
-  // R15: writing an adopted code candidate. Main owns the folder dialog; the page holds only a folder reference, asks
+  // R15: writing a code candidate. Main owns the folder dialog; the page holds only a folder reference, asks
   // for a read-only preview against it, then for a write of the files the host ticked in that preview.
   'codeExport.chooseRoot': { input: codeExportChooseRootInputSchema, output: codeExportChooseRootResultSchema },
   'codeExport.preview': { input: codeExportPreviewInputSchema, output: codeExportPreviewSchema },
@@ -81,7 +81,6 @@ export const ipcContracts = {
   'settings.getProviderConfiguration': providerSettingsContracts.getProviderConfiguration,
   'settings.listProviderSummaries': providerSettingsContracts.listProviderSummaries,
   'settings.deleteProvider': providerSettingsContracts.deleteProvider,
-  'settings.confirmTarget': providerSettingsContracts.confirmTarget,
   'settings.setKey': providerSettingsContracts.setKey,
   'settings.deleteKey': providerSettingsContracts.deleteKey,
   'settings.getProviderKeyState': providerSettingsContracts.getProviderKeyState,
@@ -92,8 +91,7 @@ export const ipcContracts = {
   'settings.listModelReadiness': providerSettingsContracts.listModelReadiness,
   'network.getSettings': { input: z.undefined(), output: networkSettingsSchema },
   'network.saveSettings': { input: proxySettingsSchema, output: networkSettingsSchema },
-  'network.testProxy': { input: proxyEndpointSchema, output: proxyTestResultSchema },
-  'app.relaunch': { input: z.undefined(), output: z.undefined() },
+  'network.testProxy': { input: proxySettingsSchema, output: proxyTestResultSchema },
 } as const;
 export type IpcChannel = keyof typeof ipcContracts;
 export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcContracts)[C]['input']>;
@@ -130,7 +128,7 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
     const request = input as IpcInput<'run.continueDiscussion'>;
     matches = result.runId === request.runId && (request.agentId === undefined || result.agentIds.length === 1 && result.agentIds[0] === request.agentId);
   }
-  if (channel === 'run.previewContinuation' || channel === 'summary.preview' || channel === 'summary.generate' || channel === 'summary.confirm') {
+  if (channel === 'run.previewContinuation' || channel === 'summary.preview' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'summary.revoke') {
     matches = (data as { runId: string }).runId === (input as { runId: string }).runId;
   }
   if (channel.startsWith('artifact.')) {
@@ -169,7 +167,7 @@ function configurationMatches(channel: IpcChannel, input: unknown, data: unknown
     return agents.every(agent => agent.roomId === request.roomId)
       && (channel !== 'rooms.reorderAgents' || agents.length === request.agentIds!.length && agents.every((agent,index) => agent.id === request.agentIds![index]));
   }
-  if (['settings.confirmTarget','settings.setKey','settings.getProviderKeyState','settings.listModels','settings.testConnection'].includes(channel)
+  if (['settings.setKey','settings.getProviderKeyState','settings.listModels','settings.testConnection'].includes(channel)
     && entity.providerId !== request.providerId) return false;
   if (channel === 'settings.testConnection' && entity.result?.level !== request.level) return false;
   if (channel === 'rooms.listRoomMessages') {

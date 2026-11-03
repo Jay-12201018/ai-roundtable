@@ -61,7 +61,7 @@ export function summaryRange(record: Pick<SummaryRecord, 'covered'>, slots: read
 
 /**
  * The summary later requests use: the latest summary positioned before `beforePosition` whose effective version is
- * complete and confirmed by the host. Without one, requests use the originals exactly as before R13B.
+ * complete and not revoked by the host (D140). Without one, requests use the originals exactly as before R13B.
  */
 export function activeSummary(snapshot: Pick<Snapshot, 'messages' | 'versions' | 'turns' | 'summaries'>, beforePosition = Number.POSITIVE_INFINITY): ActiveSummary | undefined {
   const slots = publicSlots(snapshot);
@@ -74,7 +74,8 @@ export function activeSummary(snapshot: Pick<Snapshot, 'messages' | 'versions' |
       return { record, version, message, position: positions.get(record.id) ?? Number.POSITIVE_INFINITY };
     })
     .filter(item => item.position < beforePosition && item.version && item.message?.status === 'completed' && item.message.content.trim().length > 0
-      && (item.version.origin === 'edit' || item.record.confirmedMessageIds.includes(item.version.messageId)))
+      && (item.version.origin === 'edit' || item.record.confirmedMessageIds.includes(item.version.messageId))
+      && !item.record.revokedMessageIds?.includes(item.version.messageId))
     .sort((a, b) => b.position - a.position);
   const chosen = candidates[0];
   if (!chosen) return;

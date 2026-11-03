@@ -24,11 +24,11 @@ export function generationBlocked(snapshot: RunSnapshot, commands: ArtifactComma
 }
 
 /** 本场信息 › 产物: what the discussion can become, and what it already became. */
-export function ArtifactsPanel({ snapshot, commands, onGenerate, onOpen }: { snapshot: RunSnapshot; commands: ArtifactCommands;
-  onGenerate: (kind: ArtifactKind) => void; onOpen: (artifactId: string) => void }) {
+export function ArtifactsPanel({ snapshot, commands, onGenerate, onChoose, onOpen }: { snapshot: RunSnapshot; commands: ArtifactCommands;
+  onGenerate: (kind: ArtifactKind) => void; onChoose?: (kind: ArtifactKind) => void; onOpen: (artifactId: string) => void }) {
   const blocked = generationBlocked(snapshot, commands);
   return <section className="ctx-sec art-panel"><h3>整理成…</h3>
-    <p className="small muted ctx-lead">把这场讨论整理成可以直接用的东西。每次生成发送 1 次请求；模型写的版本要你采用后才算数。</p>
+    <p className="small muted ctx-lead">把这场讨论整理成可以直接用的东西。点一下就生成，默认由综合类角色来写。每次生成发送 1 次请求。</p>
     {blocked && <p className="small art-blocked" role="note">{blocked}</p>}
     {commands.loadFailed && !commands.artifacts && <p role="alert" className="field-error small">产物读取失败。<button type="button" className="link-btn" onClick={() => void commands.reload()}>重试</button></p>}
     {artifactKindValues.map(kind => {
@@ -46,7 +46,8 @@ export function ArtifactsPanel({ snapshot, commands, onGenerate, onOpen }: { sna
                 {(() => { const write = lastWrite(artifact); return write && <span className="small muted">已写入 {write.written} 个文件 · {when(write.at)}</span>; })()}</span>
             </button>; })}
         </div>
-        {existing.length === 0 && <Button size="sm" disabled={blocked !== undefined || commands.pending !== undefined} onClick={() => onGenerate(kind)}>生成…</Button>}
+        {existing.length === 0 && <div className="art-actions"><Button size="sm" disabled={blocked !== undefined || commands.pending !== undefined} onClick={() => onGenerate(kind)}>生成</Button>
+          {onChoose && <button type="button" className="link-btn small" disabled={blocked !== undefined || commands.pending !== undefined} onClick={() => onChoose(kind)}>换人…</button>}</div>}
       </div>;
     })}
   </section>;

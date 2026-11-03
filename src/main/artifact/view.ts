@@ -13,7 +13,6 @@ export function versionStatus(version: ArtifactVersionRecord): ArtifactVersionSt
   if (version.validation === 'invalid') return 'invalid';
   if (version.validation === 'empty') return 'empty';
   if (version.validation !== 'valid') return 'failed';
-  if (version.origin !== 'edit' && version.adoptedAt === undefined) return 'candidate';
   return lastExportAt(version) ? 'exported' : 'valid';
 }
 
@@ -26,8 +25,8 @@ export function lastExportAt(version: ArtifactVersionRecord): string | undefined
 /** A recorded folder as the host sees it: the home folder shown as ~. */
 export const folderDisplay = (real: string, home = homedir()) => real === home ? '~' : real.startsWith(home + sep) ? '~' + real.slice(home.length) : real;
 
-/** True for a version the host has made effective: adopted, or written by the host. */
-export const isEffective = (version: ArtifactVersionRecord) => version.validation === 'valid' && (version.origin === 'edit' || version.adoptedAt !== undefined);
+/** D139: a version that passed validation can be used at once. */
+export const isEffective = (version: ArtifactVersionRecord) => version.validation === 'valid';
 
 export function contentOf(kind: ArtifactKind, version: ArtifactVersionRecord): ArtifactContent | undefined {
   return version.contentJson === null ? undefined : artifactContentSchemas[kind].parse(JSON.parse(version.contentJson)) as ArtifactContent;
@@ -71,7 +70,7 @@ export function versionView(kind: ArtifactKind, version: ArtifactVersionRecord, 
     ...(content ? { title: content.title } : {}), issues, ...(version.emptyReason !== null ? { emptyReason: version.emptyReason } : {}), outputChars: version.rawOutput.length,
     ...(numbers.length ? { firstNumber: Math.min(...numbers), lastNumber: Math.max(...numbers) } : {}),
     affectedNumbers: affectedNumbers(snapshot, version.sources),
-    ...(version.adoptedAt ? { adoptedAt: version.adoptedAt } : {}), ...(lastExportAt(version) ? { exportedAt: lastExportAt(version) } : {}),
+    ...(lastExportAt(version) ? { exportedAt: lastExportAt(version) } : {}),
     ...(version.codeWrites.length ? { codeWrites: version.codeWrites.map(entry => ({ exportId: entry.id, folder: folderDisplay(entry.rootPath),
       written: entry.written, skipped: entry.skipped, failed: entry.failed, at: entry.createdAt })) } : {}),
     createdAt: version.createdAt, updatedAt: version.updatedAt,

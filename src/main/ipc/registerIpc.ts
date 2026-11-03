@@ -9,12 +9,11 @@ import type { RoomManagementApiContract, ProviderSettingsApiContract } from '../
 import type { RunService } from '../services/RunService';
 import type { HostApiContract } from '../../shared/contracts/app';
 import type { UsageExportResult, UsageRange, UsageReport } from '../../shared/schemas/usage';
-import type { NetworkSettings, ProxyEndpoint, ProxySettings, ProxyTestResult } from '../../shared/schemas/network';
+import type { NetworkSettings, ProxySettings, ProxyTestResult } from '../../shared/schemas/network';
 import { ContractError } from '../../shared/contracts/errors';
 
 /** D115: saved proxy settings, a keyless proxy check and a restart; absent in tests that do not need them. */
-export type NetworkIpcService = { getSettings(): NetworkSettings; saveSettings(input: ProxySettings): NetworkSettings; testProxy(input: ProxyEndpoint): Promise<ProxyTestResult> };
-export type LifecycleIpcService = { relaunch(): void };
+export type NetworkIpcService = { getSettings(): Promise<NetworkSettings>; saveSettings(input: ProxySettings): Promise<NetworkSettings>; testProxy(input: ProxySettings): Promise<ProxyTestResult> };
 
 /** R13B: the usage report and the CSV export; the export writes only the file the user picks in Main's dialog. */
 export type UsageIpcService = { getReport(range?: UsageRange): UsageReport; exportCsv(window: BrowserWindow, range?: UsageRange): Promise<UsageExportResult> };
@@ -25,7 +24,7 @@ import type { CodeExportChooseRootInput, CodeExportChooseRootResult } from '../.
 import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
 
 /** R14: artifact reads and host writes; a file export asks Main's save dialog, owned by this window. */
-export type ArtifactIpcService = Pick<ArtifactService, 'list' | 'getVersion' | 'adopt' | 'edit' | 'listCodeCandidates'> & {
+export type ArtifactIpcService = Pick<ArtifactService, 'list' | 'getVersion' | 'edit' | 'listCodeCandidates'> & {
   export(window: BrowserWindow, input: ArtifactExportInput): Promise<ArtifactExportResult> };
 
 /** R15: the folder dialog belongs to this window; preview and write are the service's two narrow file operations. */
@@ -36,8 +35,8 @@ export type IpcDisposer = (() => void) & { drain(): Promise<void> };
 let currentDisposer: IpcDisposer | undefined;
 
 export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract; usage: UsageIpcService;
-  network?: NetworkIpcService; lifecycle?: LifecycleIpcService; artifacts?: ArtifactIpcService; codeExport?: CodeExportIpcService }): IpcDisposer {
-  const { run: service, rooms, settings, host, usage, network, lifecycle, artifacts, codeExport } = services;
+  network?: NetworkIpcService; artifacts?: ArtifactIpcService; codeExport?: CodeExportIpcService }): IpcDisposer {
+  const { run: service, rooms, settings, host, usage, network, artifacts, codeExport } = services;
   const unsupported = (): never => { throw new ContractError('unsupported'); };
   currentDisposer?.();
   let disposed = false;
@@ -79,11 +78,11 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'summary.preview': (input) => service.previewSummary(input),
     'summary.generate': (input) => service.generateSummary(input),
     'summary.confirm': (input) => service.confirmSummary(input),
+    'summary.revoke': (input) => service.revokeSummary(input),
     'artifact.preview': (input) => service.previewArtifact(input),
     'artifact.generate': (input) => service.generateArtifact(input),
     'artifact.list': (input) => artifacts ? artifacts.list(input) : unsupported(),
     'artifact.getVersion': (input) => artifacts ? artifacts.getVersion(input) : unsupported(),
-    'artifact.adopt': (input) => artifacts ? artifacts.adopt(input) : unsupported(),
     'artifact.edit': (input) => artifacts ? artifacts.edit(input) : unsupported(),
     'artifact.export': (input) => artifacts ? artifacts.export(window, input) : unsupported(),
     'artifact.listCodeCandidates': (input) => artifacts ? artifacts.listCodeCandidates(input) : unsupported(),
@@ -110,7 +109,6 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'settings.getProviderConfiguration': (input) => settings.getProviderConfiguration(input),
     'settings.listProviderSummaries': () => settings.listProviderSummaries(),
     'settings.deleteProvider': (input) => settings.deleteProvider(input),
-    'settings.confirmTarget': (input) => settings.confirmTarget(input),
     'settings.setKey': (input) => settings.setKey(input),
     'settings.deleteKey': (input) => settings.deleteKey(input),
     'settings.getProviderKeyState': (input) => settings.getProviderKeyState(input),
@@ -121,7 +119,6 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'network.getSettings': () => network ? network.getSettings() : unsupported(),
     'network.saveSettings': (input) => network ? network.saveSettings(input) : unsupported(),
     'network.testProxy': (input) => network ? network.testProxy(input) : unsupported(),
-    'app.relaunch': () => lifecycle ? lifecycle.relaunch() : unsupported(),
   };
   const register = <C extends IpcChannel>(channel: C) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
@@ -142,8 +139,8 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         return response;
       })();
       if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.continueDiscussion'
-        || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'network.saveSettings'
-        || channel === 'artifact.generate' || channel === 'artifact.adopt' || channel === 'artifact.edit' || channel === 'artifact.export' || channel === 'codeExport.write') {
+        || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'summary.revoke' || channel === 'network.saveSettings'
+        || channel === 'artifact.generate' || channel === 'artifact.edit' || channel === 'artifact.export' || channel === 'codeExport.write') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
       }

@@ -110,7 +110,6 @@ export function App() {
       try { return await work(); } finally { void reloadProviders(); }
     }
     return {
-      confirmTarget: input => api.settings.confirmTarget(input),
       createProvider: input => refreshAfter(() => api.settings.createProvider(input)),
       updateProvider: input => refreshAfter(() => api.settings.updateProvider(input)),
       deleteProvider: input => refreshAfter(() => api.settings.deleteProvider(input)),
@@ -218,12 +217,31 @@ export function App() {
   const [summaryTarget, setSummaryTarget] = useState<{ summaryId?: string }>();
   useEffect(() => setSummaryTarget(undefined), [snapshot?.runId]);
   const openSummary = useCallback((summaryId?: string) => { setPanelDrawer(false); setSummaryTarget(summaryId ? { summaryId } : {}); }, []);
+  // D140: one click generates with Main's defaults. Only what stands in the way, or asking for another writer, opens the dialog.
+  const summarizeNow = useCallback(async (summaryId?: string) => {
+    setPanelDrawer(false);
+    try {
+      const preview = await summaryCommands.preview(summaryId ? { summaryId } : {});
+      if (preview.available && preview.agentId && preview.throughSlotId
+        && await summaryCommands.generate({ agentId: preview.agentId, throughSlotId: preview.throughSlotId, ...(summaryId ? { summaryId } : {}) })) return;
+    } catch { /* the dialog says what stands in the way */ }
+    setSummaryTarget(summaryId ? { summaryId } : {});
+  }, [summaryCommands]);
   // R14: artifacts of the selected Run — the generate dialog, the reader, and going back to a message it cites.
   const artifactCommands = useArtifacts(api.artifact, snapshot?.runId, snapshot?.sequence, api.codeExport);
   const [generateTarget, setGenerateTarget] = useState<{ kind: ArtifactKind; artifactId?: string }>();
   const [readerTarget, setReaderTarget] = useState<{ artifactId: string; versionId?: string }>();
   const [reveal, setReveal] = useState<{ key: string; nonce: number }>();
   useEffect(() => { setGenerateTarget(undefined); setReaderTarget(undefined); setReveal(undefined); }, [snapshot?.runId]);
+  const generateNow = useCallback(async (kind: ArtifactKind, artifactId?: string) => {
+    setPanelDrawer(false);
+    try {
+      const preview = await artifactCommands.preview({ kind, ...(artifactId ? { artifactId } : {}) });
+      const started = preview.available && preview.agentId ? await artifactCommands.generate({ kind, agentId: preview.agentId, ...(artifactId ? { artifactId } : {}) }) : undefined;
+      if (started) { setReaderTarget({ artifactId: started.artifactId, versionId: started.versionId }); return; }
+    } catch { /* the dialog says what stands in the way */ }
+    setGenerateTarget({ kind, ...(artifactId ? { artifactId } : {}) });
+  }, [artifactCommands]);
   const readerArtifact = readerTarget ? artifactCommands.artifacts?.find(artifact => artifact.artifactId === readerTarget.artifactId) : undefined;
   const revealNumber = useCallback((number: number) => {
     const slotId = timelineSlots(snapshot)?.find(slot => slot.number === number)?.slotId;
@@ -337,11 +355,11 @@ export function App() {
     step: { enabled: stepEnabled, run: () => void session.control('step') }, stop: { enabled: stopEnabled, run: () => void session.control('stop') },
   } : undefined;
   const syncNotices = <>{syncStatus === 'syncing' && !snapshot && <p role="status" className="muted">正在同步运行状态…</p>}</>;
-  // D113 (R16 D1-B): a service whose address the host typed says once, before the start, where this discussion goes.
+  // A service whose address the host typed says once, before the start, where this discussion goes.
   const userTargets = [...new Set((enabledMembers ?? []).map(member => providers.find(provider => provider.id === member.providerId))
-    .filter((provider): provider is ProviderSummary => Boolean(provider) && isUserAddress({ kind: provider!.kind, baseUrl: readiness.rows?.find(row => row.providerId === provider!.id)?.confirmedBaseUrl ?? '' }))
-    .map(provider => readiness.rows?.find(row => row.providerId === provider.id)?.confirmedBaseUrl).filter((url): url is string => Boolean(url)))];
-  const targetNotice = !snapshot && userTargets.length > 0 ? <p className="composer-target" role="note"><Lock aria-hidden size={14} />这场讨论的目标和发言将发往 {userTargets.join('、')}（你在设置里填写并确认过的地址）。</p> : undefined;
+    .filter((provider): provider is ProviderSummary => Boolean(provider) && isUserAddress({ kind: provider!.kind, baseUrl: readiness.rows?.find(row => row.providerId === provider!.id)?.baseUrl ?? '' }))
+    .map(provider => readiness.rows?.find(row => row.providerId === provider.id)?.baseUrl).filter((url): url is string => Boolean(url)))];
+  const targetNotice = !snapshot && userTargets.length > 0 ? <p className="composer-target" role="note"><Lock aria-hidden size={14} />这场讨论的目标和发言将发往 {userTargets.join('、')}（你在设置里填写的地址）。</p> : undefined;
   const modeNotice = workflowNotice?.roomId === roomId ? workflowNotice?.text
     : stored.damaged ? `这个房间保存的讨论方式读不出来，这次按「${defaultMode}」进行。`
       : lostWorkflow?.roomId === roomId && !stored.draft ? `这台电脑上没有找到这个房间的讨论方式（例如清理过浏览器数据），已退回「${defaultMode}」${lostWorkflow?.label ? `；上次用的是「${lostWorkflow.label}」` : ''}。` : undefined;
@@ -370,13 +388,13 @@ export function App() {
   const recentTasks = [...new Set(directory.runs.map(run => run.task).filter((task): task is string => Boolean(task?.trim())))].slice(0, 3);
   const discussionBody = (() => {
     if (snapshot) return <DiscussionTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} summaries={summaryCommands}
-      onRegenerateSummary={openSummary} reveal={reveal}
+      onRegenerateSummary={summaryId => void summarizeNow(summaryId)} onChooseSummary={openSummary} reveal={reveal}
       header={<><div className="goal-card"><div className="label">讨论目标</div><p>{snapshot.execution?.task?.trim() || '历史任务（目标未记录）'}</p></div>
         <div className="sys-line">{snapshot.workflow ? workflowTemplateLabels[snapshot.workflow.templateId] : '按顺序轮流发言'}{runMembers?.length ? ` · ${runMembers.join(' → ')}` : ''}</div></>}
       footer={<RunNotices snapshot={snapshot} error={error} syncFailed={syncStatus === 'error'} onRetrySync={synchronizeHost}
         retry={{ enabled: retryEnabled, run: () => void session.repeat('retryTurn') }} resume={{ enabled: continueEnabled, run: () => void session.repeat('continueMessage') }}
         recover={{ inspect: { enabled: inspectEnabled, run: () => void session.recover('inspect') }, resume: { enabled: recoverEnabled, run: () => void session.recover('resume') }, discard: { enabled: inspectEnabled, run: () => void session.recover('discard') } }}
-        onSummarize={() => openSummary()} summaryOpen={summaryTarget !== undefined} />} />;
+        onSummarize={() => void summarizeNow()} summaryOpen={summaryTarget !== undefined} />} />;
     if (runId) return <div className="discussion-empty"><div className="empty-room">
       {syncStatus === 'error' ? <RunNotices snapshot={undefined} error={error} syncFailed onRetrySync={synchronizeHost}
         retry={{ enabled: false, run: () => {} }} resume={{ enabled: false, run: () => {} }} recover={{ inspect: { enabled: false, run: () => {} }, resume: { enabled: false, run: () => {} }, discard: { enabled: false, run: () => {} } }}
@@ -442,10 +460,10 @@ export function App() {
     onCollapse={drawer ? undefined : () => collapseSidebar(true)} onClose={drawer ? () => setNavOpen(false) : undefined} />;
   const panel = <RunPanel snapshot={snapshot} commands={hostCommands} providers={providerNames} tab={panelTab} onTab={setPanelTab}
     onClose={() => { if (layout === 'wide') { setPanelPinned(false); remember('roundtable.panelOpen', false); } else setPanelDrawer(false); }}
-    onSummarize={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setWorkflowOpen(true); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'}
+    onSummarize={() => void summarizeNow()} onChooseSummary={() => openSummary()} onOpenWorkflow={roomId ? () => { setPanelDrawer(false); setWorkflowOpen(true); } : undefined} syncLabel={syncStatus === 'ready' ? '主进程快照 · 已同步' : syncStatus === 'syncing' ? '正在同步' : syncStatus === 'error' ? '同步失败' : '未同步'}
     artifactCount={artifactCommands.artifacts?.length}
     artifacts={snapshot && artifactCommands.available ? <ArtifactsPanel snapshot={snapshot} commands={artifactCommands}
-      onGenerate={kind => { setPanelDrawer(false); setGenerateTarget({ kind }); }} onOpen={artifactId => { setPanelDrawer(false); setReaderTarget({ artifactId }); }} /> : undefined} />;
+      onGenerate={kind => void generateNow(kind)} onChoose={kind => { setPanelDrawer(false); setGenerateTarget({ kind }); }} onOpen={artifactId => { setPanelDrawer(false); setReaderTarget({ artifactId }); }} /> : undefined} />;
 
   return <div className="app app-shell" data-layout={layout}>
     {sidebarInline && <div className="app-side" inert={anyDrawer || undefined}>{sidebar(false)}</div>}
@@ -463,7 +481,7 @@ export function App() {
         {composer}
       </> : page === 'settings' ? <>
         {(layout === 'narrow' || sidebarCollapsed) && pageTopbar('settings')}
-        <SettingsPage api={settingsApi} network={api.network} lifecycle={api.app} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
+        <SettingsPage api={settingsApi} network={api.network} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
           theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onConnected={createFirstRoom}
           onStart={() => { const target = starterRoom ?? roomId; if (target) newDiscussion(target); else goDiscussion(); }} />
       </> : page === 'rooms' ? <>
@@ -486,7 +504,7 @@ export function App() {
     }} />}
     {snapshot && readerArtifact && <ArtifactReader key={readerArtifact.artifactId} snapshot={snapshot} artifact={readerArtifact} commands={artifactCommands} host={hostCommands}
       initialVersionId={readerTarget?.versionId} onClose={() => setReaderTarget(undefined)} onReveal={revealNumber}
-      onRegenerate={() => setGenerateTarget({ kind: readerArtifact.kind, artifactId: readerArtifact.artifactId })} />}
+      onRegenerate={() => void generateNow(readerArtifact.kind, readerArtifact.artifactId)} onChoose={() => setGenerateTarget({ kind: readerArtifact.kind, artifactId: readerArtifact.artifactId })} />}
     {snapshot && generateTarget && <GenerateDialog key={`${generateTarget.kind}:${generateTarget.artifactId ?? 'new'}`} snapshot={snapshot} kind={generateTarget.kind}
       artifactId={generateTarget.artifactId} commands={artifactCommands} onClose={() => setGenerateTarget(undefined)}
       onStarted={result => { setGenerateTarget(undefined); setReaderTarget({ artifactId: result.artifactId, versionId: result.versionId }); }} />}

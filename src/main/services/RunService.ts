@@ -635,15 +635,24 @@ export class RunService {
     return { runId: run.id, summaryId, requestId, messageId, duplicate: false };
   }
 
-  /** D107: the host confirms the effective version of a summary; only then do later requests use it. */
+  /** D140: the host stops using the effective version of a summary; later requests go back to the originals. */
+  revokeSummary(input: SummaryConfirmInput): SummaryCommandResult {
+    return this.setSummaryUse(input, false);
+  }
+
+  /** D140: the host uses a summary version again. A version that was never used starts being used. */
   confirmSummary(input: SummaryConfirmInput): SummaryCommandResult {
+    return this.setSummaryUse(input, true);
+  }
+
+  private setSummaryUse(input: SummaryConfirmInput, inUse: boolean): SummaryCommandResult {
     const parsed = summaryConfirmInputSchema.safeParse(input);
     if (!parsed.success) throw new ContractError('invalid_input');
     input = parsed.data;
     const run = this.requireRun(input.runId);
-    const previous = this.database.findSummaryConfirmationByClient(run.id, input.clientRequestId);
+    const previous = this.database.findSummaryUseByClient(run.id, input.clientRequestId);
     if (previous) {
-      if (previous.messageId !== input.messageId) throw new ContractError('invalid_input', 'clientRequestId');
+      if (previous.messageId !== input.messageId || previous.inUse !== inUse) throw new ContractError('invalid_input', 'clientRequestId');
       return { runId: run.id, summaryId: previous.summaryId, messageId: previous.messageId, duplicate: true };
     }
     return this.database.transaction(() => {
@@ -653,9 +662,10 @@ export class RunService {
       const message = snapshot.messages.find(item => item.id === input.messageId);
       if (!version || !summary || !message) throw new ContractError('not_found');
       if (!version.active || message.status !== 'completed' || !message.content.trim()) throw new ContractError('invalid_state');
-      const created = this.database.confirmSummaryVersion({ messageId: message.id, summaryId: summary.id, runId: run.id, clientRequestId: input.clientRequestId });
-      if (created) this.appendEvent(run.id, 'summary_updated', { summaryId: summary.id, messageId: message.id, status: 'confirmed' });
-      return { runId: run.id, summaryId: summary.id, messageId: message.id, duplicate: !created };
+      if (inUse && version.origin !== 'edit') this.database.confirmSummaryVersion({ messageId: message.id, summaryId: summary.id, runId: run.id });
+      this.database.setSummaryUse({ messageId: message.id, summaryId: summary.id, runId: run.id, clientRequestId: input.clientRequestId, inUse });
+      this.appendEvent(run.id, 'summary_updated', { summaryId: summary.id, messageId: message.id, status: inUse ? 'confirmed' : 'revoked' });
+      return { runId: run.id, summaryId: summary.id, messageId: message.id, duplicate: false };
     });
   }
 
@@ -781,7 +791,7 @@ export class RunService {
   }
 
   /** R14: a trusted artifact change (adopt, edit, export) and its run-level notification, in one transaction. */
-  notifyArtifact(runId: string, payload: { artifactId: string; versionId: string; status: 'adopted' | 'edited' | 'exported' }): void {
+  notifyArtifact(runId: string, payload: { artifactId: string; versionId: string; status: 'edited' | 'exported' }): void {
     this.appendAndNotify(runId, 'artifact_updated', payload);
   }
 
@@ -876,8 +886,9 @@ export class RunService {
       completed: (content, reason) => {
         this.database.updateMessage(messageId, content, 'completed');
         this.database.finishSummaryRequest(requestId, 'completed', reason);
-        // A regenerated summary replaces the effective version only once it is complete; it still needs confirmation.
+        // A regenerated summary replaces the effective version only once it is complete. D140: it is used from now on.
         if (request.regenerate) this.database.activateVersion(messageId);
+        if (content.trim()) this.database.confirmSummaryVersion({ messageId, summaryId, runId: context.runId });
         this.appendEvent(context.runId, 'summary_updated', { summaryId, messageId, status: 'completed' });
       },
       ended: (content, aborted, errorCode) => {

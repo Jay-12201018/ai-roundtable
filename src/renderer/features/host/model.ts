@@ -38,8 +38,7 @@ export function timelineSlots(snapshot: RunSnapshot | undefined): TimelineSlot[]
 }
 
 /**
- * R13B (D107): the summary later requests use — the latest one whose effective version is complete and confirmed
- * (a host edit confirms itself). Display only; Main makes the same choice when it builds a request.
+ * R13B (D107, D140): the summary later requests use — the latest one whose effective version is complete and not revoked. Display only; Main makes the same choice when it builds a request.
  */
 export function usedSummary(snapshot: RunSnapshot | undefined) {
   const slots = timelineSlots(snapshot) ?? [];
@@ -48,7 +47,7 @@ export function usedSummary(snapshot: RunSnapshot | undefined) {
     const summary = snapshot?.summaries?.find(item => item.slotId === slot.slotId);
     const { active } = slot;
     if (summary && active.message.status === 'completed' && active.message.content.trim()
-      && (active.origin === 'edit' || summary.confirmedMessageIds.includes(active.messageId))) return summary;
+      && (active.origin === 'edit' || summary.confirmedMessageIds.includes(active.messageId)) && !summary.revokedMessageIds?.includes(active.messageId)) return summary;
   }
   return undefined;
 }

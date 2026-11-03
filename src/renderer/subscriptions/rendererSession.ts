@@ -8,15 +8,17 @@ import { apiErrorSchema, type ErrorCode } from '../../shared/schemas/error';
 
 // Start refusals the host can act on get their own reason; anything else keeps the generic message.
 const startFailures: Partial<Record<string, string>> = {
-  forbidden: '启动失败：成员使用的 Provider 尚未在本次会话确认请求目标，或 Key 已更换。请到“模型设置”勾选“我已核对请求目标”并点“确认本次会话目标”。',
+  forbidden: '启动失败：服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
   unsupported: '启动失败：有成员的模型现在不能发送请求，请到房间里检查成员的模型。',
 };
 
 // What the service or the network said, in plain words; nothing from its response body ever reaches here.
 const turnFailureMessages: Partial<Record<ErrorCode, string>> = {
   invalid_response: '模型未完整完成响应，部分输出已保留。', timeout: '请求已超时，部分输出已保留。', cancelled: '请求已停止，部分输出已保留。',
-  authentication_failed: '服务商拒绝了这把 Key：可能无效或已过期，请到“设置 › 模型服务”检查。', forbidden: '这个服务的地址还没确认，或服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
-  rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，请检查成员用的模型名。', network_error: '连不上这个服务：请检查网络、地址或代理设置。部分输出已保留。',
+  authentication_failed: '服务商拒绝了这把 Key：可能无效或已过期，请到“设置 › 模型服务”检查。', forbidden: '服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
+  rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，请检查成员用的模型名。', network_error: '连接不上，请检查网络和地址。如果开着网络代理，也请检查代理设置。部分输出已保留。',
+  target_rejected: '这个地址解析到了内网或保留地址，不会直接连接。请检查地址；如果你的网络环境需要通过代理连接，可以到“设置 › 网络”打开。',
+  proxy_unsupported: '现在的代理类型不支持，请求没有发出。可以到“设置 › 网络”的高级选项里手动填写 HTTP 代理地址。',
   invalid_input: '服务商拒绝了这次请求：可能是讨论太长放不进模型的上下文（可以生成讨论摘要后重试）、模型名或上限不对，或账户余额不足。',
 };
 

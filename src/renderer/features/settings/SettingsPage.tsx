@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Globe, Monitor, Moon, Plug, ShieldCheck, Sun, type LucideIcon } from 'lucide-react';
-import type { AppLifecycleApiContract, NetworkApiContract } from '../../../shared/contracts/app';
+import type { NetworkApiContract } from '../../../shared/contracts/app';
 import type { ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
 import { Choice, cx } from '../../components/ui';
 import { themeLabels, type Theme } from '../../theme/useTheme';
@@ -11,7 +11,7 @@ import './settings.css';
 
 export type SettingsSection = 'services' | 'network' | 'appearance' | 'privacy';
 const sections: Array<{ id: SettingsSection; label: string; icon: LucideIcon }> = [
-  { id: 'services', label: '模型服务', icon: Plug }, { id: 'network', label: '网络与代理', icon: Globe },
+  { id: 'services', label: '模型服务', icon: Plug }, { id: 'network', label: '网络', icon: Globe },
   { id: 'appearance', label: '外观', icon: Sun }, { id: 'privacy', label: '数据与隐私', icon: ShieldCheck },
 ];
 const themeIcons: Record<Theme, LucideIcon> = { system: Monitor, light: Sun, dark: Moon };
@@ -29,14 +29,14 @@ export function useReadiness(api: ProviderSettingsApiContract, key: unknown) {
 }
 
 export type SettingsPageProps = {
-  api: ProviderSettingsApiContract; network?: NetworkApiContract; lifecycle?: AppLifecycleApiContract;
+  api: ProviderSettingsApiContract; network?: NetworkApiContract;
   providers: readonly ProviderSummary[]; providerLoadState: 'loading' | 'ready' | 'error'; onProvidersChanged: () => void;
   theme: Theme; setTheme: (theme: Theme) => void; section: SettingsSection; onSection: (section: SettingsSection) => void;
   onConnected?: ConnectWizardProps['onConnected']; onStart?: () => void;
 };
 
 /** 设置: a sub-navigation (horizontal tabs when narrow) and one section at a time. */
-export function SettingsPage({ api, network, lifecycle, providers, providerLoadState, onProvidersChanged, theme, setTheme, section, onSection, onConnected, onStart }: SettingsPageProps) {
+export function SettingsPage({ api, network, providers, providerLoadState, onProvidersChanged, theme, setTheme, section, onSection, onConnected, onStart }: SettingsPageProps) {
   const [wizard, setWizard] = useState<{ rekey?: ProviderConfiguration }>();
   const readiness = useReadiness(api, providers);
   const changed = () => { onProvidersChanged(); void readiness.reload(); };
@@ -49,7 +49,7 @@ export function SettingsPage({ api, network, lifecycle, providers, providerLoadS
     <div className="page settings-content"><div className={cx('page-inner', 'settings-inner')}>
       {section === 'services' && <ServicesPanel api={api} providers={providers} loadState={providerLoadState} readiness={readiness.rows} onChanged={changed}
         onAdd={() => setWizard({})} onRekey={provider => setWizard({ rekey: provider })} />}
-      {section === 'network' && <NetworkPanel network={network} lifecycle={lifecycle} />}
+      {section === 'network' && <NetworkPanel network={network} />}
       {section === 'appearance' && <>
         <div className="page-head"><div className="grow"><h1>外观</h1><p>默认跟随系统，切换后立即生效，并记在这台电脑上。</p></div></div>
         <div className="choice-grid theme-choices" role="group" aria-label="外观">{(['system', 'light', 'dark'] as Theme[]).map(value => {

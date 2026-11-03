@@ -6,7 +6,7 @@ type SummaryApi = { summary: SummaryApiContract };
 let fallbackCounter = 0;
 const newRequestId = () => globalThis.crypto?.randomUUID?.() ?? `summary-${Date.now()}-${++fallbackCounter}`;
 
-/** Summary generation and confirmation for the selected Run; each click gets its own clientRequestId (D107). */
+/** Summary generation, and using or not using a version, for the selected Run; each click gets its own clientRequestId (D107). */
 export function useSummaryCommands(api: SummaryApi | undefined, runId: string | undefined, onApplied: () => void) {
   const inFlight = useRef(false);
   const [pending, setPending] = useState<string>();
@@ -26,6 +26,7 @@ export function useSummaryCommands(api: SummaryApi | undefined, runId: string | 
   const generate = useCallback((input: { agentId: string; throughSlotId: string; summaryId?: string }) =>
     act('generate', clientRequestId => api!.summary.generate({ runId: runId!, clientRequestId, ...input })), [act, api, runId]);
   const confirm = useCallback((messageId: string) => act(`confirm:${messageId}`, clientRequestId => api!.summary.confirm({ runId: runId!, clientRequestId, messageId })), [act, api, runId]);
-  return { preview, generate, confirm, pending, error, available: Boolean(api && runId) };
+  const revoke = useCallback((messageId: string) => act(`revoke:${messageId}`, clientRequestId => api!.summary.revoke({ runId: runId!, clientRequestId, messageId })), [act, api, runId]);
+  return { preview, generate, confirm, revoke, pending, error, available: Boolean(api && runId) };
 }
 export type SummaryCommands = ReturnType<typeof useSummaryCommands>;

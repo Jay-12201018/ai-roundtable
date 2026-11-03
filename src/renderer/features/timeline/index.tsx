@@ -24,12 +24,12 @@ export { AgentMessage, HostMessage, SlotItem } from './MessageItem';
 export { providerNamesFrom, modelLabel, providerLabel, type ProviderNames } from './model';
 
 type Props = { snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames; summaries: SummaryCommands;
-  onRegenerateSummary: (summaryId: string) => void; header?: ReactNode; footer?: ReactNode;
+  onRegenerateSummary: (summaryId: string) => void; onChooseSummary?: (summaryId: string) => void; header?: ReactNode; footer?: ReactNode;
   /** R14: a message to bring into view, by slot id (from an artifact's sources). */
   reveal?: { key: string; nonce: number } };
 
 /** The shared public timeline of one Run: one item per message slot, its effective version first. */
-export function DiscussionTimeline({ snapshot, commands, providers, summaries, onRegenerateSummary, header, footer, reveal }: Props) {
+export function DiscussionTimeline({ snapshot, commands, providers, summaries, onRegenerateSummary, onChooseSummary, header, footer, reveal }: Props) {
   const items = useMemo<TimelineItem[]>(() => {
     const slots = timelineSlots(snapshot);
     if (!slots) return snapshot.messages.map(message => ({ key: message.id, render: () => <LegacyMessage snapshot={snapshot} messageId={message.id} providers={providers} /> }));
@@ -37,11 +37,11 @@ export function DiscussionTimeline({ snapshot, commands, providers, summaries, o
     return slots.map(slot => ({
       key: slot.slotId,
       render: () => slot.author === 'summary'
-        ? <SummaryCard slot={slot} snapshot={snapshot} commands={commands} summaries={summaries} onRegenerate={onRegenerateSummary} />
+        ? <SummaryCard slot={slot} snapshot={snapshot} commands={commands} summaries={summaries} onRegenerate={onRegenerateSummary} onChoose={onChooseSummary} />
         : <SlotItem slot={slot} snapshot={snapshot} commands={commands} providers={providers}
           coveredBy={used?.coveredSlotIds.includes(slot.slotId) ? used : undefined} revisedAfterSummary={used?.revisedSlotIds?.includes(slot.slotId) ?? false} />,
     }));
-  }, [snapshot, commands, providers, summaries, onRegenerateSummary]);
+  }, [snapshot, commands, providers, summaries, onRegenerateSummary, onChooseSummary]);
   const last = snapshot.messages.at(-1);
   return <Timeline viewKey={snapshot.runId} label="讨论时间线" items={items} header={header} footer={footer}
     contentVersion={`${snapshot.sequence}:${snapshot.messages.length}:${last?.content.length ?? 0}`}

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, CircleAlert, FlaskConical, Info, Lock, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleAlert, FlaskConical, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import type { ProviderConfiguration, ProviderKeyState, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
 import { providerBaseUrlSchema } from '../../../shared/schemas/configuration';
 import { DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS, DEFAULT_MODEL_MAX_OUTPUT_TOKENS, MAX_MODEL_LIMIT_TOKENS, MIN_MODEL_CONTEXT_WINDOW_TOKENS } from '../../../shared/schemas/provider';
 import { Button, Field, IconButton, Pill, Switch, Tag, cx } from '../../components/ui';
 import { presetOf, targetOf } from './presets';
-import { errorMessage, modelBlockText, modelIdProblem, serviceStatus } from './model';
+import { errorMessage, modelBlockText, modelIdProblem, serviceStatus, testService, type ServiceTest } from './model';
 
 /** D134: why these limits cannot be saved; Main's schema refuses the same values. */
 function limitsError({ context, output }: { context: string; output: string }): string | undefined {
@@ -48,8 +48,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
   const [config, setConfig] = useState<ProviderConfiguration>(); const [loadFailed, setLoadFailed] = useState(false);
   const [keyState, setKeyState] = useState<ProviderKeyState>();
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
-  const [check, setCheck] = useState<{ tone: 'ok' | 'warn' | 'info'; text: string; at: string }>();
-  const [trial, setTrial] = useState<{ tone: 'ok' | 'warn'; text: string }>();
+  const [check, setCheck] = useState<ServiceTest & { at: string }>();
   const [adding, setAdding] = useState<'manual' | 'listed'>(); const [newModel, setNewModel] = useState('');
   const [listed, setListed] = useState<Array<{ id: string; name: string }>>();
   const [draft, setDraft] = useState<{ name: string; baseUrl: string }>({ name: summary.name, baseUrl: '' });
@@ -84,7 +83,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
   const preset = presetOf({ kind: summary.kind, baseUrl: config?.baseUrl });
   const mock = summary.kind === 'mock';
   const target = config ? targetOf(config) : null;
-  const userAddress = summary.kind === 'openai-compatible' && config && !presetOf(config);
+  const userAddress = config && !mock && !presetOf(config);
   const keyNow = readiness?.keyState ?? keyState?.state;
   const keySaved = keyNow === 'configured' || keyNow === 'session';
   const models = config ? [...new Map([...(config.defaultModelId ? [{ id: config.defaultModelId, name: config.customModels.find(model => model.id === config.defaultModelId)?.name ?? config.defaultModelId }] : []), ...config.customModels].map(model => [model.id, model])).values()] : [];
@@ -96,23 +95,11 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
   function runCheck() {
     if (!config) return;
     void act(async () => {
-      const configuration = (await api.testConnection({ providerId: config.id, level: 'configuration' })).result;
       const at = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-      if (!configuration.ok) { setCheck({ tone: 'warn', text: `配置有问题：${errorMessage(configuration.error)}`, at }); return; }
-      if (mock) { setCheck({ tone: 'ok', text: '演示服务可以使用', at }); return; }
-      const auth = (await api.testConnection({ providerId: config.id, level: 'authentication' })).result;
-      if (!alive.current) return;
-      setCheck(auth.ok ? { tone: 'ok', text: 'Key 有效', at }
-        : auth.error.code === 'unsupported' ? { tone: 'info', text: '地址和配置没问题；这个服务没有模型列表接口，可以试发一条确认', at }
-          : { tone: 'warn', text: errorMessage(auth.error), at });
-    });
-  }
-  function tryGeneration() {
-    const model = readiness?.models.find(item => item.usable);
-    if (!config || !model) return;
-    void act(async () => {
-      const result = (await api.testConnection({ providerId: config.id, level: 'generation', modelId: model.modelId, ...(mock ? {} : { allowGeneration: true }) })).result;
-      if (alive.current) setTrial(result.ok ? { tone: 'ok', text: '已收到回复，可以生成' } : { tone: 'warn', text: errorMessage(result.error) });
+      const configuration = (await api.testConnection({ providerId: config.id, level: 'configuration' })).result;
+      if (!configuration.ok) { if (alive.current) setCheck({ tone: 'warn', text: `配置有问题：${errorMessage(configuration.error)}`, at }); return; }
+      const result = await testService(api, config, config.defaultModelId ?? config.customModels[0]?.id);
+      if (alive.current) setCheck({ ...result, at });
     });
   }
   function addModel(id: string, name = id) {
@@ -145,10 +132,6 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
       return result.models.length ? undefined : '服务商没有返回模型；可以手动添加。';
     });
   }
-  function confirmAddress() {
-    if (!config || !target) return;
-    void act(async () => { await api.confirmTarget({ providerId: config.id, baseUrl: target, confirmed: true }); onChanged(); return '地址已确认，之后不再询问；更换 Key 或地址时会再请你确认。'; });
-  }
   function remove() {
     const which = confirming;
     if (!config && which !== 'service') return;
@@ -170,13 +153,11 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
       {loadFailed && <p role="alert" className="field-error svc-pad">这个服务的配置读不出来。<button type="button" className="link-btn" onClick={() => void load()}>重试</button></p>}
       {config?.withheldModelIds && <div className="callout is-danger svc-pad-callout"><CircleAlert aria-hidden /><span className="grow">之前保存的模型名里有看起来像 API Key 的内容，已经隐藏，不会显示也不会使用。请重新添加正确的模型名。这把 Key 曾以明文存在本机数据库里，建议到服务商控制台更换。</span></div>}
       {config && !mock && <dl className="kv">
-        <dt>请求地址</dt><dd><code className="mono-inline">{target ?? '未填写'}</code>{readiness?.targetConfirmed ? <span className="small muted"> · {userAddress ? '你填写的地址' : '官方地址'}，保存 Key 时已确认</span> : null}</dd>
+        <dt>请求地址</dt><dd><code className="mono-inline">{target ?? '未填写'}</code><span className="small muted"> · {userAddress ? '你填写的地址' : '官方地址'}</span></dd>
         <dt>API Key</dt><dd>{keySaved ? <>已保存（不显示）{keyNow === 'session' && <span className="small muted"> · 只在这次运行有效</span>} <button type="button" className="link-btn" onClick={() => onRekey(config)}>更换</button></>
           : keyNow === 'unavailable' ? <>读不出来 <button type="button" className="link-btn" onClick={() => onRekey(config)}>重新填写</button></>
             : <>还没填写 <Button size="sm" variant="primary" onClick={() => onRekey(config)}>填写 Key</Button></>}</dd>
       </dl>}
-      {config && !mock && keySaved && readiness && !readiness.targetConfirmed && target && <div className="target svc-pad-callout" role="note"><Lock aria-hidden /><span className="grow">这把 Key 只会发往 <code>{target}</code>。确认一次，之后启动不再询问；更换 Key 或地址时会再请你确认。</span>
-        <Button size="sm" variant="primary" disabled={busy} onClick={confirmAddress}>确认地址</Button></div>}
       {config && !mock && <div className="svc-models">
         {models.map(model => {
           const state = readiness?.models.find(item => item.modelId === model.id);
@@ -203,7 +184,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
             <Button size="sm" type="submit" variant="primary" disabled={busy || !newModel.trim()}>添加</Button><Button size="sm" variant="quiet" onClick={() => { setAdding(undefined); setNewModel(''); }}>取消</Button>
           </form> : <>
             <Button size="sm" variant="quiet" icon={Plus} disabled={busy} onClick={() => setAdding('manual')}>手动添加模型</Button>
-            {<Button size="sm" variant="quiet" disabled={busy || !readiness?.targetConfirmed} title={readiness?.targetConfirmed ? '向服务商要一份模型列表；不生成内容' : '先填写 Key 并确认地址'} onClick={fetchList}>从服务商获取列表</Button>}
+            <Button size="sm" variant="quiet" disabled={busy || !keySaved} title={keySaved ? '向服务商要一份模型列表；不生成内容' : '先填写 Key'} onClick={fetchList}>从服务商获取列表</Button>
             <span className="small muted">名字照服务商文档填写；列表里没有的也可以手动加。</span></>}
         </div>
         {modelIdProblem(newModel) && <p className="field-error svc-pad" role="alert">{modelIdProblem(newModel)}</p>}
@@ -212,11 +193,9 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
           <Button size="sm" variant="quiet" onClick={() => { setAdding(undefined); setListed(undefined); }}>收起</Button></div>}
       </div>}
       {config && <div className="model-row svc-checks">
-        <Button size="sm" disabled={busy || !config.enabled} onClick={runCheck}>检查连接</Button><span className="small muted">不生成内容</span>
-        {readiness?.models.some(item => item.usable) && <><Button size="sm" disabled={busy} onClick={tryGeneration}>试发一条</Button><span className="small muted">{mock ? '演示，不联网' : '发送一条很短的消息，不计入用量页'}</span></>}
+        <Button size="sm" disabled={busy || !config.enabled || !mock && !keySaved} onClick={runCheck}>测试连接</Button><span className="small muted">{mock ? '演示，不联网' : '可能产生极少的费用'}</span>
         <span className="push" role="status" aria-live="polite">
-          {check && <span className={cx('status-text', check.tone === 'ok' ? 'ok-text' : check.tone === 'warn' ? 'warn-text' : 'muted')}>{check.tone === 'ok' ? <Check aria-hidden /> : check.tone === 'warn' ? <CircleAlert aria-hidden /> : <Info aria-hidden />}上次检查：{check.text} · {check.at}</span>}
-          {trial && <span className={cx('status-text', trial.tone === 'ok' ? 'ok-text' : 'warn-text')}> 试发：{trial.text}</span>}</span>
+          {check && <span className={cx('status-text', check.tone === 'ok' ? 'ok-text' : 'warn-text')}>{check.tone === 'ok' ? <Check aria-hidden /> : <CircleAlert aria-hidden />}{check.text} · {check.at}</span>}</span>
       </div>}
       {notice && <p role="status" className="ok-text small svc-pad">{notice}</p>}
       {error && <p role="alert" className="field-error svc-pad">{error}</p>}
@@ -236,7 +215,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
           {!mock && <div className="card-row svc-switch"><span className="grow"><b>设为默认服务</b><small>新房间的成员默认用它的默认模型；已有成员的选择不变。</small></span>
             <Switch label="设为默认服务" checked={config.isDefault} disabled={busy || !config.enabled} onChange={value => void save({ isDefault: value }, value ? '已设为默认服务。' : '已取消默认。')} /></div>}
         </>}
-        {!mock && config && <div className="danger-zone"><div className="grow"><b>删除 Key</b><small>删除后这个服务不能再发请求，直到重新填写；地址确认也会一起作废。</small></div>
+        {!mock && config && <div className="danger-zone"><div className="grow"><b>删除 Key</b><small>删除后这个服务不能再发请求，直到重新填写。</small></div>
           {confirming === 'key' ? <><Button size="sm" variant="danger" solid disabled={busy} onClick={remove}>确认删除 Key</Button><Button size="sm" disabled={busy} onClick={() => setConfirming(undefined)}>不删除</Button></>
             : <Button size="sm" variant="danger" icon={Trash2} disabled={busy || !keySaved && keyNow !== 'unavailable'} onClick={() => setConfirming('key')}>删除 Key…</Button>}</div>}
         <div className="danger-zone"><div className="grow"><b>删除这个服务</b><small>不可撤销。还有成员在用它、或已有讨论记录用过它时不能删除：先给这些成员改选模型；有记录的服务可以停用。</small></div>

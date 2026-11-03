@@ -18,7 +18,7 @@ const when = (iso: string) => new Date(iso).toLocaleString('zh-CN', { month: 'nu
 const size = (bytes: number) => bytes < 1024 ? `${bytes} 字节` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const errorText = (failure: unknown, step: 'choose' | 'preview' | 'write') => {
   const code = typeof failure === 'object' && failure !== null ? (failure as { code?: string }).code : undefined;
-  if (code === 'invalid_state') return '这一版已经不是最新的有效版本（可能刚保存或采用了新版本）。请关闭后打开最新的一版再写入。';
+  if (code === 'invalid_state') return '这一版已经不是最新的有效版本（可能刚保存了新版本）。请关闭后打开最新的一版再写入。';
   if (code === 'not_found') return step === 'write' ? '这次检查的结果已经失效，请重新检查。' : '这个文件夹已被移动或替换，或者应用重启过。请重新选择文件夹。';
   if (code === 'transport_error') return '与主进程的连接失败，请重试。';
   return step === 'write' ? '写入没有完成，请重新检查后再试。' : '操作没有完成，请重试。';
@@ -85,9 +85,9 @@ function FileRow({ file, content, picked, disabled, onPick }: { file: CodeExport
 type Phase = { kind: 'start' } | { kind: 'busy'; label: string; writing?: true } | { kind: 'preview'; preview: CodeExportPreview } | { kind: 'result'; preview: CodeExportPreview; result: CodeExportWriteResult };
 
 /**
- * R15 (D126–D131): write an adopted code version into a folder. The host picks the folder in Main's dialog; a
- * read-only check lists what would happen to each file; only the files the host ticks are written, and an overwrite
- * is its own, red tick. Closing at any point before 写入 writes nothing.
+ * R15 (D126–D131, D141): write a code version into a folder. The host picks the folder in Main's dialog; a
+ * read-only check lists what would happen to each file; new files start ticked, only ticked files are written, and
+ * an overwrite is its own, red tick. Closing at any point before 写入 writes nothing.
  */
 export function CodeExportDialog({ api, runId, versionId, versionNumber, files, affected, onClose }: { api: CodeExportApiContract; runId: string; versionId: string;
   versionNumber: number; files: CodeContent['files']; affected: boolean; onClose: () => void }) {
@@ -104,7 +104,8 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
     try {
       const preview = await api.preview({ runId, versionId, rootId: target.rootId });
       if (!alive.current) return;
-      setPicks({}); setPhase({ kind: 'preview', preview });
+      // D141: new files are what the host came for; an overwrite stays their own decision.
+      setPicks(Object.fromEntries(preview.files.filter(file => file.status === 'create').map(file => [file.path, true]))); setPhase({ kind: 'preview', preview });
     } catch (failure) {
       if (!alive.current) return;
       const code = (failure as { code?: string } | undefined)?.code;
@@ -157,7 +158,7 @@ export function CodeExportDialog({ api, runId, versionId, versionNumber, files, 
       <ol className="cx-steps">
         <li>选一个文件夹。</li>
         <li>逐个文件查看会怎样：新建、覆盖（附和现有文件的差异）、内容相同，或者不能写入及原因。</li>
-        <li>只写入你勾选的文件；覆盖现有文件要单独勾选。</li>
+        <li>新建的文件默认勾选，可以取消；覆盖现有文件要单独勾选。</li>
       </ol>
       <p className="art-safe"><ShieldCheck aria-hidden size={16} />不会运行其中任何代码或命令，文件只作为文本写入。</p>
       {affected && <Note icon={AlertTriangle}>这一版依据的发言后来被修改过，代码可能已经过时。可以先重新生成，或确认后照常写入。</Note>}

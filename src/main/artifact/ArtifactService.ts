@@ -3,14 +3,14 @@ import { writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { Database } from '../database/Database';
 import { ContractError } from '../../shared/contracts/errors';
-import { artifactAdoptInputSchema, artifactEditInputSchema, artifactExportInputSchema, artifactListInputSchema, artifactVersionInputSchema, artifactKindLabels,
-  type ArtifactAdoptInput, type ArtifactCommandResult, type ArtifactEditInput, type ArtifactExportInput, type ArtifactExportResult, type ArtifactList, type ArtifactListInput,
+import { artifactEditInputSchema, artifactExportInputSchema, artifactListInputSchema, artifactVersionInputSchema, artifactKindLabels,
+  type ArtifactCommandResult, type ArtifactEditInput, type ArtifactExportInput, type ArtifactExportResult, type ArtifactList, type ArtifactListInput,
   type ArtifactVersionDetail, type ArtifactVersionInput, type CodeCandidateList, type CodeContent } from '../../shared/schemas/artifact';
 import { parseArtifact } from '../../shared/schemas/artifactParse';
 import { affectedNumbers, artifactView, contentOf, isEffective, lastExportAt, rebasedSources, represented, sourceViews, versionView } from './view';
 import { jsonExport, markdownExport, type ExportMeta } from './exportText';
 
-type Notifier = { notifyArtifact(runId: string, payload: { artifactId: string; versionId: string; status: 'adopted' | 'edited' | 'exported' }): void };
+type Notifier = { notifyArtifact(runId: string, payload: { artifactId: string; versionId: string; status: 'edited' | 'exported' }): void };
 /** Main's save dialog; resolves to the path the host picked, or undefined when cancelled. */
 export type ChooseSavePath = (defaultName: string, format: 'markdown' | 'json') => Promise<string | undefined>;
 
@@ -24,7 +24,7 @@ const fileNameOf = (title: string, format: 'markdown' | 'json') =>
   `${title.replace(/[\u0000-\u001f\u007f\\/:*?"<>|]+/gu, '_').replace(/^[.\s]+|[.\s]+$/gu, '').slice(0, 80) || 'AI圆桌产物'}.${format === 'markdown' ? 'md' : 'json'}`;
 
 /**
- * R14 (D118–D123): reading artifacts and the host's own writes — adopt, edit, export. Generation is a budgeted Run
+ * R14 (D118–D123): reading artifacts and the host's own writes — edit, export. Generation is a budgeted Run
  * request and lives in RunService. Everything here is append-only and idempotent per (runId, clientRequestId).
  */
 export class ArtifactService {
@@ -43,21 +43,6 @@ export class ArtifactService {
     const content = contentOf(artifact.kind, version);
     return { runId, artifactId: artifact.id, kind: artifact.kind, version: versionView(artifact.kind, version, snapshot), rawOutput: version.rawOutput,
       ...(content ? { content: { kind: artifact.kind, data: content } as ArtifactVersionDetail['content'] } : {}), sources: sourceViews(version, snapshot) };
-  }
-
-  /** D122: the host makes a model's valid version effective. Only then can it be exported or handed to R15. */
-  adopt(input: ArtifactAdoptInput): ArtifactCommandResult {
-    const { runId, clientRequestId, versionId } = parse(artifactAdoptInputSchema, input);
-    return this.database.transaction(() => {
-      const previous = this.database.findArtifactWrite(runId, clientRequestId);
-      if (previous && (previous.kind !== 'adoption' || previous.id !== versionId)) throw new ContractError('invalid_input', 'clientRequestId');
-      const { artifact, version } = this.locate(runId, versionId);
-      if (previous) return { runId, artifactId: artifact.id, versionId, duplicate: true };
-      if (version.validation !== 'valid' || version.origin === 'edit') throw new ContractError('invalid_state');
-      const created = this.database.adoptArtifactVersion({ versionId, runId, clientRequestId });
-      if (created) this.runs.notifyArtifact(runId, { artifactId: artifact.id, versionId, status: 'adopted' });
-      return { runId, artifactId: artifact.id, versionId, duplicate: !created };
-    });
   }
 
   /**
@@ -124,8 +109,8 @@ export class ArtifactService {
   }
 
   /**
-   * D123: what R15 may consume — per code artifact, its latest effective version (adopted or written by the host,
-   * and valid). Candidates the host has not adopted, failed or invalid versions are never listed.
+   * D123: what R15 may consume — per code artifact, its latest version that passed validation. Failed or invalid
+   * versions are never listed.
    */
   listCodeCandidates(input: ArtifactListInput): CodeCandidateList {
     const { runId } = parse(artifactListInputSchema, input);
@@ -138,7 +123,7 @@ export class ArtifactService {
       return [{ runId, roomId: artifact.roomId, artifactId: artifact.id, versionId: version.id, versionNumber: version.number,
         status: lastExportAt(version) ? 'exported' as const : 'valid' as const, affected: affectedNumbers(snapshot, version.sources).length > 0,
         title: content.title, summary: content.summary, files: content.files, notes: content.notes, sourceMessageIds: version.sources,
-        adoptedAt: version.adoptedAt ?? version.createdAt }];
+        createdAt: version.createdAt }];
     });
     return { runId, candidates };
   }

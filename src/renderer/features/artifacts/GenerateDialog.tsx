@@ -8,7 +8,7 @@ export const kindDescriptions: Record<ArtifactKind, string> = {
   prd: '需求和验收标准，每条注明依据的发言',
   minutes: '讨论概要、结论、决策和遗留问题',
   actions: '要做的事、负责人、截止时间和状态；讨论没说清的标为“未知”',
-  code: '文件路径和代码，不会执行；采用后可以逐个文件确认，写入你选的文件夹',
+  code: '文件路径和代码，不会执行；可以逐个文件确认，写入你选的文件夹',
 };
 
 /** D124: what the model says when the discussion holds nothing of this kind; the request is paid either way. */

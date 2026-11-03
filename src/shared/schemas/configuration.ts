@@ -82,13 +82,10 @@ export const providerSummariesSchema = z.array(providerSummarySchema);
 export const providerKeyStateSchema = z.object({
   providerId: idSchema, keyReference: keyReferenceSchema.nullable(),
   state: z.enum(['missing', 'configured', 'session', 'unavailable']), storage: keyStorageStatusSchema,
-  // D097: Main's current session target confirmation for this Provider, so the settings page never guesses it.
-  sessionTargetConfirmed: z.boolean().optional(),
 }).strict().refine((input) => (input.state === 'missing') === (input.keyReference === null)
   && (input.state !== 'configured' || input.storage.mode === 'secure')
   && (input.state !== 'session' || input.storage.mode === 'memory'), 'Inconsistent key state');
 export const providerIdInputSchema = z.object({ providerId: idSchema }).strict();
-export const confirmProviderTargetInputSchema = providerIdInputSchema.extend({ baseUrl: providerBaseUrlSchema, confirmed: z.literal(true) });
 export const setProviderKeyInputSchema = providerIdInputSchema.extend({ apiKey: z.string().min(1) });
 export const providerModelsInputSchema = providerIdInputSchema;
 export const providerModelsResultSchema = providerIdInputSchema.extend({ models: z.array(providerModelSchema) });
@@ -98,15 +95,16 @@ export const providerConnectionTestResultSchema = providerIdInputSchema.extend({
 /**
  * D114: whether each configured model can take part in a discussion now, decided by Main exactly as a send would be.
  * `blockedBy` names the first reason a send would be refused: the Provider is disabled or its configuration is broken,
- * no usable Key, or the target is unconfirmed. The limits are the ones a request would use now (D134).
+ * or no usable Key. The limits are the ones a request would use now (D134).
  */
 export const modelReadinessSchema = z.object({
   modelId: idSchema, contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive(),
-  usable: z.boolean(), blockedBy: z.enum(['disabled', 'invalid', 'key', 'target']).nullable(),
+  usable: z.boolean(), blockedBy: z.enum(['disabled', 'invalid', 'key']).nullable(),
 }).strict().refine(value => value.usable === (value.blockedBy === null), 'A model is usable exactly when nothing blocks it');
 export const providerReadinessSchema = z.object({
   providerId: idSchema, keyState: z.enum(['missing', 'configured', 'session', 'unavailable', 'none']),
-  targetConfirmed: z.boolean(), confirmedBaseUrl: z.string().max(2048).nullable(), models: z.array(modelReadinessSchema).max(512),
+  /** Where this service's Key and content go. */
+  baseUrl: z.string().max(2048).nullable(), models: z.array(modelReadinessSchema).max(512),
 }).strict();
 export const providerReadinessListSchema = z.array(providerReadinessSchema);
 

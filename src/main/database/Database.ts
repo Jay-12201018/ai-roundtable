@@ -84,13 +84,13 @@ export type SummaryRequestRecord = { requestId: string; summaryId: string; runId
   status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; inputSnapshot: StreamChatInputRecord; createdAt: string;
   /** D125: from the request's summary_updated event (migration 9 has no column for it). */ errorCode?: ErrorCode };
 export type SummaryRecord = { id: string; runId: string; clientRequestId: string; agentId: string; covered: string[]; basedOnSummaryId?: string; createdAt: string;
-  requests: SummaryRequestRecord[]; confirmedMessageIds: string[] };
+  requests: SummaryRequestRecord[]; confirmedMessageIds: string[]; revokedMessageIds: string[] };
 
 /** R14: one artifact and its versions, oldest first. */
 export type ArtifactRequestRecord = { requestId: string; status: 'generating' | 'completed' | 'failed' | 'aborted' | 'interrupted'; finishReason?: 'stop' | 'length'; errorCode?: ErrorCode; createdAt: string };
 export type ArtifactVersionRecord = { id: string; artifactId: string; runId: string; number: number; origin: 'generate' | 'regenerate' | 'edit'; parentVersionId?: string;
   clientRequestId: string; agentId?: string; validation: 'pending' | 'valid' | 'invalid' | 'empty'; rawOutput: string; contentJson: string | null; issuesJson: string | null; emptyReason: string | null;
-  createdAt: string; updatedAt: string; request?: ArtifactRequestRecord; sources: string[]; adoptedAt?: string;
+  createdAt: string; updatedAt: string; request?: ArtifactRequestRecord; sources: string[];
   exports: Array<{ id: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string; createdAt: string }>;
   /** R15: writes of a code version into a folder, oldest first. */
   codeWrites: Array<{ id: string; rootPath: string; written: number; skipped: number; failed: number; createdAt: string }> };
@@ -98,7 +98,7 @@ export type ArtifactVersionRecord = { id: string; artifactId: string; runId: str
 export type CodeExportFileRecord = { path: string; action: 'create' | 'overwrite' | 'none'; outcome: 'written' | 'skipped' | 'failed'; reason?: string; contentSha256: string; bytes: number };
 export type CodeExportRecord = { id: string; versionId: string; runId: string; clientRequestId: string; rootPath: string; createdAt: string; files: CodeExportFileRecord[] };
 export type ArtifactRecord = { id: string; runId: string; roomId: string; kind: ArtifactKind; clientRequestId: string; createdAt: string; versions: ArtifactVersionRecord[] };
-type RawArtifactVersion = Omit<ArtifactVersionRecord, 'parentVersionId' | 'agentId' | 'request' | 'sources' | 'adoptedAt' | 'exports' | 'codeWrites'> & { parentVersionId: string | null; agentId: string | null };
+type RawArtifactVersion = Omit<ArtifactVersionRecord, 'parentVersionId' | 'agentId' | 'request' | 'sources' | 'exports' | 'codeWrites'> & { parentVersionId: string | null; agentId: string | null };
 
 export type RunEventRecord = {
   runId: string;
@@ -471,7 +471,7 @@ export class Database {
   listSummaries(runId: string): SummaryRecord[] {
     this.requireRun(runId);
     const summaries = this.db.prepare('SELECT id,run_id AS runId,client_request_id AS clientRequestId,agent_id AS agentId,covered_json AS covered,based_on_summary_id AS basedOnSummaryId,created_at AS createdAt FROM context_summaries WHERE run_id=? ORDER BY created_at,rowid')
-      .all(runId) as Array<Omit<SummaryRecord, 'covered' | 'requests' | 'confirmedMessageIds' | 'basedOnSummaryId'> & { covered: string; basedOnSummaryId: string | null }>;
+      .all(runId) as Array<Omit<SummaryRecord, 'covered' | 'requests' | 'confirmedMessageIds' | 'revokedMessageIds' | 'basedOnSummaryId'> & { covered: string; basedOnSummaryId: string | null }>;
     return summaries.map(({ covered, basedOnSummaryId, ...summary }) => ({ ...summary, covered: z.array(idSchema).parse(JSON.parse(covered)),
       ...(basedOnSummaryId === null ? {} : { basedOnSummaryId }),
       requests: (this.db.prepare(`${summaryRequestSelect} WHERE summary_id=? ORDER BY created_at,rowid`).all(summary.id) as RawSummaryRequest[]).map(summaryRequestFrom).map(request => {
@@ -480,7 +480,10 @@ export class Database {
           AND json_extract(payload_json,'$.messageId')=? AND json_extract(payload_json,'$.errorCode') IS NOT NULL ORDER BY sequence DESC LIMIT 1`).pluck().get(runId, request.messageId));
         return code.success ? { ...request, errorCode: code.data } : request;
       }),
-      confirmedMessageIds: this.db.prepare('SELECT message_id FROM summary_confirmations WHERE summary_id=? ORDER BY created_at,rowid').pluck().all(summary.id) as string[] }));
+      confirmedMessageIds: this.db.prepare('SELECT message_id FROM summary_confirmations WHERE summary_id=? ORDER BY created_at,rowid').pluck().all(summary.id) as string[],
+      // D140: the latest change of each version counts.
+      revokedMessageIds: this.db.prepare(`SELECT e.message_id FROM summary_use_events e WHERE e.summary_id=? AND e.in_use=0
+        AND e.id=(SELECT MAX(id) FROM summary_use_events l WHERE l.message_id=e.message_id)`).pluck().all(summary.id) as string[] }));
   }
 
   /** A confirmation is per version and append-only; confirming the same version again is the same confirmation. */
@@ -492,6 +495,23 @@ export class Database {
         .run(input.messageId, input.summaryId, input.runId, input.clientRequestId ?? null, now());
       return true;
     });
+  }
+
+  /** D140: the host stops using a version, or uses it again. Repeating a clientRequestId is the same change. */
+  setSummaryUse(input: { messageId: string; summaryId: string; runId: string; clientRequestId: string; inUse: boolean }): boolean {
+    this.assertInitialized();
+    return this.transaction(() => {
+      if (this.db.prepare('SELECT 1 FROM summary_use_events WHERE run_id=? AND client_request_id=?').get(input.runId, input.clientRequestId)) return false;
+      this.db.prepare('INSERT INTO summary_use_events(message_id,summary_id,run_id,client_request_id,in_use,created_at) VALUES(?,?,?,?,?,?)')
+        .run(input.messageId, input.summaryId, input.runId, input.clientRequestId, input.inUse ? 1 : 0, now());
+      return true;
+    });
+  }
+
+  findSummaryUseByClient(runId: string, clientRequestId: string): { messageId: string; summaryId: string; inUse: boolean } | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare('SELECT message_id AS messageId,summary_id AS summaryId,in_use AS inUse FROM summary_use_events WHERE run_id=? AND client_request_id=?').get(runId, clientRequestId) as { messageId: string; summaryId: string; inUse: number } | undefined;
+    return row && { messageId: row.messageId, summaryId: row.summaryId, inUse: row.inUse === 1 };
   }
 
   findSummaryConfirmationByClient(runId: string, clientRequestId: string): { messageId: string; summaryId: string } | undefined {
@@ -557,16 +577,6 @@ export class Database {
     if (result.changes !== 1) throw new Error('Artifact version is already validated');
   }
 
-  /** Adoption is per version and append-only; adopting the same version again is the same adoption. */
-  adoptArtifactVersion(input: { versionId: string; runId: string; clientRequestId: string }): boolean {
-    this.assertInitialized();
-    return this.transaction(() => {
-      if (this.db.prepare('SELECT 1 FROM artifact_adoptions WHERE version_id=?').get(input.versionId)) return false;
-      this.db.prepare('INSERT INTO artifact_adoptions(version_id,run_id,client_request_id,created_at) VALUES(?,?,?,?)').run(input.versionId, input.runId, input.clientRequestId, now());
-      return true;
-    });
-  }
-
   insertArtifactExport(input: { id: string; versionId: string; runId: string; clientRequestId: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName?: string }): void {
     this.assertInitialized();
     this.db.prepare('INSERT INTO artifact_exports(id,version_id,run_id,client_request_id,format,target,file_name,created_at) VALUES(?,?,?,?,?,?,?,?)')
@@ -574,11 +584,10 @@ export class Database {
   }
 
   /** What an earlier delivery of the same clientRequestId did in this Run, if anything (artifact commands are idempotent). */
-  findArtifactWrite(runId: string, clientRequestId: string): { kind: 'artifact' | 'version' | 'adoption' | 'export'; id: string } | undefined {
+  findArtifactWrite(runId: string, clientRequestId: string): { kind: 'artifact' | 'version' | 'export'; id: string } | undefined {
     this.assertInitialized();
     const row = this.db.prepare(`SELECT 'version' AS kind,id FROM artifact_versions WHERE run_id=? AND client_request_id=?
-      UNION ALL SELECT 'adoption',version_id FROM artifact_adoptions WHERE run_id=? AND client_request_id=?
-      UNION ALL SELECT 'export',id FROM artifact_exports WHERE run_id=? AND client_request_id=?`).get(runId, clientRequestId, runId, clientRequestId, runId, clientRequestId) as { kind: 'version' | 'adoption' | 'export'; id: string } | undefined;
+      UNION ALL SELECT 'export',id FROM artifact_exports WHERE run_id=? AND client_request_id=?`).get(runId, clientRequestId, runId, clientRequestId) as { kind: 'version' | 'export'; id: string } | undefined;
     return row;
   }
 
@@ -631,8 +640,6 @@ export class Database {
       for (const row of this.db.prepare('SELECT version_id AS versionId,message_id AS messageId FROM artifact_sources WHERE run_id=? ORDER BY version_id,position').all(runId) as Array<{ versionId: string; messageId: string }>) {
         sources.set(row.versionId, [...(sources.get(row.versionId) ?? []), row.messageId]);
       }
-      const adoptions = new Map((this.db.prepare('SELECT version_id AS versionId,created_at AS createdAt FROM artifact_adoptions WHERE run_id=?').all(runId) as Array<{ versionId: string; createdAt: string }>)
-        .map(row => [row.versionId, row.createdAt]));
       const exports = new Map<string, ArtifactVersionRecord['exports']>();
       for (const row of this.db.prepare('SELECT id,version_id AS versionId,format,target,file_name AS fileName,created_at AS createdAt FROM artifact_exports WHERE run_id=? ORDER BY created_at,rowid')
         .all(runId) as Array<{ id: string; versionId: string; format: 'markdown' | 'json'; target: 'clipboard' | 'file'; fileName: string | null; createdAt: string }>) {
@@ -650,7 +657,7 @@ export class Database {
       return artifacts.map(artifact => ({ ...artifact, versions: versions.filter(version => version.artifactId === artifact.id).map(({ parentVersionId, agentId, ...version }) => ({
         ...version, ...(parentVersionId === null ? {} : { parentVersionId }), ...(agentId === null ? {} : { agentId }),
         ...(requests.has(version.id) ? { request: requests.get(version.id)! } : {}), sources: sources.get(version.id) ?? [],
-        ...(adoptions.has(version.id) ? { adoptedAt: adoptions.get(version.id)! } : {}), exports: exports.get(version.id) ?? [], codeWrites: codeWrites.get(version.id) ?? [] })) }));
+        exports: exports.get(version.id) ?? [], codeWrites: codeWrites.get(version.id) ?? [] })) }));
     });
   }
 
@@ -1256,7 +1263,6 @@ export class Database {
       if (targetChanged) {
         this.db.prepare('UPDATE providers SET api_key_reference=NULL,key_revision=? WHERE id=?').run(randomUUID(),provider.id);
         this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(provider.id);
-        this.db.prepare('DELETE FROM provider_target_approvals WHERE provider_id=?').run(provider.id);
       }
       return this.getProviderConfiguration(provider.id)!;
     });
@@ -1313,7 +1319,6 @@ export class Database {
       if (this.db.prepare('SELECT 1 FROM agents WHERE provider_id=? LIMIT 1').get(id)
         || this.db.prepare("SELECT 1 FROM workflow_runs r WHERE EXISTS(SELECT 1 FROM json_each(r.members_snapshot) m WHERE json_extract(m.value,'$.providerId')=?) LIMIT 1").get(id)) throw new ContractError('invalid_state');
       this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(id);
-      this.db.prepare('DELETE FROM provider_target_approvals WHERE provider_id=?').run(id);
       this.db.prepare('DELETE FROM providers WHERE id=?').run(id);
     });
   }
@@ -1334,28 +1339,10 @@ export class Database {
       this.db.prepare('UPDATE providers SET api_key_reference=?,updated_at=?,key_revision=? WHERE id=?').run(record?.id ?? null, now(), randomUUID(), providerId);
       this.db.prepare('DELETE FROM key_records WHERE provider_id=? AND id<>?').run(providerId, record?.id ?? '');
       // D113: a confirmation names one Key revision; replacing or deleting the Key withdraws it at once.
-      this.db.prepare('DELETE FROM provider_target_approvals WHERE provider_id=?').run(providerId);
     });
   }
 
   /** D113: remembers that the host confirmed sending this Provider's current Key to `baseUrl` as `kind`. */
-  saveTargetApproval(providerId: string, approval: { kind: string; baseUrl: string; revision: string }): void {
-    this.transaction(() => {
-      const provider = this.getProviderConfiguration(providerId);
-      if (!provider) throw new ContractError('not_found');
-      if (provider.kind === 'mock' || provider.kind !== approval.kind || this.getProviderKeyRevision(providerId) !== approval.revision) throw new ContractError('invalid_state');
-      this.db.prepare(`INSERT INTO provider_target_approvals(provider_id,kind,base_url,key_revision,confirmed_at) VALUES(?,?,?,?,?)
-        ON CONFLICT(provider_id) DO UPDATE SET kind=excluded.kind,base_url=excluded.base_url,key_revision=excluded.key_revision,confirmed_at=excluded.confirmed_at`)
-        .run(providerId, approval.kind, approval.baseUrl, approval.revision, now());
-    });
-  }
-
-  getTargetApproval(providerId: string): { kind: string; baseUrl: string; revision: string } | undefined {
-    this.assertInitialized(); configurationInput(idSchema, providerId);
-    const row = this.db.prepare('SELECT kind,base_url AS baseUrl,key_revision AS revision FROM provider_target_approvals WHERE provider_id=?').get(providerId) as { kind: string; baseUrl: string; revision: string } | undefined;
-    return row ? { ...row } : undefined;
-  }
-
   listRoomMessages(input: RoomMessagePageInput): RoomMessagePage {
     const { roomId, cursor, limit } = configurationInput(roomMessagePageInputSchema, input);
     return this.transaction(() => {

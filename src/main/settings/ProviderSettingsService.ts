@@ -10,7 +10,7 @@ import * as schemas from '../../shared/schemas/configuration';
 import { modelLimits } from '../../shared/schemas/provider';
 import type {
   ConfigurationIdInput, CreateProviderInput, ProviderInput, ProviderIdInput,
-  ProviderModelsInput, ProviderConnectionTestInput, SetProviderKeyInput, ConfirmProviderTargetInput, ProviderConfiguration,
+  ProviderModelsInput, ProviderConnectionTestInput, SetProviderKeyInput, ProviderConfiguration,
 } from '../../shared/contracts/configuration';
 
 function parseInput<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -77,21 +77,12 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
     return this.perform(async () => {
       const { providerId } = parseInput(schemas.providerIdInputSchema, input);
       const state = await this.keys.getProviderKeyState(providerId);
-      return providerSettingsContracts.getProviderKeyState.output.parse(
-        this.runtime ? { ...state, sessionTargetConfirmed: this.runtime.isTargetConfirmed(providerId) } : state);
+      return providerSettingsContracts.getProviderKeyState.output.parse(state);
     });
   }
 
   async getKeyStorageStatus() {
     return this.perform(async () => providerSettingsContracts.getKeyStorageStatus.output.parse(await this.keys.getStatus()));
-  }
-
-  async confirmTarget(input: ConfirmProviderTargetInput) {
-    return this.perform(() => {
-      const parsed = parseInput(schemas.confirmProviderTargetInputSchema, input);
-      if (!this.runtime) throw new ContractError('unsupported');
-      return providerSettingsContracts.confirmTarget.output.parse(this.runtime.confirmTarget(parsed));
-    });
   }
 
   /** D114: for each Provider and configured model, the first reason a send would be refused now, as Main decides it. */
@@ -108,11 +99,10 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
         const ids = mock ? ['mock'] : [...new Set([configuration?.defaultModelId, ...(configuration?.customModels ?? []).map(model => model.id)].filter((id): id is string => Boolean(id)))];
         const key = mock || !configuration ? undefined : await this.keys.getProviderKeyState(summary.id);
         const keyUsable = key?.state === 'configured' || key?.state === 'session';
-        const confirmedBaseUrl = mock || !configuration || !summary.enabled ? undefined : registry.confirmedTarget(summary.id);
-        result.push({ providerId: summary.id, keyState: key?.state ?? 'none', targetConfirmed: confirmedBaseUrl !== undefined, confirmedBaseUrl: confirmedBaseUrl ?? null,
+        result.push({ providerId: summary.id, keyState: key?.state ?? 'none', baseUrl: (configuration && registry.targetOf(configuration)) ?? null,
           models: ids.map(modelId => {
             const blockedBy = !configuration ? 'invalid' as const : !summary.enabled ? 'disabled' as const : mock ? null
-              : !keyUsable ? 'key' as const : !confirmedBaseUrl ? 'target' as const : null;
+              : !keyUsable ? 'key' as const : null;
             return { modelId, ...(configuration ? registry.limits(configuration, modelId) : modelLimits()), usable: blockedBy === null, blockedBy };
           }) });
       }

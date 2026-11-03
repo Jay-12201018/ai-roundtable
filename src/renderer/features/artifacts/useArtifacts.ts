@@ -52,10 +52,9 @@ export function useArtifacts(api: ArtifactApiContract | undefined, runId: string
     api!.preview({ runId: runId!, ...input }), [api, runId]);
   const generate = useCallback((input: { kind: ArtifactKind; agentId: string; artifactId?: string }) =>
     act('generate', clientRequestId => api!.generate({ runId: runId!, clientRequestId, ...input })), [act, api, runId]);
-  const adopt = useCallback((versionId: string) => act(`adopt:${versionId}`, clientRequestId => api!.adopt({ runId: runId!, clientRequestId, versionId })), [act, api, runId]);
   const edit = useCallback((versionId: string, text: string) => act(`edit:${versionId}`, clientRequestId => api!.edit({ runId: runId!, clientRequestId, versionId, text })), [act, api, runId]);
   const getVersion = useCallback((versionId: string) => api!.getVersion({ runId: runId!, versionId }), [api, runId]);
-  /** Copies the Markdown or JSON Main renders from the adopted document. */
+  /** Copies the Markdown or JSON Main renders from the document. */
   const copy = useCallback(async (versionId: string, format: 'markdown' | 'json') => {
     const key = `copy:${format}`;
     const result = await act(key, clientRequestId => api!.export({ runId: runId!, clientRequestId, versionId, format, target: 'clipboard' }));
@@ -68,6 +67,6 @@ export function useArtifacts(api: ArtifactApiContract | undefined, runId: string
     if (result) setNotice({ key: 'save', message: result.saved ? `已保存为“${result.fileName}”。` : '已取消保存。' });
   }, [act, api, runId]);
 
-  return { available: Boolean(api && runId), artifacts: current, loadFailed, reload: load, preview, generate, adopt, edit, getVersion, copy, save, pending, error, notice, codeExport };
+  return { available: Boolean(api && runId), artifacts: current, loadFailed, reload: load, preview, generate, edit, getVersion, copy, save, pending, error, notice, codeExport };
 }
 export type ArtifactCommands = ReturnType<typeof useArtifacts>;

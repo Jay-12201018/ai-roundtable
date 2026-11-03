@@ -4,7 +4,7 @@ import { errorCodeSchema } from './error';
 
 /**
  * R14 structured artifacts (D118–D123). A model writes one of four documents as JSON; Main parses it with the strict
- * schema below. Nothing a model writes is effective until the host adopts it (or writes it themselves).
+ * schema below. A version that passes is usable at once (D139); one that does not is kept as it is, never used.
  */
 export const artifactKindValues = ['prd', 'minutes', 'actions', 'code'] as const;
 export const artifactKindSchema = z.enum(artifactKindValues);
@@ -124,11 +124,10 @@ export const MAX_ARTIFACT_ISSUES = 50;
 /**
  * Version status: `generating` while the request streams; `failed` when it failed, was stopped or was interrupted
  * (partial output kept); `invalid` when the complete output did not parse or validate (output kept in full);
- * `candidate` when a model's output is valid but the host has not adopted it; `valid` once adopted or written by
- * the host; `exported` once a valid version was copied or saved (or, R15, at least one of its files was written); `empty` when the model said, in the agreed form, that
- * the discussion holds nothing of this kind (D124) — a valid answer, but not a document: never adopted or exported.
+ * `valid` when it passed, or the host wrote it; `exported` once a valid version was copied or saved (or, R15, at least one of its files was written); `empty` when the model said, in the agreed form, that
+ * the discussion holds nothing of this kind (D124) — a valid answer, but not a document: never exported.
  */
-export const artifactVersionStatusValues = ['generating', 'failed', 'invalid', 'candidate', 'valid', 'exported', 'empty'] as const;
+export const artifactVersionStatusValues = ['generating', 'failed', 'invalid', 'valid', 'exported', 'empty'] as const;
 export type ArtifactVersionStatus = (typeof artifactVersionStatusValues)[number];
 export const artifactRequestStatusValues = ['generating', 'completed', 'failed', 'aborted', 'interrupted'] as const;
 export const artifactOriginValues = ['generate', 'regenerate', 'edit'] as const;
@@ -158,7 +157,7 @@ export const artifactVersionSchema = z.object({
   /** D087/D109: messages it is based on that were later edited or regenerated, by timeline number. */
   affectedNumbers: z.array(position).max(4096),
   /** The latest copy, save or (R15) file write of this version. */
-  adoptedAt: timestampSchema.optional(), exportedAt: timestampSchema.optional(),
+  exportedAt: timestampSchema.optional(),
   /** R15 (D130): each write of a code version into a folder the host chose, oldest first. */
   codeWrites: z.array(z.object({ exportId: idSchema, folder: z.string().min(1).max(4096), written: sequenceSchema, skipped: sequenceSchema, failed: sequenceSchema,
     at: timestampSchema }).strict()).max(256).optional(),
@@ -197,7 +196,6 @@ export const artifactGenerateInputSchema = z.object({
   /** Regenerate an existing artifact as a new version; its kind cannot change. */
   artifactId: idSchema.optional(),
 }).strict();
-export const artifactAdoptInputSchema = z.object({ runId: idSchema, clientRequestId: idSchema, versionId: idSchema }).strict();
 /** The host's own version, written from `versionId`: JSON text checked with the same parser as model output. */
 export const artifactEditInputSchema = z.object({ runId: idSchema, clientRequestId: idSchema, versionId: idSchema, text: z.string().min(1).max(MAX_ARTIFACT_OUTPUT_CHARS) }).strict();
 export const artifactCommandResultSchema = z.object({
@@ -214,14 +212,13 @@ export const artifactExportResultSchema = z.object({
 }).strict();
 
 /**
- * D123: what R15 may consume. Only a code candidate the host adopted (or wrote) and that passed validation is
- * listed; nothing here has been written to disk or executed.
+ * D123: what R15 may consume. Only a code candidate that passed validation is listed; nothing here has been written to disk or executed.
  */
 export const validatedCodeCandidateSchema = z.object({
   runId: idSchema, roomId: idSchema, artifactId: idSchema, versionId: idSchema, versionNumber: position,
   status: z.enum(['valid', 'exported']), affected: z.boolean(), title: z.string().max(200), summary: z.string().max(1000),
   files: codeContentSchema.shape.files, notes: z.array(z.string()).max(10),
-  sourceMessageIds: z.array(idSchema).max(4096), adoptedAt: timestampSchema,
+  sourceMessageIds: z.array(idSchema).max(4096), createdAt: timestampSchema,
 }).strict();
 export const codeCandidateListSchema = z.object({ runId: idSchema, candidates: z.array(validatedCodeCandidateSchema).max(256) }).strict();
 
@@ -235,7 +232,6 @@ export type ArtifactVersionDetail = z.infer<typeof artifactVersionDetailSchema>;
 export type ArtifactPreviewInput = z.infer<typeof artifactPreviewInputSchema>;
 export type ArtifactPreview = z.infer<typeof artifactPreviewSchema>;
 export type ArtifactGenerateInput = z.infer<typeof artifactGenerateInputSchema>;
-export type ArtifactAdoptInput = z.infer<typeof artifactAdoptInputSchema>;
 export type ArtifactEditInput = z.infer<typeof artifactEditInputSchema>;
 export type ArtifactCommandResult = z.infer<typeof artifactCommandResultSchema>;
 export type ArtifactExportInput = z.infer<typeof artifactExportInputSchema>;
@@ -246,7 +242,7 @@ export type CodeCandidateList = z.infer<typeof codeCandidateListSchema>;
 export const priorityLabels: Record<PrdContent['requirements'][number]['priority'], string> = { must: '必须', should: '应该', could: '可以' };
 export const actionStatusLabels: Record<(typeof actionStatusValues)[number], string> = { todo: '未开始', doing: '进行中', done: '已完成', blocked: '受阻' };
 export const artifactStatusLabels: Record<ArtifactVersionStatus, string> = {
-  generating: '生成中', failed: '没有完成', invalid: '校验失败', candidate: '候选 · 待采用', valid: '有效', exported: '有效 · 已导出', empty: '没有可整理的内容',
+  generating: '生成中', failed: '没有完成', invalid: '校验失败', valid: '有效', exported: '有效 · 已导出', empty: '没有可整理的内容',
 };
 /** “第 1、3、4 条” for cited message numbers. */
 export const sourceNumbersText = (numbers: readonly number[]) => `第 ${numbers.join('、')} 条`;

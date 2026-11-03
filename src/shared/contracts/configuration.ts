@@ -25,7 +25,6 @@ export type AgentConfigurations = z.infer<typeof schemas.agentConfigurationsSche
 export type ProviderSummaries = z.infer<typeof schemas.providerSummariesSchema>;
 export type ProviderKeyState = z.infer<typeof schemas.providerKeyStateSchema>;
 export type ProviderIdInput = z.input<typeof schemas.providerIdInputSchema>;
-export type ConfirmProviderTargetInput = z.input<typeof schemas.confirmProviderTargetInputSchema>;
 export type SetProviderKeyInput = z.input<typeof schemas.setProviderKeyInputSchema>;
 export type ProviderModelsInput = z.input<typeof schemas.providerModelsInputSchema>;
 export type ProviderModelsResult = z.infer<typeof schemas.providerModelsResultSchema>;
@@ -67,7 +66,6 @@ export interface ProviderSettingsApiContract {
   getProviderConfiguration(input: ConfigurationIdInput): Promise<ProviderConfiguration>;
   listProviderSummaries(): Promise<ProviderSummaries>;
   deleteProvider(input: ConfigurationIdInput): Promise<void>;
-  confirmTarget(input: ConfirmProviderTargetInput): Promise<ProviderIdInput>;
   setKey(input: SetProviderKeyInput): Promise<ProviderKeyState>;
   deleteKey(input: ProviderIdInput): Promise<void>;
   getProviderKeyState(input: ProviderIdInput): Promise<ProviderKeyState>;
@@ -119,7 +117,6 @@ export const providerSettingsContracts = {
   getProviderConfiguration: { input: schemas.configurationIdInputSchema, output: schemas.providerConfigurationSchema },
   listProviderSummaries: { input: z.undefined(), output: schemas.providerSummariesSchema },
   deleteProvider: { input: schemas.configurationIdInputSchema, output: z.undefined() },
-  confirmTarget: { input: schemas.confirmProviderTargetInputSchema, output: schemas.providerIdInputSchema },
   setKey: { input: schemas.setProviderKeyInputSchema, output: schemas.providerKeyStateSchema },
   deleteKey: { input: schemas.providerIdInputSchema, output: z.undefined() },
   getProviderKeyState: { input: schemas.providerIdInputSchema, output: schemas.providerKeyStateSchema },

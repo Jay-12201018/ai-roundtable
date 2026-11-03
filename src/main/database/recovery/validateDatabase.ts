@@ -221,20 +221,20 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         WHERE c.run_id<>t.run_id OR NOT EXISTS(SELECT 1 FROM json_each(c.agent_ids_json) j WHERE j.value=t.agent_id)
           OR (SELECT COUNT(*) FROM turns u WHERE u.override_action_id=c.action_id) > json_array_length(c.agent_ids_json) LIMIT 1`, 'Invalid continuation Turn');
     }
-    if ((versions.at(-1) ?? 0) >= 11) {
+    if (version >= 11 && costTables) {
       if (!tables.includes('provider_target_approvals')) throw new Error('Recovery v11 schema is incomplete');
       // D113: an approval names an existing real Provider of the same kind; a stale Key revision is harmless (unused).
       assertNoRows(db, `SELECT 1 FROM provider_target_approvals a LEFT JOIN providers p ON p.id=a.provider_id
         WHERE p.id IS NULL OR p.type<>a.kind OR a.kind='mock' LIMIT 1`, 'Invalid target approval');
     }
     if (artifacts) {
-      for (const table of ['artifacts', 'artifact_versions', 'artifact_sources', 'artifact_requests', 'artifact_adoptions', 'artifact_exports', ...(costTables ? ['artifact_charges'] : [])]) {
+      for (const table of ['artifacts', 'artifact_versions', 'artifact_sources', 'artifact_requests', 'artifact_exports', ...(costTables ? ['artifact_charges', 'artifact_adoptions'] : [])]) {
         if (!tables.includes(table)) throw new Error('Recovery v12 schema is incomplete');
       }
       for (const name of ['artifact_insert', 'artifact_immutable', 'artifact_no_delete', 'artifact_version_insert', 'artifact_version_identity_immutable', 'artifact_version_output_once',
         'artifact_version_no_delete', 'artifact_source_insert', 'artifact_source_immutable', 'artifact_source_no_delete', 'artifact_request_insert', 'artifact_request_identity_immutable',
         'artifact_request_finish_once', 'artifact_request_no_delete',
-        ...(costTables ? ['artifact_charge_identity_insert', 'artifact_charge_identity_immutable', 'artifact_charge_settle_once', 'artifact_charge_result_once', 'artifact_charge_no_delete'] : []), 'artifact_adoption_insert', 'artifact_adoption_immutable', 'artifact_adoption_no_delete',
+        ...(costTables ? ['artifact_charge_identity_insert', 'artifact_charge_identity_immutable', 'artifact_charge_settle_once', 'artifact_charge_result_once', 'artifact_charge_no_delete', 'artifact_adoption_insert', 'artifact_adoption_immutable', 'artifact_adoption_no_delete'] : []),
         'artifact_export_insert', 'artifact_export_immutable', 'artifact_export_no_delete']) {
         if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing R14 artifact protection');
       }
@@ -253,11 +253,10 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       assertNoRows(db, `SELECT 1 FROM artifact_sources s JOIN artifact_versions v ON v.id=s.version_id JOIN messages m ON m.id=s.message_id
         WHERE v.run_id<>s.run_id OR m.run_id<>s.run_id LIMIT 1`, 'Artifact source outside its Run');
       if (costTables) assertNoRows(db, "SELECT 1 FROM artifact_charges c LEFT JOIN artifact_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid artifact charge identity');
-      assertNoRows(db, `SELECT 1 FROM artifact_adoptions d LEFT JOIN artifact_versions v ON v.id=d.version_id
+      if (costTables) assertNoRows(db, `SELECT 1 FROM artifact_adoptions d LEFT JOIN artifact_versions v ON v.id=d.version_id
         WHERE v.id IS NULL OR v.run_id<>d.run_id OR v.validation<>'valid' OR v.origin='edit' LIMIT 1`, 'Invalid artifact adoption');
       assertNoRows(db, `SELECT 1 FROM artifact_exports e LEFT JOIN artifact_versions v ON v.id=e.version_id LEFT JOIN artifacts a ON a.id=v.artifact_id
-        WHERE v.id IS NULL OR v.run_id<>e.run_id OR v.validation<>'valid' OR (e.target='file' AND a.kind='code')
-          OR (v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_adoptions d WHERE d.version_id=v.id)) LIMIT 1`, 'Invalid artifact export');
+        WHERE v.id IS NULL OR v.run_id<>e.run_id OR v.validation<>'valid' OR (e.target='file' AND a.kind='code')${costTables ? " OR (v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_adoptions d WHERE d.version_id=v.id))" : ''} LIMIT 1`, 'Invalid artifact export');
       for (const row of db.prepare('SELECT a.kind,v.validation,v.content_json AS content,v.issues_json AS issues,v.empty_reason AS empty FROM artifact_versions v JOIN artifacts a ON a.id=v.artifact_id')
         .iterate() as Iterable<{ kind: string; validation: string; content: string | null; issues: string | null; empty: string | null }>) {
         const kind = artifactKindSchema.parse(row.kind);
@@ -279,8 +278,7 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing R15 code export protection');
       }
       assertNoRows(db, `SELECT 1 FROM code_exports e LEFT JOIN artifact_versions v ON v.id=e.version_id LEFT JOIN artifacts a ON a.id=v.artifact_id
-        WHERE v.id IS NULL OR v.run_id<>e.run_id OR a.kind<>'code' OR v.validation<>'valid'
-          OR (v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_adoptions d WHERE d.version_id=v.id)) LIMIT 1`, 'Invalid code export');
+        WHERE v.id IS NULL OR v.run_id<>e.run_id OR a.kind<>'code' OR v.validation<>'valid'${costTables ? " OR (v.origin<>'edit' AND NOT EXISTS(SELECT 1 FROM artifact_adoptions d WHERE d.version_id=v.id))" : ''} LIMIT 1`, 'Invalid code export');
       assertNoRows(db, "SELECT 1 FROM code_exports e WHERE NOT EXISTS(SELECT 1 FROM code_export_files f WHERE f.export_id=e.id) LIMIT 1", 'Code export without files');
       assertNoRows(db, `SELECT 1 FROM code_export_files f WHERE f.position <> (SELECT COUNT(*) FROM code_export_files g WHERE g.export_id=f.export_id AND g.position<f.position)
         OR f.content_sha256 GLOB '*[^0-9a-f]*' LIMIT 1`, 'Invalid code export file');
@@ -291,8 +289,12 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
     if (!costTables) {
       // D133: token usage lives in one table; no trial or cost table may come back.
       if (!tables.includes('request_usage')) throw new Error('Recovery v14 schema is incomplete');
-      for (const table of ['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs']) {
-        if (tables.includes(table)) throw new Error('Recovery v14 schema still holds a cost table');
+      for (const table of ['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs', 'provider_target_approvals', 'artifact_adoptions']) {
+        if (tables.includes(table)) throw new Error('Recovery v14 schema still holds a removed table');
+      }
+      if (!tables.includes('summary_use_events')) throw new Error('Recovery v14 schema is incomplete');
+      for (const name of ['summary_use_event_insert', 'summary_use_event_immutable', 'summary_use_event_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing summary use protection');
       }
       for (const name of ['request_usage_insert', 'request_usage_identity_immutable', 'request_usage_close_once', 'request_usage_result_once', 'request_usage_no_delete']) {
         if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing usage protection');

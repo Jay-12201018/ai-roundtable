@@ -12,7 +12,7 @@ import type { ArtifactCommands } from './useArtifacts';
 import { CodeExportDialog } from '../codeExport';
 
 const originLabels: Record<ArtifactVersion['origin'], string> = { generate: '生成', regenerate: '重新生成', edit: '你修改的' };
-const statusTone: Record<ArtifactVersion['status'], string> = { generating: 'is-live', failed: 'is-danger', invalid: 'is-danger', candidate: 'is-warn', valid: 'is-ok', exported: 'is-ok', empty: '' };
+const statusTone: Record<ArtifactVersion['status'], string> = { generating: 'is-live', failed: 'is-danger', invalid: 'is-danger', valid: 'is-ok', exported: 'is-ok', empty: '' };
 const when = (iso: string) => new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 /** Unsaved edits survive closing the reader (per version, for this window), so closing is never destructive. */
 const drafts = new Map<string, string>();
@@ -30,13 +30,12 @@ function statusText(version: ArtifactVersion, label: string, usage?: RequestUsag
       return `${text}${version.outputChars ? '下面是已收到的部分。' : ''}`;
     }
     case 'invalid': return `格式检查没有通过：${version.issues.length} 处问题。原始输出完整保留，没有自动重试；可以修改后保存为新版本，或重新生成（会再发送 1 次请求）。`;
-    case 'candidate': return '模型整理的候选版本，已通过格式检查。请核对内容，没问题就采用；采用之后才能复制和导出。';
-    case 'valid': return version.origin === 'edit' ? '你修改的版本，已通过格式检查，可以复制和导出。' : `已采用（${when(version.adoptedAt!)}），可以复制和导出。`;
+    case 'valid': return version.origin === 'edit' ? '你修改的版本，已通过格式检查，可以复制和导出。' : '已通过格式检查，可以复制和导出。';
     case 'exported': {
       const written = version.codeWrites?.filter(entry => entry.written > 0).at(-1);
       return written && written.at === version.exportedAt ? `有效，最近一次在 ${when(written.at)} 写入了 ${written.written} 个文件。` : `有效，最近一次导出在 ${when(version.exportedAt!)}。`;
     }
-    case 'empty': return `模型说明这场讨论里没有可以整理成${label}的内容（原因见下）。这不是模型出错，但这一版不能采用、复制或导出；在讨论里补充之后可以重新生成，也可以自己写一版。`;
+    case 'empty': return `模型说明这场讨论里没有可以整理成${label}的内容（原因见下）。这不是模型出错，但这一版不能复制或导出；在讨论里补充之后可以重新生成，也可以自己写一版。`;
   }
 }
 
@@ -89,11 +88,11 @@ function Editor({ detail, commands, onSaved, onCancel }: { detail: ArtifactVersi
 type View = 'content' | 'raw' | 'sources';
 
 /**
- * R14: one artifact, every version. Reading, adopting, editing, regenerating and exporting all happen here; a cited
+ * R14: one artifact, every version. Reading, editing, regenerating and exporting all happen here; a cited
  * message number goes back to that message in the timeline.
  */
-export function ArtifactReader({ snapshot, artifact, commands, host, initialVersionId, onClose, onRegenerate, onReveal }: { snapshot: RunSnapshot; artifact: ArtifactSummary;
-  commands: ArtifactCommands; host: HostCommands; initialVersionId?: string; onClose: () => void; onRegenerate: () => void; onReveal: (number: number) => void }) {
+export function ArtifactReader({ snapshot, artifact, commands, host, initialVersionId, onClose, onRegenerate, onChoose, onReveal }: { snapshot: RunSnapshot; artifact: ArtifactSummary;
+  commands: ArtifactCommands; host: HostCommands; initialVersionId?: string; onClose: () => void; onRegenerate: () => void; onChoose?: () => void; onReveal: (number: number) => void }) {
   const latest = artifact.versions.at(-1)!;
   const [selected, setSelected] = useState(initialVersionId ?? latest.versionId);
   const [follow, setFollow] = useState(!initialVersionId || initialVersionId === latest.versionId);
@@ -130,12 +129,11 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
     {version.status !== 'generating' && <>
       {version.status === 'empty' && <Button icon={FilePen} disabled={busy || !shown} onClick={() => { setEditing(true); setView('content'); }}>自己写一版…</Button>}
       {/* A failed request is fixed by asking again; an invalid output by editing what came back. */}
-      <Button variant={version.status === 'empty' || version.status === 'failed' ? 'primary' : 'quiet'} icon={RefreshCw} disabled={busy} onClick={onRegenerate}>重新生成…</Button>
+      <Button variant={version.status === 'empty' || version.status === 'failed' ? 'primary' : 'quiet'} icon={RefreshCw} disabled={busy} onClick={onRegenerate}>重新生成</Button>
+      {onChoose && <Button variant="quiet" disabled={busy} onClick={onChoose}>换人…</Button>}
       {version.status !== 'empty' && <Button variant={version.status === 'invalid' ? 'primary' : 'secondary'} icon={FilePen} disabled={busy || !shown}
         onClick={() => { setEditing(true); setView('content'); }}>{version.status === 'invalid' || version.status === 'failed' ? '修改为有效版本…' : '修改…'}</Button>}
     </>}
-    {version.status === 'candidate' && <Button variant="primary" icon={Check} disabled={busy} onClick={() => void commands.adopt(version.versionId)}>
-      {pendingKey === `adopt:${version.versionId}` ? '正在采用…' : '采用这一版'}</Button>}
     {effective && <>
       <Button icon={Copy} disabled={busy} onClick={() => void commands.copy(version.versionId, 'markdown')}>复制 Markdown</Button>
       <Button icon={Copy} disabled={busy} onClick={() => void commands.copy(version.versionId, 'json')}>复制 JSON</Button>
@@ -162,7 +160,7 @@ export function ArtifactReader({ snapshot, artifact, commands, host, initialVers
     </div>}>
     <p className={cx('art-status-text', version.status === 'invalid' || version.status === 'failed' ? 'is-bad' : undefined)} role="status">{statusText(version, label, snapshot.usage?.find(item => item.requestId === version.request?.requestId))}</p>
     {version.affectedNumbers.length > 0 && version.status !== 'generating' && <Note icon={AlertTriangle}
-      action={<Button size="sm" disabled={busy} onClick={onRegenerate}>重新生成…</Button>}>
+      action={<Button size="sm" disabled={busy} onClick={onRegenerate}>重新生成</Button>}>
       <b>受影响：</b>依据的第 {version.affectedNumbers.join('、')} 条发言在这一版写成后被修改或重新生成，内容可能已经过时。可以重新生成，或者自己修改。</Note>}
     {version.status === 'empty' && version.emptyReason && <div className="art-empty"><p className="art-label">模型的说明</p><p>{version.emptyReason}</p></div>}
     {notice && <p role="status" className="ok-text small">{notice.message}</p>}
