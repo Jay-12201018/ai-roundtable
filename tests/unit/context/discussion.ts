@@ -41,7 +41,7 @@ export function parseDiscussion(messages: readonly ProviderMessage[]): { task: s
       const text = body.map(line => line === '>' ? '' : line.replace(/^> /u, '')).join('\n');
       if (label === '【讨论任务 · 主持人设定】') { task = text; continue; }
       const member = /^【(你此前的发言 · )?成员「([^「」【】]+)」· [^【】]+】$/u.exec(label);
-      const summary = /^【讨论摘要 · 覆盖第 (\d+)–(\d+) 条，由主持人确认】$/u.exec(label);
+      const summary = /^【讨论摘要 · 覆盖第 (\d+)–(\d+) 条】$/u.exec(label);
       if (label !== '【主持人插话】' && !member && !summary) throw new Error(`unknown label ${label}`);
       entries.push({
         role: 'user', speaker: member ? member[2] : summary ? '讨论摘要' : '主持人', own: !!member?.[1], publicText: text,

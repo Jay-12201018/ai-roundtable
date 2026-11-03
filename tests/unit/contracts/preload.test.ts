@@ -18,16 +18,15 @@ const emit = (value: unknown) => { for (const handler of fixture.handlers) handl
 beforeEach(() => { fixture.invoke.mockReset(); fixture.handlers.clear(); });
 describe('restricted Preload contract', () => {
   it('exposes only typed feature methods and sends one explicit undefined argument for no-input requests', async () => {
-    expect(Object.keys(fixture.api!).sort()).toEqual(['app', 'artifact', 'codeExport', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
-    // D115: saved proxy settings, a keyless proxy check and a restart; no generic file or process access.
+    expect(Object.keys(fixture.api!).sort()).toEqual(['artifact', 'codeExport', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
+    // D137: saved proxy settings and a keyless connection check; no generic file or process access.
     expect(Object.keys(fixture.api!.network!)).toEqual(['getSettings', 'saveSettings', 'testProxy']);
-    expect(Object.keys(fixture.api!.app!)).toEqual(['relaunch']);
     expect(Object.keys(fixture.api!.host)).toEqual(['command']);
     // R13B: typed ledger and summary commands only; no file system, Key or generic invoke reaches the page.
-    expect(Object.keys(fixture.api!.summary)).toEqual(['preview', 'generate', 'confirm']);
+    expect(Object.keys(fixture.api!.summary)).toEqual(['preview', 'generate', 'confirm', 'revoke']);
     expect(Object.keys(fixture.api!.usage)).toEqual(['getReport', 'exportCsv']);
     // R14: typed artifact commands only; a file export goes through Main's save dialog, never a path from the page.
-    expect(Object.keys(fixture.api!.artifact!)).toEqual(['preview', 'generate', 'list', 'getVersion', 'adopt', 'edit', 'export', 'listCodeCandidates']);
+    expect(Object.keys(fixture.api!.artifact!)).toEqual(['preview', 'generate', 'list', 'getVersion', 'edit', 'export', 'listCodeCandidates']);
     // R15: a folder reference from Main's dialog, a read-only preview and a write of ticked files; never a path from the page.
     expect(Object.keys(fixture.api!.codeExport!)).toEqual(['chooseRoot', 'preview', 'write']);
     expect(fixture.api!.settings).not.toHaveProperty('resolveKey');

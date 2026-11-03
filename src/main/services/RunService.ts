@@ -266,7 +266,7 @@ export class RunService {
         ...(record.basedOnSummaryId ? { basedOnSummaryId: record.basedOnSummaryId } : {}),
         requests: record.requests.map(request => ({ requestId: request.requestId, messageId: request.messageId, status: request.status,
           ...(request.finishReason ? { finishReason: request.finishReason } : {}), ...(request.errorCode ? { errorCode: request.errorCode } : {}), createdAt: request.createdAt })),
-        confirmedMessageIds: record.confirmedMessageIds, createdAt: record.createdAt };
+        confirmedMessageIds: record.confirmedMessageIds, ...(record.revokedMessageIds.length ? { revokedMessageIds: record.revokedMessageIds } : {}), createdAt: record.createdAt };
     });
   }
 

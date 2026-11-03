@@ -25,62 +25,6 @@ function launch(path: string) {
 }
 const close = (db: Database) => { db.close(); open.splice(open.indexOf(db), 1); };
 
-it('D113 remembers a confirmed target across a restart and voids it on a new Key, target or kind', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'r16-approval-')); directories.push(dir); const path = join(dir, 'db.sqlite');
-  let app = launch(path);
-  const provider = await app.settings.createProvider({ name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
-  await app.settings.setKey({ providerId: provider.id, apiKey: 'owned-fake-key' });
-  expect(app.registry.isTargetConfirmed(provider.id)).toBe(false);
-  await app.settings.confirmTarget({ providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
-  expect(() => app.registry.assertSelection(provider.id, 'deepseek-flash')).not.toThrow();
-  close(app.db);
-
-  // Restart: no confirmation needed.
-  app = launch(path);
-  expect(app.registry.isTargetConfirmed(provider.id)).toBe(true);
-  expect(await app.settings.getProviderKeyState({ providerId: provider.id })).toMatchObject({ state: 'configured', sessionTargetConfirmed: true });
-  expect(() => app.registry.assertSelection(provider.id, 'deepseek-flash')).not.toThrow();
-
-  // A new Key voids it at once, and so does deleting the Key.
-  await app.settings.setKey({ providerId: provider.id, apiKey: 'owned-replacement-key' });
-  expect(app.registry.isTargetConfirmed(provider.id)).toBe(false);
-  expect(() => app.registry.assertSelection(provider.id, 'deepseek-flash')).toThrowError(expect.objectContaining({ code: 'forbidden' }));
-  await app.settings.confirmTarget({ providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
-  await app.settings.deleteKey({ providerId: provider.id });
-  expect(app.registry.isTargetConfirmed(provider.id)).toBe(false);
-
-  // A changed target (which also revokes the Key) voids it.
-  await app.settings.setKey({ providerId: provider.id, apiKey: 'owned-fake-key' });
-  await app.settings.confirmTarget({ providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
-  await app.settings.updateProvider({ id: provider.id, name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://other.example/v1', defaultModelId: 'deepseek-flash', customModels: [] });
-  expect(app.registry.isTargetConfirmed(provider.id)).toBe(false);
-  expect(app.db.getTargetApproval(provider.id)).toBeUndefined();
-  close(app.db);
-
-  // A remembered row for a stale Key revision authorizes nothing, even when written straight into the database.
-  const raw = new Sqlite(path);
-  raw.prepare("INSERT INTO provider_target_approvals(provider_id,kind,base_url,key_revision,confirmed_at) VALUES(?,?,?,?,?)").run(provider.id, 'openai-compatible', 'https://other.example/v1', 'stale-revision', new Date().toISOString());
-  raw.close();
-  app = launch(path);
-  expect(app.registry.isTargetConfirmed(provider.id)).toBe(false);
-  await app.settings.deleteProvider({ id: provider.id });
-  expect(app.db.getTargetApproval(provider.id)).toBeUndefined();
-});
-
-it('D113 refuses an approval for Mock or for another kind, and recovery validation rejects a mismatched row', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'r16-approval-')); directories.push(dir); const path = join(dir, 'db.sqlite');
-  const app = launch(path);
-  const mock = await app.settings.createProvider({ name: 'Mock', kind: 'mock', defaultModelId: 'mock' });
-  expect(() => app.db.saveTargetApproval(mock.id, { kind: 'mock', baseUrl: 'x', revision: app.db.getProviderKeyRevision(mock.id) })).toThrowError(expect.objectContaining({ code: 'invalid_state' }));
-  const real = await app.settings.createProvider({ name: 'OpenAI', kind: 'openai' });
-  expect(() => app.db.saveTargetApproval(real.id, { kind: 'gemini', baseUrl: 'https://api.openai.com/v1', revision: app.db.getProviderKeyRevision(real.id) })).toThrowError(expect.objectContaining({ code: 'invalid_state' }));
-  close(app.db);
-  const raw = new Sqlite(path);
-  raw.prepare("INSERT INTO provider_target_approvals(provider_id,kind,base_url,key_revision,confirmed_at) VALUES(?,?,?,?,?)").run(real.id, 'gemini', 'https://x.example', 'r', new Date().toISOString());
-  expect(() => validateDatabase(raw)).toThrow(/target approval/u);
-  raw.close();
-});
-
 it('D114 says, per model, the first reason Main would refuse a send now', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'r16-readiness-')); directories.push(dir);
   const app = launch(join(dir, 'db.sqlite'));
@@ -88,17 +32,14 @@ it('D114 says, per model, the first reason Main would refuse a send now', async 
   const openai = await app.settings.createProvider({ name: 'OpenAI', kind: 'openai', defaultModelId: 'gpt-4o-mini' });
   const mock = await app.settings.createProvider({ name: '演示', kind: 'mock', defaultModelId: 'mock' });
   const read = async (id: string) => (await app.settings.listModelReadiness()).find(row => row.providerId === id)!;
-  expect(await read(deepseek.id)).toMatchObject({ keyState: 'missing', targetConfirmed: false, models: [
+  expect(await read(deepseek.id)).toMatchObject({ keyState: 'missing', baseUrl: 'https://api.deepseek.com', models: [
     { modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' },
     { modelId: 'deepseek-pro', usable: false, blockedBy: 'key' }] });
   await app.settings.setKey({ providerId: deepseek.id, apiKey: 'owned-fake-key' });
-  expect((await read(deepseek.id)).models[0]).toMatchObject({ blockedBy: 'target' });
-  await app.settings.confirmTarget({ providerId: deepseek.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
-  expect(await read(deepseek.id)).toMatchObject({ keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.deepseek.com', models: [{ usable: true, blockedBy: null }, { usable: true, blockedBy: null }] });
-  // D134: an official target is usable with any model once it has a Key and a confirmation.
+  expect(await read(deepseek.id)).toMatchObject({ keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ usable: true, blockedBy: null }, { usable: true, blockedBy: null }] });
+  // D134: a service is usable with any model once it has a Key.
   await app.settings.setKey({ providerId: openai.id, apiKey: 'owned-fake-key' });
-  await app.settings.confirmTarget({ providerId: openai.id, baseUrl: 'https://api.openai.com/v1', confirmed: true });
-  expect(await read(openai.id)).toMatchObject({ targetConfirmed: true, models: [{ modelId: 'gpt-4o-mini', usable: true, blockedBy: null }] });
+  expect(await read(openai.id)).toMatchObject({ baseUrl: 'https://api.openai.com/v1', models: [{ modelId: 'gpt-4o-mini', usable: true, blockedBy: null }] });
   expect(await read(mock.id)).toMatchObject({ keyState: 'none', models: [{ modelId: 'mock', usable: true, blockedBy: null }] });
   await app.settings.updateProvider({ id: deepseek.id, name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', enabled: false, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }, { id: 'deepseek-pro', name: 'DeepSeek Pro' }] });
   expect((await read(deepseek.id)).models[0]).toMatchObject({ usable: false, blockedBy: 'disabled' });

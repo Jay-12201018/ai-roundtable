@@ -9,9 +9,9 @@ const deepseek: ProviderSummary = { id: 'ds', name: 'DeepSeek', kind: 'openai-co
 const openai: ProviderSummary = { id: 'oa', name: 'OpenAI', kind: 'openai', enabled: true, isDefault: false, defaultModelId: 'gpt-4o-mini', customModels: [], configurationValid: true, hasStoredKey: true };
 const mock: ProviderSummary = { id: 'mk', name: '演示（Mock）', kind: 'mock', enabled: true, isDefault: false, defaultModelId: 'mock', customModels: [], configurationValid: true, hasStoredKey: false };
 const readiness: ProviderReadiness[] = [
-  { providerId: 'ds', keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
-  { providerId: 'oa', keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.openai.com/v1', models: [{ modelId: 'gpt-4o-mini', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'target' }] },
-  { providerId: 'mk', keyState: 'none', targetConfirmed: false, confirmedBaseUrl: null, models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
+  { providerId: 'ds', keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
+  { providerId: 'oa', keyState: 'configured', baseUrl: 'https://api.openai.com/v1', models: [{ modelId: 'gpt-4o-mini', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] },
+  { providerId: 'mk', keyState: 'none', baseUrl: null, models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
 ];
 const member = (id: string, displayName: string, role: string, extra: Partial<AgentConfiguration> = {}): AgentConfiguration =>
   ({ ...agent(id, displayName), roleTemplateId: role, providerId: 'ds', modelId: 'deepseek-flash', ...extra });
@@ -31,7 +31,7 @@ describe('房间页: members', () => {
     show([member('a', '起草者', '起草'), member('b', '审查者', '审查', { providerId: 'oa', modelId: 'gpt-4o-mini' }), member('c', '综合者', '综合', { providerId: null, modelId: null }),
       member('d', '老周', '反方')]);
     await waitFor(() => expect(row('起草者').textContent).toContain('DeepSeek Flash · 可以使用'));
-    expect(row('审查者').textContent).toContain('gpt-4o-mini · 需要在设置里确认地址');
+    expect(row('审查者').textContent).toContain('gpt-4o-mini · 还没填写 Key');
     expect(row('综合者').textContent).toContain('还没选模型，暂时不会参与讨论');
     expect(within(row('综合者')).getByRole('button', { name: '去选择' })).toBeTruthy();
     // The role tag is shown only when the name does not already say it.
@@ -125,7 +125,7 @@ describe('添加成员 (D5-A)', () => {
     expect((screen.getByLabelText('模型') as HTMLSelectElement).value).toBe('');
     expect(screen.getByRole('status').textContent).toContain('还没选模型，暂时不会参与讨论');
     fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'oa\u0000gpt-4o-mini' } });
-    expect(screen.getByRole('status').textContent).toContain('暂时不能参与讨论：需要在设置里确认地址');
+    expect(screen.getByRole('status').textContent).toContain('暂时不能参与讨论：还没填写 Key');
     fireEvent.click(screen.getByRole('button', { name: '去设置' })); expect(onOpenSettings).toHaveBeenCalled();
   });
   it('keeps the draft and shows a save failure inside the dialog', async () => {

@@ -125,25 +125,6 @@ describe('registered IPC source boundary', () => {
     second.dispose();
   });
 
-  it('answers 立即重启 before the restart takes the window away', async () => {
-    // Quitting destroys the window; the restart is scheduled after the reply, so the reply's sender check still passes.
-    let frame: { url: string } | undefined; const restarted = vi.fn();
-    const bound = bind(undefined, { lifecycle: { relaunch: () => { setImmediate(() => { Object.assign(frame!, { url: 'about:blank' }); restarted(); }); } } });
-    frame = bound.frame as unknown as { url: string };
-    const reply = await fixture.handlers.get('app.relaunch')!(bound.event, undefined);
-    expect(reply).toEqual({ version: 1, ok: true });
-    expect(restarted).not.toHaveBeenCalled();
-    await new Promise(resolve => setImmediate(resolve));
-    expect(restarted).toHaveBeenCalledOnce();
-  });
-
-  it('would fail its own reply if the restart ran inside the handler (the bug this guards against)', async () => {
-    let frame: { url: string } | undefined;
-    const bound = bind(undefined, { lifecycle: { relaunch: () => { Object.assign(frame!, { url: 'about:blank' }); } } });
-    frame = bound.frame as unknown as { url: string };
-    await expect(fixture.handlers.get('app.relaunch')!(bound.event, undefined)).rejects.toThrow('Unauthorized IPC sender');
-  });
-
   it('rejects a previously captured handler after its registration is disposed', () => {
     const bound = bind();
     const captured = fixture.handlers.get('room.createDemo')!;

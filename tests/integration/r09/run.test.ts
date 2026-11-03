@@ -33,7 +33,6 @@ async function fixture(mode:'normal'|'hang'|'broken'|'length'='normal'){
  db.createProvider({id:'p',name:'local',kind:'openai-compatible',baseUrl:`http://127.0.0.1:${port}/v1`,customModels:[{id:'fixture',name:'fixture'}]});
  const keys=new KeyService(db,createMemoryKeyBackend());await keys.storeKey('p','fake-p');
  const registry=new ProviderRegistry(db,keys,{capabilitiesResolver:()=>({outputTokenParameter:'max_tokens',streamUsage:true,listModels:true,authentication:'models'})});
- registry.confirmTarget({providerId:'p',baseUrl:`http://127.0.0.1:${port}/v1`,confirmed:true});
  for(let i=0;i<3;i++)db.createAgent({id:`a${i}`,roomId:'room',displayName:`Agent${i}`,roleTemplateId:`Role${i}`,systemPrompt:`System${i}`,providerId:'p',modelId:'fixture',displayOrder:i});
  const mock=new MockProvider(); const mockCall=vi.spyOn(mock,'streamChat');
  const run=new RunService(db,mock,createPublicMessagesBuilder((model,member)=>member.providerId?registry.budget(member.providerId,model!):undefined),registry);cleanup.push(()=>run.shutdown());
@@ -87,12 +86,10 @@ it('pause/resume keeps public history and never changes frozen member identity',
  expect(f.run.getSnapshot(start.runId).status).toBe('paused');await f.run.step(start.runId);expect(f.run.getSnapshot(start.runId).status).toBe('paused');
  await f.run.resumeRun(start.runId);await f.run.waitForIdle(start.runId);expect(f.run.getSnapshot(start.runId).status).toBe('completed');expect(f.calls).toHaveLength(3);
 });
-it('requires renewed confirmation after Key replacement before an explicit retry; original paid-attempt evidence is immutable',async()=>{
+it('an explicit retry after a Key replacement uses the new Key; the original attempt evidence is immutable',async()=>{
  const f=await fixture('broken');const start=await f.run.start(input);await f.run.waitForIdle(start.runId);
  const before=f.db.readRunSnapshot(start.runId);await f.keys.storeKey('p','fake-replacement');
- await expect(f.run.retryTurn(start.runId,before.turns[0].id)).rejects.toMatchObject({code:'forbidden'});
- expect(f.calls).toHaveLength(1);expect(f.db.readRunSnapshot(start.runId)).toEqual(before);
- const baseUrl=f.db.getProviderConfiguration('p')!.baseUrl!;f.registry.confirmTarget({providerId:'p',baseUrl,confirmed:true});
+expect(f.calls).toHaveLength(1);
  await f.run.retryTurn(start.runId,before.turns[0].id);
  const after=f.db.readRunSnapshot(start.runId);expect(f.calls).toHaveLength(2);expect(f.calls[1].key).toBe('Bearer fake-replacement');
  expect(after.attempts[0]).toEqual(before.attempts[0]);expect(after.messages[0]).toEqual(before.messages[0]);expect(after.attempts[1].inputSnapshot!.messages).toEqual(before.attempts[0].inputSnapshot!.messages);

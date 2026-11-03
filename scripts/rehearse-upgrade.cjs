@@ -61,7 +61,7 @@ const sha256File = path => createHash('sha256').update(fs.readFileSync(path)).di
 const quoted = name => `"${name.replaceAll('"', '""')}"`;
 // Contents that no migration or recovery step may change, compared by hash where the table and columns exist.
 // D133: migration 14 drops these on purpose; their token usage moves to request_usage and the rest stays in the verified backup.
-const retired = new Set(['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs']);
+const retired = new Set(['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs', 'provider_target_approvals', 'artifact_adoptions']);
 const unchanged = { rooms: ['id', 'name'], messages: ['id', 'sender_name', 'content'], key_records: ['id', 'provider_id', 'encrypted_value'] };
 
 function inspect(Driver, path) {

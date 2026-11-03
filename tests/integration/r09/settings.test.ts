@@ -24,16 +24,14 @@ function fixture(approved = true) {
   });
   return { db, keys, registry, requests, service: new ProviderSettingsService(db, keys, registry) };
 }
-const confirmation = { providerId: 'p', baseUrl, confirmed: true as const };
 
-it('keeps configuration checking local and requires explicit Main approval for real discovery', async () => {
+it('keeps configuration checking local and needs a Key for real discovery', async () => {
   const { service, keys, requests } = fixture();
   const resolve = vi.spyOn(keys, 'resolveKey');
   expect(await service.testConnection({ providerId: 'p', level: 'configuration' })).toMatchObject({ result: { ok: true } });
   expect(resolve).not.toHaveBeenCalled(); expect(requests).toEqual([]);
-  await expect(service.listModels({ providerId: 'p' })).rejects.toMatchObject({ code: 'forbidden' });
+  await expect(service.listModels({ providerId: 'p' })).rejects.toMatchObject({ code: 'authentication_failed' });
   await keys.storeKey('p', 'fake-settings-key');
-  expect(await service.confirmTarget(confirmation)).toEqual({ providerId: 'p' });
   expect(await service.listModels({ providerId: 'p' })).toEqual({ providerId: 'p', models: [{ id: 'listed-model', name: 'listed-model' }] });
   expect(await service.testConnection({ providerId: 'p', level: 'authentication' })).toMatchObject({ result: { ok: true, level: 'authentication' } });
   expect(requests.map(request => [request.method, request.url])).toEqual([['GET', `${baseUrl}/models`], ['GET', `${baseUrl}/models`]]);
@@ -41,7 +39,7 @@ it('keeps configuration checking local and requires explicit Main approval for r
 
 it('requires generation authorization for the fixed eight-token probe', async () => {
   const { service, keys, requests } = fixture();
-  await keys.storeKey('p', 'fake-settings-key'); await service.confirmTarget(confirmation);
+  await keys.storeKey('p', 'fake-settings-key');
   expect(await service.testConnection({ providerId: 'p', level: 'generation', modelId: 'fixture' })).toMatchObject({ result: { ok: false, error: { code: 'forbidden' } } });
   expect(requests).toEqual([]);
   expect(await service.testConnection({ providerId: 'p', level: 'generation', modelId: 'fixture', allowGeneration: true })).toMatchObject({ result: { ok: true, level: 'generation' } });
@@ -49,19 +47,12 @@ it('requires generation authorization for the fixed eight-token probe', async ()
   expect(await requests[0].json()).toEqual({ model: 'fixture', messages: [{ role: 'user', content: 'Reply OK.' }], stream: true, max_tokens: 8 });
 });
 
-it('validates confirmation input and rejects unsupported runtime without inventing approval', async () => {
-  const { db, keys, service, requests } = fixture();
-  await expect(service.confirmTarget({ ...confirmation, confirmed: false } as never)).rejects.toMatchObject({ code: 'invalid_input' });
-  await expect(service.confirmTarget({ ...confirmation, baseUrl: 'http://127.0.0.1:9/v1' })).rejects.toMatchObject({ code: 'forbidden' });
-  await expect(new ProviderSettingsService(db, keys).confirmTarget(confirmation)).rejects.toMatchObject({ code: 'unsupported' });
-  expect(requests).toEqual([]);
-});
-
-it('invalidates session target approval after Key replacement and retains manually entered models', async () => {
+it('D136: a replaced Key works at once, with nothing to approve, and manually entered models stay', async () => {
   const { service, requests } = fixture();
-  await service.setKey({ providerId: 'p', apiKey: 'fake-settings-first' }); await service.confirmTarget(confirmation);
+  await service.setKey({ providerId: 'p', apiKey: 'fake-settings-first' });
   await service.setKey({ providerId: 'p', apiKey: 'fake-settings-second' });
-  await expect(service.listModels({ providerId: 'p' })).rejects.toMatchObject({ code: 'forbidden' });
-  expect(requests).toEqual([]);
+  expect(await service.listModels({ providerId: 'p' })).toMatchObject({ providerId: 'p' });
+  expect(requests).toHaveLength(1);
+  expect(new Headers(requests[0].headers).get('authorization')).toBe('Bearer fake-settings-second');
   expect((await service.getProviderConfiguration({ id: 'p' })).customModels).toEqual([]);
 });

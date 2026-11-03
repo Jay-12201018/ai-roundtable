@@ -217,8 +217,13 @@ describe('Gemini native text adapter', () => {
       expect((await collect(provider.streamChat(invalid as typeof input))).at(-1)).toMatchObject({ type: 'error', error: { code: 'invalid_input' } });
       expect(resolveKey).not.toHaveBeenCalled();
     });
-  it.each(['https://evil.test/v1beta', 'http://127.0.0.1/v1beta', `${baseUrl}?key=bad`])('rejects untrusted configured target %s', target => {
+  it.each([`${baseUrl}?key=bad`, 'https://user:secret@gateway.example/v1beta', 'http://gateway.example/v1beta'])('rejects an unsafe configured target %s', target => {
     expect(() => setup(vi.fn(), { configuration: { ...configuration, baseUrl: target }, confirmedBaseUrl: target })).toThrow(ContractError);
+  });
+  it('D142 accepts a user-entered https address, and refuses when the bound address is a different one', () => {
+    const target = 'https://gateway.example/v1beta';
+    expect(() => setup(vi.fn(), { configuration: { ...configuration, baseUrl: target }, confirmedBaseUrl: target })).not.toThrow();
+    expect(() => setup(vi.fn(), { configuration: { ...configuration, baseUrl: target }, confirmedBaseUrl: baseUrl })).toThrow(ContractError);
   });
   it('ignores environment Keys/Base URL/Vertex flags and accepts models/ custom IDs', async () => {
     vi.stubEnv('GOOGLE_API_KEY', 'environment-secret'); vi.stubEnv('GEMINI_API_KEY', 'other-secret');

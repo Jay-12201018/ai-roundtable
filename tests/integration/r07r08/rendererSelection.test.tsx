@@ -20,7 +20,7 @@ function fixture() {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
   const fake = bridge();
   const api = { ...fake.api, host: { command: vi.fn(async () => { throw new Error('Host command not configured in fixture'); }) },
-    summary: { preview: vi.fn(), generate: vi.fn(), confirm: vi.fn() }, usage: { getReport: vi.fn(), writeOff: vi.fn(), exportCsv: vi.fn() }, rooms: new RoomService(db), settings: new ProviderSettingsService(db, new KeyService(db, createMemoryKeyBackend())) };
+    summary: { preview: vi.fn(), generate: vi.fn(), confirm: vi.fn(), revoke: vi.fn() }, usage: { getReport: vi.fn(), writeOff: vi.fn(), exportCsv: vi.fn() }, rooms: new RoomService(db), settings: new ProviderSettingsService(db, new KeyService(db, createMemoryKeyBackend())) };
   window.roundtable = api;
   return { ...fake, db, api };
 }
@@ -174,7 +174,7 @@ it.each(['createProvider', 'deleteProvider', 'setKey', 'deleteKey'] as const)('r
   render(<App />); fireEvent.click(screen.getByRole('button', { name: '设置' }));
   if (operation === 'createProvider') {
     fireEvent.click(await screen.findByRole('button', { name: '添加服务' }));
-    fireEvent.click(screen.getByRole('button', { name: /^演示（Mock）/u })); fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+    fireEvent.click(screen.getByRole('button', { name: /^演示（Mock）/u }));
     fireEvent.click(screen.getByRole('button', { name: '添加演示服务' }));
   } else if (operation === 'deleteProvider') {
     fireEvent.click(await screen.findByRole('button', { name: '展开 原 Provider' })); fireEvent.click(await screen.findByText('高级与删除'));
@@ -183,7 +183,7 @@ it.each(['createProvider', 'deleteProvider', 'setKey', 'deleteKey'] as const)('r
     // The first real service opens by default once the list loads.
     await screen.findByRole('button', { name: '收起 原 Provider' });
     fireEvent.click(await screen.findByRole('button', { name: '填写 Key' }));
-    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'fixture-key' } }); fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'fixture-key' } }); fireEvent.click(screen.getByRole('button', { name: '保存' }));
   } else {
     await screen.findByRole('button', { name: '收起 原 Provider' }); fireEvent.click(await screen.findByText('高级与删除'));
     fireEvent.click(await screen.findByRole('button', { name: '删除 Key…' })); fireEvent.click(screen.getByRole('button', { name: '确认删除 Key' }));

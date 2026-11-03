@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { execFileSync } from 'node:child_process';
 import { mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,9 +6,9 @@ import { fileURLToPath,URL } from 'node:url';
 import Sqlite from 'better-sqlite3';
 import { afterEach,describe,expect,it } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
+import { originalSchema } from '../../fixtures/originalSchema';
 
-const baseline=execFileSync('git',['show','135bf82c6462ade6dd5300717d6f0102ce4a660c:src/main/database/Database.ts'],{cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8'});
-const sql=baseline.match(/const migrations = \[\s*`([\s\S]*?)`/)![1];
+const sql = originalSchema;
 const roots:string[]=[];
 afterEach(()=>{for (const root of roots.splice(0)) rmSync(root,{recursive:true,force:true});});
 

@@ -15,12 +15,11 @@ const deepseek = config({ id: 'ds', name: 'DeepSeek', kind: 'openai-compatible',
 const openai = config({ id: 'oa', name: 'OpenAI', kind: 'openai', defaultModelId: 'gpt-4o-mini' });
 const kimi = config({ id: 'km', name: 'Kimi', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1', defaultModelId: 'moonshot', customModels: [{ id: 'moonshot', name: 'moonshot' }] });
 const mock = config({ id: 'mk', name: '演示（Mock）', kind: 'mock', defaultModelId: 'mock' });
-const ready = (providerId: string, value: Partial<ProviderReadiness>): ProviderReadiness => ({ providerId, keyState: 'missing', targetConfirmed: false, confirmedBaseUrl: null, models: [], ...value });
+const ready = (providerId: string, value: Partial<ProviderReadiness>): ProviderReadiness => ({ providerId, keyState: 'missing', baseUrl: null, models: [], ...value });
 
 function fixture(readiness: ProviderReadiness[]) {
   const records = new Map([deepseek, openai, kimi, mock].map(value => [value.id, structuredClone(value)]));
   const api: ProviderSettingsApiContract = {
-    confirmTarget: vi.fn(async ({ providerId }) => ({ providerId })),
     listProviderSummaries: vi.fn(async () => [...records.values()].map(summary)),
     getProviderConfiguration: vi.fn(async ({ id }) => structuredClone(records.get(id)!)),
     getProviderKeyState: vi.fn(), getKeyStorageStatus: vi.fn(async () => ({ mode: 'secure', backend: 'f', persistent: true, message: '密钥将使用系统安全存储持久化。' } as const)),
@@ -33,10 +32,10 @@ function fixture(readiness: ProviderReadiness[]) {
   };
   return { api, records };
 }
-function show(api: ProviderSettingsApiContract, extra: { section?: SettingsSection; network?: NetworkApiContract; relaunch?: () => Promise<void> } = {}) {
+function show(api: ProviderSettingsApiContract, extra: { section?: SettingsSection; network?: NetworkApiContract } = {}) {
   const providers = [deepseek, openai, kimi, mock].map(summary);
   return render(<SettingsPage api={api} providers={providers} providerLoadState="ready" onProvidersChanged={() => {}} theme="system" setTheme={() => {}}
-    section={extra.section ?? 'services'} onSection={() => {}} network={extra.network} lifecycle={extra.relaunch ? { relaunch: extra.relaunch } : undefined} />);
+    section={extra.section ?? 'services'} onSection={() => {}} network={extra.network} />);
 }
 const card = (name: string) => screen.getByRole('region', { name });
 afterEach(cleanup);
@@ -44,48 +43,62 @@ afterEach(cleanup);
 describe('设置 › 模型服务', () => {
   it('states each service in words, as Main decides it (D114)', async () => {
     const { api } = fixture([
-      ready('ds', { keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
+      ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
       ready('oa', { keyState: 'missing', models: [{ modelId: 'gpt-4o-mini', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
-      ready('km', { keyState: 'configured', targetConfirmed: false, models: [{ modelId: 'moonshot', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
+      ready('km', { keyState: 'configured', baseUrl: 'https://kimi.example/v1', models: [{ modelId: 'moonshot', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
       ready('mk', { keyState: 'none', models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
     ]);
     show(api);
     await waitFor(() => expect(within(card('DeepSeek')).getByText('可以使用')).toBeTruthy());
     expect(within(card('OpenAI')).getByText('还没填写 Key')).toBeTruthy();
-    expect(within(card('Kimi')).getByText('需要确认地址')).toBeTruthy();
+    // D136: a Key is all a service needs, whichever address it goes to.
+    expect(within(card('Kimi')).getByText('可以使用')).toBeTruthy();
     expect(within(card('演示（Mock）')).getByText('内置')).toBeTruthy();
-    // DeepSeek is open: address confirmed when the Key was saved, the Key never shown, each model's limits stated.
+    // The address is written down, the Key never shown, each model's limits stated.
     await within(card('DeepSeek')).findByText('https://api.deepseek.com');
-    expect(card('DeepSeek').textContent).toContain('官方地址，保存 Key 时已确认');
+    expect(card('DeepSeek').textContent).toContain('官方地址');
+    expect(card('DeepSeek').textContent).not.toContain('确认');
     expect(card('DeepSeek').textContent).toContain('已保存（不显示）');
     expect(card('DeepSeek').textContent).toContain('上下文 128,000 · 最大输出 8,192');
   });
 
-  it('confirms a remembered address in one click for the exact target written beside it', async () => {
-    const { api } = fixture([ready('km', { keyState: 'configured', targetConfirmed: false, models: [] })]);
-    show(api);
-    fireEvent.click(await screen.findByRole('button', { name: '展开 Kimi' }));
-    const note = await within(card('Kimi')).findByRole('note');
-    expect(note.textContent).toContain('这把 Key 只会发往 https://kimi.example/v1');
-    fireEvent.click(within(note).getByRole('button', { name: '确认地址' }));
-    await waitFor(() => expect(api.confirmTarget).toHaveBeenCalledWith({ providerId: 'km', baseUrl: 'https://kimi.example/v1', confirmed: true }));
-  });
-
-  it('checks the connection and says honestly when the service has no way to check the Key', async () => {
-    const { api } = fixture([ready('ds', { keyState: 'configured', targetConfirmed: true, models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
+  it('测试连接 uses the free model list first and says what it found', async () => {
+    const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
+    vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: { requestId: 'r', level, ok: true } }));
     show(api);
     const deepseekCard = card('DeepSeek');
-    fireEvent.click(await within(deepseekCard).findByRole('button', { name: '检查连接' }));
-    await within(deepseekCard).findByText(/这个服务没有模型列表接口/u);
+    const button = await within(deepseekCard).findByRole('button', { name: '测试连接' });
+    expect(deepseekCard.textContent).toContain('可能产生极少的费用');
+    fireEvent.click(button);
+    await within(deepseekCard).findByText(/Key 有效，连接正常/u);
     expect(vi.mocked(api.testConnection).mock.calls.map(([input]) => input.level)).toEqual(['configuration', 'authentication']);
-    // A generation only happens on its own button, with explicit consent.
-    fireEvent.click(within(deepseekCard).getByRole('button', { name: '试发一条' }));
-    await within(deepseekCard).findByText(/已收到回复/u);
+    // The two old checks are one button now.
+    expect(within(deepseekCard).queryByRole('button', { name: '试发一条' })).toBeNull();
+    expect(within(deepseekCard).queryByRole('button', { name: '检查连接' })).toBeNull();
+  });
+
+  it('测试连接 falls back to one very short message when the service has no model list', async () => {
+    const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
+    show(api);
+    const deepseekCard = card('DeepSeek');
+    fireEvent.click(await within(deepseekCard).findByRole('button', { name: '测试连接' }));
+    await within(deepseekCard).findByText(/已收到回复，连接正常/u);
     expect(api.testConnection).toHaveBeenLastCalledWith({ providerId: 'ds', level: 'generation', modelId: 'deepseek-flash', allowGeneration: true });
   });
 
+  it('测试连接 does not send a message when the Key was refused, and says so', async () => {
+    const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
+    vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: level === 'configuration' ? { requestId: 'r', level, ok: true } : { requestId: 'r', level, ok: false, error: publicError('authentication_failed') } }));
+    show(api);
+    const deepseekCard = card('DeepSeek');
+    fireEvent.click(await within(deepseekCard).findByRole('button', { name: '测试连接' }));
+    await waitFor(() => expect(vi.mocked(api.testConnection).mock.calls.length).toBe(2));
+    expect(vi.mocked(api.testConnection).mock.calls.map(([input]) => input.level)).toEqual(['configuration', 'authentication']);
+    expect(within(deepseekCard).queryByText(/连接正常/u)).toBeNull();
+  });
+
   it('refuses a pasted Key as a model name and keeps dangerous deletions behind a second, red confirmation', async () => {
-    const { api } = fixture([ready('ds', { keyState: 'configured', targetConfirmed: true, models: [] })]);
+    const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [] })]);
     show(api);
     const deepseekCard = card('DeepSeek');
     fireEvent.click(await within(deepseekCard).findByRole('button', { name: '手动添加模型' }));
@@ -103,7 +116,7 @@ describe('设置 › 模型服务', () => {
   });
 
   it('warns that changing a typed address deletes the saved Key before it is saved', async () => {
-    const { api } = fixture([ready('km', { keyState: 'configured', targetConfirmed: true, models: [] })]);
+    const { api } = fixture([ready('km', { keyState: 'configured', baseUrl: 'https://kimi.example/v1', models: [] })]);
     show(api);
     fireEvent.click(await screen.findByRole('button', { name: '展开 Kimi' }));
     const kimiCard = card('Kimi');
@@ -115,39 +128,69 @@ describe('设置 › 模型服务', () => {
   });
 });
 
-describe('设置 › 网络与代理 (D115)', () => {
-  const base: NetworkSettings = { saved: null, effective: { source: 'none', proxy: null }, restartRequired: false, savedInvalid: false };
-  const network = (value: NetworkSettings) => ({
+describe('设置 › 网络 (D137)', () => {
+  const base: NetworkSettings = { saved: { enabled: false, manual: null }, status: { state: 'off' }, savedInvalid: false };
+  const network = (value: NetworkSettings, status: NetworkSettings['status'] = { state: 'proxy', source: 'system', host: '127.0.0.1', port: 7890 }) => ({
     getSettings: vi.fn(async () => value),
-    saveSettings: vi.fn(async (input: NetworkSettings['saved']) => ({ ...value, saved: input, restartRequired: true })),
-    testProxy: vi.fn(async () => ({ ok: false, target: 'api.deepseek.com', failure: 'refused' } as const)),
+    saveSettings: vi.fn(async (input: NetworkSettings['saved']) => ({ ...value, saved: input, status: input.enabled ? status : { state: 'off' as const } })),
+    testProxy: vi.fn(async () => ({ ok: false, via: 'direct', failure: 'refused' } as const)),
   });
-  it('needs the explicit name-resolution choice, checks the proxy without a Key, and restarts on request', async () => {
-    const { api } = fixture([]); const net = network(base); const relaunch = vi.fn(async () => {});
-    show(api, { section: 'network', network: net as unknown as NetworkApiContract, relaunch });
-    fireEvent.click(await screen.findByRole('switch', { name: '通过本机代理连接' }));
-    // Nothing saved waits for a restart: the note is neutral.
-    expect(document.querySelector('.net-effect')!.classList.contains('is-pending')).toBe(false);
-    expect(document.querySelector('.net-effect')!.textContent).toContain('改动保存后，重启应用才会生效。');
-    expect(screen.getByRole('alert').textContent).toBe('要使用代理，需要勾选“由代理解析域名”。');
-    expect((screen.getByRole('button', { name: '保存设置' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: '检测代理' }));
-    await screen.findByText(/这个端口上没有代理在运行/u);
-    expect(net.testProxy).toHaveBeenCalledWith({ host: '127.0.0.1', port: 7890 });
-    fireEvent.click(screen.getByLabelText(/由代理解析域名/u));
-    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
-    await screen.findByText('已保存，重启应用后生效。');
-    expect(document.querySelector('.net-effect')!.classList.contains('is-pending')).toBe(true);
-    expect(document.querySelector('.net-effect')!.textContent).toContain('保存的改动在重启应用后生效');
-    expect(net.saveSettings).toHaveBeenCalledWith({ enabled: true, host: '127.0.0.1', port: 7890, trustProxyDns: true });
-    fireEvent.click(screen.getByRole('button', { name: '立即重启' }));
-    await waitFor(() => expect(relaunch).toHaveBeenCalled());
-  });
-  it('says the environment wins and offers no restart for a saved choice it would ignore', async () => {
+  const open = async (net: ReturnType<typeof network>) => {
     const { api } = fixture([]);
-    show(api, { section: 'network', network: network({ ...base, effective: { source: 'environment', proxy: { host: '127.0.0.1', port: 7890 } } }) as unknown as NetworkApiContract, relaunch: vi.fn() });
-    await screen.findByText(/来自环境变量 ROUNDTABLE_CONNECT_PROXY/u);
-    expect(document.body.textContent).toContain('环境变量优先');
+    show(api, { section: 'network', network: net as unknown as NetworkApiContract });
+    return screen.findByRole('switch', { name: '使用系统代理' });
+  };
+
+  it('starts off, and one switch reads the system setting; there is nothing to restart', async () => {
+    const net = network(base);
+    const toggle = await open(net);
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('未开启，直接连接。')).toBeTruthy();
+    fireEvent.click(toggle);
+    await screen.findByText('已检测到系统代理 127.0.0.1:7890');
+    expect(net.saveSettings).toHaveBeenCalledWith({ enabled: true, manual: null });
     expect(screen.queryByRole('button', { name: '立即重启' })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/重启/u);
+  });
+
+  it.each([
+    [{ state: 'direct' } as const, '系统没有设置代理，将直接连接。'],
+    [{ state: 'unsupported', scheme: 'socks' } as const, '系统代理是 SOCKS，这个应用现在不支持，请求不会发出。可以在高级选项里手动填写 HTTP 代理地址。'],
+    [{ state: 'proxy', source: 'manual', host: '10.0.0.2', port: 3128 } as const, '使用手动填写的代理 10.0.0.2:3128'],
+  ])('says what the switch found: %j', async (status, words) => {
+    await open(network({ ...base, saved: { enabled: true, manual: status.state === 'proxy' ? { host: status.host, port: status.port } : null }, status }));
+    expect(screen.getByText(words)).toBeTruthy();
+  });
+
+  it('tests the connection with what is saved and says what happened, in neutral words', async () => {
+    const net = network(base);
+    await open(net);
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+    await screen.findByText('连接不上，请检查网络和地址。');
+    expect(net.testProxy).toHaveBeenCalledWith({ enabled: false, manual: null });
+    net.testProxy.mockResolvedValueOnce({ ok: true, via: 'direct' } as never);
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+    await screen.findByText('连接正常。');
+  });
+
+  it('keeps the manual address under 高级, checks its form and clears it', async () => {
+    const net = network(base);
+    await open(net);
+    fireEvent.click(screen.getByText('高级：手动填写地址'));
+    fireEvent.change(screen.getByLabelText('代理地址'), { target: { value: '127.0.0.1' } });
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '99999' } });
+    expect(screen.getByRole('alert').textContent).toContain('填写代理的地址和端口');
+    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '7890' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(net.saveSettings).toHaveBeenCalledWith({ enabled: false, manual: { host: '127.0.0.1', port: 7890 } }));
+    fireEvent.click(await screen.findByRole('button', { name: '清除' }));
+    await waitFor(() => expect(net.saveSettings).toHaveBeenLastCalledWith({ enabled: false, manual: null }));
+  });
+
+  it('names no proxy software and no reason for using one', async () => {
+    await open(network(base));
+    expect(document.body.textContent).toContain('如果你的网络环境需要通过代理连接，在这里打开。');
+    expect(document.body.textContent).not.toMatch(/Clash|Surge|V2Ray|VPN|梯子|翻墙|海外|Fake-IP/iu);
   });
 });

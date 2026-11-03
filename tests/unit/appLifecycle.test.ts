@@ -120,24 +120,9 @@ describe('application lifecycle', () => {
     expect(ProviderSettingsService).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.keys, registry);
     expect(vi.mocked(RunService).mock.calls[0][3]).toBe(registry);
     expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) },
-      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), adopt: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(),
+      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
-  });
-
-  it('relaunches only after the 立即重启 call has been answered, and refuses while a discussion runs', async () => {
-    await startApp();
-    const { relaunch } = fixture.registerIpc.mock.calls[0][1].lifecycle as { relaunch: () => void };
-    fixture.service.hasActiveRuns.mockReturnValueOnce(true);
-    expect(() => relaunch()).toThrow(expect.objectContaining({ code: 'invalid_state' }));
-    await new Promise(resolve => setImmediate(resolve));
-    expect(fixture.app.relaunch).not.toHaveBeenCalled();
-    // The handler returns at once; the window (and the IPC sender check) still exist until the next turn of the loop.
-    expect(relaunch()).toBeUndefined();
-    expect(fixture.app.relaunch).not.toHaveBeenCalled(); expect(fixture.app.quit).not.toHaveBeenCalled();
-    await new Promise(resolve => setImmediate(resolve));
-    expect(fixture.app.relaunch).toHaveBeenCalledOnce(); expect(fixture.app.quit).toHaveBeenCalledOnce();
-    expect(fixture.app.relaunch.mock.invocationCallOrder[0]).toBeLessThan(fixture.app.quit.mock.invocationCallOrder[0]);
   });
 
   it('clears key-like model IDs after initialization and before any window or IPC, logging only the count', async () => {
@@ -255,8 +240,8 @@ describe('application lifecycle', () => {
 
     expect(fixture.unregister[0]).toHaveBeenCalledTimes(1);
     expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) },
-      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), adopt: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(),
+      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
     expect(fixture.windows[1]?.destroyed).toBe(false);
   });
@@ -519,8 +504,8 @@ describe('application lifecycle', () => {
     emit('second-instance');
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
     expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) },
-      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), adopt: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(),
+      artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
     expect(fixture.windows.filter((window) => !window.destroyed)).toHaveLength(1);
   });

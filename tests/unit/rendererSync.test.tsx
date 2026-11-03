@@ -20,7 +20,7 @@ function delta(runId: string, sequence: number, text: string): RunEvent {
 function configurationApis() {
   const rooms = roomProps().api;
   vi.mocked(rooms.listRooms).mockResolvedValue([room('room', '现有房间')]);
-  return { rooms, host: { command: vi.fn() }, summary: { preview: vi.fn(), generate: vi.fn(), confirm: vi.fn() }, usage: { getReport: vi.fn(), writeOff: vi.fn(), exportCsv: vi.fn() }, settings: { confirmTarget: vi.fn(),
+  return { rooms, host: { command: vi.fn() }, summary: { preview: vi.fn(), generate: vi.fn(), confirm: vi.fn(), revoke: vi.fn() }, usage: { getReport: vi.fn(), writeOff: vi.fn(), exportCsv: vi.fn() }, settings: { confirmTarget: vi.fn(),
     createProvider: vi.fn(), updateProvider: vi.fn(), getProviderConfiguration: vi.fn(),
     listProviderSummaries: vi.fn().mockResolvedValue([]), deleteProvider: vi.fn(), setKey: vi.fn(), deleteKey: vi.fn(),
     getProviderKeyState: vi.fn(), getKeyStorageStatus: vi.fn(), listModels: vi.fn(), testConnection: vi.fn(),

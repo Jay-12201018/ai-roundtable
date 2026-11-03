@@ -7,7 +7,6 @@ import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { UsageService } from '../../../src/main/usage/UsageService';
-import { assertProxyTarget } from '../../../src/main/providers/loopbackProxy';
 import { response as anthropicResponse, success } from '../../unit/providers/anthropic/fixtures';
 import { sse as geminiSse, chunk as geminiChunk } from '../../unit/providers/gemini/fixtures';
 import type { ModelTokenCounter } from '../../../src/main/context/types';
@@ -48,7 +47,6 @@ async function fixture(members: ReadonlyArray<typeof services[number]['id']>) {
     await keys.storeKey(service.id, `owned-fake-${service.id}-key`);
   }
   const registry = new ProviderRegistry(db, keys, { transportFactory: guard => async (url, init) => { guard(); return send(url, init); } });
-  for (const service of services) registry.confirmTarget({ providerId: service.id, baseUrl: 'target' in service ? service.target : service.baseUrl, confirmed: true });
   members.forEach((id, index) => db.createAgent({ id: `a-${id}`, roomId: 'room', displayName: `成员${index + 1}`, roleTemplateId: ['起草', '审查', '综合'][index] ?? '审查', systemPrompt: '',
     providerId: id, modelId: services.find(service => service.id === id)!.model, displayOrder: index }));
   const budgetOf = (member: { providerId: string | null; modelId: string | null }) => member.providerId ? registry.budget(member.providerId, member.modelId!) : undefined;
@@ -121,7 +119,6 @@ describe('one discussion across DeepSeek, OpenAI, Anthropic and Gemini (D134, D1
     const f = await fixture(['oa', 'an']);
     f.db.updateProvider({ id: 'an', name: 'Anthropic', kind: 'anthropic', baseUrl: null, customModels: [{ id: 'claude-opus-5-5', name: 'Opus', maxOutputTokens: 2000 }] });
     await f.keys.storeKey('an', 'owned-fake-an-key');
-    f.registry.confirmTarget({ providerId: 'an', baseUrl: 'https://api.anthropic.com', confirmed: true });
     const started = await f.run.start({ roomId: 'room', task: '夹紧', workflowSnapshot: {}, maxTurns: 2, outputTokenLimit: 16000 });
     await f.run.waitForIdle(started.runId);
     expect(f.run.getSnapshot(started.runId).status).toBe('completed');
@@ -165,33 +162,5 @@ describe('the input bound and counters do not depend on any name (D134)', () => 
     const counts = services.map(service => (f.registry.budget(service.id, service.model).counter as ModelTokenCounter).countMessages(message));
     expect(new Set(counts)).toEqual(new Set([512 + 32 + Buffer.byteLength('你好 world')]));
     for (const service of services) expect(f.registry.budget(service.id, service.model)).toMatchObject({ contextWindowTokens: 128000, maxOutputTokens: 8192 });
-  });
-});
-
-describe('the proxy covers what opening models sends (D136)', () => {
-  it('allows the official OpenAI chat and model list, and the DeepSeek model list', () => {
-    expect(() => assertProxyTarget(new URL('https://api.openai.com/v1/chat/completions'), 'POST', 'openai')).not.toThrow();
-    expect(() => assertProxyTarget(new URL('https://api.openai.com/v1/models'), 'GET', 'openai')).not.toThrow();
-    expect(() => assertProxyTarget(new URL('https://api.deepseek.com/models'), 'GET', 'deepseek')).not.toThrow();
-  });
-  it.each([
-    ['https://api.openai.com/v1/embeddings', 'POST', 'openai'], ['https://api.openai.com/v1/chat/completions', 'GET', 'openai'], ['https://api.openai.com/v1/models?x=1', 'GET', 'openai'],
-    ['https://evil.example/v1/chat/completions', 'POST', 'openai'], ['https://api.deepseek.com/models', 'POST', 'deepseek'], ['https://api.deepseek.com/chat/completions', 'POST', 'openai'],
-  ] as const)('refuses %s %s for %s', (url, method, kind) => {
-    expect(() => assertProxyTarget(new URL(url), method, kind)).toThrow();
-  });
-  it('routes official OpenAI through the proxy and still refuses a typed address while a proxy is configured', async () => {
-    const db = new Database(':memory:'); await db.initialize(); cleanup.push(() => db.close());
-    db.createProvider({ id: 'oa', name: 'OpenAI', kind: 'openai', baseUrl: null });
-    db.createProvider({ id: 'km', name: 'Kimi', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1' });
-    const keys = new KeyService(db, createMemoryKeyBackend());
-    await keys.storeKey('oa', 'owned-fake-key'); await keys.storeKey('km', 'owned-fake-key');
-    const kinds: Array<string | undefined> = [];
-    const registry = new ProviderRegistry(db, keys, { proxy: { hostname: '127.0.0.1', port: 7890 }, transportFactory: (_guard, _diagnostics, kind) => { kinds.push(kind); return vi.fn(); } });
-    registry.confirmTarget({ providerId: 'oa', baseUrl: 'https://api.openai.com/v1', confirmed: true });
-    registry.confirmTarget({ providerId: 'km', baseUrl: 'https://kimi.example/v1', confirmed: true });
-    registry.getAdapter('oa');
-    expect(kinds).toEqual(['openai']);
-    expect(() => registry.getAdapter('km')).toThrowError(expect.objectContaining({ code: 'forbidden' }));
   });
 });

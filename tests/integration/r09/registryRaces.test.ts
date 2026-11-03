@@ -35,7 +35,6 @@ async function fixture(options: { decrypt?: (call: number) => Promise<void>; pre
     capabilitiesResolver: () => ({ outputTokenParameter: 'max_tokens', streamUsage: false, listModels: true, authentication: 'models' }),
     transportFactory: guard => async (url, init) => { await options.prepareTransport?.(guard); return sent(url, init); },
   });
-  registry.confirmTarget({ providerId: 'p', baseUrl: 'http://127.0.0.1:12345/v1', confirmed: true });
   const change = (values: { enabled?: boolean; baseUrl?: string }) => {
     const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = database.getProviderConfiguration('p')!;
     database.updateProvider({ ...input, ...values });

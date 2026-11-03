@@ -14,12 +14,11 @@ const definitions = [
   { kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', modelId: 'gemini-fixture', outputTokenParameter: 'maxOutputTokens' },
 ] as const;
 type Definition = typeof definitions[number];
-async function fixture(d: Definition, options: { proxy?: boolean } = {}) {
+async function fixture(d: Definition) {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
   db.createProvider({ id: 'native', name: 'Owned native fixture', kind: d.kind, baseUrl: null });
   const keys = new KeyService(db, createMemoryKeyBackend()); await keys.storeKey('native', 'owned-fake-native-secret');
   const requests: Request[] = [];
-  const proxyKinds: Array<string | undefined> = [];
   const transport = vi.fn(async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = new Request(url, init); requests.push(request);
     if (request.method === 'GET') return d.kind === 'anthropic'
@@ -28,17 +27,14 @@ async function fixture(d: Definition, options: { proxy?: boolean } = {}) {
     return d.kind === 'anthropic' ? response(success('OK')) : sse({ ...chunk('OK', 'STOP'), usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2, thoughtsTokenCount: 3, totalTokenCount: 9 } });
   });
   const registry = new ProviderRegistry(db, keys, {
-    transportFactory: (guard, _diagnostics, proxyKind) => { proxyKinds.push(proxyKind); return async (url, init) => { guard(); return transport(url, init); }; },
-    ...(options.proxy ? { proxy: { hostname: '127.0.0.1', port: 7890 } as const } : {}),
+    transportFactory: guard => async (url, init) => { guard(); return transport(url, init); },
   });
-  const confirm = () => registry.confirmTarget({ providerId: 'native', baseUrl: d.baseUrl, confirmed: true });
-  return { db, keys, registry, confirm, requests, proxyKinds, transport, settings: new ProviderSettingsService(db, keys, registry) };
+  return { db, keys, registry, requests, transport, settings: new ProviderSettingsService(db, keys, registry) };
 }
 
 describe.each(definitions)('$kind production Registry wiring', d => {
-  it('requires explicit target confirmation and returns models through the native factory', async () => {
+  it('returns models through the native factory', async () => {
     const f = await fixture(d);
-    expect(() => f.registry.getAdapter('native')).toThrow(); f.confirm();
     expect(await f.settings.listModels({ providerId: 'native' })).toMatchObject({ providerId: 'native', models: [{ id: d.modelId }] });
     expect(f.requests).toHaveLength(1);
     const request = f.requests[0];
@@ -53,41 +49,28 @@ describe.each(definitions)('$kind production Registry wiring', d => {
     expect(resolve).not.toHaveBeenCalled(); expect(f.requests).toHaveLength(0);
   });
   it('D134: any model of a confirmed service generates, with no reviewed policy', async () => {
-    const f = await fixture(d); f.confirm();
+    const f = await fixture(d);
     const result = await collect(f.registry.getAdapter('native').streamChat({ requestId: 'open', modelId: `${d.modelId}-any`, messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8 }));
     expect(result.at(-1)).toEqual({ type: 'finish', requestId: 'open', reason: 'stop' });
   });
   it('invalidates an already obtained adapter after Key replacement', async () => {
-    const f = await fixture(d); f.confirm(); const adapter = f.registry.getAdapter('native');
+    const f = await fixture(d); const adapter = f.registry.getAdapter('native');
     await f.keys.storeKey('native', 'replacement-fake-secret');
     await expect(adapter.listModels({ requestId: 'revoked' })).rejects.toMatchObject({ code: 'forbidden' });
     expect(f.requests).toHaveLength(0);
   });
-  it('rejects a changed native origin without reading Key', async () => {
-    const f = await fixture(d); const read = vi.spyOn(f.keys, 'getProviderKeyState');
+  it('D142: a saved address is where the Key goes, for this interface type too', async () => {
+    const f = await fixture(d);
     const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = f.db.getProviderConfiguration('native')!;
-    f.db.updateProvider({ ...input, baseUrl: 'https://unreviewed.invalid' });
-    expect(() => f.registry.confirmTarget({ providerId: 'native', baseUrl: 'https://unreviewed.invalid', confirmed: true })).toThrow();
-    expect(read).not.toHaveBeenCalled(); expect(f.requests).toHaveLength(0);
-  });
-  it('routes a native origin through the CONNECT proxy with its own fixed target, not the DeepSeek path', async () => {
-    const f = await fixture(d, { proxy: true }); f.confirm();
-    const result = await collect(f.registry.getAdapter('native', d.modelId).streamChat({ requestId: 'proxied', modelId: d.modelId,
-      messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8 }));
-    expect(result.at(-1)).toEqual({ type: 'finish', requestId: 'proxied', reason: 'stop' });
-    expect(f.proxyKinds).toEqual([d.kind]);
-    expect(new URL(f.requests[0].url).origin).toBe(new URL(d.baseUrl).origin);
-  });
-  it('still refuses a non-official compatible origin while a proxy is configured', async () => {
-    const f = await fixture(d, { proxy: true });
-    f.db.createProvider({ id: 'other', name: 'Other compatible', kind: 'openai-compatible', baseUrl: 'https://other.example/v1' });
-    f.registry.confirmTarget({ providerId: 'other', baseUrl: 'https://other.example/v1', confirmed: true });
-    const read = vi.spyOn(f.keys, 'getProviderKeyState');
-    expect(() => f.registry.getAdapter('other')).toThrowError(expect.objectContaining({ code: 'forbidden' }));
-    expect(read).not.toHaveBeenCalled(); expect(f.requests).toHaveLength(0);
+    f.db.updateProvider({ ...input, baseUrl: 'https://relay.example/base' });
+    await f.keys.storeKey('native', 'owned-fake-native-secret');
+    expect(await f.settings.listModels({ providerId: 'native' })).toMatchObject({ providerId: 'native' });
+    expect(f.requests.at(-1)!.url.startsWith('https://relay.example/base/')).toBe(true);
+    await expect(collect(f.registry.getAdapter('native').streamChat({ requestId: 'custom', modelId: d.modelId, messages: [{ role: 'user', content: 'hi' }], outputTokenLimit: 8 }))).resolves.toBeDefined();
+    expect(f.requests.at(-1)!.url.startsWith('https://relay.example/base/')).toBe(true);
   });
   it('passes a fixture through the real native factory with the native output field and usage semantics', async () => {
-    const f = await fixture(d, {}); f.confirm();
+    const f = await fixture(d);
     const result = await collect(f.registry.getAdapter('native', d.modelId).streamChat({ requestId: 'approved', modelId: d.modelId,
       messages: [{ role: 'system', content: 'trusted' }, { role: 'user', content: 'Reply OK.' }, { role: 'assistant', content: 'Prior public answer' }], outputTokenLimit: 8 }));
     expect(result).toContainEqual({ type: 'text_delta', requestId: 'approved', text: 'OK' });
@@ -108,18 +91,18 @@ describe.each(definitions)('$kind production Registry wiring', d => {
     }
   });
   it('D134: counts input as an upper bound for R05 context and final preflight, without a native counter', async () => {
-    const f = await fixture(d); f.confirm(); const budget = f.registry.budget('native', d.modelId);
+    const f = await fixture(d); const budget = f.registry.budget('native', d.modelId);
     expect(budget.counter.kind).toBe('upper_bound');
     expect(budget.counter.countMessages([{ role: 'user', content: '好' }])).toBe(512 + 32 + 3);
   });
   it('checks limits inside Registry before reading a Key', async () => {
-    const f = await fixture(d); f.confirm(); const read = vi.spyOn(f.keys, 'getProviderKeyState');
+    const f = await fixture(d); const read = vi.spyOn(f.keys, 'getProviderKeyState');
     const events = await collect(f.registry.getAdapter('native').streamChat({ requestId: 'rejected', modelId: d.modelId,
       messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8193 }));
     expect(events).toEqual([expect.objectContaining({ type: 'error', error: expect.objectContaining({ code: 'invalid_input' }) })]); expect(read).not.toHaveBeenCalled(); expect(f.requests).toHaveLength(0);
   });
   it('keeps Settings authentication distinct from an explicitly authorized generation test', async () => {
-    const f = await fixture(d, {}); f.confirm();
+    const f = await fixture(d);
     expect(await f.settings.testConnection({ providerId: 'native', level: 'authentication' })).toMatchObject({ result: { ok: true, level: 'authentication' } });
     expect(f.requests.map(request => request.method)).toEqual(['GET']);
     expect(await f.settings.testConnection({ providerId: 'native', level: 'generation', modelId: d.modelId })).toMatchObject({ result: { ok: false, error: { code: 'forbidden' } } });
@@ -127,27 +110,20 @@ describe.each(definitions)('$kind production Registry wiring', d => {
     expect(await f.settings.testConnection({ providerId: 'native', level: 'generation', modelId: d.modelId, allowGeneration: true })).toMatchObject({ result: { ok: true, level: 'generation' } });
     expect(f.requests.map(request => request.method)).toEqual(['GET', 'POST']);
   });
-  it('rejects native configuration errors as local errors without Key reads', async () => {
-    const f = await fixture(d); const read = vi.spyOn(f.keys, 'getProviderKeyState');
-    const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = f.db.getProviderConfiguration('native')!;
-    f.db.updateProvider({ ...input, baseUrl: 'https://unreviewed.invalid' });
-    expect(await f.settings.testConnection({ providerId: 'native', level: 'configuration' })).toMatchObject({ result: { ok: false, error: { code: 'invalid_input' } } });
-    expect(read).not.toHaveBeenCalled(); expect(f.requests).toHaveLength(0);
-  });
   it('rejects Key revocation that occurs while Key state is being resolved', async () => {
-    const f = await fixture(d); f.confirm(); const read = f.keys.getProviderKeyState.bind(f.keys);
+    const f = await fixture(d); const read = f.keys.getProviderKeyState.bind(f.keys);
     vi.spyOn(f.keys, 'getProviderKeyState').mockImplementationOnce(async id => { const state = await read(id); await f.keys.deleteKey(id); return state; });
     await expect(f.registry.getAdapter('native').listModels({ requestId: 'late-key-state' })).rejects.toMatchObject({ code: 'forbidden' });
     expect(f.requests).toHaveLength(0);
   });
   it('drops a response returned after its Provider Key has been revoked', async () => {
-    const f = await fixture(d); f.confirm();
+    const f = await fixture(d);
     f.transport.mockImplementationOnce(async () => { await f.keys.deleteKey('native'); return Response.json({ data: [], has_more: false, models: [] }); });
     await expect(f.registry.getAdapter('native').listModels({ requestId: 'late-response' })).rejects.toMatchObject({ code: 'forbidden' });
     expect(f.transport).toHaveBeenCalledTimes(1);
   });
   it.each([401, 429, 307])('does not retry or reveal body/credential details on HTTP %s', async status => {
-    const f = await fixture(d, {}); f.confirm();
+    const f = await fixture(d);
     f.transport.mockImplementationOnce(async () => new Response('untrusted-secret-response', { status, headers: { location: 'https://unreviewed.invalid' } }));
     const events = await collect(f.registry.getAdapter('native', d.modelId).streamChat({ requestId: 'http-failure', modelId: d.modelId,
       messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8 }));

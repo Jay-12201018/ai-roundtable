@@ -36,7 +36,6 @@ async function fixture(delayed = false) {
       return Response.json({ data: [{ id: 'fixture' }] });
     },
   });
-  registry.confirmTarget({ providerId: 'p', baseUrl, confirmed: true });
   const change = (values: { enabled?: boolean; baseUrl?: string }) => {
     const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = database.getProviderConfiguration('p')!;
     database.updateProvider({ ...input, ...values });

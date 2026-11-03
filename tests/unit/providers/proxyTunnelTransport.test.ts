@@ -9,7 +9,6 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { createSafeFetch } from '../../../src/main/providers/network';
-import { readLoopbackProxy } from '../../../src/main/providers/loopbackProxy';
 import type { DiagnosticEvent } from '../../../src/main/providers/diagnostics';
 import { ContractError } from '../../../src/shared/contracts/errors';
 import { Database } from '../../../src/main/database/Database';
@@ -35,7 +34,7 @@ beforeAll(() => {
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-async function fixture(mode: 'ok' | 'wrong-host' | 'no-ca' | 'extra' | 'malformed' | 'oversized' | 'hang' | 'redirect' | 'break' | number = 'ok') {
+async function fixture(mode: 'ok' | 'wrong-host' | 'no-ca' | 'extra' | 'malformed' | 'oversized' | 'hang' | 'redirect' | 'break' | number = 'ok', connectTarget = 'api.deepseek.com:443') {
   const sockets = new Set<Socket>(); const connectHeaders: object[] = []; const calls: Array<{ method?: string; path?: string; body: string; keyMatches: boolean; sni: string }> = [];
   const server = httpsServer({ key, cert: mode === 'wrong-host' ? mismatch : cert }, (req, res) => {
     const parts: Buffer[] = []; req.on('data', part => parts.push(part)); req.on('end', () => {
@@ -50,7 +49,7 @@ async function fixture(mode: 'ok' | 'wrong-host' | 'no-ca' | 'extra' | 'malforme
   for (const s of [server, proxy]) s.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
   proxy.on('connect', (req, client, head) => {
     connectHeaders.push(req.headers);
-    expect(req.url).toBe('api.deepseek.com:443'); expect(head.length).toBe(0);
+    expect(req.url).toBe(connectTarget); expect(head.length).toBe(0);
     if (mode === 'hang') return;
     if (typeof mode === 'number') { client.end(`HTTP/1.1 ${mode} Fixture\r\nContent-Length: 0\r\n\r\n`); return; }
     if (mode === 'extra') { client.end('HTTP/1.1 200 Connection Established\r\n\r\nUNSOLICITED'); return; }
@@ -66,7 +65,7 @@ async function fixture(mode: 'ok' | 'wrong-host' | 'no-ca' | 'extra' | 'malforme
   const real = await vi.importActual<typeof import('node:tls')>('node:tls');
   // This test CA is injected only in this fixture, never into application configuration or system trust.
   vi.mocked(tls.connect).mockImplementation(((options: tls.ConnectionOptions) => real.connect({ ...options, ...(mode === 'no-ca' ? {} : { ca }) })) as typeof tls.connect);
-  const proxyConfig = readLoopbackProxy({ ROUNDTABLE_CONNECT_PROXY: `http://127.0.0.1:${(proxy.address() as { port: number }).port}`, ROUNDTABLE_TRUST_PROXY_DNS: '1' })!;
+  const proxyConfig = async () => ({ kind: 'http' as const, hostname: '127.0.0.1', port: (proxy.address() as { port: number }).port });
   const resolver = vi.fn(async () => [{ address: '198.18.0.12', family: 4 }]);
   // What the transport reported, merged the way a reader would: the first failure's stage and category stay.
   const seen: { stage?: string; category?: string | null; evidence?: string; httpStatus?: number } = {};
@@ -82,9 +81,9 @@ async function fixture(mode: 'ok' | 'wrong-host' | 'no-ca' | 'extra' | 'malforme
   return { send, calls, connectHeaders, resolver, diagnostic, proxyConfig };
 }
 
-it('keeps direct Fake-IP rejection and creates no CONNECT or TLS attempt', async () => {
+it('keeps rejecting a direct connection to a reserved address and creates no CONNECT or TLS attempt', async () => {
   const f = await fixture();
-  await expect(createSafeFetch(undefined, f.resolver as never, f.diagnostic.observe)(target)).rejects.toThrow('Unsafe');
+  await expect(createSafeFetch(undefined, f.resolver as never, f.diagnostic.observe)(target)).rejects.toMatchObject({ code: 'target_rejected' });
   expect(f.diagnostic.snapshot()).toMatchObject({ stage: 'dns', category: 'target_rejected', evidence: 'client_invoked' });
   expect(f.connectHeaders).toHaveLength(0); expect(tls.connect).not.toHaveBeenCalled();
 });
@@ -142,24 +141,28 @@ it('rejects target revocation at CONNECT before TLS or any API bytes', async () 
   await expect(f.send(undefined, () => { if (++count >= 8) throw new ContractError('forbidden'); })).rejects.toBeDefined();
   expect(f.calls).toHaveLength(0); expect(f.resolver).not.toHaveBeenCalled();
 });
-it('D136: a proxy failure reaches the caller as a network error and the Key never reaches the proxy', async () => {
+it('D137: a proxy failure reaches the caller as a network error and the Key never reaches the proxy', async () => {
   const f = await fixture(407);
   const database = new Database(':memory:'); database.initialize(); cleanups.push(async () => database.close());
   database.createProvider({ id: 'p', name: 'Owned proxy fixture', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: 'deepseek-flash', name: 'Flash' }] });
   const keys = new KeyService(database, createMemoryKeyBackend()); await keys.storeKey('p', fakeKey);
   const registry = new ProviderRegistry(database, keys, { proxy: f.proxyConfig });
-  registry.confirmTarget({ providerId: 'p', baseUrl: 'https://api.deepseek.com', confirmed: true });
   const chunks = [];
   for await (const chunk of registry.getAdapter('p', 'deepseek-flash').streamChat({ requestId: 'r', modelId: 'deepseek-flash', outputTokenLimit: 8, messages: [{ role: 'user', content: 'Reply OK.' }] })) chunks.push(chunk);
   expect(chunks.at(-1)).toMatchObject({ type: 'error', error: { code: 'network_error' } });
   expect(f.calls).toHaveLength(0); expect(f.connectHeaders).toHaveLength(1);
   expect(JSON.stringify(f.connectHeaders)).not.toContain(fakeKey);
 });
-it('rejects non-reviewed proxy origins before resolving any Key', async () => {
-  const f = await fixture(); const database = new Database(':memory:'); database.initialize(); cleanups.push(async () => database.close());
-  database.createProvider({ id: 'other', name: 'Other fixture', kind: 'openai-compatible', baseUrl: 'https://other.example', customModels: [] });
-  const keys = new KeyService(database, createMemoryKeyBackend()); const read = vi.spyOn(keys, 'resolveKey');
+it('D137: any saved address goes through the proxy by name, and the Key stays out of what the proxy sees', async () => {
+  const f = await fixture(407, 'other.example:443');
+  const database = new Database(':memory:'); database.initialize(); cleanups.push(async () => database.close());
+  database.createProvider({ id: 'other', name: 'Other fixture', kind: 'openai-compatible', baseUrl: 'https://other.example', customModels: [{ id: 'm', name: 'M' }] });
+  const keys = new KeyService(database, createMemoryKeyBackend()); await keys.storeKey('other', fakeKey);
   const registry = new ProviderRegistry(database, keys, { proxy: f.proxyConfig });
-  registry.confirmTarget({ providerId: 'other', baseUrl: 'https://other.example', confirmed: true });
-  expect(() => registry.getAdapter('other')).toThrow(); expect(read).not.toHaveBeenCalled(); expect(f.connectHeaders).toHaveLength(0);
+  const chunks = [];
+  for await (const chunk of registry.getAdapter('other', 'm').streamChat({ requestId: 'r', modelId: 'm', outputTokenLimit: 8, messages: [{ role: 'user', content: 'Reply OK.' }] })) chunks.push(chunk);
+  expect(chunks.at(-1)).toMatchObject({ type: 'error', error: { code: 'network_error' } });
+  expect(f.connectHeaders).toEqual([{ host: 'other.example:443', connection: 'close' }]);
+  expect(f.resolver).not.toHaveBeenCalled();
+  expect(JSON.stringify(f.connectHeaders)).not.toContain(fakeKey);
 });

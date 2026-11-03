@@ -5,6 +5,7 @@ import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/K
 import { ProviderRegistry } from '../../../src/main/providers/ProviderRegistry';
 import { ProviderSettingsService } from '../../../src/main/settings';
 import { ConnectWizard } from '../../../src/renderer/features/settings';
+import { presets } from '../../../src/renderer/features/settings/presets';
 import type { ProviderSettingsApiContract } from '../../../src/shared/contracts/configuration';
 
 const databases: Database[] = [];
@@ -13,127 +14,173 @@ function fixture() {
   const database = new Database(':memory:'); database.initialize(); databases.push(database);
   const keys = new KeyService(database, createMemoryKeyBackend());
   const network = vi.fn(async (_url: Parameters<typeof fetch>[0], _init?: RequestInit): Promise<Response> => { throw new Error('Network disabled in the wizard test'); });
-  const registry = new ProviderRegistry(database, keys, { transportFactory: () => network,
-    });
+  const registry = new ProviderRegistry(database, keys, { transportFactory: () => network });
   const api = new ProviderSettingsService(database, keys, registry);
   return { database, keys, registry, api, network };
 }
 const open = (api: ProviderSettingsApiContract, extra: Partial<Parameters<typeof ConnectWizard>[0]> = {}) => {
-  const onClose = vi.fn(); const onConnected = vi.fn(async () => ({ roomName: '我的第一场讨论', memberNames: ['起草者', '审查者', '综合者'], modelName: 'DeepSeek Flash' }));
-  render(<ConnectWizard api={api} providers={[]} onClose={onClose} onConnected={onConnected} {...extra} />);
-  return { onClose, onConnected };
+  const onClose = vi.fn(); const onStart = vi.fn(); const onConnected = vi.fn(async () => ({ roomName: '我的第一场讨论', memberNames: ['起草者', '审查者', '综合者'], modelName: 'DeepSeek Flash' }));
+  render(<ConnectWizard api={api} providers={[]} onClose={onClose} onStart={onStart} onConnected={onConnected} {...extra} />);
+  return { onClose, onStart, onConnected };
 };
 const keyInput = () => screen.getByLabelText('API Key') as HTMLInputElement;
+const usable = (registry: ProviderRegistry, providerId: string, modelId: string) => {
+  registry.checkGeneration(providerId, { requestId: '00000000-0000-4000-8000-000000000000', modelId, messages: [{ role: 'user', content: 'x' }], outputTokenLimit: 8 });
+  return true;
+};
+const pick = (name: RegExp) => fireEvent.click(screen.getByRole('button', { name }));
 
-it('D113 connects DeepSeek in three steps: the address above the Key, 保存并连接 confirms it, the Key never stays in the page', async () => {
+it('D142 offers the domestic services, a custom service and the demo, and no other name', () => {
+  const { api } = fixture();
+  open(api);
+  const offered = within(screen.getByRole('group', { name: '服务' })).getAllByRole('button').map(button => button.textContent ?? '');
+  for (const [index, name] of ['DeepSeek', 'Kimi', '通义千问', '智谱 GLM', '豆包', 'MiniMax', '自定义服务', '演示（Mock）'].entries()) expect(offered[index]).toContain(name);
+  expect(offered).toHaveLength(8);
+  expect(offered.join('')).not.toMatch(/OpenAI(?! 兼容)|Claude|Gemini|Anthropic/u);
+  // Every built-in address is the service's own https endpoint, and each has at least one model to pick.
+  for (const preset of presets.filter(item => item.baseUrl)) {
+    expect(preset.baseUrl!.startsWith('https://')).toBe(true);
+    expect(preset.models.length).toBeGreaterThan(0);
+  }
+});
+
+it('D136 connects a service with a pasted Key: pick it, paste, save, and the discussion is one click away', async () => {
   const { database, registry, api, network } = fixture();
-  const { onConnected } = open(api);
-  expect(screen.getByRole('button', { name: /^DeepSeek/u }).getAttribute('aria-pressed')).toBe('true');
-  for (const name of ['OpenAI', 'Anthropic Claude', 'Google Gemini']) expect(screen.getByRole('button', { name: new RegExp(`^${name}`, 'u') }).textContent).not.toMatch(/价格|审核/u);
-  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-  expect(screen.getByRole('heading', { name: '填写 DeepSeek 的 API Key' })).toBeTruthy();
+  const { onConnected, onClose, onStart } = open(api);
+  pick(/^DeepSeek/u);
+  expect(screen.getByRole('heading', { name: '连接 DeepSeek' })).toBeTruthy();
   expect(screen.getByRole('note').textContent).toBe('Key 只会发往 https://api.deepseek.com');
-  expect(screen.getByText('保存即表示你确认了上面的地址')).toBeTruthy();
-  const save = screen.getByRole('button', { name: '保存并连接' });
-  expect((save as HTMLButtonElement).disabled).toBe(true);
+  // No step, checkbox or button asks to confirm the address; the save waits only for the Key.
+  expect(screen.queryByRole('button', { name: '下一步' })).toBeNull();
+  expect(document.body.textContent).not.toContain('确认');
+  const save = screen.getByRole('button', { name: '保存' }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
   fireEvent.change(keyInput(), { target: { value: 'owned-fake-wizard-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+  expect(save.disabled).toBe(false);
+  fireEvent.click(save);
   // The DOM value is gone before Main answers.
   expect(keyInput().value).toBe('');
-  await screen.findByRole('heading', { name: 'DeepSeek 已连接' });
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
   const provider = database.listProviderSummaries()[0];
   expect(provider).toMatchObject({ name: 'DeepSeek', kind: 'openai-compatible', isDefault: true, defaultModelId: 'deepseek-flash' });
+  expect((await api.getProviderKeyState({ providerId: provider.id })).state).toBe('session');
   expect(database.getProviderConfiguration(provider.id)?.baseUrl).toBe('https://api.deepseek.com/');
-  expect(registry.isTargetConfirmed(provider.id)).toBe(true);
-  // The check does not pretend: the model list cannot be read in this test environment, and it says so.
-  expect(screen.getByText('Key 没能核对')).toBeTruthy();
-  expect(screen.getByText('DeepSeek Flash 可以用于讨论')).toBeTruthy();
+  expect(usable(registry, provider.id, 'deepseek-flash')).toBe(true);
   expect(onConnected).toHaveBeenCalledWith(expect.objectContaining({ firstReal: true, provider: expect.objectContaining({ id: provider.id }) }));
-  await screen.findByText(/已为你建好房间「我的第一场讨论」/u);
+  expect(onStart).toHaveBeenCalled();
   expect(document.body.textContent).not.toContain('owned-fake-wizard-key');
-  // Only the model list was asked for; nothing was generated.
-  expect(network.mock.calls.every(call => String(call[0]).endsWith('/models'))).toBe(true);
+  // Saving sends nothing: the network is used only when the host asks for 测试连接.
+  expect(network).not.toHaveBeenCalled();
 });
 
-it('D134: a second official service works for discussions right after the Key is saved', async () => {
+it('D134 a second service works right after its Key is saved, and does not take the default', async () => {
   const { database, api } = fixture();
-  const { onConnected } = open(api, { providers: [{ id: 'x', name: 'DeepSeek', kind: 'openai-compatible', enabled: true, isDefault: true, defaultModelId: 'deepseek-flash', customModels: [], configurationValid: true, hasStoredKey: true }] });
-  fireEvent.click(screen.getByRole('button', { name: /^OpenAI/u }));
-  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-  expect(screen.getByRole('note').textContent).toBe('Key 只会发往 https://api.openai.com/v1');
-  fireEvent.change(keyInput(), { target: { value: 'owned-fake-openai-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
-  await screen.findByRole('heading', { name: 'OpenAI 已连接' });
-  expect(screen.getByText('GPT-6 Astra 可以用于讨论')).toBeTruthy();
-  // A second real service is not the first: no starter room, and it does not take the default.
+  const { onConnected, onStart, onClose } = open(api, { providers: [{ id: 'x', name: 'DeepSeek', kind: 'openai-compatible', enabled: true, isDefault: true, defaultModelId: 'deepseek-flash', customModels: [], configurationValid: true, hasStoredKey: true }] });
+  pick(/^Kimi/u);
+  expect(screen.getByRole('note').textContent).toBe('Key 只会发往 https://api.moonshot.cn/v1');
+  fireEvent.change(keyInput(), { target: { value: 'owned-fake-kimi-key' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
   expect(onConnected).toHaveBeenCalledWith(expect.objectContaining({ firstReal: false }));
-  expect(database.listProviderSummaries().find(item => item.kind === 'openai')?.isDefault).toBe(false);
-  expect(screen.getByRole('button', { name: '试发一条' })).toBeTruthy();
+  expect(onStart).not.toHaveBeenCalled();
+  expect(database.listProviderSummaries().find(item => item.name === 'Kimi')).toMatchObject({ isDefault: false, defaultModelId: 'kimi-k3.1-pro' });
 });
 
-it('a user-typed address is shown as the Key target and must be a safe https (or local http) address', async () => {
+it('D142 a custom service takes a name, an interface type, a safe address, a Key and any model name', async () => {
   const { database, registry, api } = fixture();
-  open(api);
-  fireEvent.click(screen.getByRole('button', { name: /^其他兼容服务/u }));
-  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-  fireEvent.change(screen.getByLabelText('服务名称'), { target: { value: 'Kimi' } });
-  for (const bad of ['http://kimi.example/v1', 'https://user:secret@kimi.example/v1', 'https://kimi.example/v1?x=1']) {
-    fireEvent.change(screen.getByLabelText('地址'), { target: { value: bad } });
-    expect(screen.getByRole('note').textContent).toBe('先填写上面的地址，这里会写明 Key 会发往哪里。');
+  const { onClose } = open(api);
+  pick(/^自定义服务/u);
+  fireEvent.change(screen.getByLabelText('服务名称'), { target: { value: '公司模型' } });
+  for (const bad of ['http://models.example/v1', 'https://user:secret@models.example/v1', 'https://models.example/v1?x=1']) {
+    fireEvent.change(screen.getByLabelText(/^地址/u), { target: { value: bad } });
+    expect(screen.queryByRole('note')).toBeNull();
     expect(document.body.textContent).toContain('地址必须以 https:// 开头');
   }
-  fireEvent.change(screen.getByLabelText('地址'), { target: { value: 'https://kimi.example/v1' } });
-  expect(screen.getByRole('note').textContent).toBe('Key 只会发往 https://kimi.example/v1');
+  fireEvent.change(screen.getByLabelText(/^地址/u), { target: { value: 'https://models.example/v1' } });
+  expect(screen.getByRole('note').textContent).toBe('Key 只会发往 https://models.example/v1');
   // D096: a Key pasted into the model field is refused before anything is saved.
   fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'sk-abcdefghijklmnopqrstuvwxyz0123456789' } });
-  fireEvent.change(keyInput(), { target: { value: 'owned-fake-kimi-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+  fireEvent.change(keyInput(), { target: { value: 'owned-fake-custom-key' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
   expect((await screen.findAllByRole('alert')).some(item => item.textContent?.includes('这看起来是 API Key'))).toBe(true);
   expect(database.listProviderSummaries()).toHaveLength(0);
-  fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'moonshot-v1-8k' } });
-  fireEvent.change(keyInput(), { target: { value: 'owned-fake-kimi-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
-  await screen.findByRole('heading', { name: 'Kimi 已连接' });
+  fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'any-model-v9' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
   const provider = database.listProviderSummaries()[0];
-  expect(database.getProviderConfiguration(provider.id)).toMatchObject({ name: 'Kimi', baseUrl: 'https://kimi.example/v1', defaultModelId: 'moonshot-v1-8k' });
-  expect(registry.confirmedTarget(provider.id)).toBe('https://kimi.example/v1');
+  expect(database.getProviderConfiguration(provider.id)).toMatchObject({ name: '公司模型', kind: 'openai-compatible', baseUrl: 'https://models.example/v1', defaultModelId: 'any-model-v9' });
+  expect(usable(registry, provider.id, 'any-model-v9')).toBe(true);
+});
+
+it.each([['anthropic', 'https://api.anthropic.com'], ['gemini', 'https://generativelanguage.googleapis.com']] as const)('D142 the %s interface type shows its default address and can leave it empty', async (kind, target) => {
+  const { database, api } = fixture();
+  const { onClose } = open(api);
+  pick(/^自定义服务/u);
+  fireEvent.change(screen.getByLabelText('服务名称'), { target: { value: '我的服务' } });
+  fireEvent.change(screen.getByLabelText('接口类型'), { target: { value: kind } });
+  expect(screen.getByRole('note').textContent).toContain(target);
+  fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'typed-model' } });
+  fireEvent.change(keyInput(), { target: { value: 'owned-fake-native-key' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
+  expect(database.listProviderSummaries()[0]).toMatchObject({ kind, defaultModelId: 'typed-model' });
+});
+
+it('测试连接 saves what is filled in and says what it found; it stays beside its cost note and nothing waits for it', async () => {
+  const { database, api } = fixture();
+  const test = vi.spyOn(api, 'testConnection').mockResolvedValue({ providerId: 'p', result: { requestId: 'r', level: 'authentication', ok: true } });
+  const { onClose } = open(api);
+  pick(/^DeepSeek/u);
+  expect(screen.getByText('可能产生极少的费用')).toBeTruthy();
+  const button = screen.getByRole('button', { name: '测试连接' }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  fireEvent.change(keyInput(), { target: { value: 'owned-fake-test-key' } });
+  fireEvent.click(button);
+  await screen.findByText('Key 有效，连接正常');
+  expect(test).toHaveBeenCalledWith({ providerId: database.listProviderSummaries()[0].id, level: 'authentication' });
+  expect(onClose).not.toHaveBeenCalled();
+  expect(keyInput().value).toBe('');
+  // The Key is saved now, so 保存 finishes without it, and does not create a second service.
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
+  expect(database.listProviderSummaries()).toHaveLength(1);
 });
 
 it('adds the demo service without a Key, address or network, and never as the default service', async () => {
   const { database, api, network } = fixture();
-  const { onConnected } = open(api);
-  fireEvent.click(screen.getByRole('button', { name: /^演示（Mock）/u }));
-  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  const { onConnected, onClose } = open(api);
+  pick(/^演示（Mock）/u);
   expect(screen.queryByLabelText('API Key')).toBeNull();
+  expect(screen.queryByRole('button', { name: '测试连接' })).toBeNull();
   expect(screen.getByText(/不代表真实模型的水平/u)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '添加演示服务' }));
-  await screen.findByText('演示服务已添加');
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
   expect(database.listProviderSummaries()[0]).toMatchObject({ kind: 'mock', isDefault: false, defaultModelId: 'mock' });
   expect(onConnected).toHaveBeenCalledWith(expect.objectContaining({ firstReal: false }));
   expect(network).not.toHaveBeenCalled();
 });
 
-it('replacing a Key goes straight to the address and Key; closing without saving changes nothing', async () => {
-  const { database, keys, registry, api } = fixture();
+it('replacing a Key goes straight to the Key; closing without saving changes nothing', async () => {
+  const { database, keys, api } = fixture();
   const provider = await api.createProvider({ name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
-  await keys.storeKey(provider.id, 'owned-old-key'); registry.confirmTarget({ providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
+  const reference = await keys.storeKey(provider.id, 'owned-old-key');
   const { onClose } = open(api, { rekey: database.getProviderConfiguration(provider.id)! });
   expect(screen.getByRole('heading', { name: '更换 DeepSeek 的 API Key' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '上一步' })).toBeNull();
   fireEvent.change(keyInput(), { target: { value: 'owned-new-key' } });
-  // Closing without saving clears the field and changes nothing.
   fireEvent.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: '关闭' })[0]);
   expect(onClose).toHaveBeenCalled();
-  expect(registry.isTargetConfirmed(provider.id)).toBe(true);
+  expect(keyInput().value).toBe('');
+  expect(await keys.resolveKey(provider.id, reference)).toBe('owned-old-key');
 });
 
 it('never shows a backend error text that could carry the Key; the message is fixed', async () => {
   const { api } = fixture();
   vi.spyOn(api, 'setKey').mockRejectedValue(Object.assign(new Error('echo owned-fake-leak-key'), { code: 'authentication_failed', detail: 'owned-fake-leak-key' }));
   open(api);
-  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  pick(/^DeepSeek/u);
   fireEvent.change(keyInput(), { target: { value: 'owned-fake-leak-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存并连接' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('操作失败，请重试。'));
   expect(document.body.textContent).not.toContain('owned-fake-leak-key');
 });

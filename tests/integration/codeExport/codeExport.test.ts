@@ -35,7 +35,7 @@ const tree = (dir: string): string[] => readdirSync(dir).sort().flatMap(name => 
   return info.isDirectory() && !info.isSymbolicLink() ? [entry, ...tree(path)] : [entry];
 });
 
-/** A finished discussion with one adopted code candidate, a temp folder to write into and sentinels outside it. */
+/** A finished discussion with one code candidate, a temp folder to write into and sentinels outside it. */
 async function setup(files: File[], options: { fs?: Partial<ExportFs>; hooks?: ExportHooks; filename?: string } = {}) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'r15-export-')));
   owned.push(base);
@@ -59,7 +59,6 @@ async function setup(files: File[], options: { fs?: Partial<ExportFs>; hooks?: E
     { protectedDirs: [appData], fs: { ...options.fs, ...extra.fs }, hooks: { ...options.hooks, ...extra.hooks }, home: base });
   const service = exportService();
   let counter = 0;
-  const adopt = () => artifacts.adopt({ runId, clientRequestId: 'adopt', versionId: generated.versionId });
   const choose = async (folder: string | null = root, versionId = generated.versionId) => service.chooseRoot({ runId, versionId }, async () => folder ?? undefined);
   const previewOf = async (rootId: string, versionId = generated.versionId) => {
     const value = await service.preview({ runId, versionId, rootId });
@@ -73,15 +72,12 @@ async function setup(files: File[], options: { fs?: Partial<ExportFs>; hooks?: E
   };
   const outcome = (result: Awaited<ReturnType<typeof write>>) => Object.fromEntries(result.files.map(file => [file.path, file.reason ? `${file.outcome}:${file.reason}` : file.outcome]));
   const status = (value: CodeExportPreview) => Object.fromEntries(value.files.map(file => [file.path, file.reason ? `${file.status}:${file.reason}` : file.status]));
-  return { f, artifacts, runId, versionId: generated.versionId, base, root, outside, appData, before, sentinels, service, exportService, adopt, choose, previewOf, write, outcome, status };
+  return { f, artifacts, runId, versionId: generated.versionId, base, root, outside, appData, before, sentinels, service, exportService, choose, previewOf, write, outcome, status };
 }
 
 describe('choosing the folder', () => {
-  it('only an adopted code candidate can be written; the folder comes from Main\'s dialog as a reference', async () => {
+  it('a code version that passed validation can be written at once (D139); the folder comes from Main\'s dialog as a reference', async () => {
     const t = await setup([{ path: 'a.ts', content: 'a\n' }]);
-    // A model's candidate is not effective until the host adopts it (D122/D123).
-    await expect(t.choose()).rejects.toMatchObject({ detail: { code: 'invalid_state' } });
-    t.adopt();
     expect(await t.choose(null)).toEqual({ runId: t.runId, versionId: t.versionId });
     const chosen = await t.choose();
     expect(chosen.root).toEqual({ rootId: expect.any(String), displayPath: '~/project', name: 'project' });
@@ -92,7 +88,7 @@ describe('choosing the folder', () => {
   });
 
   it('refuses the disk root, the app\'s data folder and anything that is not a folder', async () => {
-    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); 
     expect((await t.choose('/')).refused).toBe('filesystem_root');
     expect((await t.choose(t.appData)).refused).toBe('app_data');
     mkdirSync(join(t.appData, 'inner'));
@@ -109,7 +105,7 @@ describe('choosing the folder', () => {
   });
 
   it('a folder that contains the app\'s data is allowed, but the data folder inside it is refused file by file', async () => {
-    const t = await setup([{ path: 'app-data/ai-roundtable.db', content: 'overwrite me\n' }, { path: 'APP-DATA/new.txt', content: 'x\n' }, { path: 'ok.txt', content: 'ok\n' }]); t.adopt();
+    const t = await setup([{ path: 'app-data/ai-roundtable.db', content: 'overwrite me\n' }, { path: 'APP-DATA/new.txt', content: 'x\n' }, { path: 'ok.txt', content: 'ok\n' }]); 
     const chosen = await t.choose(t.base);
     const preview = await t.previewOf(chosen.root!.rootId);
     expect(t.status(preview)).toEqual({ 'app-data/ai-roundtable.db': 'invalid:app_data', 'APP-DATA/new.txt': 'invalid:app_data', 'ok.txt': 'create' });
@@ -133,7 +129,7 @@ describe('preview is read-only', () => {
       { path: 'note.txt/inner.ts', content: 'x\n' },
       { path: 'name.', content: 'x\n' },
     ]);
-    t.adopt();
+    
     mkdirSync(join(t.root, 'src'));
     writeFileSync(join(t.root, 'src/fee.ts'), 'export const BASE = 2;\nexport const RATE = 0.15;\n');
     writeFileSync(join(t.root, 'README.md'), '# 项目\n');
@@ -163,7 +159,7 @@ describe('preview is read-only', () => {
   });
 
   it('says when the folder cannot be written, and shows no line diff for a binary or huge file', async () => {
-    const t = await setup([{ path: 'bin.dat', content: 'text now\n' }, { path: 'big.txt', content: 'small\n' }, { path: 'locked.txt', content: 'new\n' }]); t.adopt();
+    const t = await setup([{ path: 'bin.dat', content: 'text now\n' }, { path: 'big.txt', content: 'small\n' }, { path: 'locked.txt', content: 'new\n' }]); 
     writeFileSync(join(t.root, 'bin.dat'), Buffer.from([0, 1, 2, 3]));
     writeFileSync(join(t.root, 'big.txt'), 'x'.repeat(3 * 1024 * 1024));
     writeFileSync(join(t.root, 'locked.txt'), 'read only\n'); chmodSync(join(t.root, 'locked.txt'), 0o444);
@@ -181,7 +177,7 @@ describe('preview is read-only', () => {
 describe('writing only what the host ticked', () => {
   it('writes the selected files, skips the rest, records each outcome and marks the version exported', async () => {
     const t = await setup([{ path: 'src/a.ts', content: 'a\n' }, { path: 'src/b.ts', content: 'b\n' }, { path: 'docs/c.md', content: 'c\n' }, { path: 'same.txt', content: 's\n' }]);
-    t.adopt();
+    
     writeFileSync(join(t.root, 'same.txt'), 's\n');
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -207,7 +203,7 @@ describe('writing only what the host ticked', () => {
   });
 
   it('a write with nothing written still records the attempt but does not count as exported; empty selections are refused', async () => {
-    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); 
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
     await expect(t.service.write({ runId: t.runId, clientRequestId: 'empty', previewId: preview.previewId, files: [] })).rejects.toMatchObject({ detail: { code: 'invalid_input' } });
@@ -222,7 +218,7 @@ describe('writing only what the host ticked', () => {
   });
 
   it('an overwrite needs its own confirmation; with it the old file is replaced in one step and keeps its permissions', async () => {
-    const t = await setup([{ path: 'conf.json', content: '{"rate":0.08}\n' }]); t.adopt();
+    const t = await setup([{ path: 'conf.json', content: '{"rate":0.08}\n' }]); 
     writeFileSync(join(t.root, 'conf.json'), '{"rate":0.15}\n'); chmodSync(join(t.root, 'conf.json'), 0o640);
     const { root } = await t.choose();
     let preview = await t.previewOf(root!.rootId);
@@ -238,7 +234,7 @@ describe('writing only what the host ticked', () => {
   });
 
   it('the same clientRequestId never writes twice', async () => {
-    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); 
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
     const input = { runId: t.runId, clientRequestId: 'once', previewId: preview.previewId, files: [{ path: 'a.ts', overwrite: false }] };
@@ -253,7 +249,7 @@ describe('writing only what the host ticked', () => {
 
 describe('links and races (情景：链接越界、覆盖竞态)', () => {
   it('never writes through a symbolic link, in the path or as the target', async () => {
-    const t = await setup([{ path: 'link/x.ts', content: 'escape\n' }, { path: 'evil.ts', content: 'escape\n' }, { path: 'inner/link2/y.ts', content: 'escape\n' }]); t.adopt();
+    const t = await setup([{ path: 'link/x.ts', content: 'escape\n' }, { path: 'evil.ts', content: 'escape\n' }, { path: 'inner/link2/y.ts', content: 'escape\n' }]); 
     symlinkSync(t.outside, join(t.root, 'link'));
     symlinkSync(join(t.outside, 'secret.txt'), join(t.root, 'evil.ts'));
     mkdirSync(join(t.root, 'inner')); symlinkSync('../../outside', join(t.root, 'inner/link2'));
@@ -266,7 +262,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
   });
 
   it('a folder swapped for a link after the preview is refused', async () => {
-    const t = await setup([{ path: 'src/x.ts', content: 'escape\n' }, { path: 'ok.ts', content: 'ok\n' }]); t.adopt();
+    const t = await setup([{ path: 'src/x.ts', content: 'escape\n' }, { path: 'ok.ts', content: 'ok\n' }]); 
     mkdirSync(join(t.root, 'src'));
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -279,7 +275,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
   });
 
   it('a target replaced by a link, created, or edited after the preview is not overwritten', async () => {
-    const t = await setup([{ path: 'a.ts', content: 'new a\n' }, { path: 'b.ts', content: 'new b\n' }, { path: 'c.ts', content: 'new c\n' }]); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'new a\n' }, { path: 'b.ts', content: 'new b\n' }, { path: 'c.ts', content: 'new c\n' }]); 
     writeFileSync(join(t.root, 'a.ts'), 'old a\n'); writeFileSync(join(t.root, 'c.ts'), 'old c\n');
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -298,7 +294,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
 
   it('a change in the last moment before the swap is still caught; a target created there is never overwritten', async () => {
     let race: (path: string) => void = () => undefined;
-    const t = await setup([{ path: 'a.ts', content: 'new a\n' }, { path: 'b.ts', content: 'new b\n' }], { hooks: { beforeCommit: path => race(path) } }); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'new a\n' }, { path: 'b.ts', content: 'new b\n' }], { hooks: { beforeCommit: path => race(path) } }); 
     writeFileSync(join(t.root, 'a.ts'), 'old a\n');
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -312,7 +308,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
 
   it.each(['beforeTemporary', 'beforeCommit'] as const)('a folder swapped for a link at the last moment (%s) never receives the file', async moment => {
     let race: () => void = () => undefined;
-    const t = await setup([{ path: 'src/x.ts', content: 'escape\n' }], { hooks: { [moment]: () => race() } }); t.adopt();
+    const t = await setup([{ path: 'src/x.ts', content: 'escape\n' }], { hooks: { [moment]: () => race() } }); 
     mkdirSync(join(t.root, 'src'));
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -322,7 +318,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
   });
 
   it('a new version of the candidate, or a replaced folder, makes the whole preview stale', async () => {
-    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }]); 
     const { root } = await t.choose();
     let preview = await t.previewOf(root!.rootId);
     // The host writes a new version after the preview: the old preview may not write the old content.
@@ -339,7 +335,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
   });
 
   it('a file that could not be ticked is reported with its own reason, not as unselected', async () => {
-    const t = await setup([{ path: 'CON', content: 'x\n' }, { path: 'link/x.ts', content: 'x\n' }, { path: 'ok.ts', content: 'ok\n' }]); t.adopt();
+    const t = await setup([{ path: 'CON', content: 'x\n' }, { path: 'link/x.ts', content: 'x\n' }, { path: 'ok.ts', content: 'ok\n' }]); 
     symlinkSync(t.outside, join(t.root, 'link'));
     const { root } = await t.choose();
     const result = await t.write(await t.previewOf(root!.rootId), [{ path: 'ok.ts', overwrite: false }]);
@@ -347,7 +343,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
   });
 
   it('a name that differs only by case from what is on disk is a conflict, not a silent merge', async () => {
-    const t = await setup([{ path: 'src/a.ts', content: 'a\n' }, { path: 'Readme.md', content: 'r\n' }]); t.adopt();
+    const t = await setup([{ path: 'src/a.ts', content: 'a\n' }, { path: 'Readme.md', content: 'r\n' }]); 
     mkdirSync(join(t.root, 'Src')); writeFileSync(join(t.root, 'README.md'), 'existing\n');
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -358,7 +354,7 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
 
 describe('write failures (情景：写入失败)', () => {
   it('a folder without permission fails that file only; the others are written and the result says so', async () => {
-    const t = await setup([{ path: 'locked/a.ts', content: 'a\n' }, { path: 'free/b.ts', content: 'b\n' }]); t.adopt();
+    const t = await setup([{ path: 'locked/a.ts', content: 'a\n' }, { path: 'free/b.ts', content: 'b\n' }]); 
     mkdirSync(join(t.root, 'locked'));
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -382,7 +378,7 @@ describe('write failures (情景：写入失败)', () => {
         }
         return handle;
       },
-    } }); t.adopt();
+    } }); 
     writeFileSync(join(t.root, 'one.ts'), 'one v1\n'); writeFileSync(join(t.root, 'two.ts'), 'two v1\n');
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -395,7 +391,7 @@ describe('write failures (情景：写入失败)', () => {
   });
 
   it('a file system without hard links still creates new files exclusively', async () => {
-    const t = await setup([{ path: 'a.ts', content: 'a\n' }], { fs: { link: async () => { throw Object.assign(new Error('Not supported'), { code: 'ENOTSUP' }); } } }); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }], { fs: { link: async () => { throw Object.assign(new Error('Not supported'), { code: 'ENOTSUP' }); } } }); 
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
     expect(t.outcome(await t.write(preview, [{ path: 'a.ts', overwrite: false }]))).toEqual({ 'a.ts': 'written' });
@@ -415,7 +411,7 @@ describe('a direct write on a file system without hard links', () => {
         return new Proxy(handle, { get: (target, key) => key === 'writeFile' ? async () => { throw Object.assign(new Error('No space left'), { code: 'ENOSPC' }); }
           : typeof target[key as keyof typeof target] === 'function' ? (target[key as keyof typeof target] as (...args: unknown[]) => unknown).bind(target) : target[key as keyof typeof target] });
       },
-    } }); t.adopt();
+    } }); 
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
     expect(t.outcome(await t.write(preview, [{ path: 'a.ts', overwrite: false }]))).toEqual({ 'a.ts': 'failed:no_space' });
@@ -450,7 +446,7 @@ describe('existing files are never read whole unless they are small (D128)', () 
 
   it('a file over the diff limit is hashed in small pieces: its status and diff are right, in preview and in the check before writing', async () => {
     const { record, fs } = watched();
-    const t = await setup([{ path: 'big.log', content: 'small now\n' }], { fs }); t.adopt();
+    const t = await setup([{ path: 'big.log', content: 'small now\n' }], { fs }); 
     const size = 5 * 1024 * 1024;
     writeFileSync(join(t.root, 'big.log'), big(size));
     const { root } = await t.choose();
@@ -466,7 +462,7 @@ describe('existing files are never read whole unless they are small (D128)', () 
   });
 
   it('the limit itself: up to it there is a line diff, one byte over there is none', async () => {
-    const t = await setup([{ path: 'at.txt', content: 'new\n' }, { path: 'over.txt', content: 'new\n' }]); t.adopt();
+    const t = await setup([{ path: 'at.txt', content: 'new\n' }, { path: 'over.txt', content: 'new\n' }]); 
     writeFileSync(join(t.root, 'at.txt'), 'y'.repeat(MAX_DIFF_INPUT_BYTES));
     writeFileSync(join(t.root, 'over.txt'), 'y'.repeat(MAX_DIFF_INPUT_BYTES + 1));
     const { root } = await t.choose();
@@ -475,7 +471,7 @@ describe('existing files are never read whole unless they are small (D128)', () 
   });
 
   it.each([['big', 3 * 1024 * 1024], ['small', 1024]] as const)('a %s file edited after the preview is found by its content, even with the same size and time', async (_label, size) => {
-    const t = await setup([{ path: 'data.txt', content: 'replacement\n' }]); t.adopt();
+    const t = await setup([{ path: 'data.txt', content: 'replacement\n' }]); 
     const path = join(t.root, 'data.txt');
     const original = big(size);
     writeFileSync(path, original); utimesSync(path, 1_700_000_000, 1_700_000_000);
@@ -498,7 +494,7 @@ describe('existing files are never read whole unless they are small (D128)', () 
         if (!appended) { appended = true; appendFileSync(path, 'x'.repeat(1024 * 1024)); }
         return (target.read as (...values: unknown[]) => unknown)(...args);
       },
-    }) } }); t.adopt();
+    }) } }); 
     writeFileSync(join(t.root, 'grow.log'), 'old\n');
     const { root } = await t.choose();
     expect(t.status(await t.previewOf(root!.rootId))).toEqual({ 'grow.log': 'conflict:target_changed' });
@@ -510,7 +506,7 @@ describe('existing files are never read whole unless they are small (D128)', () 
     const t = await setup([{ path: 'pipe.txt', content: 'new\n' }], { fs: {
       // lstat still sees the regular file it saw before the swap.
       lstat: path => path.endsWith('pipe.txt') ? fsp.lstat(decoy.path, { bigint: true }) : fsp.lstat(path, { bigint: true }),
-    } }); t.adopt();
+    } }); 
     decoy.path = join(t.base, 'decoy.txt'); writeFileSync(decoy.path, 'old\n');
     const pipe = join(t.root, 'pipe.txt');
     execFileSync('mkfifo', [pipe]);
@@ -526,7 +522,7 @@ describe('existing files are never read whole unless they are small (D128)', () 
 
 describe('folders created for a write that did not happen', () => {
   it('removes the folders this write created when they stayed empty, deepest first', async () => {
-    const t = await setup([{ path: 'a/b/c/x.ts', content: 'x\n' }], { fs: noSpace(path => path.endsWith('.roundtable-tmp')) }); t.adopt();
+    const t = await setup([{ path: 'a/b/c/x.ts', content: 'x\n' }], { fs: noSpace(path => path.endsWith('.roundtable-tmp')) }); 
     const { root } = await t.choose();
     expect(t.outcome(await t.write(await t.previewOf(root!.rootId), [{ path: 'a/b/c/x.ts', overwrite: false }]))).toEqual({ 'a/b/c/x.ts': 'failed:no_space' });
     expect(readdirSync(t.root)).toEqual([]);
@@ -535,7 +531,7 @@ describe('folders created for a write that did not happen', () => {
   it('keeps a created folder another written file now lives in, and every folder that was already there', async () => {
     let opens = 0;
     const t = await setup([{ path: 'new/x.ts', content: 'x\n' }, { path: 'new/y.ts', content: 'y\n' }, { path: 'old/made/z.ts', content: 'z\n' }, { path: 'old/kept/w.ts', content: 'w\n' }],
-      { fs: noSpace(path => path.endsWith('.roundtable-tmp') && (++opens === 1 || opens === 3 || opens === 4)) }); t.adopt();
+      { fs: noSpace(path => path.endsWith('.roundtable-tmp') && (++opens === 1 || opens === 3 || opens === 4)) }); 
     mkdirSync(join(t.root, 'old/kept'), { recursive: true });
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
@@ -548,7 +544,7 @@ describe('folders created for a write that did not happen', () => {
 
   it('leaves a folder someone else put a file in, or replaced with their own', async () => {
     let race: () => void = () => undefined;
-    const t = await setup([{ path: 'mine/x.ts', content: 'x\n' }, { path: 'theirs/y.ts', content: 'y\n' }], { hooks: { beforeCommit: () => race() } }); t.adopt();
+    const t = await setup([{ path: 'mine/x.ts', content: 'x\n' }, { path: 'theirs/y.ts', content: 'y\n' }], { hooks: { beforeCommit: () => race() } }); 
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
     let step = 0;
@@ -567,7 +563,7 @@ describe('generated code is never run (情景：代码不执行)', () => {
   it('a candidate full of commands lands as plain text and nothing runs', async () => {
     const script = '#!/bin/sh\ntouch "$(dirname "$0")/PWNED"\nrm -rf ~\n';
     const pkg = JSON.stringify({ name: 'x', scripts: { postinstall: 'touch PWNED' } });
-    const t = await setup([{ path: 'install.sh', content: script }, { path: 'package.json', content: pkg }, { path: 'Makefile', content: 'all:\n\ttouch PWNED\n' }]); t.adopt();
+    const t = await setup([{ path: 'install.sh', content: script }, { path: 'package.json', content: pkg }, { path: 'Makefile', content: 'all:\n\ttouch PWNED\n' }]); 
     const { root } = await t.choose();
     const preview = await t.previewOf(root!.rootId);
     await t.write(preview, preview.files.map(file => ({ path: file.path, overwrite: false })));
@@ -589,7 +585,7 @@ describe('records survive a restart and are protected (migration 13)', () => {
   it('keeps the write after reopening the database; validation covers the new tables', async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'r15-db-'))); owned.push(dir);
     const filename = join(dir, 'roundtable.db');
-    const t = await setup([{ path: 'a.ts', content: 'a\n' }], { filename }); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }], { filename }); 
     const { root } = await t.choose();
     const result = await t.write(await t.previewOf(root!.rootId), [{ path: 'a.ts', overwrite: false }]);
     await closeFixtures();
@@ -610,7 +606,7 @@ describe('records survive a restart and are protected (migration 13)', () => {
   it('validation refuses tampered records', async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'r15-db-'))); owned.push(dir);
     const filename = join(dir, 'roundtable.db');
-    const t = await setup([{ path: 'a.ts', content: 'a\n' }], { filename }); t.adopt();
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }], { filename }); 
     const { root } = await t.choose();
     await t.write(await t.previewOf(root!.rootId), [{ path: 'a.ts', overwrite: false }]);
     await closeFixtures();

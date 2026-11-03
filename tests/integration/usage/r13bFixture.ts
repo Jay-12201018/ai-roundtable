@@ -47,7 +47,6 @@ export async function deepSeekFixture(options: { modes?: Mode[]; cacheHit?: numb
     return sse([text, stop, { choices: [], usage: { prompt_tokens: 300, completion_tokens: 6, ...split } }]);
   });
   const registry = new ProviderRegistry(db, keys, { transportFactory: guard => async (url, init) => { guard(); return transport(url, init); } });
-  registry.confirmTarget({ providerId: 'deepseek', baseUrl: 'https://api.deepseek.com', confirmed: true });
   const people = options.members ?? [{ name: '起草者', role: '起草' }, { name: '审查者', role: '审查' }, { name: '综合者', role: '综合' }];
   people.forEach((member, index) => db.createAgent({ id: `a${index}`, roomId: 'room', displayName: member.name, roleTemplateId: member.role, systemPrompt: '', providerId: 'deepseek', modelId: 'deepseek-flash', displayOrder: index }));
   const budgetOf = (member: { providerId: string | null; modelId: string | null }) => member.providerId ? registry.budget(member.providerId, member.modelId!) : undefined;

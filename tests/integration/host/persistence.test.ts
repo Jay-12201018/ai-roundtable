@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,9 +14,9 @@ import { migration4 } from '../../../src/main/database/migrations/v4';
 import { migration5 } from '../../../src/main/database/migrations/v5';
 import { validateDatabase } from '../../../src/main/database/recovery/validateDatabase';
 import { members, roomId, ScriptedProvider } from './fixtures';
+import { originalSchema } from '../../fixtures/originalSchema';
 
-const baseline = execFileSync('git', ['show', '135bf82c6462ade6dd5300717d6f0102ce4a660c:src/main/database/Database.ts'], { encoding: 'utf8' });
-const migration1 = baseline.match(/const migrations = \[\s*`([\s\S]*?)`/)![1];
+const migration1 = originalSchema;
 const directories: string[] = [];
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {

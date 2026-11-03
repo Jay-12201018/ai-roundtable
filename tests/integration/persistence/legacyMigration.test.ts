@@ -1,6 +1,5 @@
 // @vitest-environment node
 import DatabaseDriver from 'better-sqlite3';
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,15 +8,9 @@ import { describe, expect, it } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
 import { createVerifiedBackup } from '../../../src/main/database/backup/createVerifiedBackup';
 import { prepareRestore } from '../../../src/main/database/recovery/prepareRestore';
+import { originalSchema } from '../../fixtures/originalSchema';
 
-function baselineMigrationSql(): string {
-  const source = execFileSync('git', ['show', '135bf82c6462ade6dd5300717d6f0102ce4a660c:src/main/database/Database.ts'], {
-    cwd: fileURLToPath(new URL('../../../', import.meta.url)), encoding: 'utf8',
-  });
-  const migration = source.match(/const migrations = \[\s*`([\s\S]*?)`\s*,?\s*\];/);
-  if (!migration?.[1]) throw new Error('The original Database migration could not be extracted');
-  return migration[1];
-}
+const baselineMigrationSql = () => originalSchema;
 
 function seedLegacyDatabase(database: DatabaseDriver.Database): void {
   const timestamp = '2026-10-13T01:00:00.000Z';

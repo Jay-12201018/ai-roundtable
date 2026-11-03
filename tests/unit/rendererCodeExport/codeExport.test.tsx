@@ -17,7 +17,7 @@ const code: CodeContent = { title: '费用计算', summary: '算费用。', note
   { path: 'README.md', language: null, description: null, content: '# 说明\n' },
   { path: 'CON', language: null, description: null, content: 'x\n' },
 ] };
-const version = (overrides: Partial<ArtifactVersion> = {}): ArtifactVersion => ({ versionId: 'v1', artifactId: 'art', number: 1, origin: 'generate', status: 'valid', adoptedAt: time,
+const version = (overrides: Partial<ArtifactVersion> = {}): ArtifactVersion => ({ versionId: 'v1', artifactId: 'art', number: 1, origin: 'generate', status: 'valid',
   agentId: 'a', issues: [], outputChars: 10, affectedNumbers: [], createdAt: time, updatedAt: time, ...overrides });
 const summary = (versions: ArtifactVersion[]): ArtifactSummary => ({ artifactId: 'art', runId: 'run', roomId: 'room', kind: 'code', createdAt: time, versions });
 const detail = (v: ArtifactVersion): ArtifactVersionDetail => ({ runId: 'run', artifactId: 'art', kind: 'code', version: v, rawOutput: JSON.stringify(code), content: { kind: 'code', data: code }, sources: [] });
@@ -74,7 +74,7 @@ describe('the reader’s 写入文件夹… (R15)', () => {
 });
 
 describe('the write dialog', () => {
-  it('chooses a folder in Main, previews read-only, ticks nothing by default, and writes exactly the ticked files', async () => {
+  it('chooses a folder in Main, previews read-only, ticks new files by default (D141) but never an overwrite, and writes exactly the ticked files', async () => {
     const api = exportApi();
     open(api);
     expect(within(dialog()).getByText('不会运行其中任何代码或命令，文件只作为文本写入。')).toBeTruthy();
@@ -85,10 +85,10 @@ describe('the write dialog', () => {
     expect(api.preview).toHaveBeenCalledWith({ runId: 'run', versionId: 'v1', rootId: 'root-1' });
     expect(screen.getByText('~/projects/pilot')).toBeTruthy();
     expect(screen.getByText('新建 1 · 覆盖 1 · 内容相同 1 · 不能写入 1。没有勾选的文件不会写入，现在还什么都没写。')).toBeTruthy();
-    // Nothing is ticked; the write button says why it is unavailable.
+    // The new file starts ticked, the overwrite does not.
     const writeButton = () => screen.getByRole('button', { name: /^写入( \d+ 个)?文件/u }) as HTMLButtonElement;
-    expect(writeButton().disabled).toBe(true);
-    expect(screen.getByText('先勾选要写入的文件')).toBeTruthy();
+    expect((screen.getByRole('checkbox', { name: '新建 src/new.ts' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: '覆盖 src/fee.ts' }) as HTMLInputElement).checked).toBe(false);
     // Only create and overwrite rows can be ticked; the overwrite is its own, red tick, and its diff is open.
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
     const overwrite = screen.getByRole('checkbox', { name: '覆盖 src/fee.ts' });
@@ -97,9 +97,13 @@ describe('the write dialog', () => {
     expect(screen.getByRole('checkbox', { name: '新建 src/new.ts' }).closest('label')!.textContent).toBe('新建');
     expect(screen.getByRole('group', { name: '与现有文件的差异' }).textContent).toContain('export const RATE = 0.15;');
     expect(screen.getByText(/系统保留的名字/u)).toBeTruthy();
-    fireEvent.click(screen.getByRole('checkbox', { name: '新建 src/new.ts' }));
     expect(writeButton().textContent).toBe('写入 1 个文件');
     expect(writeButton().className).toContain('is-primary');
+    // Unticking everything: the write button says why it is unavailable.
+    fireEvent.click(screen.getByRole('checkbox', { name: '新建 src/new.ts' }));
+    expect(writeButton().disabled).toBe(true);
+    expect(screen.getByText('先勾选要写入的文件')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: '新建 src/new.ts' }));
     fireEvent.click(overwrite);
     expect(writeButton().textContent).toBe('写入 2 个文件（含覆盖 1 个）');
     expect(writeButton().className).toContain('is-danger');
@@ -119,6 +123,9 @@ describe('the write dialog', () => {
     const api = exportApi({ preview: vi.fn(async () => ({ ...preview, files: [...preview.files, { path: 'b.ts', status: 'create' as const, bytes: 1, lines: 1, createsDirectories: ['lib'] }] })) });
     open(api);
     fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }));
+    // Untick both, as a host who changed their mind would; the button brings back the new files and nothing else.
+    fireEvent.click(await screen.findByRole('checkbox', { name: '新建 b.ts' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '新建 src/new.ts' }));
     fireEvent.click(await screen.findByRole('button', { name: '勾选全部新建文件（2 个）' }));
     expect((screen.getByRole('checkbox', { name: '新建 b.ts' }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('checkbox', { name: '新建 src/new.ts' }) as HTMLInputElement).checked).toBe(true);
@@ -150,7 +157,6 @@ describe('the write dialog', () => {
     open(api);
     fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: '覆盖 src/fee.ts' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '新建 src/new.ts' }));
     fireEvent.click(screen.getByRole('button', { name: '写入 2 个文件（含覆盖 1 个）' }));
     await screen.findByText('写入了 1 个文件，1 个没有写入');
     expect(screen.getByText(/目标在检查之后有变化，没有覆盖/u)).toBeTruthy();
@@ -160,7 +166,8 @@ describe('the write dialog', () => {
     expect(screen.getByText(/为了不覆盖你没看过的内容/u)).toBeTruthy();
     fireEvent.click(within(screen.getByRole('note')).getByRole('button', { name: '重新检查' }));
     await waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2));
-    await screen.findByText('先勾选要写入的文件');
+    // After the second look, an overwrite has to be ticked again.
+    expect((await screen.findByRole('checkbox', { name: '覆盖 src/fee.ts' }) as HTMLInputElement).checked).toBe(false);
   });
 
   it('remembers the folder for this window and checks it again at once; a lost folder sends the host back to choosing', async () => {
@@ -196,7 +203,7 @@ describe('the write dialog', () => {
     expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole('button', { name: '关闭' }) as HTMLButtonElement).disabled).toBe(false);
     finishCheck(preview);
-    fireEvent.click(await screen.findByRole('checkbox', { name: '新建 src/new.ts' }));
+    await screen.findByRole('checkbox', { name: '新建 src/new.ts' });
     fireEvent.click(screen.getByRole('button', { name: '写入 1 个文件' }));
     await screen.findByText('正在写入 1 个文件…');
     expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(true);

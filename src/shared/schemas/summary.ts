@@ -77,6 +77,6 @@ export type SummaryCommandResult = z.infer<typeof summaryCommandResultSchema>;
 export type ContextSummary = z.infer<typeof contextSummarySchema>;
 export type ContextPressure = z.infer<typeof contextPressureSchema>;
 
-/** The label the model sees above a confirmed summary; numbering matches the timeline (D107). */
+/** The label the model sees above a summary in use; numbering matches the timeline (D107). It says nothing of the host: D140 uses a summary without asking. */
 export const summaryLabel = (firstNumber: number, lastNumber: number) =>
-  `【讨论摘要 · 覆盖第 ${firstNumber}–${lastNumber} 条，由主持人确认】`;
+  `【讨论摘要 · 覆盖第 ${firstNumber}–${lastNumber} 条】`;

@@ -40,6 +40,6 @@ export function apiFor(service:RunService):RunSessionApiContract {
 export function appApiFor(service: RunService, database: Database): RoundtableApiContract {
   const usage = new UsageService(database);
   return { ...apiFor(service), host: new HostService(database, service), rooms: new RoomService(database), settings: new ProviderSettingsService(database, new KeyService(database, createMemoryKeyBackend())),
-    summary: { preview: async input => service.previewSummary(input), generate: async input => service.generateSummary(input), confirm: async input => service.confirmSummary(input) },
+    summary: { preview: async input => service.previewSummary(input), generate: async input => service.generateSummary(input), confirm: async input => service.confirmSummary(input), revoke: async input => service.revokeSummary(input) },
     usage: { getReport: async () => usage.getReport(), exportCsv: async () => ({ saved: false, rows: usage.csv().rows }) } };
 }

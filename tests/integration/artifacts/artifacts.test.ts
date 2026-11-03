@@ -36,7 +36,7 @@ async function generate(f: ReturnType<typeof setup>, runId: string, kind: Artifa
 }
 
 describe('structured artifacts (D118–D123)', () => {
-  it('generates all four kinds from the numbered discussion; a model version is a candidate until the host adopts it', async () => {
+  it('generates all four kinds from the numbered discussion; a valid model version can be used at once (D139)', async () => {
     const f = setup();
     const runId = await finished(f);
     for (const kind of artifactKindValues) {
@@ -57,13 +57,9 @@ describe('structured artifacts (D118–D123)', () => {
       expect(transcript).toContain('【请输出 JSON】\n请根据以上第 1–3 条发言整理');
       const detail = version();
       expect(artifactVersionDetailSchema.safeParse(detail).success).toBe(true);
-      expect(detail).toMatchObject({ kind, version: { number: 1, origin: 'generate', status: 'candidate', agentId: 'a', firstNumber: 1, lastNumber: 3, affectedNumbers: [], issues: [] },
+      expect(detail).toMatchObject({ kind, version: { number: 1, origin: 'generate', status: 'valid', agentId: 'a', firstNumber: 1, lastNumber: 3, affectedNumbers: [], issues: [] },
         content: { kind, data: validDocuments[kind] }, rawOutput: text(validDocuments[kind]) });
       expect(detail.sources.map(source => source.number)).toEqual([1, 2, 3]);
-      await expect(f.artifacts.export({ runId, clientRequestId: `early-${kind}`, versionId: result.versionId, format: 'markdown', target: 'clipboard' })).rejects.toMatchObject({ code: 'invalid_state' });
-      f.artifacts.adopt({ runId, clientRequestId: `a-${kind}`, versionId: result.versionId });
-      expect(f.artifacts.adopt({ runId, clientRequestId: `a-${kind}`, versionId: result.versionId })).toMatchObject({ duplicate: true });
-      expect(version().version).toMatchObject({ status: 'valid', adoptedAt: expect.any(String) });
     }
     const list = f.artifacts.list({ runId });
     expect(artifactListSchema.safeParse(list).success).toBe(true);
@@ -99,7 +95,6 @@ describe('structured artifacts (D118–D123)', () => {
     // No automatic retry: nothing else is sent while the host looks at it.
     await new Promise(resolve => setTimeout(resolve, 30));
     expect(f.provider.inputs.length).toBe(before + 1);
-    expect(() => f.artifacts.adopt({ runId, clientRequestId: 'adopt-bad', versionId: result.versionId })).toThrowError(expect.objectContaining({ code: 'invalid_state' }));
     // The host's edit is checked by the same parser; an invalid one is refused and records nothing.
     expect(() => f.artifacts.edit({ runId, clientRequestId: 'e0', versionId: result.versionId, text: raw })).toThrowError(expect.objectContaining({ detail: expect.objectContaining({ code: 'invalid_input', field: 'text' }) }));
     const fixed = { ...broken, items: [{ id: 'A1', task: '调研', owner: null, due: '周五', status: 'todo', sources: [1] }] };
@@ -111,7 +106,7 @@ describe('structured artifacts (D118–D123)', () => {
     expect(version().rawOutput).toBe(raw);
     // Regenerating is a host decision: a new version, the earlier ones kept.
     await generate(f, runId, 'actions', 'g2', text(validDocuments.actions), list.artifactId);
-    expect(f.artifacts.list({ runId }).artifacts[0].versions.map(item => [item.number, item.origin, item.status])).toEqual([[1, 'generate', 'invalid'], [2, 'edit', 'valid'], [3, 'regenerate', 'candidate']]);
+    expect(f.artifacts.list({ runId }).artifacts[0].versions.map(item => [item.number, item.origin, item.status])).toEqual([[1, 'generate', 'invalid'], [2, 'edit', 'valid'], [3, 'regenerate', 'valid']]);
   });
 
   it('says when an output was cut off at the limit, and keeps partial output of a failed or stopped request', async () => {
@@ -188,7 +183,6 @@ describe('structured artifacts (D118–D123)', () => {
     const f = setup();
     const runId = await finished(f);
     const { result, version } = await generate(f, runId, 'minutes', 'g1');
-    f.artifacts.adopt({ runId, clientRequestId: 'a1', versionId: result.versionId });
     const first = f.run.getSnapshot(runId).turns[0].messageId!;
     await f.command({ runId, kind: 'editMessage', messageId: first, content: '主持人改过的第一条' });
     expect(version().version.affectedNumbers).toEqual([1]);
@@ -236,7 +230,7 @@ describe('structured artifacts (D118–D123)', () => {
     expect(new Set(requests.map(request => request.messages.at(-1)!.content)).size).toBe(4);
   });
 
-  it('keeps "nothing of this kind" as its own result: never adopted, exported or handed to R15 (D124)', async () => {
+  it('keeps "nothing of this kind" as its own result: never exported or handed to R15 (D124)', async () => {
     const f = setup();
     const runId = await finished(f);
     const reason = '讨论记录中没有出现任何代码设计，没有可整理的代码候选。';
@@ -244,18 +238,16 @@ describe('structured artifacts (D118–D123)', () => {
     expect(version().version).toMatchObject({ status: 'empty', emptyReason: reason, issues: [] });
     expect(version().content).toBeUndefined();
     expect(version().rawOutput).toBe(JSON.stringify({ nothing: reason }));
-    expect(() => f.artifacts.adopt({ runId, clientRequestId: 'a1', versionId: result.versionId })).toThrowError(expect.objectContaining({ code: 'invalid_state' }));
     await expect(f.artifacts.export({ runId, clientRequestId: 'x1', versionId: result.versionId, format: 'json', target: 'clipboard' })).rejects.toMatchObject({ code: 'invalid_state' });
     expect(f.artifacts.listCodeCandidates({ runId }).candidates).toEqual([]);
     const raw = (f.db as unknown as { db: Sqlite.Database }).db;
-    expect(() => raw.prepare("INSERT INTO artifact_adoptions(version_id,run_id,client_request_id,created_at) VALUES(?,?,'c','t')").run(result.versionId, runId)).toThrow(/Invalid artifact adoption/u);
     // The host's own version must be a document; writing one from scratch works.
     expect(() => f.artifacts.edit({ runId, clientRequestId: 'e0', versionId: result.versionId, text: JSON.stringify({ nothing: '手写' }) }))
       .toThrowError(expect.objectContaining({ detail: expect.objectContaining({ code: 'invalid_input', field: 'text' }) }));
     expect(f.artifacts.edit({ runId, clientRequestId: 'e1', versionId: result.versionId, text: text(validDocuments.code) })).toMatchObject({ duplicate: false });
     // Regenerating is still offered and adds a version.
     await generate(f, runId, 'code', 'g2', text(validDocuments.code), result.artifactId);
-    expect(f.artifacts.list({ runId }).artifacts[0].versions.map(item => item.status)).toEqual(['empty', 'valid', 'candidate']);
+    expect(f.artifacts.list({ runId }).artifacts[0].versions.map(item => item.status)).toEqual(['empty', 'valid', 'valid']);
     // Minutes always exist: there, the same answer is a validation failure.
     const minutes = await generate(f, runId, 'minutes', 'g3', JSON.stringify({ nothing: reason }));
     expect(minutes.version().version).toMatchObject({ status: 'invalid', issues: [expect.objectContaining({ message: expect.stringContaining('会议纪要总能整理') })] });
@@ -272,7 +264,7 @@ describe('structured artifacts (D118–D123)', () => {
     const { preview: artifactPreview, version } = await generate(f, runId, 'actions', 'g1');
     expect(artifactPreview).toMatchObject({ summarizedThrough: 3, lastNumber: 5 });
     const transcript = f.provider.inputs.at(-1)!.messages.at(-1)!.content;
-    expect(transcript).toContain('【讨论摘要 · 覆盖第 1–3 条，由主持人确认】');
+    expect(transcript).toContain('【讨论摘要 · 覆盖第 1–3 条】');
     expect(transcript).not.toContain('【第 1 条');
     expect(transcript).toContain('【第 4 条 · 成员');
     expect(version().version).toMatchObject({ firstNumber: 1, lastNumber: 5, affectedNumbers: [] });
@@ -289,7 +281,6 @@ describe('structured artifacts (D118–D123)', () => {
     f.db.insertRoom({ id: 'other-room', name: 'Other', objective: '' });
     const runB = await finished(f);
     expect(() => f.artifacts.getVersion({ runId: runB, versionId: result.versionId })).toThrowError(expect.objectContaining({ code: 'not_found' }));
-    expect(() => f.artifacts.adopt({ runId: runB, clientRequestId: 'x', versionId: result.versionId })).toThrowError(expect.objectContaining({ code: 'not_found' }));
     expect(() => f.run.generateArtifact({ runId: runB, clientRequestId: 'x', kind: 'prd', agentId: 'a', artifactId: result.artifactId })).toThrowError(expect.objectContaining({ code: 'not_found' }));
     const foreign = f.run.getSnapshot(runA).turns[0].messageId!;
     f.db.insertArtifact({ id: 'b-art', runId: runB, roomId, kind: 'prd', clientRequestId: 'b' });
@@ -313,7 +304,6 @@ describe('structured artifacts (D118–D123)', () => {
       const f = setup();
       const runId = await finished(f);
       const { result } = await generate(f, runId, 'prd', 'g1');
-      f.artifacts.adopt({ runId, clientRequestId: 'a1', versionId: result.versionId });
       const markdown = await f.artifacts.export({ runId, clientRequestId: 'x1', versionId: result.versionId, format: 'markdown', target: 'clipboard' });
       expect(markdown.text).toContain('# 校园跑腿平台');
       expect(markdown.text).toContain('### R1 下单（必须）');
@@ -339,7 +329,7 @@ describe('structured artifacts (D118–D123)', () => {
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
-  it('never writes or runs a code candidate; R15 sees only an adopted, valid one', async () => {
+  it('never writes or runs a code candidate; R15 sees only a valid one', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'r14-code-'));
     const cwd = process.cwd();
     try {
@@ -348,8 +338,6 @@ describe('structured artifacts (D118–D123)', () => {
       const runId = await finished(f);
       const script = { ...validDocuments.code, files: [{ path: 'evil.js', language: 'javascript', description: null, content: "require('fs').writeFileSync('pwned', '1')" }] };
       const { result } = await generate(f, runId, 'code', 'g1', text(script));
-      expect(f.artifacts.listCodeCandidates({ runId }).candidates).toEqual([]);
-      f.artifacts.adopt({ runId, clientRequestId: 'a1', versionId: result.versionId });
       const list = f.artifacts.listCodeCandidates({ runId });
       expect(codeCandidateListSchema.safeParse(list).success).toBe(true);
       expect(list.candidates).toEqual([expect.objectContaining({ runId, roomId, artifactId: result.artifactId, versionId: result.versionId, versionNumber: 1, status: 'valid', affected: false,
@@ -376,7 +364,6 @@ describe('structured artifacts (D118–D123)', () => {
       const { result } = await generate(f, runId, 'actions', 'g1', '不是 JSON');
       f.artifacts.edit({ runId, clientRequestId: 'e1', versionId: result.versionId, text: text(validDocuments.actions) });
       const adopted = await generate(f, runId, 'minutes', 'g2');
-      f.artifacts.adopt({ runId, clientRequestId: 'a1', versionId: adopted.result.versionId });
       await f.artifacts.export({ runId, clientRequestId: 'x1', versionId: adopted.result.versionId, format: 'json', target: 'clipboard' });
       const index = f.provider.inputs.length;
       f.provider.hold.add(index); f.provider.answers.set(index, '{"title":');

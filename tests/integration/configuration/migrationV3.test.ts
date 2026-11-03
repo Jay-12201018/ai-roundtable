@@ -1,5 +1,4 @@
 // @vitest-environment node
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,8 +9,8 @@ import { migration2 } from '../../../src/main/database/migrations/v2';
 import { validateDatabase } from '../../../src/main/database/recovery/validateDatabase';
 import { createVerifiedBackup } from '../../../src/main/database/backup/createVerifiedBackup';
 import { prepareRestore } from '../../../src/main/database/recovery/prepareRestore';
-const source = execFileSync('git', ['show', '135bf82c6462ade6dd5300717d6f0102ce4a660c:src/main/database/Database.ts'], { encoding: 'utf8' });
-const v1 = source.match(/const migrations = \[\s*`([\s\S]*?)`/)![1];
+import { originalSchema } from '../../fixtures/originalSchema';
+const v1 = originalSchema;
 function legacy(version: number) {
   const directory = mkdtempSync(join(tmpdir(), 'roundtable-v3-')); const path = join(directory, 'source.db'); const raw = new Sqlite(path);
   raw.exec(v1); const time = '2026-10-13T00:00:00.000Z';

@@ -57,8 +57,7 @@ assert.equal(existsSync(join(userData, 'ai-roundtable.db')), false);
 const recoveryStates = ['running','pausing','paused','cancelling','idle','completed','cancelled','error','interrupted'];
 if (recoveryMode) {
   const Sqlite = require('better-sqlite3');
-  const source = execFileSync('git',['show','135bf82c6462ade6dd5300717d6f0102ce4a660c:src/main/database/Database.ts'],{cwd:root,encoding:'utf8'});
-  const migration = source.match(/const migrations = \[\s*`([\s\S]*?)`/);
+  const migration = [null, readFileSync(join(root, 'tests/fixtures/original-schema.sql'), 'utf8')];
   assert.ok(migration?.[1]);
   const seed = new Sqlite(join(userData,'ai-roundtable.db'));
   try {

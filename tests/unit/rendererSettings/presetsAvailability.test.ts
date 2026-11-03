@@ -4,7 +4,7 @@ import { availabilityText, presets } from '../../../src/renderer/features/settin
 import { modelIdSchema } from '../../../src/shared/schemas/common';
 
 it('builds the welcome sentence from the presets, and says nothing about prices', () => {
-  expect(availabilityText()).toBe('支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini，以及其他兼容 OpenAI 接口的服务。三位成员可以各用一家。');
+  expect(availabilityText()).toBe('支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他 OpenAI 兼容或自定义接口。几位成员可以各用一家。');
   for (const preset of presets) expect(`${preset.description}${preset.models.map(model => model.hint ?? '').join('')}`).not.toMatch(/价格|便宜|¥|审核/u);
 });
 

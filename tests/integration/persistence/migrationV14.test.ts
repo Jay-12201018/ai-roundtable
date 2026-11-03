@@ -22,7 +22,7 @@ import { UsageService } from '../../../src/main/usage/UsageService';
 
 const later = [migration2, migration3, migration4, migration5, migration6, migration7, migration8, migration9, migration10, migration11, migration12, migration13];
 const v1 = readFileSync(resolve(__dirname, '../../../src/main/database/Database.ts'), 'utf8').match(/const migrations = \[\s*`([\s\S]*?)`/u)![1]!;
-const costTables = ['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs'];
+const removedTables = ['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs', 'provider_target_approvals', 'artifact_adoptions'];
 const time = '2026-10-23T02:00:00.000Z';
 
 const directories: string[] = [];
@@ -106,8 +106,8 @@ describe('migration 14 (D133)', () => {
       expect(validateDatabase(raw).schemaVersion).toBe(14);
       expect(raw.prepare('SELECT version FROM schema_backups').pluck().all()).toEqual([version]);
       const tables = raw.prepare("SELECT name FROM sqlite_schema WHERE type='table'").pluck().all() as string[];
-      expect(tables.filter(table => costTables.includes(table))).toEqual([]);
-      expect(tables).toContain('request_usage');
+      expect(tables.filter(table => removedTables.includes(table))).toEqual([]);
+      expect(tables).toEqual(expect.arrayContaining(['request_usage', 'summary_use_events']));
       expect((raw.prepare("SELECT sql FROM sqlite_schema WHERE sql LIKE '%charge%' OR sql LIKE '%budget%'").pluck().all() as string[])).toEqual([]);
       expect(rowCount(raw, 'messages')).toBe(messages);
       expect(rowCount(raw, 'turns')).toBe(turns);
@@ -138,6 +138,28 @@ describe('migration 14 (D133)', () => {
     } finally { db.close(); }
   });
 
+  it.each([9, 12, 13])('D140: a summary of v%i still waiting for a confirmation takes effect', async version => {
+    const path = historical(version);
+    const db = new Database(path); await db.initialize(); db.close();
+    const raw = new Sqlite(path, { readonly: true });
+    try {
+      expect(raw.prepare('SELECT message_id FROM summary_confirmations').pluck().all()).toEqual(['m-summary']);
+      expect(rowCount(raw, 'summary_use_events')).toBe(0);
+    } finally { raw.close(); }
+  });
+
+  it('D139: a valid version of v13 can be exported without an adoption, and one that has not passed still cannot', async () => {
+    const path = historical(13);
+    const db = new Database(path); await db.initialize(); db.close();
+    const raw = new Sqlite(path);
+    try {
+      const insert = (id: string) => raw.prepare("INSERT INTO artifact_exports(id,run_id,version_id,client_request_id,format,target,created_at) VALUES(?,'run','v1',?,'json','clipboard',?)").run(id, id, time);
+      expect(() => insert('x1')).toThrow(/Invalid artifact export/u);
+      raw.prepare("UPDATE artifact_versions SET validation='valid',content_json='{}' WHERE id='v1'").run();
+      expect(() => insert('x2')).not.toThrow();
+    } finally { raw.close(); }
+  });
+
   it('gives a Run the old budget stopped a stop reason with no amount, and lets it continue', async () => {
     const path = historical(13);
     const db = new Database(path); await db.initialize();
@@ -164,7 +186,7 @@ describe('migration 14 (D133)', () => {
 
   it.each([
     ['DROP TRIGGER request_usage_no_delete', /Missing usage protection/u],
-    ['CREATE TABLE run_budgets(run_id TEXT)', /still holds a cost table/u],
+    ['CREATE TABLE run_budgets(run_id TEXT)', /still holds a removed table/u],
     ["DROP TRIGGER request_usage_insert; INSERT INTO request_usage(request_id,run_id,agent_id,provider_id,model_id,kind,state,created_at,updated_at) VALUES('ghost','run','agent','p','m','summary','in_flight','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')", /Missing usage protection|Invalid usage identity/u],
   ] as const)('recovery validation refuses %s', async (sql, message) => {
     const path = historical(13);

@@ -23,6 +23,6 @@ export function Welcome({ onConnect, onDemo, demoBusy, demoError }: { onConnect:
     </div>
     {demoError && <p className="field-error" role="alert">{demoError}</p>}
     <ol className="three-steps" aria-label="怎么开始"><li><i>1</i>连接模型</li><li><i>2</i>建房间、选成员（默认起草 · 审查 · 综合）</li><li><i>3</i>写下目标，开始讨论</li></ol>
-    <p className="trust"><Lock aria-hidden size={14} />所有数据只保存在这台电脑上。Key 存进系统钥匙串，只会发往你确认过的服务地址。</p>
+    <p className="trust"><Lock aria-hidden size={14} />所有数据只保存在这台电脑上。Key 存进系统钥匙串，只会发往你连接的服务地址。</p>
   </div></div>;
 }

@@ -165,7 +165,7 @@ describe('Renderer command ownership', () => {
 
 describe('R13A start refusals', () => {
   it.each([
-    ['forbidden', '启动失败：成员使用的 Provider 尚未在本次会话确认请求目标，或 Key 已更换。请到“模型设置”勾选“我已核对请求目标”并点“确认本次会话目标”。'],
+    ['forbidden', '启动失败：服务商拒绝了这次访问，请到“设置 › 模型服务”检查。'],
     ['unsupported', '启动失败：有成员的模型现在不能发送请求，请到房间里检查成员的模型。'],
     ['internal_error', '启动协作失败，请检查当前任务状态。'],
   ] as const)('explains a %s start refusal and passes the limit through', async (code, message) => {
