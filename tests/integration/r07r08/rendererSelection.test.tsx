@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within, configure } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { App } from '../../../src/renderer/App';
 import { Database } from '../../../src/main/database/Database';
@@ -11,6 +11,11 @@ import { bridge, deferred, snapshot, subscription, time } from '../../unit/rende
 
 const databases: Database[] = [];
 afterEach(() => { cleanup(); localStorage.clear(); delete document.documentElement.dataset.theme; databases.splice(0).forEach(db => db.close()); vi.restoreAllMocks(); });
+// Under heavy load the 1 s default can run out while a correct page is still rendering (a config answer delayed 2.5 s still
+// appears: nothing is lost). A longer wait still fails when the text never comes.
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
+
 function fixture() {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
   const fake = bridge();
