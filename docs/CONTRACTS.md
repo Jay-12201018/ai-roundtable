@@ -447,3 +447,19 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Renderer | `features/artifacts/`（产物面板、生成对话框、阅读器与 JSON 编辑、结构化视图）；`RunPanel` 的产物标签页由 App 传入；`Timeline` 新增 `reveal`（跳到某条并高亮）；用量页"按用途"；`copyText` 在模态对话框里也能复制 | — |
 
 安全影响：模型输出没有主持人权限，候选必须采用后才能导出或交给 R15；模型文本经净化渲染，HTML / 脚本只显示为文字；代码候选不写盘、不执行，另存为在服务层和数据库层都拒绝代码；导出只含校验过的文档，不含 Key、提示词、讨论原文或推理；生成只在主持人点击后发出一次请求，失败不自动重试。
+
+## R15 安全代码导出（2026-11-03，子会话候选，未合 main）
+
+分支 `codex/r15-safe-code-export`（基线 `9cb0a1b`）。决策见 [DECISIONS](DECISIONS.md) D126–D131。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Database / migration 13 | 新表 `code_exports`（`version_id`、`run_id`、`client_request_id`、`root_path`、`created_at`，`UNIQUE(run_id, client_request_id)`；插入触发器要求代码候选的有效版本）、`code_export_files`（`export_id`、`position`、`path`、`action create/overwrite/none`、`outcome written/skipped/failed`、`reason`、`content_sha256`、`byte_count`）；都只追加。`validateDatabase` 增加 v13 段。`Database.insertCodeExport / findCodeExport`，`ArtifactVersionRecord.codeWrites` | 只增；migrations 1–12 不变。旧库升级前按既有流程校验备份 |
+| Shared `schemas/codeExport.ts`（新） | 根引用 `{rootId, displayPath, name}`、`chooseRoot` / `preview` / `write` 的输入输出、文件状态 `create/overwrite/same/conflict/invalid`、原因码 `codeExportReasonValues`、diff（`lines` 或 `unavailable: too_large/binary/too_many_changes`）及中文文案 | 新文件 |
+| Shared `schemas/artifact.ts` | `artifactVersion.codeWrites?: {exportId, folder, written, skipped, failed, at}[]`；`exportedAt` 与 `exported` 状态也计入至少写入 1 个文件的写入 | 可选字段；旧读者忽略 |
+| Shared `schemas/error.ts` | 公开错误字段增加 `rootId / previewId / files` | 只增 |
+| IPC / Preload | 新通道 `codeExport.chooseRoot({runId, versionId})`、`codeExport.preview({runId, versionId, rootId})`、`codeExport.write({runId, clientRequestId, previewId, files:[{path, overwrite}]})`；输出核对 `runId`、`versionId`、`rootId`、`previewId` 以及请求的文件都在结果里。`RoundtableApiContract.codeExport?` 可选，Preload 总是提供 | 只增。错误：版本不再可写 `invalid_state`；引用或预览失效 `not_found`；空选择或不在预览里的路径 `invalid_input` |
+| Main | `src/main/export/`：`paths.ts`（路径文本规则）、`diff.ts`（有上限的行 diff）、`CodeExportService.ts`（选文件夹、只读预览、逐项重查的写入与记录）；`artifact/view.ts`、`ArtifactService.listCodeCandidates` 计入写入；`main/index.ts` 组装，并把 `userData` 列为受保护目录 | `registerIpc` 增加可选的 `codeExport` 服务；关闭时 `codeExport.write` 进入待完成集合 |
+| Renderer | `features/codeExport/`（写入对话框）；阅读器的"写入文件夹…"与写入记录；产物列表的"已写入 N 个文件 · 时间"；`useArtifacts` 第四个参数透传 `api.codeExport`；代码候选的说明文字更新 | 没有 `codeExport` 的页面如实说明只能复制 |
+
+安全影响：见 DECISIONS R15 节末尾。残余风险写在 D129。
