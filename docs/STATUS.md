@@ -1,6 +1,17 @@
 # R00–R18 状态与授权看板
 
-## 当前状态（2026-10-29）
+## 当前状态（2026-11-03）
+
+- **R15 安全代码导出：merged / verified。** 分支 `codex/r15-safe-code-export`（`6c61748`，基于 main `9cb0a1b`），以 ff-only 方式合入 main。决策 D126–D131；**migration 13**（`code_exports`、`code_export_files`，只追加，不存文件内容）；新增窄接口 `codeExport.chooseRoot / preview / write`，没有通用文件读写，也不执行任何生成的代码。
+  - 只有 R14 交出的已采用代码候选能写入；文件夹由 Main 的系统对话框选，页面只拿引用，传不了路径；不能选磁盘根目录、应用数据目录和 `.git` 内的文件夹。
+  - 预览只读：候选路径先按文本检查（绝对路径、`..`、盘符、UNC、反斜杠、保留名、不可见字符、`.git` 及其变体 `git~1`、NFKC 规范化后再查），再逐段检查磁盘（符号链接、非目录、仅大小写不同都拒绝）；每个文件标新建 / 覆盖（附差异）/ 内容相同 / 不能写入 / 路径无效；超大文件只流式算哈希、不读进内存。
+  - 逐文件确认，默认全不勾，覆盖单独确认并标红；写入前重查版本、文件夹、路径和目标内容，有变化就拒绝并提示重新检查；临时文件 + `fsync`，新文件用 `link()` 独占放置，覆盖用 `rename`；逐文件如实给结果，失败时清理本次新建的空文件夹。残余风险（检查到放置之间的极小窗口）记在 D129。
+- **R15 的检查**：合并候选 `6c61748` 上总控跑了完整检查：typecheck、142 个文件 / 2194 个测试、build；R01（三种模式）、R07/R08、R09、R12、R13A、R13B 的首次运行和重启，R10/R11，premerge（首次 + 重启），R12、R13A、R13B、R16 实操，R16 长历史，讨论延续实操，第二批验收（含两次重启），R14、R15 实操（含重启），全部 exit 0，liveApi=false。记录见 [R15](verification/2026-11-03-r15.md)。
+- **R15 真实写入（用户亲手在试用版操作，2026-11-03 周二 13:50 起）**：用 DeepSeek 跑一场审查修订链讨论（5 步）并生成代码候选（`csv2json.py`、`README.md`），采用后写入用户新建的测试文件夹：只勾一个文件时只写了这个文件；预览后在外部修改目标，确认时被拒绝（`target_changed`）；重新检查后覆盖成功。磁盘文件哈希与记录一致，权限 `-rw-r--r--`，没有临时文件残留，脚本没有被运行。合计 ¥0.094（5 次发言 ¥0.068、代码候选 ¥0.026），均为空闲价，逐笔验算一致。试用库已重置：旧库另存为 `ai-roundtable.r14-mid-v12-2026-11-03.sqlite3`，再从升级前备份恢复并升到 migration 13。
+- **维护事项（待安排）**：① 独立实操探针（r12 / r13a / r13b / premerge-quality）的 `window size applied` 要求 `innerHeight === 900`，在可用高度不足的屏幕上属竞态，修复会改变断言。② `tests/integration/r07r08/rendererSelection.test.tsx` 有一项在高负载下约 1/20 超时。③ 已重置的旧试用库里，R14 复测 PRD 第一次失败的未知费用（预留 ¥0.083）只需对照 DeepSeek 控制台确认，当前试用库里不再有这笔。
+- **下一步路线**：R17 E2E 与发布（R07–R16 均已完成；发布门槛见 [发布与授权政策](RELEASE_POLICY.md)，规划不等于实施或发布授权）。
+
+## 较早状态（2026-10-29）
 
 - **R14 结构化产物：merged / verified。** 分支 `codex/r14-structured-artifacts`（`af16f3d`，基于 main `0c29bfe`），以 ff-only 方式合入 main。决策 D118–D125；**migration 12**（`artifacts`、`artifact_versions`、`artifact_sources`、`artifact_requests`、`artifact_charges`、`artifact_adoptions`、`artifact_exports`，全部只追加、身份与状态由触发器约束；重建 migration 9 的两个账本交叉核对触发器，规则不变，只把产物费用加入核对范围）；新增 `artifact.*` IPC 8 个。
   - 四类产物（需求文档、会议纪要、行动清单、代码候选）用严格 Zod schema 校验，未知信息必须显式写 null（界面显示"未知"），不得编造；一个解析器把错误定位到字段和行号，格式错误与来源越界一次列全；原始输出始终保留，不自动重试。
@@ -113,9 +124,9 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 | R12 | 主持人与消息版本 | R11 | R12子会话；总控集成 | merged / verified | 用户批准合main | codex/r12-host-message-versions → codex/integrate-r12-r13a | 15e2e30；合并见顶部 | 自动化、实操、DeepSeek真实模型三层通过 |
 | R13 | 摘要、usage、费用预算 | R05/R09/R11 | R13A/R13B子会话；总控集成 | merged / verified | 用户批准合main | codex/r13a-real-model-enable、codex/r13a-premerge-quality、codex/r13b-usage-summary | b3e3324、0ccb49c、a96d4fe | 预算、账本、按时段与缓存结算、摘要均经DeepSeek真实账单核对 |
 | R14 | 结构化产物 | R11 | R14子会话；总控集成 | merged / verified | 用户批准合main | codex/r14-structured-artifacts | af16f3d | 自动化、实操、DeepSeek真实模型三层通过（含修复后复测） |
-| R15 | 安全代码导出 | R14 | 未分派 | ready | 待派发 | 未创建 | 无 | 未运行 |
+| R15 | 安全代码导出 | R14 | R15子会话；总控集成 | merged / verified | 用户批准合main | codex/r15-safe-code-export | 6c61748 | 自动化、实操、用户亲手真实写入三层通过（不涉及模型实测） |
 | R16 | 聊天 UI 与可用性 | R06；主要交互稳定 | R16子会话；总控集成 | merged / verified | 用户确认设计（D1–D6）并批准各批合main | codex/r16-ui-redesign、codex/r16-impl-discussion、codex/r16-discussion-continuity、codex/r16-batch2 | 8c8eb1b、8d833a2、4d3e8b7、a72301a | 第一批、讨论延续、第二批均经自动化、实操、DeepSeek真实模型三层验收 |
-| R17 | Electron E2E 与发布 | 骨架 R02；最终 R07–R16，含 R10A/R10B | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
+| R17 | Electron E2E 与发布 | 骨架 R02；最终 R07–R16，含 R10A/R10B | 未分派 | ready | 待派发（需用户授权） | 未创建 | 无 | 未运行 |
 | R18 | V1.1 评测与 ADR | R17 V1 验收 | 未分派 | blocked | 未授权启动 | 未创建 | 无 | 未运行 |
 
 ## R00 提交引用
