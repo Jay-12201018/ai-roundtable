@@ -163,11 +163,11 @@ test('first launch, one demo discussion, quit and reopen in the installed form',
   running = await launch();
   page = running.page;
   await expect(page.locator('.welcome'), 'Not first use any more').toHaveCount(0);
-  await capture(running, 'reopened', '关闭后重新打开：不再显示欢迎页，侧栏里有演示房间和刚才那场讨论。');
+  await capture(running, 'reopened', '关闭后重新打开：不再显示欢迎页，直接回到上次那场讨论，侧栏里有演示房间，没有发出任何请求。');
   await page.locator('.sb-runs .sb-item').first().click();
   await expect(memberTexts(page)).toHaveText(shown);
   await statusHas(page, '已完成');
-  await capture(running, 'reopened-discussion', '打开那场讨论：三条发言和状态与关闭前完全一致，没有重新生成。');
+  await capture(running, 'reopened-discussion', '再从侧栏点开那场讨论：三条发言和状态与关闭前完全一致，没有重新生成。');
   const [[run], [version]] = sql('SELECT status FROM workflow_runs', 'SELECT MAX(version) AS version FROM schema_migrations');
   expect(run.status).toBe('completed');
   result.schemaVersion = version.version;

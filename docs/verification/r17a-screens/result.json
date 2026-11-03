@@ -1,0 +1,54 @@
+{
+  "steps": [
+    {
+      "file": "01-first-launch.png",
+      "caption": "首次启动打包后的应用：欢迎页给出“连接模型服务”和“先试玩演示”两条路，说明费用由服务商收取、数据只存在这台电脑上。"
+    },
+    {
+      "file": "02-demo-room.png",
+      "caption": "点“开始试玩”：建好演示房间和三位成员。讨论目标用模拟输入法写入中文，确认候选的回车没有误触发开始。"
+    },
+    {
+      "file": "03-running.png",
+      "caption": "讨论进行中：“开始讨论”原地变成“暂停”，第一位成员的回复正在流式显示。"
+    },
+    {
+      "file": "04-completed.png",
+      "caption": "三位演示成员依次发言完成，状态“已完成”。"
+    },
+    {
+      "file": "05-completed-dark.png",
+      "caption": "切到深色主题后的同一场讨论。"
+    },
+    {
+      "file": "06-reopened.png",
+      "caption": "关闭后重新打开：不再显示欢迎页，直接回到上次那场讨论，侧栏里有演示房间，没有发出任何请求。"
+    },
+    {
+      "file": "07-reopened-discussion.png",
+      "caption": "再从侧栏点开那场讨论：三条发言和状态与关闭前完全一致，没有重新生成。"
+    }
+  ],
+  "proof": {
+    "userData": "$TMPDIR/roundtable-e2e-packaged/userData",
+    "standInRead": "EPERM",
+    "standInWrite": "EPERM"
+  },
+  "report": {
+    "isPackaged": true,
+    "name": "ai-roundtable",
+    "version": "0.1.0",
+    "userData": "$TMPDIR/roundtable-e2e-packaged/userData",
+    "appData": "$TMPDIR/roundtable-e2e-packaged/home/Library/Application Support",
+    "home": "$TMPDIR/roundtable-e2e-packaged/home",
+    "logs": "$TMPDIR/roundtable-e2e-packaged/home/Library/Logs/ai-roundtable"
+  },
+  "databaseOpenInTestFolder": true,
+  "packageUnderDenyRule": {
+    "userData": "$TMPDIR/roundtable-e2e-packaged/userData",
+    "name": "ai-roundtable"
+  },
+  "connectionsDuringDiscussion": [],
+  "quitExitCode": 0,
+  "schemaVersion": 13
+}
