@@ -16,7 +16,7 @@ try{
  if(result.phase==='first'){
   const authors=membersByMessage(db,saved.runId);const calls=result.requests.filter(r=>r.method==='POST'&&r.body.messages.some(m=>m.content.includes('R09 three Agent public context')));assert.equal(calls.length,3);
   for(let i=0;i<3;i++){
-   const input=JSON.parse(rows[i].input_snapshot);assert.deepEqual(calls[i].body.messages,input.messages);assert.equal(input.modelId,'fixture');assert.equal(input.outputTokenLimit,4096);
+   const input=JSON.parse(rows[i].input_snapshot);assert.deepEqual(calls[i].body.messages,input.messages);assert.equal(input.modelId,'fixture');assert.equal(input.outputTokenLimit,8192);
    check(input.messages.some(m=>m.role==='system'&&m.content.includes('R09 system '+i)),'Frozen member system missing');
    // D095: earlier members' replies are labelled "> " quotes on the user side, in order, never assistant turns.
    const positions=completed.slice(0,i).map(m=>quotedPosition(input.messages,authors[m.id],m.content));

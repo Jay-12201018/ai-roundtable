@@ -33,7 +33,6 @@ async function page(stage, saved = {}) {
     const provider = await api.settings.createProvider({ name: 'R10R11 fixture ' + kind, kind, defaultModelId: 'fixture', customModels: [{ id: 'fixture', name: 'Owned fixture' }] });
     saved.providers[kind] = provider.id;
     await api.settings.setKey({ providerId: provider.id, apiKey: 'r10r11-fake-' + kind });
-    await api.settings.confirmTarget({ providerId: provider.id, baseUrl, confirmed: true });
     const configuration = await api.settings.testConnection({ providerId: provider.id, level: 'configuration' });
     check(configuration.result.ok && configuration.result.level === 'configuration', 'Native local configuration false');
     const models = await api.settings.listModels({ providerId: provider.id });

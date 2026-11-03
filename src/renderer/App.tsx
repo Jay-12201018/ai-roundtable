@@ -55,7 +55,6 @@ export function App() {
   const [roomDialog, setRoomDialog] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [demo, setDemo] = useState<{ busy: boolean; error?: string }>({ busy: false });
-  const [starterRoom, setStarterRoom] = useState<string>();
   const layout = useLayout();
   const [theme, setTheme] = useTheme();
   const [navOpen, setNavOpen] = useState(false);
@@ -423,8 +422,8 @@ export function App() {
     const model = row?.models.find(item => item.modelId === provider.defaultModelId);
     const usable = model?.usable ? { providerId: provider.id, modelId: model.modelId } : undefined;
     const created = await createStarterRoom(api.rooms, { name: '我的第一场讨论' }, usable);
-    setStarterRoom(created.id); void directory.reload();
-    return { roomName: created.name, memberNames: ['起草者', '审查者', '综合者'], modelName: usable ? provider.customModels.find(item => item.id === usable.modelId)?.name ?? usable.modelId : null };
+    await directory.reload();
+    return { roomId: created.id, roomName: created.name, memberNames: ['起草者', '审查者', '综合者'], modelName: usable ? provider.customModels.find(item => item.id === usable.modelId)?.name ?? usable.modelId : null };
   };
   const tryDemo = async () => {
     setDemo({ busy: true });
@@ -483,7 +482,7 @@ export function App() {
         {(layout === 'narrow' || sidebarCollapsed) && pageTopbar('settings')}
         <SettingsPage api={settingsApi} network={api.network} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
           theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onConnected={createFirstRoom}
-          onStart={() => { const target = starterRoom ?? roomId; if (target) newDiscussion(target); else goDiscussion(); }} />
+          onStart={made => { const target = made ?? roomId; if (target) newDiscussion(target); else goDiscussion(); }} />
       </> : page === 'rooms' ? <>
         <Topbar title={room?.name ?? '房间'} detail={room ? `房间设置 · ${directory.counts.get(room.id) ?? 0} 位参与讨论 · ${directory.runs.length} 次讨论` : undefined}
           members={layout === 'narrow' ? undefined : modeMembers.filter(member => member.enabled).map(member => member.name)}
@@ -497,7 +496,7 @@ export function App() {
     {workflowOpen && roomId && <WorkflowDialog key={`${roomId}:${workflowVersion}`} roomName={roomName ?? '这个房间'} members={modeMembers} initial={stored.draft}
       onCheck={checkWorkflow} onSave={saveWorkflow} onClose={() => setWorkflowOpen(false)} />}
     {connectOpen && <ConnectWizard api={settingsApi} providers={providers} onClose={() => { setConnectOpen(false); void reloadProviders(); void readiness.reload(); }}
-      onConnected={createFirstRoom} onStart={() => { const target = starterRoom ?? roomId; if (target) newDiscussion(target); }} />}
+      onConnected={createFirstRoom} onStart={made => { const target = made ?? roomId; if (target) newDiscussion(target); }} />}
     {roomDialog && <RoomDialog note="新房间会带好三位成员：起草者、审查者、综合者，都可以再改。" onClose={() => setRoomDialog(false)} onSave={async value => {
       const created = await createStarterRoom(api.rooms, value, defaultModelFor(providers, readiness.rows));
       setRoomDialog(false); void directory.reload(); openRoom(created.id);

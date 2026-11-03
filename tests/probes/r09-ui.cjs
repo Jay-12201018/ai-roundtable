@@ -52,22 +52,21 @@ async function page(stage, saved, endpoint) {
   if(stage==='first'){
     await click('设置');
     for(const [name,kind,url,key] of [['R09 fixture Compatible','openai-compatible',endpoint,'r09-fake-key-compatible'],['R09 fixture Official','openai','','r09-fake-key-official']]){
-      // The connect wizard: service, then the address written above the Key; 保存并连接 confirms it (D113).
-      await click('添加服务');await clickPrefix(kind==='openai'?'OpenAI':'其他兼容服务',dialog());await click('下一步');
-      if(kind==='openai'){dialog().querySelector('details.adv summary').click();await sleep();await fill('服务名称',name);await fill('再加一个模型可选','fixture');check(dialog().querySelector('h2').textContent.includes(name),'Name not applied');check(dialog().querySelector('.target').textContent==='Key 只会发往 https://api.openai.com/v1','Official target not shown');}
-      else{await fill('服务名称',name);await fill('地址',url);await fill('模型名','fixture');await fill('显示名可选','Owned local fixture');check(dialog().querySelector('.target').textContent==='Key 只会发往 '+url,'Typed target not shown');}
-      await fill('API Key',key);await click('保存并连接');
+      // The connect wizard for a user-added service; the official-endpoint adapter has no preset (D142), so its service comes from the API.
+      if(kind==='openai'){const made=await api.settings.createProvider({name,kind,enabled:true,isDefault:false,defaultModelId:'fixture',customModels:[{id:'fixture',name:'fixture'}]});await api.settings.setKey({providerId:made.id,apiKey:key});await click('添加服务');await clickIn('dialog[open] .modal-foot','取消');}
+      else{await click('添加服务');await clickPrefix('自定义服务',dialog());await fill('服务名称',name);await fill('地址',url);await fill('模型名','fixture');check(dialog().querySelector('.target').textContent==='Key 只会发往 '+url,'Typed target not shown');await fill('API Key',key);await click('保存');}
       // A refusal is reported with what the wizard said, never with a secret (the Key field is cleared on submit).
       const values=await wait(()=>api.settings.listProviderSummaries(),ps=>ps.some(p=>p.name===name),'Provider not created').catch(error=>{throw new Error(error.message+' '+name+': '+(dialog()?.innerText??'no dialog').slice(0,600));});const p=values.find(p=>p.name===name);saved[kind]=p.id;
-      await wait(()=>api.settings.getProviderKeyState({providerId:p.id}),s=>s.state==='configured'&&s.sessionTargetConfirmed===true,'Fake encrypted Key missing or target unconfirmed');
+      await wait(()=>api.settings.getProviderKeyState({providerId:p.id}),s=>s.state==='configured','Fake encrypted Key missing');
+      await wait(dialog,d=>!d,'Wizard did not close');
       check([...document.querySelectorAll('input')].every(e=>!e.value.startsWith('r09-fake-key-')),'Secret form retained');
-      // The free check, then an explicit generation in the wizard; both go to the owned fixture only.
-      await wait(()=>dialog()?.textContent,t=>t?.includes(kind==='openai'?'Key 有效':'Key 有效'),'Authentication check failed');
-      await wait(()=>dialog()?.textContent,t=>t?.includes('试发一条'),'Generation offered only for a usable model');
-      await clickIn('dialog[open]','试发一条');await wait(()=>dialog()?.textContent,t=>t?.includes('已收到回复，可以生成。'),'Explicit fixture generation failed');
-      await clickIn('dialog[open] .modal-foot',kind==='openai'?'稍后再说':'稍后再说');await wait(dialog,d=>!d,'Wizard did not close');
+      // The first real service goes straight to its discussion (D136); the probe goes back to settings.
+      await sleep();if(!card(name))await click('设置');
+      await wait(()=>card(name),Boolean,'Card absent: '+name);
+      // The free check, then an explicit generation; both go to the owned fixture only.
       if(!card(name).querySelector('.svc-body'))await inCard(name,'展开 '+name);
-      await inCard(name,'检查连接');await wait(()=>card(name).textContent,t=>t.includes('上次检查：Key 有效'),'Configuration and authentication check failed');
+      await inCard(name,'测试连接');await wait(()=>card(name).textContent,t=>t.includes('Key 有效，连接正常'),'Authentication check failed');
+      check((await api.settings.testConnection({providerId:p.id,level:'generation',modelId:'fixture',allowGeneration:true})).result.ok,'Explicit fixture generation failed');
       await inCard(name,'从服务商获取列表');await wait(()=>card(name).textContent,t=>t.includes('服务商返回的模型'),'Models not fetched');
       noKey(await api.settings.getProviderConfiguration({id:p.id}));
     }
@@ -110,7 +109,7 @@ async function page(stage, saved, endpoint) {
     await wait(()=>api.rooms.listRooms(),rs=>rs.some(r=>r.id===saved.roomId),'Room configuration lost');
     await clickIn('.sidebar','R09 fixture Room');await wait(roomTitle,t=>t==='R09 fixture Room','Room page absent');
     await openRun('R09 three Agent public context');snapshots.restarted=await settle(saved.runId,'completed');check(snapshots.restarted.attempts.length===3,'History lost on restart');
-    for(const id of [saved.openai,saved['openai-compatible']]){const state=await api.settings.getProviderKeyState({providerId:id});check(state.state==='configured','Fake secure Key not restored');check(state.sessionTargetConfirmed===true,'D113: the confirmed target was not remembered for the same Key');}
+    for(const id of [saved.openai,saved['openai-compatible']]){const state=await api.settings.getProviderKeyState({providerId:id});check(state.state==='configured','Fake secure Key not restored');}
     // D113 (R16 D1-B): after a restart the same Key, address and kind need no confirmation; an explicit start sends.
     await wait(()=>field('继续讨论'),Boolean,'Completed Run did not offer to continue in place');check(!field('讨论目标'),'Completed Run offered a new-goal box');
     const runsBefore=(await api.rooms.listRoomRuns({roomId:saved.roomId})).items.map(r=>r.id);

@@ -7,7 +7,7 @@ import { interfaceTypes, presets, presetOf, targetOf, type ServicePreset } from 
 import { errorMessage, modelIdProblem, testService, type ServiceTest } from './model';
 
 /** What the app did after a connection: the room it created for the first real service, if any. */
-export type ConnectedRoom = { roomName: string; memberNames: string[]; modelName: string | null };
+export type ConnectedRoom = { roomId: string; roomName: string; memberNames: string[]; modelName: string | null };
 export type ConnectWizardProps = {
   api: ProviderSettingsApiContract; providers: readonly ProviderSummary[];
   /** Replace the Key of a saved service: the wizard opens on the Key with the service fixed. */
@@ -15,8 +15,8 @@ export type ConnectWizardProps = {
   onClose: () => void;
   /** Called once the service is saved; may create the first room. */
   onConnected?: (input: { provider: ProviderConfiguration; firstReal: boolean; readiness: ProviderReadiness | undefined }) => Promise<ConnectedRoom | undefined>;
-  /** The first real service goes straight to a discussion. */
-  onStart?: () => void;
+  /** The first real service goes straight to a discussion, in the room just made for it. */
+  onStart?: (roomId: string | undefined) => void;
 };
 
 const storageText = (storage: KeyStorageStatus | null) => storage?.mode === 'memory'
@@ -90,7 +90,8 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     if (!mock && custom && !rekey && (!target || type.addressRequired && !address.trim())) { setError('先填写这个服务的地址，例如 https://api.example.com/v1。'); return; }
     if (!mock && !keySaved && apiKey.trim() === '') { setError('请粘贴 API Key。'); return; }
     if (!rekey && !mock && !chosenModel) { setError('请填写模型名，例如服务商文档里的模型 ID。'); return; }
-    if (modelProblem) { setError(modelProblem); return; }
+    // What looks like a Key in the model field means the two may be mixed up: nothing typed stays on the page.
+    if (modelProblem) { clearSecret(); setError(modelProblem); return; }
     clearSecret();
     const provider = rekey ?? await saveConfiguration();
     if (!mock && apiKey.trim()) { await api.setKey({ providerId: provider.id, apiKey }); if (alive.current) setKeySaved(true); }
@@ -105,13 +106,14 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
       let current: ProviderReadiness | undefined;
       try { current = (await api.listModelReadiness?.())?.find(row => row.providerId === provider.id); } catch { current = undefined; }
       const firstReal = provider.kind !== 'mock' && !existingReal.current && !rekey;
+      let room: ConnectedRoom | undefined;
       if (!rekey && onConnected) {
         // A room that could not be made is a small thing: 新建房间 is one click away, and the service is saved.
-        try { await onConnected({ provider, firstReal, readiness: current }); } catch { /* the sidebar still offers it */ }
+        try { room = await onConnected({ provider, firstReal, readiness: current }); } catch { /* the sidebar still offers it */ }
       }
       if (!alive.current) return;
       close();
-      if (firstReal) onStart?.();
+      if (firstReal) onStart?.(room?.roomId);
     });
   }
 

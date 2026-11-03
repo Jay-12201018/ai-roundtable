@@ -248,7 +248,7 @@ async function main() {
   } else {
   // Step 1 (D096, R16 batch 2): in the connect wizard, a pasted API Key in the model name is flagged at once and cannot be saved.
   await click('设置'); await click('添加服务');
-  await click('其他兼容服务', { selector: '.choice', prefix: true }); await click('下一步');
+  await click('自定义服务', { selector: '.choice', prefix: true });
   await field('服务名称'); await selectAll(); await ime('deepseek', 'DeepSeek 直连');
   await field('地址'); await type('https://api.deepseek.com');
   check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The typed address is written above the Key');
@@ -256,36 +256,34 @@ async function main() {
   check((await text()).includes('这看起来是 API Key，不是模型名。Key 请填在「API Key」一栏；这里只填模型名，例如 deepseek-flash。'), 'A pasted key is flagged at once in Chinese');
   check(await js(`[...document.querySelectorAll('input')].find(e => e.labels?.[0]?.textContent === '模型名').getAttribute('aria-invalid')`) === 'true', 'The field is marked invalid');
   await field('API Key'); await type(fakeKey);
-  await click('保存并连接');
+  await click('保存', { scope: 'dialog[open] .modal-foot' });
   check((await js('window.roundtable.settings.listProviderSummaries()')).length === 0, 'Saving is refused: no Provider was created');
   check(await js(`[...document.querySelectorAll('input')].every(e => e.value !== ${JSON.stringify(fakeKey)})`), 'The refused attempt cleared the Key field');
-  await capture('model-id-key-blocked', '连接向导 › 其他兼容服务：在“模型名”里误填了一串 sk- 开头的内容（合成的假值）：输入框立即标红，提示“这看起来是 API Key，不是模型名。Key 请填在「API Key」一栏……”；点“保存并连接”被拒绝，没有创建服务，Key 输入框也已清空。上方写明“Key 只会发往 https://api.deepseek.com”。', 'dialog[open]');
+  await capture('model-id-key-blocked', '连接向导 › 自定义服务：在“模型名”里误填了一串 sk- 开头的内容（合成的假值）：输入框立即标红，提示“这看起来是 API Key，不是模型名。Key 请填在「API Key」一栏……”；点“保存并连接”被拒绝，没有创建服务，Key 输入框也已清空。上方写明“Key 只会发往 https://api.deepseek.com”。', 'dialog[open]');
 
   // Step 2: the right model name; the address the Key goes to stays written right above the Key.
   await field('模型名'); await selectAll(); await type('deepseek-flash');
   check(!(await text()).includes('这看起来是 API Key'), 'The warning clears once a model name is typed');
-  await field('显示名可选'); await type('DeepSeek Flash');
-  await capture('key-blocked-reason', '改成 deepseek-flash 后提示消失。Key 只有一个入口：“Key 只会发往 https://api.deepseek.com”写在 API Key 上方，底部“保存即表示你确认了上面的地址”（D113，取代原来的“目标无误，启用输入框”和“确认本次会话”两步）。', 'dialog[open]');
+  await capture('key-blocked-reason', '改成 deepseek-flash 后提示消失。Key 只有一个入口：“Key 只会发往 https://api.deepseek.com”写在 API Key 上方。', 'dialog[open]');
 
-  // Step 3: the Key is typed and saved with Enter; saving confirms the address in the same step.
+  // Step 3: the Key is typed and saved with Enter; that is the last step, and the first discussion is right there (D136).
   await field('API Key'); await type(fakeKey); await key('Enter');
-  await until(`document.body.innerText.includes('DeepSeek 直连 已连接')`, 'key saved');
+  await until(`document.body.innerText.includes('这场讨论要解决什么？')`, 'key saved');
   check(!(await text()).includes(fakeKey), 'The Key is never echoed in the page');
-  check((await text()).includes('请求地址 https://api.deepseek.com 已确认') && (await text()).includes('deepseek-flash 可以用于讨论') || (await text()).includes('DeepSeek Flash 可以用于讨论'), 'The check names the confirmed address and a usable model');
-  await capture('key-saved-last-step', '按 Enter 保存：第 3 步写明 Key 已保存、请求地址已确认、DeepSeek Flash 可以用于讨论；DeepSeek 没有免费检查 Key 的接口，写“Key 还没有核对”。没有额外的“最后一步”。', 'dialog[open]');
+  await capture('key-saved-last-step', '按 Enter 保存：向导关闭，直接到第一场讨论，房间和三位成员已经建好。');
 
-  // Step 4: the service card says it is ready; nothing is asked again at the next launch (D113).
-  await click('稍后再说');
+  // Step 4: the service card says it is ready; nothing is asked again at the next launch (D136).
+  await click('设置');
   await until(`document.body.innerText.includes('可以使用')`, 'service ready');
-  check((await text()).includes('保存 Key 时已确认') && (await text()).includes('已保存（不显示）'), 'The card says the address was confirmed with the Key');
-  await capture('session-confirmed', '设置 › 模型服务：“DeepSeek 直连 · 可以使用”，请求地址写明“保存 Key 时已确认”，API Key“已保存（不显示）”。整个连接在一个三步对话框里完成。', '.svc-card');
+  check((await text()).includes('已保存（不显示）'), 'The card says the Key is saved and does not show it');
+  await capture('session-confirmed', '设置 › 模型服务：“DeepSeek 直连 · 可以使用”，API Key“已保存（不显示）”。');
 
   // Step 5: the room made for the first service (D6-A), renamed; three DeepSeek members.
   await click('我的第一场讨论', { selector: '.sb-item' });
   await until(`document.querySelector('.room-page')`, 'room page');
   await click('编辑'); await field('房间名称'); await selectAll(); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存');
   await until(`document.querySelector('.room-page h1')?.textContent === '校园跑腿讨论'`, 'room renamed');
-  check((await text()).split('DeepSeek Flash · 可以使用').length === 4, 'Three members on DeepSeek Flash, each usable');
+  check((await text()).split('deepseek-flash · 可以使用').length === 4, 'Three members on deepseek-flash, each usable');
   await capture('members', '连接后自动建好的房间改名为“校园跑腿讨论”（输入法组合输入）：起草者、审查者、综合者三位成员都写着“DeepSeek Flash · 可以使用”。', '.room-page');
 
   // Step 6: start, then pause without moving the pointer: 开始讨论 turns into 暂停 at the same spot.

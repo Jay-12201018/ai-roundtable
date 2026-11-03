@@ -118,7 +118,7 @@ async function main(){
  await guarded;const window=await loaded;const contents=window.webContents;
  assert.equal(contents.getURL(),pathToFileURL(renderer).href);
  const preferences=contents.getLastWebPreferences();assert.equal(preferences.sandbox,true);assert.equal(preferences.contextIsolation,true);assert.equal(preferences.nodeIntegration,false);assert.equal(preferences.webSecurity,true);
- result.bridge=await contents.executeJavaScript(`(()=>{const a=window.roundtable;if(typeof require!=='undefined'||typeof process!=='undefined'||'invoke' in a||'resolveKey' in a.settings||typeof a.settings.confirmTarget!=='function')throw new Error('Bridge security failure');return {restricted:true,settings:Object.keys(a.settings).sort()};})()`);
+ result.bridge=await contents.executeJavaScript(`(()=>{const a=window.roundtable;if(typeof require!=='undefined'||typeof process!=='undefined'||'invoke' in a||'resolveKey' in a.settings||typeof a.settings.setKey!=='function')throw new Error('Bridge security failure');return {restricted:true,settings:Object.keys(a.settings).sort()};})()`);
  const ui=require('./r09-ui.cjs');
  if(restarting){
   // Nothing is sent by the restart itself; D113: the explicit new start sends without asking to confirm the target again.

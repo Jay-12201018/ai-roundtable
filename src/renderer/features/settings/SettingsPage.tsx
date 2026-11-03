@@ -32,7 +32,7 @@ export type SettingsPageProps = {
   api: ProviderSettingsApiContract; network?: NetworkApiContract;
   providers: readonly ProviderSummary[]; providerLoadState: 'loading' | 'ready' | 'error'; onProvidersChanged: () => void;
   theme: Theme; setTheme: (theme: Theme) => void; section: SettingsSection; onSection: (section: SettingsSection) => void;
-  onConnected?: ConnectWizardProps['onConnected']; onStart?: () => void;
+  onConnected?: ConnectWizardProps['onConnected']; onStart?: ConnectWizardProps['onStart'];
 };
 
 /** 设置: a sub-navigation (horizontal tabs when narrow) and one section at a time. */

@@ -41,8 +41,7 @@ async function page(stage, saved) {
   };
   const openAdvanced = async cardName => { const details = await wait(() => card(cardName)?.querySelector('details.adv'), Boolean, 'Advanced section missing: ' + cardName); if (!details.open) { details.querySelector('summary').click(); await sleep(); } };
   const dialog = () => document.querySelector('dialog[open]');
-  const closeWizard = async () => { const button = await wait(() => dialog() && [...dialog().querySelectorAll('.modal-foot button')].find(element => ['关闭', '稍后再说'].includes(element.textContent.trim())), Boolean, 'Wizard did not finish');
-    button.click(); await wait(dialog, value => !value, 'Wizard did not close'); };
+  const closeWizard = () => wait(dialog, value => !value, 'Wizard did not close');
   // The member menu: 编辑…, 上移, 下移, 归档, 删除….
   const memberAction = async (member, action) => {
     await click('「' + member + '」：编辑、排序、归档、删除');
@@ -110,28 +109,33 @@ async function page(stage, saved) {
     await wait(() => document.querySelector('.welcome'), Boolean, 'Welcome page absent');
     check(!findButton('开始讨论'), 'Empty profile must not offer a start');
     await click('设置');
-    await click('添加服务'); await clickPrefix('演示（Mock）', dialog()); await click('下一步'); await click('添加演示服务');
+    await click('添加服务'); await clickPrefix('演示（Mock）', dialog()); await click('添加演示服务');
     const mock = await wait(providerList, providers => providers.some(provider => provider.kind === 'mock'), 'Mock Provider not saved');
     saved.mockProviderId = mock.find(provider => provider.kind === 'mock').id;
     await closeWizard();
     const keyState = id => api.settings.getProviderKeyState({ providerId: id });
     const secretsGone = () => check(!/r78-fake-key-/u.test(document.body.innerHTML) && [...document.querySelectorAll('input')].every(input => !input.value.startsWith('r78-fake-key-')), 'Secret left in the page');
-    // A compatible service: name, typed address, model and the Key in one step; 保存并连接 confirms the address (D113).
+    // A custom service: name, typed address, model and the Key in one step (D136).
     async function realProvider(name, key) {
-      await click('添加服务'); await clickPrefix('其他兼容服务', dialog()); await click('下一步');
-      await fill('服务名称', name); await fill('地址', 'https://fixture.invalid/v1'); await fill('模型名', 'fixture-model'); await fill('显示名可选', 'Fixture Model');
+      await click('添加服务'); await clickPrefix('自定义服务', dialog());
+      await fill('服务名称', name); await fill('地址', 'https://fixture.invalid/v1'); await fill('模型名', 'fixture-model');
       check(dialog().querySelector('.target').textContent === 'Key 只会发往 https://fixture.invalid/v1', 'Target not written above the Key');
-      await fill('API Key', key); await click('保存并连接');
+      await fill('API Key', key); await click('保存');
       const providers = await wait(providerList, values => values.some(value => value.name === name), 'Provider not saved: ' + name);
       const provider = providers.find(value => value.name === name);
-      await wait(() => keyState(provider.id), state => state.state === 'configured' && state.sessionTargetConfirmed === true, 'Key not saved with its target confirmed: ' + name);
+      await wait(() => keyState(provider.id), state => state.state === 'configured', 'Key not saved: ' + name);
       await closeWizard(); secretsGone();
+      // The first real service goes straight to its discussion (D136); the probe goes back to settings.
+      await sleep(); if (!card(name)) await click('设置');
       return provider.id;
     }
     saved.realProviderId = await realProvider('Smoke Real A', 'r78-fake-key-one');
     const firstKey = noKey(await keyState(saved.realProviderId));
     async function rekey(cardName, label, value) {
-      await clickInCard(cardName, label); await fill('API Key', value); await click('保存并连接');
+      await wait(() => card(cardName), Boolean, 'Card absent: ' + cardName);
+      if (!card(cardName).querySelector('.svc-body')) await clickInCard(cardName, '展开 ' + cardName);
+      await wait(() => [...card(cardName).querySelectorAll('button')].some(element => element.textContent.trim() === label), Boolean, 'Key button absent: ' + label);
+      await clickInCard(cardName, label); await fill('API Key', value); await click('保存');
     }
     await rekey('Smoke Real A', '更换', 'r78-fake-key-two');
     const replacement = await wait(() => keyState(saved.realProviderId), state => state.state === 'configured' && state.keyReference.id !== firstKey.keyReference.id, 'Replacement did not revoke old reference');
@@ -141,7 +145,7 @@ async function page(stage, saved) {
     await rekey('Smoke Real A', '填写 Key', 'r78-fake-key-three');
     await wait(() => keyState(saved.realProviderId), state => state.state === 'configured', 'Third Key not saved'); await closeWizard();
     await openAdvanced('Smoke Real A'); await fill('请求地址', 'https://fixture.invalid/v2'); await clickInCard('Smoke Real A', '保存（会删除已保存的 Key）');
-    await wait(() => keyState(saved.realProviderId), state => state.state === 'missing' && state.sessionTargetConfirmed === false, 'Endpoint change did not revoke old Key and confirmation');
+    await wait(() => keyState(saved.realProviderId), state => state.state === 'missing', 'Endpoint change did not revoke the old Key');
     await rekey('Smoke Real A', '填写 Key', 'r78-fake-key-final');
     const finalKey = noKey(await wait(() => keyState(saved.realProviderId), state => state.state === 'configured', 'Final Key not saved')); await closeWizard(); secretsGone();
     saved.keyReference = finalKey.keyReference;
@@ -156,10 +160,10 @@ async function page(stage, saved) {
     catch (error) { rejectionEvidence = { name: error.name, message: error.message, code: error.code, detail: error.detail, keys: Object.getOwnPropertyNames(error) }; rejected = error.code === 'invalid_input' || error.detail?.code === 'invalid_input'; }
     check(rejected, 'Cross-provider Key reference injection rejection shape: ' + JSON.stringify(rejectionEvidence));
     check((await api.settings.getProviderKeyState({ providerId: saved.otherProviderId })).state === 'missing', 'Other Provider acquired Key');
-    // 检查连接 is free: the compatible target has no free Key check, and nothing pretends it succeeded.
+    // 测试连接 tells what it found; this address answers nothing here, and nothing pretends it succeeded.
     if (!card('Smoke Real A').querySelector('.svc-body')) await clickInCard('Smoke Real A', '展开 Smoke Real A');
-    await clickInCard('Smoke Real A', '检查连接');
-    await wait(() => card('Smoke Real A').textContent, value => value.includes('地址和配置没问题；这个服务没有模型列表接口'), 'Real Provider reported false network success');
+    await clickInCard('Smoke Real A', '测试连接');
+    await wait(() => card('Smoke Real A').querySelector('.svc-checks .status-text')?.textContent, value => Boolean(value) && !value.includes('连接正常'), 'Real Provider reported false network success');
     check(card('Smoke Real A').textContent.includes('上下文 128,000 · 最大输出 8,192'), 'Model limits not stated');
     noKey(await api.settings.listProviderSummaries()); noKey(await api.settings.getProviderConfiguration({ id: saved.realProviderId }));
     noKey(await keyState(saved.realProviderId)); noKey(replacement);
@@ -173,9 +177,9 @@ async function page(stage, saved) {
       return rooms.find(value => value.name === name).id;
     }
     saved.roomId = await createRoom('Smoke Roundtable');
-    // The three default members have no model (no usable one exists): replace them with explicit Mock members.
+    // The three default members take the default service, which has a Key: replace them with explicit Mock members.
     const starters = await api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false });
-    check(starters.map(agent => agent.displayName).join() === '起草者,审查者,综合者' && starters.every(agent => agent.providerId === null), 'Default members missing or silently on Mock');
+    check(starters.map(agent => agent.displayName).join() === '起草者,审查者,综合者' && starters.every(agent => agent.providerId === saved.realProviderId), 'Default members missing or silently on Mock');
     for (const starter of starters) { await memberAction(starter.displayName, '删除…'); await clickIn('dialog[open]', '删除'); await wait(dialog, value => !value, 'Member deletion did not finish'); }
     const names = ['Smoke Drafter', 'Smoke Critic', 'Smoke Synthesizer']; const roles = ['Drafter', 'Critic', 'Synthesizer'];
     for (let index = 0; index < names.length; index++) {
@@ -275,7 +279,6 @@ async function page(stage, saved) {
   await wait(() => findButton('Smoke Current Renamed 参与讨论'), Boolean, 'Edited configuration not restored');
   await click('设置'); await wait(() => document.querySelector('.settings-shell'), Boolean, 'Settings not mounted after restart');
   // D113: the remembered confirmation survived the restart for the unchanged Key.
-  check((await api.settings.getProviderKeyState({ providerId: saved.realProviderId })).sessionTargetConfirmed === true, 'Target confirmation not remembered across restart');
   return { saved, checks: ['restart actual Main/Renderer configuration/history', 'fake secure Key persistence and owner isolation', 'edited member restored'], snapshots };
 }
 

@@ -19,7 +19,7 @@ function fixture() {
   return { database, keys, registry, api, network };
 }
 const open = (api: ProviderSettingsApiContract, extra: Partial<Parameters<typeof ConnectWizard>[0]> = {}) => {
-  const onClose = vi.fn(); const onStart = vi.fn(); const onConnected = vi.fn(async () => ({ roomName: '我的第一场讨论', memberNames: ['起草者', '审查者', '综合者'], modelName: 'DeepSeek Flash' }));
+  const onClose = vi.fn(); const onStart = vi.fn(); const onConnected = vi.fn(async () => ({ roomId: 'starter-room', roomName: '我的第一场讨论', memberNames: ['起草者', '审查者', '综合者'], modelName: 'DeepSeek Flash' }));
   render(<ConnectWizard api={api} providers={[]} onClose={onClose} onStart={onStart} onConnected={onConnected} {...extra} />);
   return { onClose, onStart, onConnected };
 };
@@ -67,7 +67,8 @@ it('D136 connects a service with a pasted Key: pick it, paste, save, and the dis
   expect(database.getProviderConfiguration(provider.id)?.baseUrl).toBe('https://api.deepseek.com/');
   expect(usable(registry, provider.id, 'deepseek-flash')).toBe(true);
   expect(onConnected).toHaveBeenCalledWith(expect.objectContaining({ firstReal: true, provider: expect.objectContaining({ id: provider.id }) }));
-  expect(onStart).toHaveBeenCalled();
+  // The room just made, not whichever room was open before (an earlier demo room, say).
+  expect(onStart).toHaveBeenCalledWith('starter-room');
   expect(document.body.textContent).not.toContain('owned-fake-wizard-key');
   // Saving sends nothing: the network is used only when the host asks for 测试连接.
   expect(network).not.toHaveBeenCalled();
@@ -104,7 +105,9 @@ it('D142 a custom service takes a name, an interface type, a safe address, a Key
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   expect((await screen.findAllByRole('alert')).some(item => item.textContent?.includes('这看起来是 API Key'))).toBe(true);
   expect(database.listProviderSummaries()).toHaveLength(0);
+  expect(keyInput().value).toBe('');
   fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'any-model-v9' } });
+  fireEvent.change(keyInput(), { target: { value: 'owned-fake-custom-key' } });
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(onClose).toHaveBeenCalled());
   const provider = database.listProviderSummaries()[0];
@@ -140,7 +143,9 @@ it('测试连接 saves what is filled in and says what it found; it stays beside
   expect(test).toHaveBeenCalledWith({ providerId: database.listProviderSummaries()[0].id, level: 'authentication' });
   expect(onClose).not.toHaveBeenCalled();
   expect(keyInput().value).toBe('');
-  // The Key is saved now, so 保存 finishes without it, and does not create a second service.
+  // The service exists now: 上一步 could only send that saved Key elsewhere, so it is gone.
+  expect(screen.queryByRole('button', { name: '上一步' })).toBeNull();
+  // The Key is saved, so 保存 finishes without it, and does not create a second service.
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(onClose).toHaveBeenCalled());
   expect(database.listProviderSummaries()).toHaveLength(1);

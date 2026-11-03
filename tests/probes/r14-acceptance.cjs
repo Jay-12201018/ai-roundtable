@@ -94,7 +94,6 @@ async function main() {
     // Setup (accepted hands-on in R13A–R16): DeepSeek with a fake Key and a confirmed target, a room of three members.
     const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
     await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
-    await api('settings.confirmTarget', { providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
     const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
     for (const [index, [name, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries())
       await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });
@@ -111,20 +110,20 @@ async function main() {
     // ── 2. 本场信息 › 产物 ────────────────────────────────────────────────────
     await panelOpen();
     const panel = await js(`document.querySelector('.art-panel').innerText`);
-    for (const piece of ['整理成…', '需求文档（PRD）', '会议纪要', '行动清单', '代码候选', '每次生成发送 1 次请求', '模型写的版本要你采用后才算数', '文件路径和代码，不会执行；采用后可以逐个文件确认，写入你选的文件夹'])
+    for (const piece of ['整理成…', '需求文档（PRD）', '会议纪要', '行动清单', '代码候选', '点一下就生成', '每次生成发送 1 次请求', '文件路径和代码，不会执行；可以逐个文件确认，写入你选的文件夹'])
       check(panel.includes(piece), 'Panel says: ' + piece);
     check(!panel.includes('即将推出') && !/R1[45]/u.test(panel), 'No placeholder or development terms');
-    await capture('panel-light', '讨论结束后打开“本场信息 › 产物”：四类产物各一行，写明它是什么；顶部说明每次生成发送 1 次请求、开始前显示预计最高花费、模型写的版本要主持人采用后才算数。“代码候选”写明不会执行、采用后可以逐个文件确认写入主持人选的文件夹。', '.art-panel');
+    await capture('panel-light', '讨论结束后打开“本场信息 › 产物”：四类产物各一行，写明它是什么；顶部说明点一下就生成、每次发送 1 次请求，默认由综合类角色来写。“代码候选”写明不会执行、采用后可以逐个文件确认写入主持人选的文件夹。', '.art-panel');
 
-    // ── 3. PRD: preview, generate, candidate, adopt ─────────────────────────
+    // ── 3. PRD: 换人… shows who writes and on what; a valid version is usable at once ─
     const sent = fixture.requests.length;
-    await click('生成…', { scope: '.artifact', which: 0 });
+    await click('换人…', { scope: '.artifact', which: 0 });
     await until(`document.querySelector('dialog[open] .summary-send')`, 'generate dialog');
     const dialogText = await js(`document.querySelector('dialog[open]').innerText`);
     check(dialogText.includes('根据这场讨论的第 1–3 条发言整理一份需求文档（PRD）') && dialogText.includes('综合者（deepseek-flash）'), 'Dialog: basis range and the synthesizer by default');
     check(dialogText.includes('费用由服务商收取') && !/¥|预计/u.test(dialogText) && dialogText.includes('不会自动重试'), 'Dialog: who bills, no estimate, no automatic retry');
     check(fixture.requests.length === sent, 'Opening the dialog sent nothing');
-    await capture('prd-dialog', '点“需求文档（PRD）”的“生成…”：对话框写明依据第 1–3 条发言、默认由综合者来写（可换人）、预计最高花费（按高峰价和 4096 tokens 输出上限预留，结束后按实际结算）；说明模型按固定格式输出、检查不通过时原样保留并指出位置、不会自动重试。按钮写“生成（发送 1 次请求）”。打开对话框没有发出任何请求。', 'dialog[open]');
+    await capture('prd-dialog', '点“需求文档（PRD）”旁的“换人…”：对话框写明依据第 1–3 条发言、默认由综合者来写，可以换人；说明费用由服务商收取、不会自动重试。', 'dialog[open]');
     fixture.mode = 'hang';
     await click('生成（发送 1 次请求）');
     await until(`document.querySelector('dialog.artifact-reader')`, 'reader opens');
@@ -133,23 +132,20 @@ async function main() {
     await until(`/已收到 [1-9]/u.test(document.querySelector('dialog.artifact-reader')?.innerText ?? '') && document.querySelector('dialog.artifact-reader .art-raw')?.innerText.includes('校园跑腿')`, 'progress shown');
     await capture('prd-generating', '发送后对话框原地换成产物阅读器：第 1 版“生成中”，写着已收到多少字符（第一段输出一到就落盘，之后每 2 KB 或每秒一次），原始输出里能看到已经收到的部分；完成后自动检查格式；底部是“中止生成”。', 'dialog.artifact-reader');
     fixture.mode = 'ok'; fixture.release();
-    await readerHas('候选 · 待采用', 30000);
-    check(fixture.requests.length === sent + 1 && fixture.requests.at(-1).maxTokens === 4096, 'Exactly one request, output limit 4096');
+    await readerHas('已通过格式检查', 30000);
+    check(fixture.requests.length === sent + 1 && fixture.requests.at(-1).maxTokens === 8192, 'Exactly one request, output limit 8192');
     check(!JSON.stringify(fixture.requests.at(-1)).includes('response_format'), 'No provider JSON mode is requested');
     await safe('PRD');
     const prdText = await reader();
-    for (const piece of ['校园跑腿试点 PRD', 'R1', '下单与接单', '必须', '验收标准', '第 1 条', '<script>window.__pwned = 1</script>', '采用之后才能复制和导出'])
+    for (const piece of ['校园跑腿试点 PRD', 'R1', '下单与接单', '必须', '验收标准', '第 1 条', '<script>window.__pwned = 1</script>', '复制 Markdown'])
       check(prdText.includes(piece), 'PRD shows: ' + piece);
-    check(!prdText.includes('复制 Markdown'), 'A candidate cannot be exported yet');
-    await capture('prd-candidate', '完成后是“候选 · 待采用”：结构化显示标题、背景、目标、每条需求（编号、优先级、说明、验收标准清单、来源发言按钮）。模型写在背景里的 <script> 和需求里的 <img onerror> 原样显示为文字，没有执行或加载。底部主按钮“采用这一版”；采用前没有复制和导出。', 'dialog.artifact-reader');
-    await click('采用这一版');
-    await readerHas('已采用');
+    await capture('prd-candidate', '完成后直接可用：结构化显示标题、背景、目标、每条需求（编号、优先级、说明、验收标准清单、来源发言按钮）。模型写在背景里的 <script> 和需求里的 <img onerror> 原样显示为文字，没有执行或加载。底部主按钮“采用这一版”；采用前没有复制和导出。', 'dialog.artifact-reader');
     await click('复制 Markdown');
     await readerHas('已复制为 Markdown。');
     const markdown = clipboard.readText();
     check(markdown.startsWith('# 校园跑腿试点 PRD') && markdown.includes('### R1 下单与接单（必须）') && markdown.includes('（来源：第 1 条发言）') && markdown.includes('依据讨论第 1–3 条发言'), 'Markdown on the clipboard');
     check(!markdown.includes('只输出一个 JSON 对象') && !markdown.includes('【第 1 条') && !markdown.includes(fakeKey), 'Nothing from the request leaves with the export');
-    await capture('prd-adopted', '点“采用这一版”：状态变“有效”，出现“复制 Markdown”“复制 JSON”“另存为…”。点“复制 Markdown”后提示“已复制为 Markdown。”——剪贴板里是从采用的内容生成的 Markdown（含来源和依据范围），不含提示词、讨论原文或 Key。', 'dialog.artifact-reader');
+    await capture('prd-adopted', '格式检查通过就有“复制 Markdown”“复制 JSON”“另存为…”。点“复制 Markdown”后提示“已复制为 Markdown。”，剪贴板里是整理好的 Markdown（含来源和依据范围）。', 'dialog.artifact-reader');
 
     // A cited message goes back to its place in the timeline.
     await click('第 2 条', { selector: 'button.art-source' });
@@ -159,11 +155,10 @@ async function main() {
 
     // ── 4. Minutes: invalid JSON kept with field-located errors, fixed by hand ─
     await panelOpen();
-    await click('生成…', { scope: '.artifact', which: 0 });
-    await until(`document.querySelector('dialog[open] .summary-send')`, 'minutes dialog');
-    check((await js(`document.querySelector('dialog[open] h2').textContent`)) === '生成会议纪要', 'The minutes dialog');
-    await click('生成（发送 1 次请求）');
+    const beforeMinutes = fixture.requests.length;
+    await click('生成', { scope: '.artifact', which: 0 });
     await readerHas('格式检查没有通过', 30000);
+    check(fixture.requests.length === beforeMinutes + 1, 'One click, one request');
     const invalidText = await reader();
     check(invalidText.includes('参与者') && invalidText.includes('应该是列表') && invalidText.includes('决策 第 1 项 › 决定人') && invalidText.includes('缺少这个字段'), 'Errors name the fields');
     check(invalidText.includes('格式检查没有通过：3 处问题') && invalidText.includes('第 7 条不在这次依据的发言里（第 1–3 条）'), 'The out-of-range source is listed with the schema errors, all at once');
@@ -193,24 +188,19 @@ async function main() {
     check(fixture.requests.length === afterInvalid, 'Fixing by hand sent nothing');
     const minutesText = await reader();
     check(minutesText.includes('决定人') && minutesText.includes('未知'), 'Unknown shown as 未知');
-    await capture('minutes-fixed', '保存后成为第 2 版“你修改的版本”，直接有效（主持人写的不需要再采用）；决策的“决定人”显示为“未知”。版本下拉里第 1 版仍是“校验失败”，原始输出可随时查看。整个修改没有发出请求。', 'dialog.artifact-reader');
+    await capture('minutes-fixed', '保存后成为第 2 版“你修改的版本”，直接有效；决策的“决定人”显示为“未知”。版本下拉里第 1 版仍是“校验失败”，原始输出可随时查看。整个修改没有发出请求。', 'dialog.artifact-reader');
     await key('Escape');
 
     // ── 5. Action list with unknown owners and dates; code candidate preview ──
     await panelOpen();
-    await click('生成…', { scope: '.artifact', which: 0 });
-    await until(`document.querySelector('dialog[open] .summary-send')`, 'actions dialog');
-    await click('生成（发送 1 次请求）');
-    await readerHas('候选 · 待采用', 30000);
+    await click('生成', { scope: '.artifact', which: 0 });
+    await readerHas('已通过格式检查', 30000);
     const actionsText = await reader();
     check(actionsText.includes('2 项没有明确负责人，标为“未知”') && actionsText.includes('第 2 周前') && actionsText.includes('受阻'), 'Unknown owners stay unknown; dates as said');
     await capture('actions-candidate', '行动清单：事项、负责人、截止时间、状态、来源。讨论里没指派的负责人和没说的截止时间显示为“未知”，顶部提示“2 项没有明确负责人”；截止时间照抄讨论原话“第 2 周前”，没有换算成日期。', 'dialog.artifact-reader');
-    await click('采用这一版'); await readerHas('已采用');
     // D125: a request that ends without a result says why, what it cost and what to do; nothing is retried.
-    await click('重新生成…');
-    await until(`[...document.querySelectorAll('dialog[open] h2')].some(e => e.textContent === '重新生成行动清单')`, 'actions regenerate dialog');
     fixture.mode = 'hang';
-    await click('生成（发送 1 次请求）', { which: 'last' });
+    await click('重新生成', { scope: 'dialog.artifact-reader .modal-foot' });
     await readerHas('正在生成：已收到', 30000);
     await click('中止生成');
     await readerHas('这次请求已中止。', 30000);
@@ -223,34 +213,30 @@ async function main() {
     const afterStop = fixture.requests.length;
     await sleep(1500);
     check(fixture.requests.length === afterStop, 'Nothing is retried after a stop');
-    await capture('actions-stopped', '在行动清单里点“重新生成…”，生成到一半点“中止生成”：第 2 版写明“这次请求已中止。请求可能已经发出，费用暂记为未知（按上限 ¥… 计）；可以到服务商控制台核对后，在用量页核销。没有自动重试，可以重新生成。”——原因、费用和下一步都说清，“重新生成…”是主按钮。网络中断、限流、Key 失效等失败按同样的格式写出各自的原因（只用脱敏的公开错误码）。第 1 版仍然有效。', 'dialog.artifact-reader');
+    await capture('actions-stopped', '在行动清单里点“重新生成”，生成到一半点“中止生成”：第 2 版写明“这次请求已中止。请求可能已经发出，服务商可能已经计入用量。”没有自动重试；“重新生成”成为主按钮，部分输出保留。', 'dialog.artifact-reader');
     await key('Escape');
     await panelOpen();
-    await click('生成…', { scope: '.artifact', which: 0 });
+    await click('换人…', { scope: '.artifact', which: 0 });
     await until(`document.querySelector('dialog[open] .summary-send')`, 'code dialog');
     const codeDialog = await js(`document.querySelector('dialog[open]').innerText`);
-    check(codeDialog.includes('8192 tokens 输出上限'), 'Code gets a larger output limit, stated in the cost');
     check(codeDialog.includes('讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会计入服务商的用量。'), 'The dialog says an honest nothing still costs a request');
     await click('生成（发送 1 次请求）');
     await readerHas('没有可整理的内容', 30000);
     const emptyText = await reader();
     check(emptyText.includes('这不是模型出错') && emptyText.includes('讨论记录中没有出现任何代码设计或实现要求') && !emptyText.includes('校验失败'), 'Nothing of this kind is its own state, with the reason');
-    check(!(await ui.find('采用这一版')) && !(await ui.find('复制 JSON')), 'Nothing to adopt or export');
-    await capture('code-empty', '这场讨论没有涉及代码：模型按约定只回了 {"nothing": 原因}。阅读器显示“没有可整理的内容”（中性灰，不是红色的校验失败），写明这不是模型出错、这一版不能采用或导出，并原样给出模型的说明；底部是“重新生成…”（主按钮）和“自己写一版…”，没有采用和导出。', 'dialog.artifact-reader');
-    await click('重新生成…');
-    await until(`[...document.querySelectorAll('dialog[open] h2')].some(e => e.textContent === '重新生成代码候选')`, 'code regenerate dialog');
-    await click('生成（发送 1 次请求）', { which: 'last' });
-    await readerHas('第 2 版', 30000); await readerHas('候选 · 待采用', 30000);
+    check(!(await ui.find('复制 JSON')), 'Nothing to export');
+    await capture('code-empty', '这场讨论没有涉及代码：模型按约定只回了 {"nothing": 原因}。阅读器显示“没有可整理的内容”（中性灰，不是红色的校验失败），写明这不是模型出错、这一版不能导出，并原样给出模型的说明；底部是“重新生成…”（主按钮）和“自己写一版…”，没有采用和导出。', 'dialog.artifact-reader');
+    await click('重新生成', { scope: 'dialog.artifact-reader .modal-foot' });
+    await readerHas('第 2 版', 30000); await readerHas('已通过格式检查', 30000);
     const codeText = await reader();
-    check(codeText.includes('这些代码不会被执行。采用之后可以写入你选的文件夹，写之前会逐个文件列出差异，由你勾选。') && codeText.includes('src/pilot/fee.ts') && codeText.includes('riderIncome'), 'Code preview with path and code');
-    await capture('code-candidate', '代码候选：顶部写明“这些代码不会被执行”，采用之后才能写入主持人选的文件夹、写之前逐个文件列出差异；每个文件显示相对路径、语言和行数，代码用净化后的代码块显示（可复制）。', 'dialog.artifact-reader');
-    await click('采用这一版'); await readerHas('已采用');
+    check(codeText.includes('“写入文件夹…”会先逐个文件列出新建、覆盖和差异，只写你勾选的文件；不会运行任何代码。') && codeText.includes('src/pilot/fee.ts') && codeText.includes('riderIncome'), 'Code preview with path and code');
+    await capture('code-candidate', '代码候选：写明“写入文件夹…”会先逐个文件列出差异、不会运行任何代码；每个文件显示相对路径、语言和行数，代码用净化后的代码块显示（可复制）。', 'dialog.artifact-reader');
     const codeAdopted = await reader();
     check(!codeAdopted.includes('另存为…') && codeAdopted.includes('写入文件夹…') && codeAdopted.includes('“写入文件夹…”会先逐个文件列出新建、覆盖和差异'), 'No plain file save for code; R15 writing is offered and explained');
     const candidates = await api('artifact.listCodeCandidates', { runId: (await runSnapshot()).runId });
-    check(candidates.candidates.length === 1 && candidates.candidates[0].files[0].path === 'src/pilot/fee.ts' && candidates.candidates[0].status === 'valid', 'R15 sees the adopted code candidate');
+    check(candidates.candidates.length === 1 && candidates.candidates[0].files[0].path === 'src/pilot/fee.ts' && candidates.candidates[0].status === 'valid', 'R15 sees the valid code version');
     check(fs.readdirSync(exportsDir).length === 0 && !fs.existsSync(join(probe.directory, 'src')), 'Nothing written to disk for code');
-    await capture('code-adopted', '采用后代码候选有效：可以“复制 Markdown / JSON”；没有“另存为…”，取而代之的是红色的“写入文件夹…”（R15），并写明会先逐个文件列出新建、覆盖和差异、只写勾选的文件。供后续写盘功能读取的接口只列出这份已采用、通过校验的候选；磁盘上没有任何新文件。', 'dialog.artifact-reader');
+    await capture('code-adopted', '代码候选可以“复制 Markdown / JSON”；没有“另存为…”，取而代之的是红色的“写入文件夹…”（R15）。', 'dialog.artifact-reader');
     await key('Escape');
 
     // ── 6. A source message edited → affected → regenerate ──────────────────
@@ -264,25 +250,26 @@ async function main() {
     await click('打开需求文档（PRD）', { prefix: true });
     await readerHas('受影响：');
     check((await reader()).includes('依据的第 1 条发言在这一版写成后被修改或重新生成'), 'The note names the message');
-    await capture('prd-affected', '打开需求文档：顶部提示“受影响：依据的第 1 条发言在这一版写成后被修改或重新生成，内容可能已经过时”，旁边就是“重新生成…”。', 'dialog.artifact-reader');
-    await click('重新生成…', { scope: '.note' });
+    await capture('prd-affected', '打开需求文档：顶部提示“受影响：依据的第 1 条发言在这一版写成后被修改或重新生成，内容可能已经过时”，旁边就是“重新生成”。', 'dialog.artifact-reader');
+    await click('换人…', { scope: 'dialog.artifact-reader .modal-foot' });
     await until(`[...document.querySelectorAll('dialog[open] h2')].some(e => e.textContent === '重新生成需求文档（PRD）')`, 'regenerate dialog');
     check((await js(`[...document.querySelectorAll('dialog[open]')].at(-1).innerText`)).includes('会作为新的一版保存，之前的版本都保留'), 'Regenerating keeps earlier versions');
-    await capture('prd-regenerate-dialog', '“重新生成需求文档（PRD）”：沿用上次的成员（综合者），说明会作为新的一版、之前的版本都保留，并写明预计最高花费。', 'dialog[open]:last-of-type');
+    await capture('prd-regenerate-dialog', '“换人…”打开“重新生成需求文档（PRD）”：沿用上次的成员（综合者），说明会作为新的一版、之前的版本都保留。', 'dialog[open]:last-of-type');
+    await click('取消', { which: 'last' });
+    await until(`document.querySelectorAll('dialog[open]').length === 1`, 'back to the reader');
     const beforeRegen = fixture.requests.length;
-    await click('生成（发送 1 次请求）');
-    await readerHas('第 2 版', 30000); await readerHas('候选 · 待采用', 30000);
+    await click('重新生成', { scope: 'dialog.artifact-reader .note' });
+    await readerHas('第 2 版', 30000); await readerHas('已通过格式检查', 30000);
     check(fixture.requests.length === beforeRegen + 1 && JSON.stringify(fixture.requests.at(-1).messages).includes('试点方案（主持人修改）'), 'One request, based on the edited message');
     check(!(await reader()).includes('受影响：'), 'The new version is not affected');
-    await click('采用这一版'); await readerHas('已采用');
-    await capture('prd-regenerated', '重新生成得到第 2 版（依据修改后的第 1 条，范围改成 2 栋），不再受影响；已采用。版本下拉里第 1 版仍保留并标“受影响”。', 'dialog.artifact-reader');
+    await capture('prd-regenerated', '重新生成得到第 2 版（依据修改后的第 1 条，范围改成 2 栋），不再受影响。版本下拉里第 1 版仍保留并标“受影响”。', 'dialog.artifact-reader');
 
     // ── 7. Save as a file through Main's dialog ─────────────────────────────
     await click('另存为…');
     await click('Markdown 文件（.md）');
     await readerHas('已保存为“校园跑腿试点 PRD.md”。');
     const saved = fs.readFileSync(join(exportsDir, '校园跑腿试点 PRD.md'), 'utf8');
-    check(saved.includes('2 栋宿舍楼') && saved.includes('第 2 版') && !saved.includes(fakeKey), 'The saved file is the adopted version 2');
+    check(saved.includes('2 栋宿舍楼') && saved.includes('第 2 版') && !saved.includes(fakeKey), 'The saved file is version 2');
     check(result.saveDialogs.length === 1 && result.saveDialogs[0].title === '导出产物' && result.saveDialogs[0].filters[0].extensions[0] === 'md', 'Main asked where to save');
     await capture('prd-saved', '“另存为… › Markdown 文件（.md）”由 Main 弹出系统保存对话框，只写入主持人选的文件（探针选了自己的临时目录），提示“已保存为‘校园跑腿试点 PRD.md’”；状态变成“有效 · 已导出”。', 'dialog.artifact-reader');
 

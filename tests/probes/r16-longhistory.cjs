@@ -18,7 +18,6 @@ async function main() {
   const { js, until, api, mouse, send, click, capture } = ui;
   const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await api('settings.setKey', { providerId: provider.id, apiKey: 'r16-long-fake-key' });
-  await api('settings.confirmTarget', { providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
   const room = await api('rooms.createRoom', { name: '长历史', objective: '' });
   for (const [index, name] of ['起草者', '审查者', '综合者'].entries()) {
     await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: '成员', systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });

@@ -57,7 +57,6 @@ async function main() {
   // and a room with three DeepSeek members. Everything after this is real input in the new screen.
   const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
-  await api('settings.confirmTarget', { providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
   const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
   const agents = [];
   for (const [index, [name, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries()) {
@@ -75,7 +74,7 @@ async function main() {
   check(fixture.requests.length === 0 && !(await js(`document.querySelector('[aria-label="运行控制"]')`)), 'IME Enter in the goal box did not start a discussion');
   await capture('new-light', '新讨论');
   await click('更多设置');
-  check(await js(`document.querySelector('[role=group][aria-label="更多设置"] [aria-label="单次输出上限（token）"]').value`) === '4096', 'Output limit defaults to 4096 in 更多设置');
+  check(await js(`document.querySelector('[role=group][aria-label="更多设置"] [aria-label="单次输出上限（token）"]').value`) === '8192', 'Output limit defaults to 8192 in 更多设置');
   await capture('settings-pop-light', '更多设置');
   await key('Escape');
   check(!(await js(`document.querySelector('[role=group][aria-label="更多设置"]')`)), 'Esc closes the settings popover');
@@ -181,22 +180,20 @@ async function main() {
   await click('运行详情（排查问题时用）', { selector: 'summary' });
   await click('产物', { selector: '[role=tab]' });
   const panelText = await js(`document.querySelector('.run-panel').innerText`);
-  // R14: the artifacts tab is live; it states the cost and the adoption rule, without development terms.
-  check(panelText.includes('整理成…') && panelText.includes('每次生成发送 1 次请求') && panelText.includes('模型写的版本要你采用后才算数') && !panelText.includes('即将推出') && !/R1[45]/u.test(panelText), 'Artifacts tab states cost and adoption without development terms');
+  // R14: the artifacts tab is live; it says each generation is one request, without development terms.
+  check(panelText.includes('整理成…') && panelText.includes('每次生成发送 1 次请求') && !panelText.includes('即将推出') && !/R1[45]/u.test(panelText), 'Artifacts tab states cost and adoption without development terms');
   await click('进度', { selector: '[role=tab]' });
 
-  // ── 9. Summary: dialog with coverage and cost; nothing is sent until the button ─
-  await click('生成讨论摘要…');
-  await until(`document.querySelector('dialog.modal .summary-cost')`, 'summary dialog');
+  // ── 9. Summary: the dialog is there to choose the range and the writer; one click makes it and it is in use at once (D140) ─
+  await click('选择范围和成员…');
+  await until(`document.querySelector('dialog.modal .summary-send')`, 'summary dialog');
   check(fixture.requests.length === before + 1, 'Opening the summary dialog sent nothing');
   await capture('summary-dialog-light', '摘要对话框');
-  await click('生成摘要（发送 1 次请求）');
-  await until(`document.querySelector('.summary-card')?.innerText.includes('待确认')`, 'summary pending', 30000);
-  await capture('summary-pending-light', '摘要待确认', '.summary-card');
-  await click('确认使用');
-  await until(`document.querySelector('.summary-card')?.innerText.includes('已确认 · 之后的发言用它代替原文')`, 'summary confirmed');
+  await click('取消', { scope: 'dialog.modal' });
+  await click('生成讨论摘要');
+  await until(`document.querySelector('.summary-card')?.innerText.includes('之后的发言用它代替原文')`, 'summary in use', 30000);
   check(await js(`document.querySelectorAll('.msg.is-covered').length >= 1`), 'Covered originals are marked and still shown');
-  await capture('summary-confirmed-light', '摘要已确认', '.summary-card');
+  await capture('summary-confirmed-light', '摘要生成后直接生效', '.summary-card');
 
   // ── 10. Truncated → 续写; stop from paused ──────────────────────────
   await click('新讨论', { selector: '.sb-new' });
@@ -289,7 +286,7 @@ async function main() {
   await until(`document.querySelector('.thread-item .md')`, 'streaming in dark');
   await click('停止');
   await until(`document.querySelector('[role=dialog][aria-label="确认停止运行"]')`, 'stop confirm in dark');
-  check((await js(`document.querySelector('[role=dialog][aria-label="确认停止运行"]').innerText`)).includes('可能已经计费'), 'Running stop wording warns of a billed request and its cap');
+  check((await js(`document.querySelector('[role=dialog][aria-label="确认停止运行"]').innerText`)).includes('服务商可能已经计入用量'), 'Running stop wording warns that the request may count');
   await capture('stop-confirm-dark', '深色 运行中停止');
   await click('停止讨论');
   await statusHas('已停止', 30000);

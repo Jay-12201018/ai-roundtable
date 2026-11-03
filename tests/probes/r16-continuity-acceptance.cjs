@@ -37,7 +37,6 @@ async function main() {
 
   const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
-  await api('settings.confirmTarget', { providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
   const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
   for (const [index, [name, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries()) {
     await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });
@@ -144,7 +143,7 @@ async function main() {
   };
   // Dark theme for the continue box.
   await themeTo('深色');
-  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('整轮最多')`, 'dark preview');
+  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('各回应一次')`, 'dark preview');
   await capture('continue-box-dark', '深色：继续讨论的输入框');
   await themeTo('浅色');
 

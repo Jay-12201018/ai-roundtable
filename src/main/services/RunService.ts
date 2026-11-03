@@ -613,7 +613,7 @@ export class RunService {
     const record = { covered, ...(existing?.basedOnSummaryId ?? basedOn?.record.id ? { basedOnSummaryId: existing?.basedOnSummaryId ?? basedOn!.record.id } : {}) };
     const basis = summaryBasis(snapshot, record);
     const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: plan.messages, outputTokenLimit: this.memberOutputLimit(context.outputTokenLimit, member), agentRole: 'summary' });
-    const tracked = Boolean(member.providerId && this.registry);
+    const tracked = this.tracksUsage(member);
     context.job = {};
     try {
       this.schedule(context, () => {
@@ -769,7 +769,7 @@ export class RunService {
     const artifactId = existing?.id ?? randomUUID();
     const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: request.messages, outputTokenLimit: plan.outputTokenLimit,
       agentRole: `artifact:${input.kind}` });
-    const tracked = Boolean(member.providerId && this.registry);
+    const tracked = this.tracksUsage(member);
     context.job = {};
     try {
       this.schedule(context, () => {
@@ -1358,7 +1358,7 @@ export class RunService {
     const requestId = randomUUID();
     const job = repeat?.kind === 'regenerate' && repeat.job;
     const extend = repeat?.kind === 'regenerate' ? repeat.extend : undefined;
-    const tracked = Boolean(member.providerId && this.registry);
+    const tracked = this.tracksUsage(member);
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
       const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, directed);
@@ -1528,6 +1528,11 @@ export class RunService {
   /** D134: the output limit of one member's requests: the Run's, never above what that member's model takes. */
   private memberOutputLimit(limit: number, member: MemberSnapshot): number {
     return Math.min(limit, this.modelBudget(member)?.maxOutputTokens ?? limit);
+  }
+
+  /** The usage page counts what a service reported; a demo member's numbers are made up and stay out of it. */
+  private tracksUsage(member: MemberSnapshot): boolean {
+    return Boolean(member.providerId && this.registry) && this.database.getProviderConfiguration(member.providerId!)?.kind !== 'mock';
   }
 
   /** D133: a request's usage from evidence only: provider usage of a terminal stream, or proof it was never sent. */

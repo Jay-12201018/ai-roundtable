@@ -1,8 +1,8 @@
-// R15 hands-on acceptance: writing an adopted code candidate into a folder, through the production build with real
+// R15 hands-on acceptance: writing a valid code version into a folder, through the production build with real
 // mouse, keyboard and IME input. Isolation, network blocking and the DeepSeek loopback fixture come from r16-harness.cjs.
 // The folder the host "picks" in Main's dialog is a directory inside this probe's own temporary profile; a sentinel
 // folder next to it (and a link into it) proves nothing outside the chosen folder changes. Two launches of one profile:
-//   electron tests/probes/r15-acceptance.cjs                   adopt → preview → partial write → external edit refused → link refused
+//   electron tests/probes/r15-acceptance.cjs                   generate → preview → partial write → external edit refused → link refused
 //   electron tests/probes/r15-acceptance.cjs --restart <dir>   the write records are intact; the folder must be chosen again
 // Screenshots go to docs/verification/r15-screens/ (01–39 first launch, 40–49 restart).
 const assert = require('node:assert/strict');
@@ -101,35 +101,30 @@ async function main() {
     // Setup (accepted hands-on in R13A–R16): DeepSeek with a fake Key and a confirmed target, a room of three members.
     const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
     await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
-    await api('settings.confirmTarget', { providerId: provider.id, baseUrl: 'https://api.deepseek.com', confirmed: true });
     const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
     for (const [index, [name, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries())
       await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });
     await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded'); await ui.ensureLocator();
 
-    // ── 1. A finished discussion and an adopted code candidate ──────────────
+    // ── 1. A finished discussion and a valid code version ───────────────────
     await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
     await has('这场讨论要解决什么？');
     await field('讨论目标'); await selectAll(); await ime('shidian', '为学校设计一个校园跑腿平台的试点方案：说清定价和夜间规则，并写出代码。');
     await click('开始讨论');
     await statusHas('已完成', 60000);
     await panelOpen();
-    check((await js(`document.querySelector('.art-panel').innerText`)).includes('采用后可以逐个文件确认，写入你选的文件夹'), 'The panel says code can be written after adoption, file by file');
-    await click('生成…', { scope: '.artifact', which: 3 });
-    await until(`document.querySelector('dialog[open] .summary-cost')`, 'code dialog');
-    await click('生成（发送 1 次请求）');
-    await readerHas('候选 · 待采用', 30000);
-    check(!(await ui.find('写入文件夹…')), 'A candidate the host has not adopted cannot be written');
-    await click('采用这一版'); await readerHas('已采用');
+    check((await js(`document.querySelector('.art-panel').innerText`)).includes('可以逐个文件确认，写入你选的文件夹'), 'The panel says code can be written, file by file');
+    await click('生成', { scope: '.artifact', which: 3 });
+    await readerHas('已通过格式检查', 30000);
     const writeButton = await js(`[...document.querySelectorAll('dialog.artifact-reader .modal-foot button')].find(b => b.textContent.includes('写入文件夹…'))?.className ?? ''`);
     check(writeButton.includes('is-danger'), 'The entry is styled as a dangerous action');
     check((await js(`document.querySelector('dialog.artifact-reader').innerText`)).includes('“写入文件夹…”会先逐个文件列出新建、覆盖和差异，只写你勾选的文件；不会运行任何代码。'), 'The reader explains what writing does');
-    await capture('reader-adopted', '采用代码候选后，阅读器底部多了红色描边的“写入文件夹…”（和普通的复制按钮区分开）；正文上方写明会先逐个文件列出新建、覆盖和差异、只写勾选的文件、不会运行任何代码。没采用的候选没有这个按钮。', 'dialog.artifact-reader');
+    await capture('reader-adopted', '代码候选通过格式检查后，阅读器底部就有红色描边的“写入文件夹…”（和普通的复制按钮区分开）；正文上方写明会先逐个文件列出新建、覆盖和差异、只写勾选的文件、不会运行任何代码。没采用的候选没有这个按钮。', 'dialog.artifact-reader');
 
     // ── 2. The dialog; cancelling the folder dialog writes nothing ──────────
     await openExport();
     const intro = await exportText();
-    for (const piece of ['把这一版的 7 个文件写进你选的文件夹，只会写在这个文件夹里面。', '只写入你勾选的文件；覆盖现有文件要单独勾选。', '不会运行其中任何代码或命令，文件只作为文本写入。'])
+    for (const piece of ['把这一版的 7 个文件写进你选的文件夹，只会写在这个文件夹里面。', '新建的文件默认勾选，可以取消；覆盖现有文件要单独勾选。', '不会运行其中任何代码或命令，文件只作为文本写入。'])
       check(intro.includes(piece), 'Intro says: ' + piece);
     await capture('export-intro', '点“写入文件夹…”：先说明三步——选文件夹（只会写在它里面）、逐个文件查看会怎样、只写勾选的文件（覆盖要单独勾选），并写明不会运行任何代码或命令。此时还没有读写任何文件。', 'dialog.code-export');
     answers.push({ canceled: true, filePaths: [] });
@@ -155,9 +150,11 @@ async function main() {
     check((await rowText('README.md')).includes('和现有文件完全一样，不需要写入'), 'Same content needs no write');
     check((await rowText('aux.ts')).includes('系统保留的名字'), 'A reserved name is refused');
     check((await rowText('shared/config.ts')).includes('路径上有一段是符号链接，可能指向所选文件夹以外'), 'A link inside the folder is refused');
-    check(await js(`document.querySelectorAll('dialog.code-export input[type=checkbox]').length`) === 4 && await js(`document.querySelectorAll('dialog.code-export input[type=checkbox]:checked').length`) === 0,
-      'Four files can be ticked, none is ticked by default');
-    check(await js(`[...document.querySelectorAll('dialog.code-export .modal-foot button')].at(-1).disabled`), 'Writing is unavailable until a file is ticked');
+    check(await js(`document.querySelectorAll('dialog.code-export input[type=checkbox]').length`) === 4 && await js(`document.querySelectorAll('dialog.code-export input[type=checkbox]:checked').length`) === 2,
+      'Four files can be ticked; the two new ones start ticked, the two overwrites do not (D141)');
+    await click('新建 src/pilot/rules/night.ts', { selector: 'input[type=checkbox]' }); await click('新建 docs/试点说明.md', { selector: 'input[type=checkbox]' });
+    check(await js(`[...document.querySelectorAll('dialog.code-export .modal-foot button')].at(-1).disabled`), 'Writing is unavailable when nothing is ticked');
+    await click('新建 src/pilot/rules/night.ts', { selector: 'input[type=checkbox]' }); await click('新建 docs/试点说明.md', { selector: 'input[type=checkbox]' });
     check(JSON.stringify(tree(workspace)) === JSON.stringify(before), 'The preview changed nothing on disk');
     await capture('preview-top', '选好文件夹后，Main 只读检查每个文件：顶部是所选文件夹和“换一个文件夹… / 重新检查”；汇总“新建 2 · 覆盖 2 · 内容相同 1 · 不能写入 2”，并写明没勾选的不会写、现在什么都没写。所有可写的文件默认都不勾选，底部“写入文件”不可用并提示先勾选。', 'dialog.code-export');
     const feeDiff = await rowText('src/pilot/fee.ts');
@@ -166,7 +163,9 @@ async function main() {
     await capture('preview-refused', '列表下方：README.md 内容相同、不需要写入；aux.ts 用了 Windows 保留名，路径无效；shared/config.ts 的 shared 是指向所选文件夹以外的符号链接，不能写入。这三行都没有勾选框。', '.cx-file.is-conflict');
 
     // ── 4. Tick a part, write, check the disk ───────────────────────────────
-    await click('新建 src/pilot/rules/night.ts', { selector: 'input[type=checkbox]' });
+    // D141: new files start ticked, overwrites do not. Keep only night.ts of the new files.
+    check(await js(`[...document.querySelectorAll('dialog.code-export .modal-foot button')].at(-1).textContent`) === '写入 2 个文件', 'Both new files start ticked');
+    await click('新建 docs/试点说明.md', { selector: 'input[type=checkbox]' });
     check(await js(`[...document.querySelectorAll('dialog.code-export .modal-foot button')].at(-1).textContent`) === '写入 1 个文件', 'One create ticked');
     await click('覆盖 src/pilot/fee.ts', { selector: 'input[type=checkbox]' });
     const footer = await js(`(() => { const b = [...document.querySelectorAll('dialog.code-export .modal-foot button')].at(-1); return { text: b.textContent, cls: b.className }; })()`);
@@ -198,6 +197,7 @@ async function main() {
     await exportHas('没有勾选的文件不会写入');
     check(result.openDialogs.length === 3, 'The remembered folder needs no new dialog');
     check((await rowText('src/pilot/fee.ts')).includes('和现有文件完全一样') && (await rowText('config/settings.json')).includes('+2 −2 行'), 'The new check reflects the first write');
+    await click('新建 docs/试点说明.md', { selector: 'input[type=checkbox]' });
     await click('覆盖 config/settings.json', { selector: 'input[type=checkbox]' });
     await capture('second-preview', '再次打开“写入文件夹…”：同一窗口里上次选的文件夹会立即重新检查（只读）。fee.ts 和 night.ts 现在“内容相同”；勾选覆盖 config/settings.json。', 'dialog.code-export');
     const external = json({ commission: 0.1, nightCutoff: 22, buildings: 4, note: '外部编辑器刚改过' }) + '\n';
@@ -225,7 +225,6 @@ async function main() {
     await exportHas('没有勾选的文件不会写入');
     await noOverflow('preview 800 dark');
     await capture('preview-800-dark', '800×600 深色：长的文件夹路径自动换行；差异的行号、+/− 标记和红绿底色在深色下对比清楚；没有横向滚动。', '.cx-file.is-overwrite');
-    await click('新建 docs/试点说明.md', { selector: 'input[type=checkbox]' });
     await click('写入 1 个文件');
     await exportHas('已写入 1 个文件');
     check(read('docs/试点说明.md').includes('抽成 8%'), 'The Chinese file name was written');

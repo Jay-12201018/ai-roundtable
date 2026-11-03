@@ -3,13 +3,13 @@
 // DeepSeek loopback fixture come from r16-harness.cjs; a loopback CONNECT proxy owned by this probe answers 检测代理.
 // Three launches of one profile:
 //   electron tests/probes/r16-batch2-acceptance.cjs                      first run (welcome → demo → connect → room → mode → discussion → proxy)
-//   electron tests/probes/r16-batch2-acceptance.cjs --restart <dir>      the saved proxy is in effect; nothing asks to confirm the target again (D113)
-//   electron tests/probes/r16-batch2-acceptance.cjs --restart2 <dir>     direct again: a discussion sends without confirming; a new Key needs it
+//   electron tests/probes/r16-batch2-acceptance.cjs --restart <dir>      the saved switch is in effect; nothing asks to confirm anything (D136)
+//   electron tests/probes/r16-batch2-acceptance.cjs --restart2 <dir>     direct again: a discussion sends; a new Key works at once
 // Screenshots go to docs/verification/r16-batch2-screens/ (01–29, 40–49, 60–79).
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const { resolve } = require('node:path');
-const { app } = require('electron');
+const { session } = require('electron');
 const { createProbe } = require('./r16-harness.cjs');
 
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--inspect'));
@@ -20,9 +20,6 @@ const { fixture, check, sleep, result } = probe;
 const screens = resolve(probe.root, 'docs/verification/r16-batch2-screens');
 const fakeKey = 'r16b2-fake-deepseek-key';
 
-// A relaunch would start this script again outside its phase: record it instead (the restart phases relaunch by hand).
-result.relaunches = 0; result.quitRequests = 0;
-app.relaunch = () => { result.relaunches++; };
 
 const replies = {
   起草者: '### 试点方案（初稿）\n\n1. 范围：3 栋宿舍楼，试点 4 周。\n2. 定价：基础费 2 元/单，抽成 15%。',
@@ -41,6 +38,8 @@ async function main() {
   await new Promise(done => proxy.listen(0, '127.0.0.1', done)); fixture.proxyPort = proxy.address().port;
   const ui = await probe.start({ screens, width: 1280, height: 800, keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : phase === 'restart' ? 39 : 59 });
   const { js, until, click, field, key, selectAll, ime, type, capture, resize, api, text, runSnapshot, finish } = ui;
+  // What the system's proxy setting answers on this machine must not decide the result.
+  session.defaultSession.resolveProxy = async () => `PROXY 127.0.0.1:${fixture.proxyPort}`;
   const has = value => until(`document.body.innerText.includes(${JSON.stringify(value)})`, value);
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
   const noOverflow = async label => check(await js('document.documentElement.scrollWidth <= window.innerWidth'), `${label}: no horizontal page scroll`);
@@ -57,8 +56,8 @@ async function main() {
     // ── G · first use ──────────────────────────────────────────────────────────
     await has('让几位 AI 围坐一桌，替你把问题讨论透');
     const welcome = await text();
-    for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '建房间、选成员（默认起草 · 审查 · 综合）', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型',
-      '支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini，以及其他兼容 OpenAI 接口的服务。'])
+    for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '写下目标，开始讨论', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型',
+      '支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他 OpenAI 兼容或自定义接口。'])
       check(welcome.includes(piece), 'Welcome says: ' + piece);
     check(!/价格|审核/u.test(welcome), 'The welcome page says nothing about prices');
     check(await js(`!document.querySelector('[aria-label="讨论目标"]')`), 'No goal box before anything exists');
@@ -85,30 +84,27 @@ async function main() {
     check((await runSnapshot()).turns.length === 3 && fixture.requests.length === 0, 'The demo discussion ran on Mock, with no network');
     await capture('demo-done', '演示讨论跑完：三位演示成员依次发言（Mock，不联网）。');
 
-    // ── E · connect wizard (D113) ───────────────────────────────────────────────
+    // ── E · connect wizard (D136, D142) ─────────────────────────────────────────
     await click('设置', { selector: '.sb-item' }); await click('添加服务');
     const step1 = await js(`document.querySelector('dialog[open]').innerText`);
-    for (const service of ['OpenAI', 'Anthropic Claude', 'Google Gemini']) check(step1.includes(service), `${service} is offered`);
+    for (const service of ['DeepSeek', 'Kimi', '通义千问', '智谱 GLM', '豆包', 'MiniMax', '自定义服务']) check(step1.includes(service), `${service} is offered`);
     check(!/价格|审核/u.test(step1), 'No service is held back by a price');
-    await capture('wizard-1-services', '设置 › 模型服务 › 添加服务，第 1 步：DeepSeek（推荐，已按官方价格核对）预选；OpenAI、Claude、Gemini、其他兼容服务都写明“价格尚未审核，暂时不能用于讨论”，配置之前就说清楚；演示（Mock）写明回复是预设示例。', 'dialog[open]');
-    await click('下一步');
+    await capture('wizard-1-services', '设置 › 模型服务 › 添加服务：六家国内服务、自定义服务和演示，只写在哪里创建 Key。');
+    await click('DeepSeek', { selector: '.choice', prefix: true });
     check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The address is written right above the Key');
-    check((await text()).includes('保存即表示你确认了上面的地址'), 'Saving is the confirmation');
+    check(!(await js(`document.querySelector('dialog[open]').innerText`)).includes('确认'), 'Nothing asks to confirm the address');
     await field('API Key'); await type(fakeKey);
-    await capture('wizard-2-key', '第 2 步：地址“Key 只会发往 https://api.deepseek.com”写在 API Key 正上方，底部“保存即表示你确认了上面的地址”（D1-B）；Key 输入框是密码框，说明写明存进系统钥匙串、不会出现在记录/日志/导出里。', 'dialog[open]');
-    await click('保存并连接');
-    await has('DeepSeek 已连接'); await has('已为你建好房间「我的第一场讨论」');
+    await capture('wizard-2-key', '贴 Key：地址“Key 只会发往 https://api.deepseek.com”写在 API Key 正上方；Key 输入框是密码框，说明写明存进系统钥匙串、不进日志和导出；保存就能用，测试连接是可选的。');
+    await click('测试连接');
+    await until(`document.querySelector('dialog[open]')?.innerText.includes('Key 有效，连接正常')`, 'tested');
     await keyLeak();
-    const connected = await text();
-    check(connected.includes('Key 有效'), 'The model list answered, and the page says so');
-    check(connected.includes('DeepSeek Flash 可以用于讨论') && !/¥|价格/u.test(connected), 'The model is usable; no price anywhere');
-    check(fixture.requests.every(request => request.method === 'GET'), 'Connecting sent no generation request');
-    const ds = await deepseek();
-    check(ds.isDefault && (await api('settings.getProviderKeyState', { providerId: ds.id })).sessionTargetConfirmed === true, 'DeepSeek is the default service with its target confirmed');
-    await capture('wizard-3-connected', '第 3 步：Key 已存进钥匙串、地址已确认；DeepSeek 没有免费检查 Key 的接口，如实写“Key 还没有核对”；“DeepSeek Flash 可以用于讨论（价格已核对）”；可选“试发一条（约 ¥0.0001）”；连接第一个真实服务后自动建好“我的第一场讨论”（D6-A），三位成员都用 DeepSeek Flash。没有发出任何生成请求。', 'dialog[open]');
-    await click('去开始讨论');
+    check(fixture.requests.every(request => request.method === 'GET'), 'Testing used the model list and sent no generation request');
+    await capture('wizard-3-connected', '测试连接：用模型列表接口核对 Key，结果写在按钮旁边；没有生成内容。');
+    await click('保存', { scope: 'dialog[open] .modal-foot' });
     await has('这场讨论要解决什么？');
-    check((await js(`document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? ''`)).includes('我的第一场讨论'), '去开始讨论 opens the new room');
+    const ds = await deepseek();
+    check(ds.isDefault, 'DeepSeek is the default service');
+    await until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes('我的第一场讨论')`, 'Saving opens the new room');
 
     // ── F · room page, members, discussion mode ───────────────────────────────
     await click('我的第一场讨论', { selector: '.sb-item' });
@@ -120,7 +116,7 @@ async function main() {
     await click('添加成员'); await click('反方', { selector: '.choice', prefix: true });
     await field('名字'); await selectAll(); await ime('laozhou', '老周');
     check(await js(`document.querySelector('dialog[open] textarea').value.startsWith('你是反方。')`), 'The 反方 template fills 设定');
-    check((await js(`document.querySelector('dialog[open]').innerText`)).includes('可以使用：Key 已保存，地址已确认。'), 'The default model is preselected and usable');
+    check((await js(`document.querySelector('dialog[open]').innerText`)).includes('可以使用：Key 已保存。'), 'The default model is preselected and usable');
     await capture('member-dialog', '添加成员：六个角色模板，选“反方”自动填好名字、角色和设定；名字改成“老周”（输入法组合输入）；写明名字与角色的区别，以及“起草、审查、综合会自动带上内置的发言要求；其他角色按设定发言”；模型默认是默认服务的 DeepSeek Flash，“可以使用”。', 'dialog[open]');
     await click('添加');
     await until(`!document.querySelector('dialog[open]') && document.body.innerText.includes('老周')`, 'member added');
@@ -155,7 +151,9 @@ async function main() {
     await statusHas('已完成', 90000);
     const run = await runSnapshot();
     check(run.workflow.templateId === 'review-revision' && run.turns.length === 5, 'Five plan turns in the review chain');
-    check(fixture.requests.length === 5 && fixture.requests.every(request => request.model === 'deepseek-flash'), 'Five DeepSeek requests, nothing else');
+    // Apart from the model-list check 测试连接 made earlier.
+    const generated = fixture.requests.filter(request => request.method !== 'GET');
+    check(generated.length === 5 && generated.every(request => request.model === 'deepseek-flash'), 'Five DeepSeek requests, nothing else');
     const tags = await js(`[...document.querySelectorAll('.thread-item .msg-head .tag')].map(e => e.textContent)`);
     check(JSON.stringify(tags) === JSON.stringify(['起草', '审查', '修订', '复审', '定稿']), 'Each message carries its stage: ' + JSON.stringify(tags));
     await capture('run-done', '讨论按审查修订链完成：每条发言头部带阶段标签（起草、审查、修订、复审、定稿）；老周已停用、综合者不在流程里，都没有发言。');
@@ -175,9 +173,9 @@ async function main() {
     await click('用量', { selector: '.sb-item' });
     await until(`document.querySelector('.usage-page [aria-label="合计"]')`, 'usage');
     const usage = await text();
-    check(usage.includes('5 次请求') || usage.includes('6 次请求'), 'This month counts the DeepSeek requests');
+    check(usage.includes('5 次拿到了服务商的用量'), 'This month counts the DeepSeek requests: ' + usage.slice(0, 260).replace(/\s+/gu, ' '));
     check(usage.includes('按讨论') && usage.includes('费用由服务商收取') && !/¥|花费|金额|核销/u.test(usage), 'Groupings, who bills, and no money');
-    await capture('usage-month', '用量页（1280 浅色）：时间范围默认“本月”；合计、已结算、未知（按上限计）、已核销四张卡片；按讨论 / 按模型 / 按日期；说明写明按请求发出时间归入月份。');
+    await capture('usage-month', '用量页（1280 浅色）：时间范围默认“本月”；请求、输入、输出、没拿到用量四张卡片；按讨论 / 按模型 / 按日期 / 按用途；写明费用由服务商收取。');
     await field('时间范围'); await js(`(() => { const e = document.querySelector('[aria-label="时间范围"]'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, 'last-month'); e.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await has('上月没有使用真实模型的请求');
     await capture('usage-last-month', '时间范围选“上月”：如实写“上月没有使用真实模型的请求”，并提示可以换成“全部”。');
@@ -185,94 +183,71 @@ async function main() {
     await until(`document.querySelector('.usage-page [aria-label="合计"]')`, 'usage dark'); await noOverflow('usage 800');
     await capture('usage-800-dark', '800×600 深色：统计卡片改为两列，表格在卡片内横向滚动，页面本身无横向滚动。');
 
-    // E · network and proxy (D115) at 800 dark, then 1280 light.
-    await openNav(); await click('设置', { selector: '.sb-item' }); await click('网络与代理');
-    // Nothing waits for a restart yet: the note is neutral and says what runs now.
-    await has('当前生效：直连，没有使用代理。改动保存后，重启应用才会生效。');
-    check(!(await js(`document.querySelector('.net-effect').classList.contains('is-pending')`)), 'Neutral note while nothing waits for a restart');
-    await click('通过本机代理连接', { selector: '[role=switch]' });
-    await field('端口'); await selectAll(); await type(String(fixture.proxyPort));
-    await has('要使用代理，需要勾选“由代理解析域名”。');
-    check(await js(`[...document.querySelectorAll('button')].find(b => b.textContent === '保存设置').disabled`), 'Saving needs the explicit name-resolution choice');
+    // E · the proxy switch (D137) at 800 dark, then 1280 light. The system's answer is injected; a change takes effect at once.
+    await openNav(); await click('设置', { selector: '.sb-item' }); await click('网络');
+    await has('未开启，直接连接。');
+    await click('使用系统代理', { selector: '[role=switch]' });
+    await has(`已检测到系统代理 127.0.0.1:${fixture.proxyPort}`);
+    check(!(await text()).includes('重启'), 'Nothing waits for a restart');
     await noOverflow('network 800');
-    await capture('network-800-dark', '设置 › 网络与代理（800 深色，设置分类变成顶部横向标签）：打开代理开关、端口填本机代理；“由代理解析域名”默认不勾，不勾时写明不能保存。当前生效：直连。');
-    await resize(1280, 800); await theme('light'); await click('网络与代理');
-    await click('通过本机代理连接', { selector: '[role=switch]' });
-    await field('端口'); await selectAll(); await type(String(fixture.proxyPort));
-    await click('由代理解析域名', { selector: 'input[type=checkbox]', prefix: true });
-    await click('检测代理');
-    await has('可以通过代理连到 api.deepseek.com');
-    check(connects.length === 1 && connects[0].url === 'api.deepseek.com:443' && !connects[0].headers.includes('authorization') && !connects[0].headers.includes('proxy-authorization'), 'One keyless CONNECT to the fixed DeepSeek host');
-    await click('保存设置'); await has('已保存，重启应用后生效。');
-    await capture('network-saved', '勾选“由代理解析域名”（说明代理能看到访问哪个服务、看不到 Key 和内容）后“检测代理”：只做一次不带 Key 的 CONNECT 握手，显示“可以通过代理连到 api.deepseek.com”；保存后写明重启生效，出现“立即重启”。');
-    const quit = app.quit; app.quit = () => { result.quitRequests++; };
-    try { await click('立即重启'); await until(`true`, 'relaunch requested'); await sleep(500); } finally { app.quit = quit; }
-    check(result.relaunches === 1 && result.quitRequests === 1, '立即重启 asked Main to relaunch and quit');
+    await capture('network-800-dark', '设置 › 网络（800 深色，设置分类变成顶部横向标签）：打开开关马上读到系统代理，写在开关旁；不用重启。');
+    await resize(1280, 800); await theme('light'); await click('网络');
+    await click('测试连接');
+    await has('连接正常。');
+    check(connects.length === 1 && connects[0].url.endsWith(':443') && !connects[0].headers.includes('authorization') && !connects[0].headers.includes('proxy-authorization'), 'One keyless CONNECT');
+    await capture('network-saved', '“测试连接”只做一次不带 Key 的 CONNECT 握手，结果写在按钮旁。');
     await keyLeak();
   }
 
   if (phase === 'restart') {
-    // The saved proxy is what this launch uses; the confirmed target was remembered (D113).
+    // The saved switch is what this launch uses; nothing asks to confirm anything (D136).
     await until(`document.querySelector('.sidebar')`, 'loaded');
     await click('设置', { selector: '.sb-item' });
     await has('可以使用');
     const card = await js(`document.querySelector('section[aria-label="DeepSeek"]').innerText`);
-    check(card.includes('官方地址，保存 Key 时已确认') && card.includes('已保存（不显示）') && !card.includes('需要确认地址'), 'After a restart DeepSeek is usable without confirming again');
-    const ds = await deepseek();
-    check((await api('settings.getProviderKeyState', { providerId: ds.id })).sessionTargetConfirmed === true, 'Main remembered the confirmation');
-    await capture('restart-services', '重启后（同一个 profile）设置 › 模型服务：DeepSeek 仍是“可以使用”，“官方地址，保存 Key 时已确认”——不再要求每次启动确认（D1-B / D113）。');
-    await click('网络与代理');
-    const savedPort = (await api('network.getSettings')).saved.port;
-    check((await api('network.getSettings')).effective.source === 'settings', 'Main took the proxy from the saved settings at launch');
-    await has(`当前生效：已开启 127.0.0.1:${savedPort}（来自这个页面的设置）`);
-    check(!(await js(`document.querySelector('.net-effect').classList.contains('is-pending')`)), 'After the restart nothing is pending');
-    check(await js(`document.querySelector('[role=switch]').getAttribute('aria-checked')`) === 'true', 'The saved proxy is shown as on');
-    await capture('restart-network', `重启后 网络与代理：写明“当前生效：已开启 127.0.0.1:${savedPort}（来自这个页面的设置）”——Main 在启动时读到了页面保存的代理；没有待生效的改动，提示条是中性底色。`);
-    await click('通过本机代理连接', { selector: '[role=switch]' }); await click('保存设置');
-    await has('已保存，重启应用后生效。'); await has('保存的改动在重启应用后生效');
-    check(await js(`document.querySelector('.net-effect').classList.contains('is-pending')`), 'A saved change waiting for a restart is marked');
-    const quit = app.quit; app.quit = () => { result.quitRequests++; };
-    try { await click('立即重启'); await sleep(500); } finally { app.quit = quit; }
-    check(result.relaunches === 1, 'Restart requested to go direct again');
-    await capture('restart-proxy-off', '关掉代理并保存：提示条转为提醒色，写明“保存的改动在重启应用后生效”，仍显示当前生效的是代理；点“立即重启”。');
+    check(card.includes('官方地址') && card.includes('已保存（不显示）') && !card.includes('确认'), 'After a restart DeepSeek is usable with nothing to confirm');
+    await capture('restart-services', '重启后（同一个 profile）设置 › 模型服务：DeepSeek 仍是“可以使用”。');
+    await click('网络');
+    check((await api('network.getSettings')).saved.enabled === true, 'The switch was saved');
+    await has(`已检测到系统代理 127.0.0.1:${fixture.proxyPort}`);
+    check(await js(`document.querySelector('[role=switch]').getAttribute('aria-checked')`) === 'true', 'The saved switch is shown as on');
+    await capture('restart-network', '重启后 网络：开关仍开着，状态写在开关旁。');
+    await click('使用系统代理', { selector: '[role=switch]' });
+    await has('未开启，直接连接。');
+    await capture('restart-proxy-off', '关掉开关：立即生效，不用重启。');
   }
 
   if (phase === 'restart2') {
     await until(`document.querySelector('.sidebar')`, 'loaded');
-    await click('设置', { selector: '.sb-item' }); await click('网络与代理');
-    await has('当前生效：直连，没有使用代理');
-    // D113: a discussion sends right away after the restart, with no confirmation step.
+    await click('设置', { selector: '.sb-item' }); await click('网络');
+    await has('未开启，直接连接。');
+    // D136: a discussion sends right away after the restart, with no confirmation step.
     await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
     await field('讨论目标'); await selectAll(); await ime('chongqi', '重启后直接开始');
     const before = fixture.requests.length;
     await click('开始讨论');
     await statusHas('已完成', 90000);
-    check(fixture.requests.length === before + 5, 'Five requests sent after the restart without confirming the target');
-    await capture('restart-run', '再次重启（直连）后直接开始一场讨论：没有任何确认目标的步骤，审查修订链的 5 次请求照常发出并完成；讨论方式仍是房间记住的“审查修订链”。');
-    // A new Key withdraws the confirmation at once: the card says so, a start is refused, one click confirms again.
+    check(fixture.requests.length === before + 5, 'Five requests sent after the restart');
+    await capture('restart-run', '再次重启（直连）后直接开始一场讨论：审查修订链的 5 次请求照常发出并完成；讨论方式仍是房间记住的“审查修订链”。');
+    // A new Key works at once.
     const ds = await deepseek();
     await api('settings.setKey', { providerId: ds.id, apiKey: fakeKey + '-new' });
     await click('设置', { selector: '.sb-item' });
-    await has('需要确认地址');
-    check((await js(`document.querySelector('section[aria-label="DeepSeek"] [role=note]')?.textContent ?? ''`)).includes('这把 Key 只会发往 https://api.deepseek.com'), 'The card writes the address beside the confirmation');
-    await capture('rekey-needs-confirm', '换了 Key（这里用 API 模拟在别处换 Key）后，绑定立即失效：卡片显示“需要确认地址”，并写明“这把 Key 只会发往 https://api.deepseek.com……确认地址”。');
-    await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
-    await field('讨论目标'); await selectAll(); await ime('jujue', '确认之前的一场');
-    const refusedBefore = fixture.requests.length;
-    await click('开始讨论');
-    await until(`document.querySelector('.composer-alerts [role=alert]')`, 'refused start');
-    check(fixture.requests.length === refusedBefore, 'Nothing sent before the new Key is confirmed');
-    await capture('rekey-refused', '确认之前开始讨论：Main 拒绝发送，输入框上方说明原因，没有发出请求。');
-    await click('设置', { selector: '.sb-item' });
-    await click('确认地址');
-    await has('地址已确认，之后不再询问');
     await has('可以使用');
-    await capture('rekey-confirmed', '点“确认地址”：卡片回到“可以使用”，提示“之后不再询问；更换 Key 或地址时会再请你确认”。');
-    // Replacing the Key through the page: the wizard writes the address above the Key again; saving is the new confirmation.
+    check(!(await text()).includes('确认地址'), 'A new Key asks for nothing');
+    await capture('rekey-usable', '换了 Key：卡片仍是“可以使用”，不用再确认。');
+    await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
+    await field('讨论目标'); await selectAll(); await ime('xinkey', '换 Key 之后的一场');
+    const beforeNew = fixture.requests.length;
+    await click('开始讨论');
+    await statusHas('已完成', 90000);
+    check(fixture.requests.length === beforeNew + 5, 'The new Key sends right away');
+    await click('设置', { selector: '.sb-item' });
+    // Replacing the Key through the page: the wizard writes the address above the Key again.
     await click('更换');
     check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'Replacing the Key shows the address again');
     await resize(800, 600);
-    await capture('rekey-wizard-800', '800×600 浅色：在卡片上点“更换”，向导直接进入填 Key 这一步，地址再次写在 Key 上方，“保存并连接”即重新确认。');
+    await capture('rekey-wizard-800', '800×600 浅色：在卡片上点“更换”，向导直接进入填 Key 这一步，地址写在 Key 上方。');
     await key('Escape'); await resize(1280, 800); await theme('dark'); await click('模型服务'); await has('可以使用');
     await capture('services-dark', '1280 深色：设置 › 模型服务（演示服务“内置”、DeepSeek“可以使用”）。');
     await theme('light');
