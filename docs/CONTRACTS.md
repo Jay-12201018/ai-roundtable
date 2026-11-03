@@ -463,3 +463,22 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Renderer | `features/codeExport/`（写入对话框）；阅读器的"写入文件夹…"与写入记录；产物列表的"已写入 N 个文件 · 时间"；`useArtifacts` 第四个参数透传 `api.codeExport`；代码候选的说明文字更新 | 没有 `codeExport` 的页面如实说明只能复制 |
 
 安全影响：见 DECISIONS R15 节末尾。残余风险写在 D129。
+
+## 移除费用与去掉多余步骤（2026-11-03，子会话候选，未合 main）
+
+决策见 DECISIONS D133–D142。这一节之前写到价格、预算、核销、受控试用、`confirmTarget`、`adopt` 和 `app.relaunch` 的段落是当时的记录，不再是现行接口。
+
+| 层 | 变化 | 兼容性 |
+| --- | --- | --- |
+| Database / migration 14 | 新表 `request_usage`（从三张账本表和 `charge_pricing` 迁入）和 `summary_use_events`；重建 `artifact_export_insert`、`code_export_insert`；给还在等确认的摘要补确认；删除 `provider_target_approvals`、`artifact_adoptions`、`charge_writeoffs`、`charge_pricing`、`artifact_charges`、`summary_charges`、`request_charges`、`run_budget_topups`、`run_budgets`、`controlled_trial_reconciliations`、`controlled_trials` | 能从 v5、v9、v12、v13 升级，升级前自动做已验证备份；migration 1–13 未改 |
+| 恢复校验 | v14 起检查新表、触发器和行内容，拒绝已删除的表残留；v4–v13 升级前只做 SQL 层校验 | 按 `schema_migrations` 版本分支 |
+| Shared `schemas/usage.ts` | 重写：`requestUsageSchema`（状态 `in_flight/reported/unknown/not_sent`）、按讨论/模型/日期/用途的 token 汇总。`schemas/budget.ts` 删除 | 破坏性，只有 Renderer 使用 |
+| Shared `schemas/network.ts` | `proxySettingsSchema {enabled, manual|null}`、`proxyStatusSchema`（`off/direct/proxy/unsupported`）、`networkSettingsSchema {saved, status, savedInvalid}`、`proxyTestResultSchema {ok, via, failure?}` | 旧设置文件按“开关开、手动地址”读入 |
+| Shared `schemas/run.ts`、`error.ts` | 快照 `budget`/`charges` 换成 `usage`；错误码增加 `target_rejected`、`proxy_unsupported`。`budget_exceeded` 和事件 `budget_updated` 只为读旧 Run 保留；事件 `adopted` 可解析不再产生；`summary_updated` 增加 `revoked` | 旧事件仍可解析 |
+| Shared `schemas/summary.ts` | `contextSummary.revokedMessageIds?`；发给模型的摘要标签改为 `【讨论摘要 · 覆盖第 a–b 条】` | 可选字段 |
+| Shared `schemas/artifact.ts`、`schemas/configuration.ts` | 版本状态去掉 `candidate`、`adoptedAt`；`providerReadiness` 用 `baseUrl` 取代 `targetConfirmed`/`confirmedBaseUrl`；`customModels` 条目可带上下文长度和最大输出 | 破坏性，只有 Renderer 使用 |
+| IPC / Preload | 删除 `settings.confirmTarget`、`artifact.adopt`、`run.addBudget`、`run.resumeAfterBudget`、`usage.writeOff`、`app.relaunch` 和整个 `app` 分组；增加 `summary.revoke`；`summary.confirm` 改为恢复使用；`network.testProxy` 接受 `ProxySettings` | 破坏性，只有 Renderer 使用；仍然只有 typed 方法 |
+| Main | `providers/serviceProfiles.ts`（按地址的请求参数）、`providers/proxyTunnel.ts`（原 `loopbackProxy.ts`，任意目标按域名 CONNECT）、`NetworkSettingsService(directory, resolveSystemProxy)`；`RunService` 不再预留，单次输出按成员夹紧，演示成员不记用量 | 内部 |
+| Renderer | 向导去掉步骤；`features/settings/presets.ts` 只列国内服务和自定义服务；`NetworkPanel` 一个开关；`useArtifacts`/`SummaryCard` 一键生成和撤销；`ConnectWizard.onStart` 带上刚建好的房间 ID | 内部 |
+
+安全影响：Key 仍只在 Main，不进日志和 Renderer；地址格式校验、`redirect: 'error'`、TLS 校验、直连的保留地址防护、写文件的路径和符号链接防护及写入前重查都未放宽；中断的请求不自动重发；模型输出没有主持人权限，不执行生成的代码；停止按钮的确认保留。去掉的是地址确认和“采用”这两步人工确认，理由见 D136、D139。
