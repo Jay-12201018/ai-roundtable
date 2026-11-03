@@ -14,6 +14,7 @@
     "pretest": "node scripts/ensure-native.cjs",
     "test": "node scripts/electron-node.cjs node_modules/vitest/vitest.mjs run",
     "test:watch": "node scripts/electron-node.cjs node_modules/vitest/vitest.mjs",
+    "pree2e": "pnpm build && node scripts/ensure-native.cjs",
     "e2e": "playwright test",
     "prepreview": "node scripts/ensure-native.cjs",
     "preview": "electron-vite preview",
