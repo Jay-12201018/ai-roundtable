@@ -16,7 +16,7 @@ const { ProviderRegistry, TrialDiagnostics } = bundle.exports;
 const target = 'https://api.deepseek.com/chat/completions';
 const input = { requestId: 'fixture-request', modelId: 'deepseek-flash', messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 128 };
 const config = { id: 'fixture-provider', name: 'Local fixture', kind: 'openai-compatible', enabled: true, baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [], isDefault: false, keyReference: { id: 'owned-reference' }, createdAt: '2026-10-18T00:00:00.000Z', updatedAt: '2026-10-18T00:00:00.000Z' };
-const db = { getProviderConfiguration: () => config, validateModelSelection: () => config, getProviderKeyRevision: () => 'fixture-revision' };
+const db = { getProviderConfiguration: () => config, validateModelSelection: () => config, getProviderKeyRevision: () => 'fixture-revision', saveTargetApproval(_id, approval) { this.approval = approval; }, getTargetApproval() { return this.approval; } };
 const fakeKeys = { getProviderKeyState: async () => ({ keyReference: config.keyReference }), resolveKey: async () => 'owned-fake-key' };
 let passed = 0;
 async function run(name, action) { await action(); passed++; console.log('PASS ' + name); }

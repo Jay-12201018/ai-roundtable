@@ -82,7 +82,7 @@ async function main() {
   const bundle = new Module(file); bundle.paths = createRequire(path.join(process.cwd(), 'package.json')).resolve.paths('zod');
   bundle._compile(fs.readFileSync(file, 'utf8'), file);
   const { ProviderRegistry, TrialDiagnostics, createSafeFetch } = bundle.exports;
-  const db = { getProviderConfiguration: () => config, validateModelSelection: () => config, getProviderKeyRevision: () => 'owned-connect-revision' };
+  const db = { getProviderConfiguration: () => config, validateModelSelection: () => config, getProviderKeyRevision: () => 'owned-connect-revision', saveTargetApproval(_id, approval) { this.approval = approval; }, getTargetApproval() { return this.approval; } };
   const keys = { getProviderKeyState: async () => ({ keyReference: config.keyReference }), resolveKey: async () => { keyReads++; return fake; } };
   const policy = { hostname: '127.0.0.1', port: proxyPort };
   const diagnostic = () => new TrialDiagnostics(() => {});
