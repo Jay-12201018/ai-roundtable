@@ -3,7 +3,7 @@ import { useStore } from 'zustand';
 import { Check, Lock, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
 import { RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
-import { DEFAULT_MODE_LABEL, WorkflowDialog, draftProblems, readRoomWorkflow, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
+import { defaultModeLabel, WorkflowDialog, draftProblems, readRoomWorkflow, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
   writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft, type WorkflowMember } from './features/workflows';
 import { errorCodeSchema } from '../shared/schemas/error';
 import { ConnectWizard, SettingsPage, isUserAddress, useReadiness, type ConnectedRoom, type SettingsSection } from './features/settings';
@@ -307,9 +307,10 @@ export function App() {
   const collapseSidebar = (value: boolean) => { setSidebarCollapsed(value); remember('roundtable.sidebarCollapsed', value); };
   const anyDrawer = navOpen || panelDrawer && panelAvailable && layout !== 'wide';
 
-  const workflowLabel = stored.draft ? templateLabel(stored.draft.template) : DEFAULT_MODE_LABEL;
   const roomName = room?.name;
   const enabledMembers = roomId && workflowMembers && workflowMembers.roomId === roomId ? workflowMembers.members.filter(member => member.enabled && !member.archivedAt) : undefined;
+  const defaultMode = defaultModeLabel(enabledMembers?.length);
+  const workflowLabel = stored.draft ? templateLabel(stored.draft.template) : defaultMode;
   const runMembers = snapshot?.execution?.membersSnapshot?.map(member => member.displayName) ?? enabledMembers?.map(member => member.displayName);
 
   const statusPill = (() => {
@@ -342,8 +343,8 @@ export function App() {
     .map(provider => readiness.rows?.find(row => row.providerId === provider.id)?.confirmedBaseUrl).filter((url): url is string => Boolean(url)))];
   const targetNotice = !snapshot && userTargets.length > 0 ? <p className="composer-target" role="note"><Lock aria-hidden size={14} />这场讨论的目标和发言将发往 {userTargets.join('、')}（你在设置里填写并确认过的地址）。</p> : undefined;
   const modeNotice = workflowNotice?.roomId === roomId ? workflowNotice?.text
-    : stored.damaged ? `这个房间保存的讨论方式读不出来，这次按「${DEFAULT_MODE_LABEL}」进行。`
-      : lostWorkflow?.roomId === roomId && !stored.draft ? `这台电脑上没有找到这个房间的讨论方式（例如清理过浏览器数据），已退回「${DEFAULT_MODE_LABEL}」${lostWorkflow?.label ? `；上次用的是「${lostWorkflow.label}」` : ''}。` : undefined;
+    : stored.damaged ? `这个房间保存的讨论方式读不出来，这次按「${defaultMode}」进行。`
+      : lostWorkflow?.roomId === roomId && !stored.draft ? `这台电脑上没有找到这个房间的讨论方式（例如清理过浏览器数据），已退回「${defaultMode}」${lostWorkflow?.label ? `；上次用的是「${lostWorkflow.label}」` : ''}。` : undefined;
   const taskNotices = (error && !snapshot && syncStatus !== 'error') || modeNotice || workflowMembersError || otherLive || targetNotice ? <div className="composer-alerts">
     {targetNotice}
     {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始或继续别的讨论。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}

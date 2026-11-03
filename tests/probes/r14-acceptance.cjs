@@ -67,7 +67,7 @@ fixture.reply = body => {
 };
 
 async function main() {
-  const ui = await probe.start({ screens, width: 1280, height: 800, fixedClock: '2026-10-28T21:00:00+08:00', keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : 39 });
+  const ui = await probe.start({ screens, width: 1280, height: 800, keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : 39 });
   const { js, until, click, field, key, selectAll, ime, type, capture, resize, api, text, runSnapshot, finish } = ui;
   const has = (value, timeout) => until(`document.body.innerText.includes(${JSON.stringify(value)})`, value, timeout);
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
@@ -119,10 +119,10 @@ async function main() {
     // ── 3. PRD: preview, generate, candidate, adopt ─────────────────────────
     const sent = fixture.requests.length;
     await click('生成…', { scope: '.artifact', which: 0 });
-    await until(`document.querySelector('dialog[open] .summary-cost')`, 'generate dialog');
+    await until(`document.querySelector('dialog[open] .summary-send')`, 'generate dialog');
     const dialogText = await js(`document.querySelector('dialog[open]').innerText`);
     check(dialogText.includes('根据这场讨论的第 1–3 条发言整理一份需求文档（PRD）') && dialogText.includes('综合者（deepseek-flash）'), 'Dialog: basis range and the synthesizer by default');
-    check(/预计最高 ¥0\.\d+（按高峰价和 4096 tokens 输出上限预留）/u.test(dialogText) && dialogText.includes('不会自动重试'), 'Dialog: maximum cost and no automatic retry');
+    check(dialogText.includes('费用由服务商收取') && !/¥|预计/u.test(dialogText) && dialogText.includes('不会自动重试'), 'Dialog: who bills, no estimate, no automatic retry');
     check(fixture.requests.length === sent, 'Opening the dialog sent nothing');
     await capture('prd-dialog', '点“需求文档（PRD）”的“生成…”：对话框写明依据第 1–3 条发言、默认由综合者来写（可换人）、预计最高花费（按高峰价和 4096 tokens 输出上限预留，结束后按实际结算）；说明模型按固定格式输出、检查不通过时原样保留并指出位置、不会自动重试。按钮写“生成（发送 1 次请求）”。打开对话框没有发出任何请求。', 'dialog[open]');
     fixture.mode = 'hang';
@@ -160,7 +160,7 @@ async function main() {
     // ── 4. Minutes: invalid JSON kept with field-located errors, fixed by hand ─
     await panelOpen();
     await click('生成…', { scope: '.artifact', which: 0 });
-    await until(`document.querySelector('dialog[open] .summary-cost')`, 'minutes dialog');
+    await until(`document.querySelector('dialog[open] .summary-send')`, 'minutes dialog');
     check((await js(`document.querySelector('dialog[open] h2').textContent`)) === '生成会议纪要', 'The minutes dialog');
     await click('生成（发送 1 次请求）');
     await readerHas('格式检查没有通过', 30000);
@@ -199,7 +199,7 @@ async function main() {
     // ── 5. Action list with unknown owners and dates; code candidate preview ──
     await panelOpen();
     await click('生成…', { scope: '.artifact', which: 0 });
-    await until(`document.querySelector('dialog[open] .summary-cost')`, 'actions dialog');
+    await until(`document.querySelector('dialog[open] .summary-send')`, 'actions dialog');
     await click('生成（发送 1 次请求）');
     await readerHas('候选 · 待采用', 30000);
     const actionsText = await reader();
@@ -216,7 +216,7 @@ async function main() {
     await readerHas('这次请求已中止。', 30000);
     fixture.mode = 'ok'; fixture.release();
     const stoppedText = await reader();
-    check(stoppedText.includes('请求可能已经发出，费用暂记为未知（按上限 ¥') && stoppedText.includes('可以到服务商控制台核对后，在用量页核销。') && stoppedText.includes('没有自动重试，可以重新生成。'), 'A stopped request says why, its cost and the next step');
+    check(stoppedText.includes('请求可能已经发出，服务商可能已经计入用量。') && stoppedText.includes('没有自动重试，可以重新生成。'), 'A stopped request says why, its cost and the next step');
     check(await js(`[...document.querySelectorAll('dialog.artifact-reader .modal-foot button')].find(e => e.textContent.includes('重新生成'))?.className.includes('primary')`), 'Regenerate is the next step');
     const stopped = (await artifactsOf()).find(item => item.kind === 'actions').versions.at(-1);
     check(stopped.status === 'failed' && stopped.request.status === 'aborted' && stopped.request.errorCode === 'cancelled', 'The public code is recorded: cancelled');
@@ -227,10 +227,10 @@ async function main() {
     await key('Escape');
     await panelOpen();
     await click('生成…', { scope: '.artifact', which: 0 });
-    await until(`document.querySelector('dialog[open] .summary-cost')`, 'code dialog');
+    await until(`document.querySelector('dialog[open] .summary-send')`, 'code dialog');
     const codeDialog = await js(`document.querySelector('dialog[open]').innerText`);
     check(codeDialog.includes('8192 tokens 输出上限'), 'Code gets a larger output limit, stated in the cost');
-    check(codeDialog.includes('讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会产生费用。'), 'The dialog says an honest nothing still costs a request');
+    check(codeDialog.includes('讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会计入服务商的用量。'), 'The dialog says an honest nothing still costs a request');
     await click('生成（发送 1 次请求）');
     await readerHas('没有可整理的内容', 30000);
     const emptyText = await reader();
@@ -336,10 +336,10 @@ async function main() {
   const Sqlite = require('better-sqlite3');
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
-    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 13, 'Migration 13');
+    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 14, 'Migration 14');
     check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 8 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 7
-      && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='settled'").pluck().get() === 6 && db.prepare("SELECT COUNT(*) FROM artifact_charges WHERE state='unknown'").pluck().get() === 1,
-      'Eight versions; six settled artifact requests and the stopped one unknown');
+      && db.prepare("SELECT COUNT(*) FROM request_usage WHERE kind='artifact' AND state='reported'").pluck().get() === 6 && db.prepare("SELECT COUNT(*) FROM request_usage WHERE kind='artifact' AND state='unknown'").pluck().get() === 1,
+      'Eight versions; six artifact requests with usage and the stopped one unknown');
     check(db.prepare("SELECT error_code FROM artifact_requests WHERE status='aborted'").pluck().all().join() === 'cancelled', 'Only the public code is stored');
     check(db.prepare("SELECT empty_reason FROM artifact_versions WHERE validation='empty'").pluck().all().join() === '讨论记录中没有出现任何代码设计或实现要求，没有可整理的代码候选。', 'The empty answer and its reason are stored');
     check(db.prepare("SELECT COUNT(*) FROM artifact_exports WHERE target='file'").pluck().get() === 1, 'One file export');

@@ -21,7 +21,8 @@ test('the Key is used for requests but never appears in the database, logs, expo
   const key = page.getByRole('textbox', { name: 'API Key' });
   await key.fill(FAKE_KEY);
   await page.getByRole('button', { name: '保存并连接' }).click();
-  await expect(page.getByText('Key 还没有核对'), 'DeepSeek has no free Key check; the wizard says so').toBeVisible();
+  await expect(page.getByText('Key 有效'), 'The model list answered; nothing was generated').toBeVisible();
+  expect(fixture.requests.at(-1)!.path).toBe('/deepseek/models');
   await expect(page.getByText(/可以用于讨论/u)).toBeVisible();
   await page.getByRole('button', { name: '去开始讨论' }).click();
 
@@ -31,7 +32,7 @@ test('the Key is used for requests but never appears in the database, logs, expo
   await newDiscussion(running, rooms[0]!.name, 'Key 安全的目标。');
   await page.getByRole('button', { name: '开始讨论' }).click();
   await statusHas(page, '已完成');
-  expect(fixture.requests[0]!.headers.authorization).toBe(`Bearer ${FAKE_KEY}`);
+  expect(fixture.requests.find(request => request.path?.endsWith('/chat/completions'))!.headers.authorization).toBe(`Bearer ${FAKE_KEY}`);
   await openArtifacts(page);
   const reader = await generateArtifact(page, 2);
   await reader.getByRole('button', { name: '采用这一版' }).click();

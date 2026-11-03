@@ -159,8 +159,8 @@ async function page(stage, saved) {
     // 检查连接 is free: the compatible target has no free Key check, and nothing pretends it succeeded.
     if (!card('Smoke Real A').querySelector('.svc-body')) await clickInCard('Smoke Real A', '展开 Smoke Real A');
     await clickInCard('Smoke Real A', '检查连接');
-    await wait(() => card('Smoke Real A').textContent, value => value.includes('地址和配置没问题；这个服务没有免费检查 Key 的接口'), 'Real Provider reported false network success');
-    check(card('Smoke Real A').textContent.includes('价格尚未审核 · 暂时不能用于讨论'), 'Unreviewed price not stated');
+    await wait(() => card('Smoke Real A').textContent, value => value.includes('地址和配置没问题；这个服务没有模型列表接口'), 'Real Provider reported false network success');
+    check(card('Smoke Real A').textContent.includes('上下文 128,000 · 最大输出 8,192'), 'Model limits not stated');
     noKey(await api.settings.listProviderSummaries()); noKey(await api.settings.getProviderConfiguration({ id: saved.realProviderId }));
     noKey(await keyState(saved.realProviderId)); noKey(replacement);
     // D6-A: the first real service got 我的第一场讨论; it never had a discussion, so it can be deleted.
@@ -184,7 +184,7 @@ async function page(stage, saved) {
       const modelOptions = await wait(() => field('模型'), Boolean, 'Model field absent');
       check([...modelOptions.options].some(option => option.value.startsWith(saved.realProviderId + '\u0000')), 'Settings summary did not refresh in member options');
       await fill('模型', saved.mockProviderId + '\u0000mock');
-      check(dialog().textContent.includes('演示成员不联网、不花钱'), 'Mock choice not explained');
+      check(dialog().textContent.includes('演示成员不联网'), 'Mock choice not explained');
       await clickIn('dialog[open]', '添加'); await wait(() => api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false }), values => values.length === index + 1, 'Member not persisted');
       await wait(dialog, value => !value, 'Member editor did not close');
     }

@@ -60,6 +60,8 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
   const server = http.createServer(async (req, res) => {
     try {
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
+      // The connect wizard checks a Key with the model list; nothing is generated.
+      if (req.method === 'GET') { fixture.requests.push({ path: req.url, method: 'GET', model: '', maxTokens: 0, mode: 'ok', messages: [] }); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'deepseek-flash' }] })); return; }
       const body = JSON.parse(Buffer.concat(chunks).toString());
       const mode = typeof fixture.mode === 'function' ? fixture.mode(body) : fixture.mode;
       fixture.requests.push({ path: req.url, model: body.model, maxTokens: body.max_tokens, mode, messages: body.messages });
@@ -120,10 +122,9 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
   const sleep = ms => new Promise(done => setTimeout(done, ms));
   const check = (value, message) => { result.checks.push(message); if (!value) throw new Error('Check failed: ' + message); };
 
-  async function start({ screens, width = 1440, height = 900, fixedClock, keepScreens = false, firstShot = 0 }) {
+  async function start({ screens, width = 1440, height = 900, keepScreens = false, firstShot = 0 }) {
     await new Promise(done => server.listen(0, '127.0.0.1', done)); fixture.port = server.address().port;
-    const { ProviderRegistry: Registry, settlementClock } = await import(pathToFileURL(entry).href);
-    if (fixedClock) settlementClock.now = () => new Date(fixedClock);
+    const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
     const transport = Registry.prototype.createTransport;
     Registry.prototype.createTransport = function (guard, diagnostics, proxyKind) {
       const send = transport.call(this, guard, diagnostics, proxyKind);

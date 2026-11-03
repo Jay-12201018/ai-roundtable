@@ -1,6 +1,6 @@
 // E2E entry: runs in Electron's Main before the built app and refuses to start it unless every data path is the test's
-// own temporary directory. Keys use a fake safeStorage, Node and Chromium network are blocked, and only
-// https://api.deepseek.com is redirected to the test's loopback fixture. Native dialogs answer from a queue the test
+// own temporary directory. Keys use a fake safeStorage, Node and Chromium network are blocked, and only the four official
+// service addresses and one fixture-owned typed address are redirected to the test's loopback fixture. Native dialogs answer from a queue the test
 // fills. Same isolation as tests/probes/r16-harness.cjs, without its in-process driver: Playwright drives the page.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -36,7 +36,7 @@ for (const [name, path] of Object.entries(paths)) {
   if (app.getPath(name) !== path) refuse(`could not set ${name}`);
 }
 app.commandLine.appendSwitch('use-mock-keychain');
-for (const name of ['ELECTRON_RENDERER_URL', 'ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS', 'ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
+for (const name of ['ELECTRON_RENDERER_URL', 'ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS']) delete process.env[name];
 
 const state = globalThis.__e2e = {
   profile, fakeSafeStorage: { encrypt: 0, decrypt: 0 }, nodeNetworkAttempts: [], chromiumNetworkAttempts: [], externalOpens: [],
@@ -96,17 +96,17 @@ app.whenReady().then(() => {
   });
 });
 
+const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.openai.com': 'openai', 'https://api.anthropic.com': 'anthropic', 'https://generativelanguage.googleapis.com': 'gemini', 'https://kimi.e2e.invalid': 'compatible' };
 const build = process.env.ROUNDTABLE_E2E_BUILD ? resolve(process.env.ROUNDTABLE_E2E_BUILD) : resolve(__dirname, '../../../out');
-import(pathToFileURL(join(build, 'main/index.js')).href).then(({ ProviderRegistry, settlementClock }) => {
-  // The reviewed DeepSeek price has an expiry: a fixed clock keeps these tests from depending on today's date.
-  if (process.env.ROUNDTABLE_E2E_CLOCK) settlementClock.now = () => new Date(process.env.ROUNDTABLE_E2E_CLOCK);
+import(pathToFileURL(join(build, 'main/index.js')).href).then(({ ProviderRegistry }) => {
   const transport = ProviderRegistry.prototype.createTransport;
   ProviderRegistry.prototype.createTransport = function (guard, diagnostics, proxyKind) {
     const send = transport.call(this, guard, diagnostics, proxyKind);
     return (url, init) => {
       const target = new URL(String(url));
-      assert.equal(target.origin, 'https://api.deepseek.com', 'Only the DeepSeek target may be redirected');
-      return send(`http://127.0.0.1:${fixturePort}/deepseek${target.pathname}${target.search}`, init);
+      const service = fixtureServices[target.origin];
+      assert.ok(service, 'Only the fixture services may be redirected');
+      return send(`http://127.0.0.1:${fixturePort}/${service}${target.pathname}${target.search}`, init);
     };
   };
 }).catch(error => { console.error('E2E_ENTRY_FAILED', error); process.exit(1); });

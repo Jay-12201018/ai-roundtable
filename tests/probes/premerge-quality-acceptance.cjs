@@ -291,8 +291,6 @@ async function main() {
   // Step 6: start, then pause without moving the pointer: 开始讨论 turns into 暂停 at the same spot.
   await click('新讨论', { scope: '.room-page' });
   await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
-  // R16: the budget is in the settings popover beside the goal (opened from 更多设置 or the budget chip).
-  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.05');
   check(!(await js(`document.querySelector('label.chip-check input').checked`)), 'Step-by-step is off by default');
   holdNext = true;
   // Where the host's pointer rests after clicking 开始讨论; measured without scrolling, never re-aimed afterwards.
@@ -312,7 +310,7 @@ async function main() {
   held.shift()();
   await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已暂停')`, 'paused');
   const paused = await snapshot();
-  check(paused.status === 'paused' && paused.charges.length === 1 && paused.charges[0].state === 'settled', 'Pause finished the turn and settled its request; nothing was stopped');
+  check(paused.status === 'paused' && paused.usage.length === 1 && paused.usage[0].state === 'reported', 'Pause finished the turn and recorded its usage; nothing was stopped');
   check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '继续', 'Paused, the same spot offers 继续');
 
   // Step 7: continue from the same spot; while the reviewer is speaking, Stop asks first without covering Pause.
@@ -321,7 +319,7 @@ async function main() {
   await until(`document.querySelectorAll('.thread-item').length === 2 && document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('运行中')`, 'second reply streaming');
   await click('停止');
   const confirmText = await js(`document.querySelector('[aria-label=确认停止运行]')?.textContent ?? ''`);
-  check(confirmText.includes('已生成的部分文字会保留') && confirmText.includes('可能已经计费'), 'The confirmation explains partial output and possible charges');
+  check(confirmText.includes('已生成的部分文字会保留') && confirmText.includes('服务商可能已经计入用量'), 'The confirmation explains partial output and possible charges');
   check((await snapshot()).status === 'running', 'The first click on Stop sends nothing');
   check(await js(`document.activeElement?.textContent === '不停止'`), 'Focus rests on the safe choice');
   check(await js(`!document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.disabled && document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent === '暂停'`), 'The confirmation does not cover or disable 暂停');
@@ -333,7 +331,7 @@ async function main() {
   const stopped = await snapshot();
   check((await text()).includes('重试和续写会重新发送请求，可能再次计费。'), 'Retry and continue warn that they may bill again');
   check(stopped.status === 'cancelled' && stopped.messages[1].status === 'aborted' && stopped.messages[1].content.length > 0, 'Stop kept the partial reply');
-  check(stopped.charges.find(c => c.requestId === stopped.attempts.find(a => a.messageId === stopped.messages[1].id).requestId).state === 'unknown', 'The stopped request is recorded as an unknown charge, not zero');
+  check(stopped.usage.find(c => c.requestId === stopped.attempts.find(a => a.messageId === stopped.messages[1].id).requestId).state === 'unknown', 'The stopped request is recorded as an unknown charge, not zero');
   // Settled: no run controls; the slot offers 新讨论 (the box still takes an interjection for a retry).
   check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '新讨论', 'Settled, the slot offers 新讨论');
   await capture('stopped', '点“不停止”后运行继续；再点“停止”并“停止讨论”：页头“已停止”，审查者已输出的部分文字保留并标为“已中止”，这次请求在预算栏按未知费用（预留上限）计入、不记为 0。输入区原位置变回“开始讨论”；右侧“重试当前回合”“续写部分回复”下方提示“重试和续写会重新发送请求，可能再次计费。”', '.topbar');
@@ -361,7 +359,7 @@ async function main() {
   await capture('step-next', '点“下一步”：只让下一位（审查者）发言一次，说完再次自动暂停；它收到的上下文里包含刚才的主持人插话（脚本核对了请求体）。右侧显示"下一位：综合者（按计划）"，输入区仍是 继续 / 下一步 / 停止。', 2);
 
   // Step 9 (D103): finish the step-by-step Run from the same in-place control, then set the output limit, which is
-  // folded under 更多设置 next to the budget; here it becomes 2048.
+  // folded under 更多设置 ; here it becomes 2048.
   await click('继续');
   await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'step-by-step run finished');
   // D111: a finished discussion is continued from its box; a new one is the explicit 新讨论 button.
@@ -374,7 +372,7 @@ async function main() {
   await field('单次输出上限（token）'); await selectAll(); await type('2048');
   await field('讨论目标'); await selectAll(); await ime('jieduan', '比较三种跑腿定价方案');
   check(await js(`document.elementFromPoint(${startSpot.x}, ${startSpot.y})?.closest('button')?.textContent`) === '开始讨论', 'Opening 更多设置 does not move 开始讨论');
-  await capture('output-limit', '开始前点输入区的"更多设置"：在控制行上方展开"单次输出上限（token）"（默认 4096，这里改为 2048），"开始讨论"位置不变；并说明"每次请求按这个上限预留费用，实际按用量结算；回复写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）"。平时收起，不占常用路径。', '.composer');
+  await capture('output-limit', '开始前点输入区的"更多设置"：在控制行上方展开"单次输出上限（token）"（默认 8192，这里改为 2048），"开始讨论"位置不变；并说明"每次请求按这个上限预留费用，实际按用量结算；回复写到上限会保留并标注，可以续写。不能超过成员所用模型允许的最大值（DeepSeek Flash 为 32768）"。平时收起，不占常用路径。', '.composer');
 
   // Step 10 (D102): the first reply stops at the output limit; it is kept and marked, and the Run goes on.
   const beforeTruncation = requests.length;
@@ -385,12 +383,12 @@ async function main() {
   check(requests.length === beforeTruncation + 3 && requests.slice(beforeTruncation).every(r => r.maxTokens === 2048), 'Three requests, each with max_tokens 2048');
   const firstTurn = finished.turns[0];
   check(finished.turns.every(t => t.status === 'completed') && finished.attempts.find(a => a.messageId === firstTurn.messageId).finishReason === 'length', 'The truncated Turn completed and the Run went on');
-  check(finished.charges.length === 3 && finished.charges.every(c => c.state === 'settled'), 'Every request, the truncated one included, settled from usage');
+  check(finished.usage.length === 3 && finished.usage.every(c => c.state === 'reported'), 'Every request, the truncated one included, has its usage');
   check(requests[beforeTruncation + 1].messages.at(-1).content.includes('（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）'), 'The next member was told the reply is unfinished');
   check((await js(`document.querySelectorAll('.thread-item')[0].innerText`)).includes('写到单次上限停下了') && !(await text()).includes('运行失败'), 'The truncated reply is marked, never shown as a failure');
   await capture('truncated', 'DeepSeek 夹具让起草者的回复以 finish_reason=length 结束：这条回复保留并标注"已达单次输出上限，内容可能不完整。"，下方有"续写"；运行没有失败，审查者和综合者照常发言，页头"已完成"。脚本核对了审查者收到的上下文里这条发言带有"（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）"，三次请求都按用量结算。', 0);
 
-  // Step 11 (D102): 续写 continues it as a new version with its own request and charge.
+  // Step 11 (D102): 续写 continues it as a new version with its own request and usage.
   const original = finished.messages.find(m => m.id === firstTurn.messageId).content;
   await click('续写', { slot: 0 });
   await until(`(async () => { const s = await window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId'));
@@ -400,7 +398,7 @@ async function main() {
   const continuation = requests.at(-1).messages;
   check(continuation.at(-2).role === 'assistant' && continuation.at(-2).content === original && continuation.at(-1).content === 'Continue the previous response from where it stopped.', 'The continuation sends the kept text and asks to continue');
   check(slotVersions[1].origin === 'continue' && slotVersions[1].active && extended.messages.find(m => m.id === slotVersions[1].messageId).content.startsWith(original), 'The continuation is the new effective version and starts from the kept text');
-  check(extended.charges.length === 4 && extended.charges.every(c => c.state === 'settled'), 'The continuation was reserved and settled as its own request');
+  check(extended.usage.length === 4 && extended.usage.every(c => c.state === 'reported'), 'The continuation is its own request with its own usage');
   await capture('continued', '运行结束后点"续写"：发出新请求（携带原回复并请求接着写，单独预留和结算费用），生成"续写 · 当前有效 · 版本 2/2"，内容从原来的文字接着写、不再标注截断；原版本保留为版本 1，后面两条发言标为"受影响"，可按需重新生成。', 0);
 
   // The reviewer saw the drafter's reply as quoted discussion on the user side, never as its own assistant turn.

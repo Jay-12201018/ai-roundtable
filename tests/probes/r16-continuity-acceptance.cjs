@@ -28,7 +28,7 @@ fixture.reply = body => {
 };
 
 async function main() {
-  const ui = await probe.start({ screens, fixedClock: '2026-10-27T16:30:00+08:00' });
+  const ui = await probe.start({ screens });
   const { js, until, click, field, key, ime, capture, api, status, text, runSnapshot } = ui;
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
   const strip = label => js(`document.querySelector('[role=status][aria-label=${JSON.stringify(label)}]')?.textContent ?? ''`);
@@ -86,7 +86,7 @@ async function main() {
   // ── Path 2: after it ended, "@综合者 请总结" continues the same discussion ─────────────
   const runId = snap.runId;
   check(await js(`document.querySelector('[aria-label="继续讨论"]') !== null && document.querySelector('[aria-label="讨论目标"]') === null`), 'D111: the box continues this discussion; it is not a new-goal box');
-  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('各回应一次 · 单次最多约 ¥')`, 'round preview');
+  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('各回应一次')`, 'round preview');
   check((await strip('继续后谁回应')).includes('起草者 → 审查者 → 综合者 各回应一次'), 'Without @ everyone answers once, in order');
   check(await js(`document.querySelector('[role=status][aria-label="继续后谁回应"] > span').getBoundingClientRect().height <= 22`), 'At 1440 wide the who-and-cost line fits on one line');
   check((await js(`document.querySelector('[aria-label="继续讨论"]').placeholder`)).includes('所有成员按顺序各回应一次'), 'Placeholder explains continuing');
@@ -97,10 +97,10 @@ async function main() {
   await capture('continue-mention', '继续时的 @：只让一位成员回应');
   await key('ArrowDown'); await key('ArrowDown'); await key('Enter');
   await ime('qingzongjie', '请总结一下最终方案。', { enterWhileComposing: true });
-  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('只由综合者回应一次 · 最多 ¥')`, 'single preview');
+  await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('只由综合者回应一次')`, 'single preview');
   const requestsBefore = fixture.requests.length;
   check(requestsBefore === 4, 'Nothing was sent while typing');
-  await capture('continue-at-synth', '带 @：只由综合者回应一次，发送前显示预计最高花费');
+  await capture('continue-at-synth', '带 @：只由综合者回应一次，发送前说明谁回应');
   await key('Enter');
   await statusHas('已完成', 60000);
   snap = await runSnapshot();
@@ -124,7 +124,7 @@ async function main() {
   check(JSON.stringify(speakers(snap).slice(5)) === JSON.stringify(['起草者', '审查者', '综合者']), 'D111: one round in roster order');
   check(snap.continuations.length === 2 && snap.turns.slice(5).every(turn => turn.overrideActionId === snap.continuations[1].actionId), 'Round answers belong to the second continuation');
   check(lastRequest().includes('试点最大的风险') && lastRequest().includes('骑手不足时高峰期会超时') && lastRequest().includes('夜间门禁后无人接单'), 'Later answers see earlier answers of the round');
-  check(snap.charges.length === 8 && snap.charges.every(charge => charge.state === 'settled'), 'Every answer was reserved and settled');
+  check(snap.usage.length === 8 && snap.usage.every(row => row.state === 'reported'), 'Every answer has its usage');
   await until(`document.body.innerText.includes('问卷样本偏差')`, 'round rendered');
   await capture('continue-round-done', '一轮结束：三位成员各回应一次', '.thread-item:last-child');
 
@@ -145,7 +145,7 @@ async function main() {
   // Dark theme for the continue box.
   await themeTo('深色');
   await until(`(document.querySelector('[role=status][aria-label="继续后谁回应"]')?.textContent ?? '').includes('整轮最多')`, 'dark preview');
-  await capture('continue-box-dark', '深色：继续讨论的输入框与预计花费');
+  await capture('continue-box-dark', '深色：继续讨论的输入框');
   await themeTo('浅色');
 
   // A new discussion is only the explicit button.

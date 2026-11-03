@@ -110,15 +110,6 @@ async function main() {
   await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve)); port = fixture.address().port;
   const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
   assert.equal(typeof Registry, 'function');
-  const policy = Registry.prototype.resolveModelPolicy;
-  Registry.prototype.resolveModelPolicy = function (config, modelId) {
-    if (!config.name.startsWith('R10R11 fixture ') || modelId !== 'fixture') return policy.call(this, config, modelId);
-    const now = Date.now();
-    return { evidence: 'owned zero-charge local fixture, not a real-model policy', outputTokenParameter: config.kind === 'gemini' ? 'maxOutputTokens' : 'max_tokens', contextWindowTokens: 100000, maxOutputTokens: 128,
-      counter: { modelId, kind: 'upper_bound', method: 'owned fixture wire bytes plus fixed packet envelope', countMessages: () => { throw new Error('Native wire counter required'); } },
-      nativeInputCounter: { protocol: config.kind === 'gemini' ? 'gemini-generate-content-v1' : 'anthropic-messages-v1', evidence: 'actual fixture wire framing', countNativeWire: wire => 64 + Buffer.byteLength(JSON.stringify(wire)) },
-      price: { inputUsdPerMillion: 0, outputUsdPerMillion: 0, maxRequestUsd: 0, evidence: 'owned loopback fixture, no model charges', reviewedAt: new Date(now - 60000).toISOString(), expiresAt: new Date(now + 300000).toISOString() } };
-  };
   const transport = Registry.prototype.createTransport;
   Registry.prototype.createTransport = function (guard, diagnostics) {
     const send = transport.call(this, guard, diagnostics);

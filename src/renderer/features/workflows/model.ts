@@ -21,8 +21,8 @@ export const templates: Array<{ id: WorkflowTemplate; label: string; description
   { id: 'deep-debate', label: '深度辩论', description: '各自立论 → 两轮交锋 → 总结。', steps: 4 },
 ];
 export const templateLabel = (id: WorkflowTemplate) => templates.find(item => item.id === id)!.label;
-/** With no saved choice the room uses Main's default plan: members in order, 3 turns in all. */
-export const DEFAULT_MODE_LABEL = '自由讨论 · 3 回合';
+/** With no mode chosen every member speaks once, three turns at least; Main decides the same when the Run starts. */
+export const defaultModeLabel = (members = 0) => `自由讨论 · ${Math.max(3, members)} 回合`;
 
 const drafter = /起草|草稿|撰写|执笔|draft|writer|author/iu;
 const reviewer = /审查|审阅|评审|审核|批评|质疑|review|critic/iu;

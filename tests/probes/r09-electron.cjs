@@ -107,22 +107,14 @@ const guarded=app.whenReady().then(()=>{
 async function main(){
  // The compatible service's saved address names this port, so a restart listens on the first phase's port again.
  await new Promise(r=>fixture.listen(restarting?prior.fixturePort:0,'127.0.0.1',r));fixturePort=fixture.address().port;fixtureBase='http://127.0.0.1:'+fixturePort;
- // The reviewed Main profile directory intentionally has no live-provider profiles. Substitute only
- // trusted Main policy/official transport for this owned zero-cost fixture; no product env backdoor.
+ // Substitute only the trusted Main transport for this owned fixture; no product env backdoor.
  const entryModule=await import(pathToFileURL(entry).href);
  const Registry=entryModule.ProviderRegistry;assert.equal(typeof Registry,'function','Actual production Registry export missing');
- const originalPolicy=Registry.prototype.resolveModelPolicy;
- Registry.prototype.resolveModelPolicy=function(config,modelId){
-  if(!config.name.startsWith('R09 fixture ')||modelId!=='fixture')return originalPolicy.call(this,config,modelId);
-  return {evidence:'owned local HTTP fixture protocol; no live API model claim',outputTokenParameter:config.kind==='openai'?'max_completion_tokens':'max_tokens',contextWindowTokens:100000,maxOutputTokens:4096,
-    counter:{modelId:'fixture',kind:'upper_bound',method:'owned fixture UTF8 bytes + packet framing bound',countMessages:ms=>32+ms.reduce((n,m)=>n+16+Buffer.byteLength(m.content),0)},
-    price:{inputUsdPerMillion:0,outputUsdPerMillion:0,maxRequestUsd:0,evidence:'owned loopback fixture has no provider charges'}};
- };
  const originalCapabilities=Registry.prototype.resolveCapabilities;
  Registry.prototype.resolveCapabilities=function(config){return config.name==='R09 fixture Compatible'?{outputTokenParameter:'max_tokens',streamUsage:true,listModels:true,authentication:'models'}:originalCapabilities.call(this,config);};
  const originalTransport=Registry.prototype.createTransport;
  Registry.prototype.createTransport=function(guard){const transport=originalTransport.call(this,guard);return (url,init)=>{const target=String(url);return transport(target.startsWith('https://api.openai.com/v1/')?fixtureBase+'/official/v1/'+target.slice('https://api.openai.com/v1/'.length):url,init);};};
- result.fixture={policySubstitutedInTrustedMain:true,officialTransportMappedToLoopback:true,realCompatibleSafeTransport:true,liveApi:false};
+ result.fixture={officialTransportMappedToLoopback:true,realCompatibleSafeTransport:true,liveApi:false};
  await guarded;const window=await loaded;const contents=window.webContents;
  assert.equal(contents.getURL(),pathToFileURL(renderer).href);
  const preferences=contents.getLastWebPreferences();assert.equal(preferences.sandbox,true);assert.equal(preferences.contextIsolation,true);assert.equal(preferences.nodeIntegration,false);assert.equal(preferences.webSecurity,true);
@@ -154,8 +146,6 @@ async function main(){
   assert.equal(stopped.length,3,'One explicit start, retry and continue; no automatic retry');assert.ok(stopped.every(r=>r.aborted),'Stop did not abort actual sockets');
   assert.deepEqual(result.ui.snapshots.repeated.messages[0],result.ui.snapshots.stopped.messages[0]);
  }
- result.deepSeekPreparation=await require('./deepseek-preparation.cjs')(contents,()=>result.fakeSafeStorage.decrypt);
- assert.equal(result.deepSeekPreparation.checks.length,9,'DeepSeek preparation assertions did not all execute');
  assert.deepEqual(result.nodeNetworkAttempts,[]);assert.deepEqual(result.chromiumNetworkAttempts,[]);assert.deepEqual(result.preloadErrors,[]);assert.deepEqual(result.consoleErrors,[]);
  for(const name of safeStorageMethods)assert.equal(safeStorage[name],fake[name],'Unisolated Key backend');
  assert.ok(result.fakeSafeStorage.decrypt>0,'No actual fake encrypted Key read');

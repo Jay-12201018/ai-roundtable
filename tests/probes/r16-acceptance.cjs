@@ -30,7 +30,7 @@ const contrastScript = `(() => {
   const lum = ({ r, g, b }) => { const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
   const behind = element => { for (let e = element; e; e = e.parentElement) { const c = parse(getComputedStyle(e).backgroundColor); if (c && c.a > 0.5) return c; } return parse(getComputedStyle(document.documentElement).backgroundColor); };
   const ratio = (fg, bg) => { const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x); return Math.round((a + 0.05) / (b + 0.05) * 100) / 100; };
-  const pick = { 正文: '.thread-item .md p', 成员名: '.msg-name', 模型名: '.msg-meta', 页脚金额: '.msg-foot .cost', 侧栏元信息: '.sb-foot .meta', 侧栏讨论: '.sb-runs .sb-item', 状态胶囊: '.tb-sub .pill',
+  const pick = { 正文: '.thread-item .md p', 成员名: '.msg-name', 模型名: '.msg-meta', 页脚用量: '.msg-foot .usage-tag', 侧栏元信息: '.sb-foot .meta', 侧栏讨论: '.sb-runs .sb-item', 状态胶囊: '.tb-sub .pill',
     主按钮: '.controls .slot', 停止: '.controls .is-danger', 提示条: '.note .note-body', 输入框提示: '.dock-hint', 主持人气泡: '.bubble', 本场信息说明: '.ctx-note' };
   const out = {};
   for (const [name, selector] of Object.entries(pick)) { const e = document.querySelector(selector); if (!e || !e.getClientRects().length) continue; const fg = parse(getComputedStyle(e).color); out[name] = ratio(fg, behind(e)); }
@@ -40,7 +40,7 @@ const contrastScript = `(() => {
 })()`;
 
 async function main() {
-  const ui = await probe.start({ screens, fixedClock: '2026-10-23T10:00:00+08:00' });
+  const ui = await probe.start({ screens });
   const { js, until, click, field, key, selectAll, ime, type, capture, api, status, text, resize, find, mouse, runSnapshot } = ui;
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
   const noOverflow = async label => check(await js('document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth'), `${label}: no horizontal page scroll`);
@@ -89,7 +89,7 @@ async function main() {
   check(Math.abs(pause.left + pause.w - (start.left + start.w)) < 1.5 && Math.abs(pause.top - start.top) < 1.5 && Math.abs(pause.w - start.w) < 1.5, 'D098: 暂停 takes exactly the place and width of 开始讨论');
   check(await js(`document.querySelector('[aria-label="讨论目标"]') === null && document.querySelector('[aria-label="主持人插话"]') !== null`), 'Running: the box is now the interjection box');
   await until(`document.querySelector('.thread-item .md')?.textContent.includes('试点方案')`, 'streamed text visible');
-  check((await status()).includes('运行中') && (await text()).includes('正在发言 · 已预留最高 ¥'), 'Status says running; the streaming reply shows its reservation');
+  check((await status()).includes('运行中') && (await text()).includes('正在发言'), 'Status says running; the streaming reply says so, with no amount');
   await capture('running-light', '运行中');
 
   // ── 3. D4: @ names the next speaker and interjects; Enter while composing does not send ──
@@ -217,37 +217,22 @@ async function main() {
   check((await text()).includes('已停止 · 已生成的文字都保留'), 'Stopped notice at the end');
   await capture('stopped-light', '已停止');
 
-  // ── 11. Budget stop → top up and continue ───────────────────────────
+  // ── 11. Step by step, then a reply that comes back without usage ─────
   await click('新讨论', { selector: '.sb-new' });
   await field('讨论目标'); await ime('baoxian', '骑手保险怎么买');
-  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.001'); await key('Escape');
   await click('开始讨论');
-  await until(`document.querySelector('[role=alert][aria-label="预算不足"]')`, 'budget stop');
-  check(await js(`document.querySelector('.budget-chip').classList.contains('is-warn')`) && (await status()).includes('已因预算停止'), 'Budget chip and status turn to the budget stop');
-  check(!(await find('重试当前回合')) && !(await find('续写部分回复')), 'No retry/continue while the budget holds the Run');
-  check(await js(`[...document.querySelectorAll('.controls .slot')].some(e => e.textContent === '继续' && e.disabled)`), '继续 is greyed with its reason');
-  await capture('budget-stop-light', '预算停下');
-  await field('追加预算（元）', { scope: '.notice-card' }); await selectAll(); await type('0.5');
-  await click('追加并继续');
   await statusHas('已暂停', 30000);
-  check((await runSnapshot()).budget.topUps.length === 1, 'Top-up recorded and the same Run continued');
-  await capture('topped-up-light', '追加后继续');
+  await capture('paused-next-light', '逐回合暂停');
 
-  // ── 12. Unknown cost → write-off from the amount in the footer ──────
+  // ── 12. Unknown usage is said in the footer, never as zero ──────────
   fixture.mode = 'no-usage';
   await click('下一步');
-  await until(`[...document.querySelectorAll('.cost')].some(e => e.textContent.startsWith('费用未知'))`, 'unknown cost', 30000);
+  await until(`[...document.querySelectorAll('.usage-tag')].some(e => e.textContent === '用量未知')`, 'unknown usage', 30000);
   await statusHas('已暂停', 30000);
-  await click('费用未知', { selector: '.cost', prefix: true, which: 'last' });
-  await click('核销', { scope: '.msg-details' });
-  await field('实际金额（元）'); await type('0.0003');
-  await field('依据说明'); await ime('kongzhitai', '控制台十月二十三日用量明细');
-  await click('我已在服务商控制台核对过这次请求的实际扣费', { selector: 'input[type=checkbox]' });
-  await capture('writeoff-form-light', '核销表单', '.writeoff-form');
-  await click('保存核销');
-  await until(`[...document.querySelectorAll('.cost')].some(e => e.textContent.startsWith('已核销 ¥0.0003'))`, 'written off');
+  await click('用量未知', { selector: '.usage-tag', which: 'last' });
+  await until(`document.querySelector('.msg-details')?.textContent.includes('没拿到完整用量')`, 'unknown usage explained');
   fixture.mode = 'ok';
-  await capture('written-off-light', '已核销', '.msg-details');
+  await capture('unknown-usage-light', '用量未知', '.msg-details');
 
   // Measured contrast in the light theme on this paused discussion (text ≥ 4.5:1, control boundary ≥ 3:1).
   probe.result.contrast = { light: await js(contrastScript) };
@@ -269,7 +254,7 @@ async function main() {
   await until(`document.querySelector('.drawer.is-left')`, 'nav drawer');
   await capture('w800-nav-drawer-light', '800 导航抽屉');
   await key('Escape');
-  await click('本次预算', { prefix: true, selector: '.budget-chip' });
+  await click('本场信息');
   await until(`document.querySelector('.drawer.is-right')`, 'panel drawer at 800');
   await capture('w800-panel-drawer-light', '800 本场信息抽屉');
   await key('Escape');
@@ -296,7 +281,6 @@ async function main() {
   await click('停止'); await click('停止讨论');
   await statusHas('已停止', 30000);
   await click('新讨论', { selector: '.sb-new' });
-  await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('1'); await key('Escape');
   await click('每回合后暂停', { selector: 'input[type=checkbox]' });
   await field('讨论目标'); await selectAll(); await ime('pinggu', '评估一下试点的风险');
   await capture('new-dark', '深色 新讨论');

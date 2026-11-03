@@ -62,7 +62,7 @@ const artifactKind = body => /整理「([^」]+)」。只输出 JSON 对象。$/
 fixture.reply = body => artifactKind(body) === '代码候选' ? code : replies[/现在由你（成员「([^」]+)」/u.exec(body.messages.at(-1).content)?.[1]] ?? '好的，补充一点。';
 
 async function main() {
-  const ui = await probe.start({ screens, width: 1280, height: 800, fixedClock: '2026-10-29T15:00:00+08:00', keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : 39 });
+  const ui = await probe.start({ screens, width: 1280, height: 800, keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : 39 });
   const { js, until, click, field, key, selectAll, ime, capture, resize, api, runSnapshot, finish } = ui;
   const has = (value, timeout) => until(`document.body.innerText.includes(${JSON.stringify(value)})`, value, timeout);
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
@@ -277,7 +277,7 @@ async function main() {
   const Sqlite = require('better-sqlite3');
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
-    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 13, 'Migration 13');
+    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 14, 'Migration 14');
     check(db.prepare('SELECT COUNT(*) FROM code_exports').pluck().get() === 3 && db.prepare('SELECT COUNT(*) FROM code_export_files').pluck().get() === 21, 'Three writes of seven files each are recorded');
     check(db.prepare("SELECT GROUP_CONCAT(reason) FROM code_export_files WHERE outcome='failed'").pluck().get() === 'target_changed', 'The refused overwrite is recorded with its reason');
     check(db.prepare('SELECT DISTINCT root_path FROM code_exports').pluck().all().join() === fs.realpathSync(project), 'The folder is recorded by its real path');

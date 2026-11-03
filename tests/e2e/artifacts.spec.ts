@@ -31,7 +31,7 @@ test('a valid artifact is shown safely, adopted by the host and only then export
   const sent = fixture.requests.length;
   await openArtifacts(page);
   await page.locator('.artifact').first().getByRole('button', { name: /生成/u }).click();
-  await expect(page.locator('dialog[open] .summary-cost')).toBeVisible();
+  await expect(page.locator('dialog[open] .summary-send')).toBeVisible();
   expect(fixture.requests, 'Opening the dialog sends nothing').toHaveLength(sent);
   await page.getByRole('button', { name: '生成（发送 1 次请求）' }).click();
 

@@ -183,7 +183,8 @@ export class RunService {
     if (!members.length) throw new ContractError('invalid_state');
     const runId = randomUUID();
     const context: RunContext = { runId, roomId: input.roomId, members,
-      mode: input.mode ?? 'automatic', maxTurns: Math.min(input.maxTurns ?? workflow?.config.limits.maxTurns ?? 3, workflow?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
+      mode: input.mode ?? 'automatic', // With no stated limit every member speaks once: a fourth member must not be left out in silence.
+      maxTurns: Math.min(input.maxTurns ?? workflow?.config.limits.maxTurns ?? Math.max(3, members.length), workflow?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
       maxDurationMs: Math.min(input.maxDurationMs ?? workflow?.config.limits.maxDurationMs ?? 300000, workflow?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
       outputTokenLimit: Math.min(input.outputTokenLimit ?? workflow?.config.limits.outputTokenLimit ?? DEFAULT_OUTPUT_TOKEN_LIMIT, workflow?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };

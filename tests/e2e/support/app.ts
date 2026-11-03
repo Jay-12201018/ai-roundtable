@@ -90,7 +90,7 @@ export class Harness {
 
   async launch(): Promise<RunningApp> {
     const app = await electron.launch({ args: [ENTRY], cwd: root, env: {
-      ...clean(process.env), ROUNDTABLE_E2E_PROFILE: this.profile, ROUNDTABLE_E2E_FIXTURE_PORT: String(this.fixture.port), ROUNDTABLE_E2E_CLOCK: '2026-10-29T15:00:00+08:00', ROUNDTABLE_E2E_SECRET: FAKE_KEY,
+      ...clean(process.env), ROUNDTABLE_E2E_PROFILE: this.profile, ROUNDTABLE_E2E_FIXTURE_PORT: String(this.fixture.port), ROUNDTABLE_E2E_SECRET: FAKE_KEY,
     } });
     const running = new RunningApp(app, await app.firstWindow(), this.profile);
     this.running.push(running);
@@ -180,8 +180,8 @@ export async function openArtifacts(page: Page) {
 /** Generates one artifact from the panel; the row order is PRD, minutes, actions, code. */
 export async function generateArtifact(page: Page, row: 0 | 1 | 2 | 3) {
   await page.locator('.artifact').nth(row).getByRole('button', { name: /生成/u }).click();
-  await expect(page.locator('dialog[open] .summary-cost')).toBeVisible();
-  // A priced model says what it sends; the demo members cost nothing and just say 生成.
+  await expect(page.locator('dialog[open] .summary-send')).toBeVisible();
+  // A real model says what it sends; the demo members just say 生成.
   await page.locator('dialog[open]').getByRole('button', { name: /^生成/u }).click();
   return page.locator('dialog.artifact-reader');
 }

@@ -14,7 +14,7 @@ const longReply = '### 补充\n\n| 项 | 说明 |\n| --- | --- |\n| 范围 | 两
 fixture.reply = () => longReply;
 
 async function main() {
-  const ui = await probe.start({ screens, fixedClock: '2026-10-23T10:00:00+08:00' });
+  const ui = await probe.start({ screens });
   const { js, until, api, mouse, send, click, capture } = ui;
   const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await api('settings.setKey', { providerId: provider.id, apiKey: 'r16-long-fake-key' });
@@ -24,7 +24,7 @@ async function main() {
     await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: '成员', systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });
   }
   // Setup through the same trusted IPC the UI uses: a step-mode Run, then 1000 host interjections of mixed length.
-  const run = await api('run.start', { roomId: room.id, task: '长历史阅读测量', mode: 'step', budgetMicroCny: 1_000_000_000, maxTurns: 64 });
+  const run = await api('run.start', { roomId: room.id, task: '长历史阅读测量', mode: 'step', maxTurns: 64 });
   await until(`window.roundtable.run.getSnapshot(${JSON.stringify(run.runId)}).then(s => s.status === 'paused')`, 'first turn paused', 60000);
   const started = Date.now();
   await js(`(async () => {

@@ -39,7 +39,7 @@ proxy.on('connect', (request, socket) => { connects.push({ url: request.url, hea
 
 async function main() {
   await new Promise(done => proxy.listen(0, '127.0.0.1', done)); fixture.proxyPort = proxy.address().port;
-  const ui = await probe.start({ screens, width: 1280, height: 800, fixedClock: '2026-10-28T16:30:00+08:00', keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : phase === 'restart' ? 39 : 59 });
+  const ui = await probe.start({ screens, width: 1280, height: 800, keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : phase === 'restart' ? 39 : 59 });
   const { js, until, click, field, key, selectAll, ime, type, capture, resize, api, text, runSnapshot, finish } = ui;
   const has = value => until(`document.body.innerText.includes(${JSON.stringify(value)})`, value);
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
@@ -58,10 +58,9 @@ async function main() {
     await has('让几位 AI 围坐一桌，替你把问题讨论透');
     const welcome = await text();
     for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '建房间、选成员（默认起草 · 审查 · 综合）', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型',
-      // Only what Main allows today: DeepSeek can be used in a discussion; the unreviewed services can be connected first.
-      '目前可以用于讨论的是 DeepSeek；OpenAI、Anthropic Claude、Google Gemini 和其他兼容服务可以先连接，价格审核后开放讨论。'])
+      '支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini，以及其他兼容 OpenAI 接口的服务。'])
       check(welcome.includes(piece), 'Welcome says: ' + piece);
-    check(!welcome.includes('支持 DeepSeek'), 'The welcome page does not promise services that cannot be used yet');
+    check(!/价格|审核/u.test(welcome), 'The welcome page says nothing about prices');
     check(await js(`!document.querySelector('[aria-label="讨论目标"]')`), 'No goal box before anything exists');
     await noOverflow('welcome 1280');
     await capture('welcome-1280-light', '首次启动（1280，浅色）：没有服务也没有房间，主区域是欢迎页——“连接模型服务”（主推，墨绿描边）和“先试玩演示”（写明回复是预先写好的示例、不代表真实模型水平）；连接卡片按审核状态如实写“目前可以用于讨论的是 DeepSeek；OpenAI、Anthropic Claude、Google Gemini 和其他兼容服务可以先连接，价格审核后开放讨论”；下方三步说明与数据/Key 安全说明；侧栏写“还没有房间……会自动建好第一个房间”，设置旁提示“未连接模型”。');
@@ -84,14 +83,13 @@ async function main() {
     await click('开始讨论');
     await statusHas('已完成', 60000);
     check((await runSnapshot()).turns.length === 3 && fixture.requests.length === 0, 'The demo discussion ran on Mock, with no network');
-    await capture('demo-done', '演示讨论跑完：三位演示成员依次发言（Mock，不联网、不花钱）。');
+    await capture('demo-done', '演示讨论跑完：三位演示成员依次发言（Mock，不联网）。');
 
     // ── E · connect wizard (D113) ───────────────────────────────────────────────
     await click('设置', { selector: '.sb-item' }); await click('添加服务');
     const step1 = await js(`document.querySelector('dialog[open]').innerText`);
-    for (const [service, line] of [['OpenAI', '官方接口。价格尚未审核，暂时不能用于讨论。'], ['Anthropic Claude', '官方接口。价格尚未审核，暂时不能用于讨论。'], ['Google Gemini', '官方接口。价格尚未审核，暂时不能用于讨论。']])
-      check(step1.includes(service) && step1.includes(line), service + ' says its price is unreviewed before setup');
-    check(step1.includes('价格尚未审核，暂时不能用于讨论。') && step1.includes('“价格尚未审核”的服务可以保存 Key、检查连接，但在价格核对之前不会发送讨论请求'), 'Compatible services say so too');
+    for (const service of ['OpenAI', 'Anthropic Claude', 'Google Gemini']) check(step1.includes(service), `${service} is offered`);
+    check(!/价格|审核/u.test(step1), 'No service is held back by a price');
     await capture('wizard-1-services', '设置 › 模型服务 › 添加服务，第 1 步：DeepSeek（推荐，已按官方价格核对）预选；OpenAI、Claude、Gemini、其他兼容服务都写明“价格尚未审核，暂时不能用于讨论”，配置之前就说清楚；演示（Mock）写明回复是预设示例。', 'dialog[open]');
     await click('下一步');
     check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The address is written right above the Key');
@@ -102,9 +100,9 @@ async function main() {
     await has('DeepSeek 已连接'); await has('已为你建好房间「我的第一场讨论」');
     await keyLeak();
     const connected = await text();
-    check(connected.includes('Key 还没有核对') && connected.includes('这个服务没有免费检查 Key 的接口'), 'DeepSeek has no free Key check, and the page says so');
-    check(connected.includes('DeepSeek Flash 可以用于讨论') && connected.includes('约 ¥0.0001'), 'The model is usable; the optional paid check states its cost');
-    check(fixture.requests.length === 0, 'Connecting sent no generation request');
+    check(connected.includes('Key 有效'), 'The model list answered, and the page says so');
+    check(connected.includes('DeepSeek Flash 可以用于讨论') && !/¥|价格/u.test(connected), 'The model is usable; no price anywhere');
+    check(fixture.requests.every(request => request.method === 'GET'), 'Connecting sent no generation request');
     const ds = await deepseek();
     check(ds.isDefault && (await api('settings.getProviderKeyState', { providerId: ds.id })).sessionTargetConfirmed === true, 'DeepSeek is the default service with its target confirmed');
     await capture('wizard-3-connected', '第 3 步：Key 已存进钥匙串、地址已确认；DeepSeek 没有免费检查 Key 的接口，如实写“Key 还没有核对”；“DeepSeek Flash 可以用于讨论（价格已核对）”；可选“试发一条（约 ¥0.0001）”；连接第一个真实服务后自动建好“我的第一场讨论”（D6-A），三位成员都用 DeepSeek Flash。没有发出任何生成请求。', 'dialog[open]');
@@ -122,7 +120,7 @@ async function main() {
     await click('添加成员'); await click('反方', { selector: '.choice', prefix: true });
     await field('名字'); await selectAll(); await ime('laozhou', '老周');
     check(await js(`document.querySelector('dialog[open] textarea').value.startsWith('你是反方。')`), 'The 反方 template fills 设定');
-    check((await js(`document.querySelector('dialog[open]').innerText`)).includes('可以使用：Key 已保存，价格已核对。'), 'The default model is preselected and usable');
+    check((await js(`document.querySelector('dialog[open]').innerText`)).includes('可以使用：Key 已保存，地址已确认。'), 'The default model is preselected and usable');
     await capture('member-dialog', '添加成员：六个角色模板，选“反方”自动填好名字、角色和设定；名字改成“老周”（输入法组合输入）；写明名字与角色的区别，以及“起草、审查、综合会自动带上内置的发言要求；其他角色按设定发言”；模型默认是默认服务的 DeepSeek Flash，“可以使用”。', 'dialog[open]');
     await click('添加');
     await until(`!document.querySelector('dialog[open]') && document.body.innerText.includes('老周')`, 'member added');
@@ -162,17 +160,6 @@ async function main() {
     check(JSON.stringify(tags) === JSON.stringify(['起草', '审查', '修订', '复审', '定稿']), 'Each message carries its stage: ' + JSON.stringify(tags));
     await capture('run-done', '讨论按审查修订链完成：每条发言头部带阶段标签（起草、审查、修订、复审、定稿）；老周已停用、综合者不在流程里，都没有发言。');
 
-    // R13B leftover: a budget stop shows no greyed retry / continue anywhere.
-    await click('新讨论', { scope: '.controls' });
-    await field('讨论目标'); await selectAll(); await ime('yusuan', '预算很小的一场');
-    await click('更多设置'); await field('本次运行预算（元）'); await selectAll(); await type('0.001'); await key('Escape');
-    await click('开始讨论');
-    await until(`document.querySelector('[role=alert][aria-label=预算不足]')`, 'budget stop');
-    const stopped = await text();
-    check(!stopped.includes('重试当前回合') && !stopped.includes('续写部分回复'), 'No retry or continue after a budget stop');
-    check(await js(`![...document.querySelectorAll('button')].some(b => ['重试当前回合', '续写部分回复'].includes(b.textContent.trim()))`), 'Not even disabled');
-    await capture('budget-stop', 'R13B 遗留问题复查：预算 ¥0.001 放不下一次请求，运行在发送前停下；时间线末尾只有“追加并继续”，本场信息里没有灰色的“重试当前回合 / 续写部分回复”。');
-
     // D6 companion: a room that never had a discussion can be deleted, after a red second step.
     await click('新建房间'); await field('房间名称'); await ime('linshi', '临时房间'); await click('新建');
     await until(`document.querySelector('.room-page h1')?.textContent === '临时房间'`, 'temporary room');
@@ -189,7 +176,7 @@ async function main() {
     await until(`document.querySelector('.usage-page [aria-label="合计"]')`, 'usage');
     const usage = await text();
     check(usage.includes('5 次请求') || usage.includes('6 次请求'), 'This month counts the DeepSeek requests');
-    check(usage.includes('按讨论') && usage.includes('待核对的未知费用'), 'Groupings and unknown charges');
+    check(usage.includes('按讨论') && usage.includes('费用由服务商收取') && !/¥|花费|金额|核销/u.test(usage), 'Groupings, who bills, and no money');
     await capture('usage-month', '用量页（1280 浅色）：时间范围默认“本月”；合计、已结算、未知（按上限计）、已核销四张卡片；按讨论 / 按模型 / 按日期；说明写明按请求发出时间归入月份。');
     await field('时间范围'); await js(`(() => { const e = document.querySelector('[aria-label="时间范围"]'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, 'last-month'); e.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await has('上月没有使用真实模型的请求');
