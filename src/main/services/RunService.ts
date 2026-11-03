@@ -17,13 +17,10 @@ import type { MemberSnapshot } from '../../shared/schemas/persistence';
 import type { Database, RunEventRecord, RunRecord, TurnRecord, VersionInput } from '../database/Database';
 import { affectedVersions, basisBefore, effectiveInstructions } from '../host/versions';
 import type { HostCommandKind, HostState, MessageVersion } from '../../shared/schemas/host';
-import type { ProviderRegistry, RequestQuote } from '../providers/ProviderRegistry';
-import { budgetBlockMessage, type BudgetBlock, type RequestCharge } from '../../shared/schemas/budget';
+import type { ProviderRegistry } from '../providers/ProviderRegistry';
 import type { ProviderAdapter, StreamChatInput } from '../providers/types';
-import { addRunBudgetInputSchema, writeOffChargeInputSchema, type AddRunBudgetInput, type AddRunBudgetResult, type WriteOffChargeInput, type WriteOffChargeResult } from '../../shared/schemas/budget';
 import { summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, type ContextPressure, type ContextSummary,
   type SummaryCommandResult, type SummaryConfirmInput, type SummaryGenerateInput, type SummaryPreview, type SummaryPreviewInput } from '../../shared/schemas/summary';
-import { settlementClock, settlementPricing } from '../usage/pricing';
 import { activeSummary, buildSummaryMessages, publicSlots, revisedCoveredSlots, summaryBasis, summaryRange, type ActiveSummary, type PublicSlot } from '../context/summary';
 import { measureContext, type ModelBudget } from '../context/wirePublicContext';
 import { countModelTokens } from '../context/buildPublicContext';
@@ -54,8 +51,6 @@ type RunContext = {
   failureReason?: string;
   // R12: a version regeneration runs outside the schedule and leaves the Run status unchanged.
   job?: { requestId?: string };
-  // R13A: why the budget stopped scheduling; persisted with the Run's terminal state.
-  budgetBlock?: BudgetBlock;
 };
 
 export type RequestPreparation = {
@@ -105,7 +100,6 @@ function openContinuation(continuations: Snapshot['continuations'], turns: reado
   return { continuation: latest, remaining: latest.agentIds.slice(answered) };
 }
 /** Input bounds count UTF-8 bytes (byte-level BPE never makes more tokens); a message's label and notes stay under 64. */
-const tokenBound = (text: string) => Buffer.byteLength(text, 'utf8') + 64;
 
 // Compare persisted DTO identity by fields; JSON property insertion order is not identity.
 const memberIdentity = (member: MemberSnapshot) => JSON.stringify([member.agentId, member.displayName, member.roleTemplateId,
@@ -132,7 +126,6 @@ export class RunService {
   constructor(private readonly database: Database, private readonly provider: ProviderAdapter,
     private readonly buildMessages: RunMessagesBuilder = (run,_member,_index,preparation) => preparation.repeat?.messages ?? [{ role: 'user', content: run.task! }],
     private readonly registry?: ProviderRegistry,
-    private readonly assertGenerationAllowed: () => void = () => {},
     /** R13B: a member's context window and token counter, for summary requests and the context-pressure hint. */
     private readonly modelBudget: (member: MemberSnapshot) => ModelBudget | undefined = member => member.modelId === 'mock' ? mockModelBudget : undefined) {}
   private readonly pressureCache = new Map<string, { key: string; value?: ContextPressure }>();
@@ -194,15 +187,9 @@ export class RunService {
       maxDurationMs: Math.min(input.maxDurationMs ?? workflow?.config.limits.maxDurationMs ?? 300000, workflow?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
       outputTokenLimit: Math.min(input.outputTokenLimit ?? workflow?.config.limits.outputTokenLimit ?? DEFAULT_OUTPUT_TOKEN_LIMIT, workflow?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
-    // D103: a limit above what a member's reviewed model allows is refused before any Run exists.
-    for (const member of members) {
-      if (!member.providerId || !member.modelId || !this.registry) continue;
-      const max = (this.registry.budget(member.providerId, member.modelId) as { maxOutputTokens?: number }).maxOutputTokens;
-      if (max !== undefined && context.outputTokenLimit > max) throw new ContractError('invalid_input', 'outputTokenLimit');
-    }
     this.schedule(context, () => {
       this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: workflow ?? input.workflowSnapshot ?? {}, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
-        task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0, budgetMicroCny: input.budgetMicroCny });
+        task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 });
       this.setRunState(runId, { status: 'running', startedAt: new Date().toISOString() }, { status: 'running' });
     });
     if (input.workflowPreviewId) this.workflowPreviews.delete(input.workflowPreviewId);
@@ -242,7 +229,7 @@ export class RunService {
         messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed' })),
         updatedAt: run.updatedAt,startedAt:run.startedAt??undefined,execution,
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
-        versions, host: this.hostView(data), budget: data.budget, charges: data.charges,
+        versions, host: this.hostView(data), usage: data.usage,
         ...(data.summaries.length ? { summaries: this.summaryView(data) } : {}),
         ...(data.artifactRequestIds.length ? { artifactRequestIds: data.artifactRequestIds } : {}),
         ...(data.continuations.length ? { continuations: data.continuations.map((item): RunContinuation => {
@@ -452,7 +439,7 @@ export class RunService {
     const context = this.contexts.get(runId) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
     this.assertSettled(runId);
-    this.assertBudget(run);
+    this.assertDurationLeft(run);
     context.mode = mode;
     this.schedule(context, () => this.setRunState(runId, { status: 'running', mode }, { status: 'running' }));
     await context.promise;
@@ -482,7 +469,7 @@ export class RunService {
     const attempt = requestId ? this.database.getAttempt(requestId) : undefined;
     if (!turn || turn.id !== turnId || !canRetryTurn(turn.status as TurnStatus) || !attempt
       || !canRetryTurn(attempt.status) || !attempt.inputSnapshot) throw new ContractError('invalid_state');
-    this.assertBudget(run);
+    this.assertDurationLeft(run);
     const messages = suffixOf === undefined ? attempt.inputSnapshot.messages : [
       ...attempt.inputSnapshot.messages,
       { role: 'assistant' as const, content: suffixOf },
@@ -493,76 +480,19 @@ export class RunService {
     await context.promise;
   }
 
-  /**
-   * D104: add to a Run's budget as an append-only top-up. With `resume`, a Run the budget stopped (status error,
-   * block `insufficient`) continues from where it stopped once the top-up is recorded. A refused resume never undoes
-   * the recorded top-up; its reason is returned instead.
-   */
-  addBudget(input: AddRunBudgetInput): AddRunBudgetResult {
-    const parsed = addRunBudgetInputSchema.safeParse(input);
-    if (!parsed.success) throw new ContractError('invalid_input', parsed.error.issues[0]?.path[0] === 'amountMicroCny' ? 'amountMicroCny' : undefined);
-    input = parsed.data;
-    this.requireRun(input.runId);
-    const { topUp, duplicate } = this.database.transaction(() => {
-      const result = this.database.addBudgetTopUp({ id: randomUUID(), runId: input.runId, clientRequestId: input.clientRequestId, amountMicro: input.amountMicroCny });
-      if (!result.duplicate) this.appendEvent(input.runId, 'budget_updated', { reason: 'top_up' });
-      return result;
-    });
-    const base = { runId: input.runId, topUpId: topUp.topUpId, duplicate };
-    if (!input.resume || duplicate) return { ...base, resumed: false };
-    try { this.resumeAfterBudget(input.runId); return { ...base, resumed: true }; }
-    catch (error) { return { ...base, resumed: false, resumeError: toPublicError(error).code }; }
-  }
-
-  /**
-   * D105: the host records what the provider console shows for an unknown charge. The unknown row stays as it is;
-   * the write-off is a separate, append-only entry and the budget counts its amount from now on.
-   */
-  writeOffCharge(input: WriteOffChargeInput): WriteOffChargeResult {
-    const parsed = writeOffChargeInputSchema.safeParse(input);
-    if (!parsed.success) {
-      const field = parsed.error.issues[0]?.path[0];
-      throw new ContractError('invalid_input', field === 'basis' || field === 'amountMicroCny' || field === 'acknowledgedUncertainty' ? field : undefined);
-    }
-    input = parsed.data;
-    this.requireRun(input.runId);
-    return this.database.transaction(() => {
-      const { writeOff, duplicate } = this.database.writeOffCharge({ id: randomUUID(), runId: input.runId, requestId: input.requestId,
-        clientRequestId: input.clientRequestId, amountMicro: input.amountMicroCny, basis: input.basis });
-      if (!duplicate) this.appendEvent(input.runId, 'budget_updated', { reason: 'write_off' });
-      return { runId: input.runId, requestId: input.requestId, writeOffId: writeOff.writeOffId, duplicate };
-    });
-  }
-
-  /** D104: continue a Run that stopped because its next request did not fit in the budget. Does not wait. */
-  resumeAfterBudget(runId: string): void {
-    const run = this.requireRun(runId);
-    if (run.status !== 'error' || this.database.getRunBudget(runId).blocked?.reason !== 'insufficient') throw new ContractError('invalid_state');
-    this.workflowPlan(run);
-    const context = this.contexts.get(runId) ?? this.contextFrom(run);
-    if (context.executing) throw new ContractError('invalid_state');
-    this.assertSettled(runId);
-    this.assertBudget(run);
-    this.schedule(context, () => {
-      // The stop reason was answered by the host; the top-up rows keep the history.
-      this.database.setRunBudgetBlock(runId, null);
-      this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' });
-    });
-  }
-
-  /** D111: who would answer a continuation of this finished discussion, and what it may cost. Sends and records nothing. */
+  /** D111: who would answer a continuation of this finished discussion. Sends and records nothing. */
   previewContinuation(input: ContinuationPreviewInput): ContinuationPreview {
     const parsed = continuationPreviewInputSchema.safeParse(input);
     if (!parsed.success) throw new ContractError('invalid_input');
-    const plan = this.planContinuation(this.requireRun(parsed.data.runId), parsed.data.agentId, parsed.data.content ?? '');
-    return { runId: parsed.data.runId, available: plan.reason === undefined, ...(plan.reason ? { reason: plan.reason } : {}), agentIds: plan.agentIds, cost: plan.cost };
+    const plan = this.planContinuation(this.requireRun(parsed.data.runId), parsed.data.agentId);
+    return { runId: parsed.data.runId, available: plan.reason === undefined, ...(plan.reason ? { reason: plan.reason } : {}), agentIds: plan.agentIds };
   }
 
   /**
-   * D111: continue a finished discussion (completed, or stopped — not by the budget — with every Turn settled) in the
+   * D111: continue a finished discussion (completed, or stopped with every Turn settled) in the
    * same Run. The host's words become a public interjection, recorded with its continuation and the Run's return to
    * running in one transaction; then the named member answers once, or every available member once in roster order.
-   * Each request is still reserved and settled on its own (D090). Repeating a delivery returns the original
+   * Repeating a delivery returns the original
    * continuation. Does not wait.
    */
   continueDiscussion(input: ContinueDiscussionInput): ContinueDiscussionResult {
@@ -577,8 +507,7 @@ export class RunService {
       if (previous.fingerprint !== fingerprint || !continuation || !previous.resultMessageId) throw new ContractError('invalid_input', 'clientRequestId');
       return { runId: run.id, actionId: previous.id, messageId: previous.resultMessageId, agentIds: continuation.agentIds, duplicate: true };
     }
-    const plan = this.planContinuation(run, input.agentId, input.content);
-    if (plan.reason === 'budget_insufficient') throw new ContractError('budget_exceeded');
+    const plan = this.planContinuation(run, input.agentId);
     if (plan.reason === 'unsupported') throw new ContractError('unsupported');
     if (plan.reason === 'context_exceeds') throw new ContractError('invalid_input', 'content');
     if (plan.reason) throw new ContractError('invalid_state');
@@ -601,12 +530,11 @@ export class RunService {
   }
 
   /**
-   * D111: a continuation's answering members and its cost bound. Only a completed or stopped Run with every Turn
-   * settled and nothing in flight continues; a budget stop is resumed after a top-up instead. Members are the frozen
-   * roster, limited to those still enabled.
+   * D111: a continuation's answering members. Only a completed or stopped Run with every Turn settled and nothing in
+   * flight continues. Members are the frozen roster, limited to those still enabled.
    */
-  private planContinuation(run: RunRecord, agentId: string | undefined, content: string) {
-    type Plan = { agentIds: string[]; cost: ContinuationPreview['cost']; reason?: NonNullable<ContinuationPreview['reason']> };
+  private planContinuation(run: RunRecord, agentId: string | undefined) {
+    type Plan = { agentIds: string[]; reason?: NonNullable<ContinuationPreview['reason']> };
     const roster = [...(run.membersSnapshot ?? [])].sort((a, b) => a.displayOrder - b.displayOrder);
     if (agentId !== undefined && !roster.some(member => member.agentId === agentId)) throw new ContractError('not_found');
     const available = roster.filter(member => {
@@ -614,43 +542,30 @@ export class RunService {
       return agent && agent.roomId === run.roomId && agent.enabled && agent.archivedAt === null;
     });
     const answering = agentId === undefined ? available : available.filter(member => member.agentId === agentId);
-    const plan: Plan = { agentIds: answering.map(member => member.agentId).slice(0, 64), cost: { kind: 'unavailable' } };
+    const plan: Plan = { agentIds: answering.map(member => member.agentId).slice(0, 64) };
     if (run.task === null || !roster.length || run.nextTurnIndex === null || run.elapsedExecutionMs === null) return { ...plan, reason: 'unsupported' as const };
     const snapshot = this.database.readRunSnapshot(run.id);
-    // A budget stop keeps its own path (top up and resume); any other stop with nothing left to retry can continue.
-    if (!['completed', 'cancelled', 'error'].includes(run.status) || run.status === 'error' && snapshot.budget.blocked) return { ...plan, reason: 'not_finished' as const };
+    // Any stop with nothing left to retry can continue.
+    if (!['completed', 'cancelled', 'error'].includes(run.status)) return { ...plan, reason: 'not_finished' as const };
     if (this.isExecuting(run.id) || this.contexts.get(run.id)?.job || snapshot.messages.some(message => message.status === 'streaming')
       || snapshot.turns.some(turn => !turnSettled(snapshot, turn))) return { ...plan, reason: 'busy' as const };
     if (!answering.length) return { ...plan, reason: 'member_unavailable' as const };
-    // Each answer is quoted as it would be sent now, plus what it will also read: the interjection and the earlier
-    // answers of this continuation. Input bounds count UTF-8 bytes; an earlier answer written to the output limit is
-    // taken as 6 bytes per token (Chinese runs about 5), quoting included.
-    const outputTokenLimit = this.contextFrom(run).outputTokenLimit;
-    let maxMicro = 0; let firstMicro = 0; let priced = false;
-    for (const [index, member] of answering.entries()) {
+    // Each answer is checked as it would be sent now, so a member that cannot be reached or does not fit is said up front.
+    for (const member of answering) {
       if (!member.providerId || !this.registry) continue;
-      let quote: RequestQuote | undefined;
       try {
         const current = { turnId: randomUUID(), requestId: randomUUID(), messageId: randomUUID(), agentId: member.agentId, turnIndex: run.nextTurnIndex };
         const messages = this.buildMessages(run, member, run.nextTurnIndex, { snapshot, current });
-        quote = this.registry.quoteRequest(member.providerId, streamChatInputSchema.parse({ requestId: current.requestId, modelId: member.modelId ?? 'mock',
-          messages, outputTokenLimit, agentRole: member.roleTemplateId, turnIndex: run.nextTurnIndex }));
+        this.registry.checkGeneration(member.providerId, streamChatInputSchema.parse({ requestId: current.requestId, modelId: member.modelId ?? 'mock',
+          messages, outputTokenLimit: this.memberOutputLimit(this.contextFrom(run).outputTokenLimit, member), agentRole: member.roleTemplateId, turnIndex: run.nextTurnIndex }));
       } catch (error) {
         return { ...plan, reason: toPublicError(error).code === 'invalid_input' ? 'context_exceeds' as const : 'unsupported' as const };
       }
-      if (!quote || quote.currency !== 'CNY') continue;
-      priced = true;
-      const extra = (tokenBound(content) + index * (6 * outputTokenLimit + 64)) * quote.inputMicroPerToken;
-      if (index === 0) firstMicro = quote.reservedMicro + tokenBound(content) * quote.inputMicroPerToken;
-      maxMicro += quote.reservedMicro + extra;
     }
-    if (!priced) return { ...plan, cost: { kind: 'free' as const } };
-    const remainingMicro = this.database.getRunBudget(run.id).remainingMicro;
-    plan.cost = { kind: 'priced', maxMicro, firstMicro, remainingMicro };
-    return firstMicro > remainingMicro ? { ...plan, reason: 'budget_insufficient' as const } : plan;
+    return plan;
   }
 
-  /** D107: what a summary would cover, who would write it and its maximum cost. Sends and records nothing. */
+  /** D107: what a summary would cover and who would write it. Sends and records nothing. */
   previewSummary(input: SummaryPreviewInput): SummaryPreview {
     const parsed = summaryPreviewInputSchema.safeParse(input);
     if (!parsed.success) throw new ContractError('invalid_input');
@@ -665,13 +580,12 @@ export class RunService {
       ...(plan.through ? { throughSlotId: plan.through.slotId, firstNumber: 1, lastNumber: plan.through.number } : {}),
       agents, ...(plan.member ? { agentId: plan.member.agentId } : {}),
       ...(plan.basedOn ? { basedOn: { summaryId: plan.basedOn.record.id, lastNumber: plan.basedOn.lastNumber } } : {}),
-      cost: plan.cost,
       ...(plan.inputTokens !== undefined ? { inputTokens: plan.inputTokens } : {}), ...(plan.inputBudgetTokens !== undefined ? { inputBudgetTokens: plan.inputBudgetTokens } : {}),
     };
   }
 
   /**
-   * D107: generate a summary as an explicit, budgeted request of one frozen member. A new summary becomes a timeline
+   * D107: generate a summary as an explicit request of one frozen member. A new summary becomes a timeline
    * slot; regenerating an existing one adds a version that becomes effective only when it completes. Does not wait.
    */
   generateSummary(input: SummaryGenerateInput): SummaryCommandResult {
@@ -686,7 +600,6 @@ export class RunService {
     }
     const plan = this.planSummary(input);
     if (plan.reason === 'busy') throw new ContractError('invalid_state');
-    if (plan.reason === 'budget_insufficient') throw new ContractError('budget_exceeded');
     if (plan.reason === 'unsupported') throw new ContractError('unsupported');
     if (plan.reason || !plan.member || !plan.through || !plan.messages) throw new ContractError('invalid_input', 'throughSlotId');
     if (plan.through.slotId !== input.throughSlotId) throw new ContractError('invalid_input', 'throughSlotId');
@@ -698,29 +611,23 @@ export class RunService {
     const covered = slots.filter(slot => slot.number <= through.number).map(slot => slot.slotId);
     const record = { covered, ...(existing?.basedOnSummaryId ?? basedOn?.record.id ? { basedOnSummaryId: existing?.basedOnSummaryId ?? basedOn!.record.id } : {}) };
     const basis = summaryBasis(snapshot, record);
-    const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: plan.messages, outputTokenLimit: context.outputTokenLimit, agentRole: 'summary' });
-    let quote: RequestQuote | undefined;
+    const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: plan.messages, outputTokenLimit: this.memberOutputLimit(context.outputTokenLimit, member), agentRole: 'summary' });
+    const tracked = Boolean(member.providerId && this.registry);
     context.job = {};
     try {
       this.schedule(context, () => {
-        // The reservation is checked against what is left in the same transaction that records the request.
-        quote = member.providerId && this.registry ? this.registry.quoteRequest(member.providerId, inputSnapshot) : undefined;
-        if (quote && quote.currency === 'CNY' && quote.reservedMicro > this.database.getRunBudget(run.id).remainingMicro) throw new ContractError('budget_exceeded');
+        if (tracked) this.registry!.checkGeneration(member.providerId!, inputSnapshot);
         const active = existing ? snapshot.versions.find(version => version.slotId === existing.id && version.active) : undefined;
         this.database.insertMessage({ id: messageId, roomId: run.roomId, runId: run.id, senderType: 'system', senderName: summarySenderName, content: '', status: 'streaming' },
           existing ? { slotId: existing.id, origin: 'regenerate', parentMessageId: active?.messageId, activate: false, basis } : { origin: 'original', basis });
         if (!existing) this.database.insertSummary({ id: summaryId, runId: run.id, clientRequestId: input.clientRequestId, agentId: member.agentId, covered, ...(record.basedOnSummaryId ? { basedOnSummaryId: record.basedOnSummaryId } : {}) });
         this.database.insertSummaryRequest({ requestId, summaryId, runId: run.id, messageId, clientRequestId: input.clientRequestId, agentId: member.agentId, inputSnapshot });
-        if (quote) {
-          const { currency, inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt } = quote;
-          this.database.reserveCharge({ requestId, runId: run.id, providerId: member.providerId!, modelId: inputSnapshot.modelId, currency, kind: 'summary',
-            inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt });
-        }
+        if (tracked) this.database.openUsage({ requestId, runId: run.id, agentId: member.agentId, providerId: member.providerId!, modelId: inputSnapshot.modelId, kind: 'summary' });
         context.job = { requestId };
         this.appendEvent(run.id, 'summary_updated', { summaryId, messageId, status: 'generating' });
       }, undefined, async () => {
-        try { await this.executeSummary(context, member, { requestId, messageId, summaryId, regenerate: existing !== undefined, input: inputSnapshot, quote }); }
-        catch { /* The failed or aborted summary version, its request and its charge are already persisted as evidence. */ }
+        try { await this.executeSummary(context, member, { requestId, messageId, summaryId, regenerate: existing !== undefined, input: inputSnapshot, tracked }); }
+        catch { /* The failed or aborted summary version, its request and its usage are already persisted as evidence. */ }
         finally { this.endJob(context); }
       });
     } catch (error) { context.job = undefined; throw error; }
@@ -754,7 +661,7 @@ export class RunService {
   /**
    * The summary plan both the preview and the generation use: public messages 1..N (N defaults to all but the last
    * two), the confirmed summary it builds on, the writing member (a synthesizer by role, else the first member),
-   * the exact request and its maximum cost.
+   * and the exact request.
    */
   private planSummary(input: { runId: string; agentId?: string; throughSlotId?: string; summaryId?: string }) {
     const run = this.requireRun(input.runId);
@@ -764,9 +671,9 @@ export class RunService {
     const existing = input.summaryId === undefined ? undefined : snapshot.summaries.find(summary => summary.id === input.summaryId);
     if (input.summaryId !== undefined && !existing) throw new ContractError('not_found');
     type Plan = { snapshot: Snapshot; slots: PublicSlot[]; existing?: typeof existing; basedOn?: ActiveSummary; through?: PublicSlot; member?: MemberSnapshot;
-      messages?: StreamChatInput['messages']; inputTokens?: number; inputBudgetTokens?: number; cost: SummaryPreview['cost'];
+      messages?: StreamChatInput['messages']; inputTokens?: number; inputBudgetTokens?: number;
       reason?: NonNullable<SummaryPreview['reason']> };
-    const plan: Plan = { snapshot, slots, existing, cost: { kind: 'unavailable' } };
+    const plan: Plan = { snapshot, slots, existing };
     if (run.task === null || !members.length) return { ...plan, reason: 'unsupported' as const };
     const basedOn = existing
       ? existing.basedOnSummaryId ? activeSummary({ ...snapshot, summaries: snapshot.summaries.filter(summary => summary.id === existing.basedOnSummaryId) }) : undefined
@@ -792,22 +699,18 @@ export class RunService {
     const messages = buildSummaryMessages({ task: run.task, members, snapshot, slots, ...(basedOn ? { basedOn } : {}), firstNumber: 1, lastNumber: through.number });
     plan.messages = messages;
     const budget = this.modelBudget(plan.member);
-    const outputTokenLimit = (this.contexts.get(run.id) ?? this.contextFrom(run)).outputTokenLimit;
+    const outputTokenLimit = this.memberOutputLimit((this.contexts.get(run.id) ?? this.contextFrom(run)).outputTokenLimit, plan.member);
     const count = budget ? countModelTokens(messages, plan.member.modelId, budget.counter) : undefined;
     if (!budget || count === undefined) return { ...plan, reason: 'unsupported' as const };
     plan.inputTokens = count; plan.inputBudgetTokens = Math.max(0, budget.contextWindowTokens - outputTokenLimit);
     if (count > plan.inputBudgetTokens) return { ...plan, reason: 'context_exceeds' as const };
-    if (!plan.member.providerId || !this.registry) { plan.cost = { kind: 'free' }; return plan; }
-    let quote: RequestQuote | undefined;
-    try { quote = this.registry.quoteRequest(plan.member.providerId, { requestId: randomUUID(), modelId: plan.member.modelId ?? 'mock', messages, outputTokenLimit, agentRole: 'summary' }); }
+    if (!plan.member.providerId || !this.registry) return plan;
+    try { this.registry.checkGeneration(plan.member.providerId, { requestId: randomUUID(), modelId: plan.member.modelId ?? 'mock', messages, outputTokenLimit, agentRole: 'summary' }); }
     catch { return { ...plan, reason: 'unsupported' as const }; }
-    if (!quote || quote.currency !== 'CNY') { plan.cost = { kind: 'free' }; return plan; }
-    const remainingMicro = this.database.getRunBudget(run.id).remainingMicro;
-    plan.cost = { kind: 'priced', maxMicro: quote.reservedMicro, remainingMicro };
-    return quote.reservedMicro > remainingMicro ? { ...plan, reason: 'budget_insufficient' as const } : plan;
+    return plan;
   }
 
-  /** D120: what an artifact would be based on, who would write it and its maximum cost. Sends and records nothing. */
+  /** D120: what an artifact would be based on and who would write it. Sends and records nothing. */
   previewArtifact(input: ArtifactPreviewInput): ArtifactPreview {
     const parsed = artifactPreviewInputSchema.safeParse(input);
     if (!parsed.success) throw new ContractError('invalid_input');
@@ -820,14 +723,14 @@ export class RunService {
       ...(plan.member ? { agentId: plan.member.agentId } : {}),
       messageCount: plan.request?.numbers.length ?? 0, ...(plan.request ? { lastNumber: Math.max(...plan.request.numbers) } : {}),
       ...(plan.basedOn ? { summarizedThrough: plan.basedOn.lastNumber } : {}),
-      cost: plan.cost, outputTokenLimit: plan.outputTokenLimit,
+      outputTokenLimit: plan.outputTokenLimit,
       ...(plan.inputTokens !== undefined ? { inputTokens: plan.inputTokens } : {}), ...(plan.inputBudgetTokens !== undefined ? { inputBudgetTokens: plan.inputBudgetTokens } : {}),
     };
   }
 
   /**
-   * D120: generate an artifact version as one explicit, budgeted request of one frozen member. A failed or invalid
-   * result is kept as it is and never retried automatically (that could be charged again); the host decides.
+   * D120: generate an artifact version as one explicit request of one frozen member. A failed or invalid result is
+   * kept as it is and never retried automatically (the provider may have counted it); the host decides.
    */
   generateArtifact(input: ArtifactGenerateInput): ArtifactCommandResult {
     const parsed = artifactGenerateInputSchema.safeParse(input);
@@ -844,7 +747,6 @@ export class RunService {
     }
     const plan = this.planArtifact(input);
     if (plan.reason === 'busy') throw new ContractError('invalid_state');
-    if (plan.reason === 'budget_insufficient') throw new ContractError('budget_exceeded');
     if (plan.reason === 'unsupported') throw new ContractError('unsupported');
     if (plan.reason === 'context_exceeds') throw new ContractError('invalid_input', 'runId');
     if (plan.reason || !plan.member || !plan.request) throw new ContractError('invalid_state');
@@ -856,27 +758,21 @@ export class RunService {
     const artifactId = existing?.id ?? randomUUID();
     const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: request.messages, outputTokenLimit: plan.outputTokenLimit,
       agentRole: `artifact:${input.kind}` });
-    let quote: RequestQuote | undefined;
+    const tracked = Boolean(member.providerId && this.registry);
     context.job = {};
     try {
       this.schedule(context, () => {
-        // The reservation is checked against what is left in the same transaction that records the request.
-        quote = member.providerId && this.registry ? this.registry.quoteRequest(member.providerId, inputSnapshot) : undefined;
-        if (quote && quote.currency === 'CNY' && quote.reservedMicro > this.database.getRunBudget(run.id).remainingMicro) throw new ContractError('budget_exceeded');
+        if (tracked) this.registry!.checkGeneration(member.providerId!, inputSnapshot);
         if (!existing) this.database.insertArtifact({ id: artifactId, runId: run.id, roomId: run.roomId, kind: input.kind, clientRequestId: input.clientRequestId });
         this.database.insertArtifactVersion({ id: versionId, artifactId, runId: run.id, origin: existing ? 'regenerate' : 'generate',
           ...(existing ? { parentVersionId: existing.versions.at(-1)!.id } : {}), clientRequestId: input.clientRequestId, agentId: member.agentId, sources: request.basis });
         this.database.insertArtifactRequest({ requestId, versionId, runId: run.id, agentId: member.agentId, inputSnapshot });
-        if (quote) {
-          const { currency, inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt } = quote;
-          this.database.reserveCharge({ requestId, runId: run.id, providerId: member.providerId!, modelId: inputSnapshot.modelId, currency, kind: 'artifact',
-            inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt });
-        }
+        if (tracked) this.database.openUsage({ requestId, runId: run.id, agentId: member.agentId, providerId: member.providerId!, modelId: inputSnapshot.modelId, kind: 'artifact' });
         context.job = { requestId };
         this.appendEvent(run.id, 'artifact_updated', { artifactId, versionId, status: 'generating' });
       }, undefined, async () => {
-        try { await this.executeArtifact(context, member, { requestId, versionId, artifactId, kind: input.kind, numbers: request.numbers, input: inputSnapshot, quote }); }
-        catch { /* The failed or stopped version keeps its partial output, its request and its charge as evidence. */ }
+        try { await this.executeArtifact(context, member, { requestId, versionId, artifactId, kind: input.kind, numbers: request.numbers, input: inputSnapshot, tracked }); }
+        catch { /* The failed or stopped version keeps its partial output, its request and its usage as evidence. */ }
         finally { this.endJob(context); }
       });
     } catch (error) { context.job = undefined; throw error; }
@@ -890,7 +786,7 @@ export class RunService {
 
   /**
    * The plan both the artifact preview and the generation use: the whole public history (D121), the writing member
-   * (a synthesizer by role, else the first member; for a regeneration the earlier writer), the request and its cost.
+   * (a synthesizer by role, else the first member; for a regeneration the earlier writer) and the request.
    */
   private planArtifact(input: { runId: string; kind: ArtifactKind; agentId?: string; artifactId?: string }) {
     const run = this.requireRun(input.runId);
@@ -900,16 +796,16 @@ export class RunService {
     if (input.artifactId !== undefined && !existing) throw new ContractError('not_found');
     if (existing && existing.kind !== input.kind) throw new ContractError('invalid_input', 'kind');
     const context = this.contexts.get(run.id) ?? this.contextFrom(run);
-    const outputTokenLimit = artifactOutputTokenLimit(input.kind, context.outputTokenLimit);
     type Plan = { snapshot: Snapshot; existing?: typeof existing; basedOn?: ActiveSummary; member?: MemberSnapshot; outputTokenLimit: number;
-      request?: NonNullable<ReturnType<typeof buildArtifactRequest>>; inputTokens?: number; inputBudgetTokens?: number; cost: ArtifactPreview['cost'];
+      request?: NonNullable<ReturnType<typeof buildArtifactRequest>>; inputTokens?: number; inputBudgetTokens?: number;
       reason?: NonNullable<ArtifactPreview['reason']> };
-    const plan: Plan = { snapshot, existing, outputTokenLimit, cost: { kind: 'unavailable' } };
+    const plan: Plan = { snapshot, existing, outputTokenLimit: artifactOutputTokenLimit(input.kind, context.outputTokenLimit) };
     if (run.task === null || !members.length) return { ...plan, reason: 'unsupported' as const };
     const earlierWriter = existing ? [...existing.versions].reverse().find(version => version.agentId)?.agentId : undefined;
     plan.member = members.find(member => member.agentId === (input.agentId ?? earlierWriter))
       ?? (input.agentId === undefined ? members.find(member => summarizerPattern.test(`${member.roleTemplateId} ${member.displayName}`)) ?? members[0] : undefined);
     if (!plan.member) throw new ContractError('not_found');
+    const outputTokenLimit = plan.outputTokenLimit = this.memberOutputLimit(plan.outputTokenLimit, plan.member);
     const busy = this.isExecuting(run.id) || !['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(run.status)
       || snapshot.messages.some(message => message.status === 'streaming');
     if (busy) return { ...plan, reason: 'busy' as const };
@@ -925,14 +821,10 @@ export class RunService {
     if (!budget || count === undefined) return { ...plan, reason: 'unsupported' as const };
     plan.inputTokens = count; plan.inputBudgetTokens = Math.max(0, budget.contextWindowTokens - outputTokenLimit);
     if (count > plan.inputBudgetTokens) return { ...plan, reason: 'context_exceeds' as const };
-    if (!plan.member.providerId || !this.registry) { plan.cost = { kind: 'free' }; return plan; }
-    let quote: RequestQuote | undefined;
-    try { quote = this.registry.quoteRequest(plan.member.providerId, { requestId: randomUUID(), modelId: plan.member.modelId ?? 'mock', messages: request.messages, outputTokenLimit, agentRole: `artifact:${input.kind}` }); }
+    if (!plan.member.providerId || !this.registry) return plan;
+    try { this.registry.checkGeneration(plan.member.providerId, { requestId: randomUUID(), modelId: plan.member.modelId ?? 'mock', messages: request.messages, outputTokenLimit, agentRole: `artifact:${input.kind}` }); }
     catch { return { ...plan, reason: 'unsupported' as const }; }
-    if (!quote || quote.currency !== 'CNY') { plan.cost = { kind: 'free' }; return plan; }
-    const remainingMicro = this.database.getRunBudget(run.id).remainingMicro;
-    plan.cost = { kind: 'priced', maxMicro: quote.reservedMicro, remainingMicro };
-    return quote.reservedMicro > remainingMicro ? { ...plan, reason: 'budget_insufficient' as const } : plan;
+    return plan;
   }
 
   /**
@@ -941,7 +833,7 @@ export class RunService {
    * nearly all of what arrived without rewriting a long output on every fragment.
    */
   private async executeArtifact(context: RunContext, member: MemberSnapshot, request: { requestId: string; versionId: string; artifactId: string; kind: ArtifactKind;
-    numbers: number[]; input: StreamChatInput; quote?: RequestQuote }): Promise<void> {
+    numbers: number[]; input: StreamChatInput; tracked: boolean }): Promise<void> {
     const { requestId, versionId, artifactId } = request;
     let persisted = 0; let persistedAt = 0;
     await this.streamSideRequest(context, member, request, {
@@ -971,9 +863,9 @@ export class RunService {
     });
   }
 
-  /** Streams one summary request into its own message and settles its charge from evidence, like a Turn request. */
+  /** Streams one summary request into its own message and closes its usage from evidence, like a Turn request. */
   private async executeSummary(context: RunContext, member: MemberSnapshot,
-    request: { requestId: string; messageId: string; summaryId: string; regenerate: boolean; input: StreamChatInput; quote?: RequestQuote }): Promise<void> {
+    request: { requestId: string; messageId: string; summaryId: string; regenerate: boolean; input: StreamChatInput; tracked: boolean }): Promise<void> {
     const { requestId, messageId, summaryId } = request;
     await this.streamSideRequest(context, member, request, {
       text: (content, text) => {
@@ -997,12 +889,12 @@ export class RunService {
   }
 
   /**
-   * One Turn-less request (a summary or an artifact): streams it, records text through `hooks`, and settles its charge
+   * One Turn-less request (a summary or an artifact): streams it, records text through `hooks`, and closes its usage
    * from evidence in the same transaction as the outcome. A failed or stopped request keeps its partial text.
    */
-  private async streamSideRequest(context: RunContext, member: MemberSnapshot, request: { requestId: string; input: StreamChatInput; quote?: RequestQuote },
+  private async streamSideRequest(context: RunContext, member: MemberSnapshot, request: { requestId: string; input: StreamChatInput; tracked: boolean },
     hooks: { text(content: string, delta: string): void; completed(content: string, reason: 'stop' | 'length'): void; ended(content: string, aborted: boolean, errorCode: ErrorCode): void }): Promise<void> {
-    const { requestId, quote } = request;
+    const { requestId, tracked } = request;
     const signal = context.abortController.signal;
     let content = '';
     let iterator: AsyncIterator<unknown> | undefined;
@@ -1011,17 +903,11 @@ export class RunService {
     let usage: { inputTokens: number; outputTokens: number } | undefined;
     let cacheHitInputTokens: number | undefined;
     let dispatched = false;
-    let dispatchedAt: Date | undefined;
-    const settle = () => {
-      if (!quote) return;
-      const charge = this.database.settleCharge(requestId, usage && finishReason ? { state: 'settled', ...usage, pricing: this.pricingFor(quote, dispatchedAt, usage, cacheHitInputTokens) }
-        : dispatched ? { state: 'unknown', ...(usage ? { observed: usage } : {}) } : { state: 'not_sent' });
-      if (charge) this.checkOverrun(context, charge);
-    };
+    const closeUsage = () => { if (tracked) this.closeRequestUsage(requestId, finishReason, usage, cacheHitInputTokens, dispatched); };
     try {
       if (this.deadlineReached(context) || signal.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
       if (this.contexts.get(context.runId) !== context || context.job?.requestId !== requestId) throw new ContractError('invalid_state');
-      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, request.input.modelId, () => { dispatched = true; dispatchedAt = settlementClock.now(); }) : this.provider;
+      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, request.input.modelId, () => { dispatched = true; }) : this.provider;
       iterator = provider.streamChat({ ...request.input, signal })[Symbol.asyncIterator]();
       let started = false;
       await this.withAbort(context, async () => {
@@ -1053,7 +939,7 @@ export class RunService {
       const completedReason = finishReason;
       this.database.transaction(() => {
         hooks.completed(content, completedReason);
-        settle();
+        closeUsage();
         this.persistElapsed(context);
       });
     } catch (error) {
@@ -1062,7 +948,7 @@ export class RunService {
       this.database.transaction(() => {
         // Only the public code is kept: never the response body, headers or anything that could hold a Key.
         hooks.ended(content, aborted, code);
-        settle();
+        closeUsage();
         this.persistElapsed(context);
       });
       throw error;
@@ -1120,7 +1006,7 @@ export class RunService {
     if (!version || !turn || !member || snapshot.messages.some(message => message.status === 'streaming')) throw new ContractError('invalid_state');
     const context = this.contexts.get(runId) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
-    this.assertBudget(run);
+    this.assertDurationLeft(run);
     const latest = snapshot.attempts.filter(attempt => attempt.turnId === turn.id).at(-1);
     const base = { turn, modelId: member.modelId ?? 'mock', sourceRequestId: latest?.requestId ?? turn.requestId, kind: 'regenerate' as const, sourceMessageId: messageId, actionId };
     let extend: { messages: StreamChatInput['messages']; prefix: string } | undefined;
@@ -1168,7 +1054,6 @@ export class RunService {
     const elapsed = this.elapsed(context);
     this.database.transaction(() => {
       this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
-      this.persistBudgetBlock(context);
       const paused = this.requireRun(context.runId).status === 'paused';
       this.database.afterCommit(() => {
         context.elapsedBefore = elapsed;
@@ -1202,7 +1087,7 @@ export class RunService {
       return;
     }
     this.assertSettled(runId);
-    this.assertBudget(run);
+    this.assertDurationLeft(run);
     this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }));
     await context.promise;
   }
@@ -1318,12 +1203,11 @@ export class RunService {
     if (snapshot.turns.some(turn => !turnSettled(snapshot, turn))) throw new ContractError('invalid_state');
   }
 
-  private assertBudget(run: RunRecord): void {
+  private assertDurationLeft(run: RunRecord): void {
     if (run.elapsedExecutionMs !== null && run.elapsedExecutionMs >= this.durationLimit({ run, continuations: this.database.listContinuations(run.id) }, undefined)) throw new ContractError('timeout');
   }
 
   private assertAvailable(context?: RunContext): void {
-    this.assertGenerationAllowed();
     if (this.shuttingDown) throw new ContractError('invalid_state');
     if (this.activeRooms.size && (!context || this.contexts.get(context.runId) !== context)) throw new Error('Another room already has an active run');
   }
@@ -1402,7 +1286,6 @@ export class RunService {
         await this.executeTurn(context, member, turnIndex, repeat, next?.directed);
         repeat = undefined;
         if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
-        if (context.budgetBlock) { this.finishRun(context, 'error', undefined, context.failureReason); return; }
         if (this.deadlineReached(context)) throw new ContractError('timeout');
         if (this.nextSpeaker(context, this.requireRun(context.runId)) === 'complete') { this.finishRun(context, 'completed'); return; }
         if (context.mode === 'step' || this.requireRun(context.runId).status === 'pausing') { this.finishRun(context, 'paused'); return; }
@@ -1463,7 +1346,7 @@ export class RunService {
     const requestId = randomUUID();
     const job = repeat?.kind === 'regenerate' && repeat.job;
     const extend = repeat?.kind === 'regenerate' ? repeat.extend : undefined;
-    let quote: RequestQuote | undefined;
+    const tracked = Boolean(member.providerId && this.registry);
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
       const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, directed);
@@ -1482,10 +1365,9 @@ export class RunService {
           basis: basisBefore(snapshot.messages, snapshot.versions, turnId) }
         : { origin: repeat.kind, ...(source ? { parentMessageId: source.messageId } : {}), ...(source?.basis ? { basis: source.basis } : {}) };
       const inputSnapshot=streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
-        outputTokenLimit:context.outputTokenLimit,agentRole:member.roleTemplateId,turnIndex,
+        outputTokenLimit:this.memberOutputLimit(context.outputTokenLimit,member),agentRole:member.roleTemplateId,turnIndex,
         messages:this.buildMessages(snapshot.run,member,turnIndex,preparation) });
-      quote = member.providerId && this.registry ? this.registry.quoteRequest(member.providerId, inputSnapshot) : undefined;
-      if (quote) this.assertBudgetFits(context, quote);
+      if (tracked) this.registry!.checkGeneration(member.providerId!, inputSnapshot);
       if (this.deadlineReached(context)) throw new ContractError('timeout');
       if(context.abortController.signal.aborted)throw new ContractError('cancelled');
       if (job) context.job = { requestId };
@@ -1495,13 +1377,7 @@ export class RunService {
       this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: extend?.prefix ?? '', status: 'streaming' }, version);
       const attemptIndex = snapshot.attempts.filter(a => a.turnId === turnId).length;
       this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
-      if (quote) {
-        // The maximum cost is held before any byte is sent and released only by evidence (D090).
-        const { currency, inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt } = quote;
-        this.database.reserveCharge({ requestId, runId: context.runId, providerId: member.providerId!, modelId: inputSnapshot.modelId, currency,
-          inputTokenBound, outputTokenLimit, inputMicroPerToken, outputMicroPerToken, reservedMicro, priceEvidence, priceReviewedAt });
-        if (snapshot.budget.blocked) this.database.setRunBudgetBlock(context.runId, null);
-      }
+      if (tracked) this.database.openUsage({ requestId, runId: context.runId, agentId: member.agentId, providerId: member.providerId!, modelId: inputSnapshot.modelId, kind: 'turn' });
       if (!job) this.database.updateRun(context.runId, { currentTurnId: turnId, currentAgentId: member.agentId });
       this.appendEvent(context.runId, 'turn_started', { turnId, messageId, agentId: member.agentId, requestId });
       return {...inputSnapshot,signal:context.abortController.signal};
@@ -1513,15 +1389,8 @@ export class RunService {
     let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
     let usage: { inputTokens: number; outputTokens: number } | undefined;
     let dispatched = false;
-    let dispatchedAt: Date | undefined;
     let cacheHitInputTokens: number | undefined;
-    // Settles this request's reservation from evidence only: provider usage of a terminal stream, or proof it was never sent.
-    const settle = () => {
-      if (!quote) return;
-      const charge = this.database.settleCharge(requestId, usage && finishReason ? { state: 'settled', ...usage, pricing: this.pricingFor(quote, dispatchedAt, usage, cacheHitInputTokens) }
-        : dispatched ? { state: 'unknown', ...(usage ? { observed: usage } : {}) } : { state: 'not_sent' });
-      if (charge) this.checkOverrun(context, charge);
-    };
+    const closeUsage = () => { if (tracked) this.closeRequestUsage(requestId, finishReason, usage, cacheHitInputTokens, dispatched); };
     try {
       let started = false;
       if (this.deadlineReached(context) || signal?.aborted) throw new ContractError(context.timedOut ? 'timeout' : 'cancelled');
@@ -1534,7 +1403,7 @@ export class RunService {
         || (job ? context.job?.requestId !== requestId || ['running', 'pausing', 'cancelling'].includes(dispatch.run.status) : !['running', 'pausing'].includes(dispatch.run.status))
         || !turn || turn.agentId !== member.agentId || turn.turnIndex !== turnIndex || turn.status !== (job ? 'completed' : 'running')
         || attempt?.requestId !== requestId || attempt.messageId !== messageId || !['pending', 'running'].includes(attempt.status)) throw new ContractError('invalid_state');
-      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId, () => { dispatched = true; dispatchedAt = settlementClock.now(); }) : this.provider;
+      const provider = member.providerId && this.registry ? this.registry.getAdapter(member.providerId, input.modelId, () => { dispatched = true; }) : this.provider;
       iterator = provider.streamChat(input)[Symbol.asyncIterator]();
       await this.withAbort(context, async () => {
         while (true) {
@@ -1585,7 +1454,7 @@ export class RunService {
         if (job) this.database.activateVersion(messageId);
         else this.database.updateTurn(turnId, { status: transitionTurn('running', 'completed'), partialContent: content });
         this.database.updateAttempt(requestId, { status: 'completed', finishReason: completedReason });
-        settle();
+        closeUsage();
         this.persistElapsed(context);
         this.appendEvent(context.runId, 'turn_completed', { turnId, messageId });
       });
@@ -1596,7 +1465,7 @@ export class RunService {
         this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
         if (!job) this.database.updateTurn(turnId, { status: transitionTurn('running', aborted ? 'aborted' : 'failed'), partialContent: content });
         this.database.updateAttempt(requestId, { status: aborted ? 'aborted' : 'failed' });
-        settle();
+        closeUsage();
         this.persistElapsed(context);
         this.appendEvent(context.runId, aborted ? 'turn_aborted' : 'turn_failed', { turnId, messageId, error: toPublicError(error, aborted ? 'cancelled' : 'internal_error') });
       });
@@ -1624,14 +1493,13 @@ export class RunService {
           this.database.updateMessage(message.id, message.content, aborted ? 'aborted' : 'failed');
           this.database.updateTurn(turn.id, { status: transitionTurn('running', aborted ? 'aborted' : 'failed') });
           this.database.updateAttempt(attempt.requestId, { status: aborted ? 'aborted' : 'failed' });
-          // Without terminal usage an open reservation stays charged in full.
-          this.database.settleCharge(attempt.requestId, { state: 'unknown' });
+          // Without terminal usage what the provider counted stays unknown, never zero.
+          this.database.closeUsage(attempt.requestId, { state: 'unknown' });
           this.appendEvent(context.runId, aborted ? 'turn_aborted' : 'turn_failed', { turnId: turn.id, messageId: message.id,
             error: publicError(context.timedOut ? 'timeout' : aborted ? 'cancelled' : 'internal_error') });
         }
       }
       this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
-      this.persistBudgetBlock(context);
       const pending = status === 'completed' ? this.database.getPendingOverride(context.runId) : undefined;
       if (pending) this.database.settleHostAction(pending.id, 'expired');
       this.database.afterCommit(() => {
@@ -1645,42 +1513,16 @@ export class RunService {
     });
   }
 
-  /**
-   * D106: the actual price of a settled request: its period from the time it was sent until it settled, and the
-   * provider's cache split. Without reviewed period pricing the frozen peak cache-miss amount stands.
-   */
-  private pricingFor(quote: RequestQuote, startedAt: Date | undefined, usage: { inputTokens: number }, cacheHitInputTokens: number | undefined) {
-    if (!quote.periodPricing || quote.currency !== 'CNY') return;
-    const finishedAt = settlementClock.now();
-    return settlementPricing(quote.periodPricing, { startedAt: startedAt ?? finishedAt, finishedAt }, { inputTokens: usage.inputTokens, cacheHitInputTokens });
+  /** D134: the output limit of one member's requests: the Run's, never above what that member's model takes. */
+  private memberOutputLimit(limit: number, member: MemberSnapshot): number {
+    return Math.min(limit, this.modelBudget(member)?.maxOutputTokens ?? limit);
   }
 
-  /** The next request's maximum cost must fit in what the Run has left; equal is allowed. */
-  private assertBudgetFits(context: RunContext, quote: RequestQuote): void {
-    if (quote.currency !== 'CNY') return; // Only an exactly zero non-CNY price is ever quoted.
-    const budget = this.database.getRunBudget(context.runId);
-    if (quote.reservedMicro <= budget.remainingMicro) return;
-    this.blockBudget(context, { reason: 'insufficient', requiredMicro: quote.reservedMicro, remainingMicro: budget.remainingMicro, at: new Date().toISOString() });
-    throw new ContractError('budget_exceeded');
-  }
-
-  /** Provider usage above the reserved bound disproves the bound for this Run: stop scheduling and report it. */
-  private checkOverrun(context: RunContext, charge: RequestCharge): void {
-    if (charge.state !== 'settled' || (charge.inputTokens! <= charge.inputTokenBound && charge.outputTokens! <= charge.outputTokenLimit
-      && charge.accountedMicro! <= charge.reservedMicro)) return;
-    this.blockBudget(context, { reason: 'overrun', requestId: charge.requestId, reservedMicro: charge.reservedMicro, accountedMicro: charge.accountedMicro!, at: new Date().toISOString() });
-  }
-
-  private blockBudget(context: RunContext, block: BudgetBlock): void {
-    context.budgetBlock = block;
-    context.failureReason = budgetBlockMessage(block);
-  }
-
-  private persistBudgetBlock(context: RunContext): void {
-    const block = context.budgetBlock;
-    if (!block) return;
-    this.database.setRunBudgetBlock(context.runId, block);
-    this.database.afterCommit(() => { if (context.budgetBlock === block) context.budgetBlock = undefined; });
+  /** D133: a request's usage from evidence only: provider usage of a terminal stream, or proof it was never sent. */
+  private closeRequestUsage(requestId: string, finishReason: string | undefined, usage: { inputTokens: number; outputTokens: number } | undefined, cacheHitTokens: number | undefined, dispatched: boolean): void {
+    const tokens = usage ? { ...usage, ...(cacheHitTokens === undefined ? {} : { cacheHitTokens }) } : undefined;
+    this.database.closeUsage(requestId, tokens && finishReason ? { state: 'reported', ...tokens }
+      : dispatched ? { state: 'unknown', ...(tokens ? { observed: tokens } : {}) } : { state: 'not_sent' });
   }
 
   private setRunState(runId: string, patch: Parameters<Database['updateRun']>[1], payload: unknown): void {

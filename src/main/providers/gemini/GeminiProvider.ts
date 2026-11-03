@@ -18,6 +18,8 @@ export interface GeminiOptions {
   confirmedBaseUrl: string;
   resolveKey: (providerId: string, reference: KeyReference | null) => Promise<string | undefined>;
   timeoutMs?: number;
+  /** D135: the total for a generation stream; list and authentication calls keep `timeoutMs`. */
+  streamTimeoutMs?: number;
   fetch?: typeof fetch;
 }
 const officialBaseUrl = 'https://generativelanguage.googleapis.com/v1beta';
@@ -32,6 +34,7 @@ const modelListSchema = z.object({
 export class GeminiProvider implements ProviderAdapter {
   private readonly configuration: ProviderConfiguration;
   private readonly timeoutMs: number;
+  private readonly streamTimeoutMs: number;
   private readonly resolveKey: GeminiOptions['resolveKey'];
   private readonly fetcher: typeof fetch;
   constructor(options: GeminiOptions) {
@@ -41,6 +44,7 @@ export class GeminiProvider implements ProviderAdapter {
       if (normalizeBase(this.configuration.baseUrl ?? officialBaseUrl) !== officialBaseUrl
         || normalizeBase(options.confirmedBaseUrl) !== officialBaseUrl) throw new ContractError('invalid_input');
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
+      this.streamTimeoutMs = z.number().int().min(1).max(2147483647).parse(options.streamTimeoutMs ?? this.timeoutMs);
       this.resolveKey = options.resolveKey;
       this.fetcher = options.fetch ?? createSafeFetch();
     } catch (error) { throw new ContractError(error instanceof ContractError ? error.code : 'invalid_input'); }
@@ -78,7 +82,7 @@ export class GeminiProvider implements ProviderAdapter {
 
   async *streamChat(input: StreamChatInput): AsyncIterable<NormalizedChunk> {
     parse(idSchema, input?.requestId);
-    const scope = new RequestScope(input.signal, this.timeoutMs);
+    const scope = new RequestScope(input.signal, this.streamTimeoutMs);
     const { requestId } = input;
     try {
       const parsed = parse(streamChatInputSchema, withoutSignal(input)); scope.check();

@@ -36,7 +36,7 @@ try {
     }
     if (resolve(app.getPath('userData')) === resolve(real)) throw new Error('userData 指向真实数据目录，已停止。');
     // The built renderer, not a dev server, and no inherited one-shot trial authorizations.
-    for (const name of ['ELECTRON_RENDERER_URL', 'ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
+    for (const name of ['ELECTRON_RENDERER_URL']) delete process.env[name];
     console.log(`AI 圆桌试用版：数据目录 ${directory}`);
     import(pathToFileURL(entry).href).catch(error => fail(error instanceof Error ? error.message : String(error)));
   }

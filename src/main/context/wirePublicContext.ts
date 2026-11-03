@@ -15,7 +15,9 @@ import type { RequestPreparation } from '../services/RunService';
 
 type BuildInput={run:RunRecord;member:MemberSnapshot;turnIndex:number;preparation:RequestPreparation;budget:ModelBudget};
 /** R13B: the R05 context for one request, with the latest confirmed summary standing in for what it covers. */
-function contextFor({run,member,turnIndex,preparation:{snapshot,current,workflowStep,regenerate},budget}:BuildInput){
+function contextFor({run:frozen,member,turnIndex,preparation:{snapshot,current,workflowStep,regenerate},budget}:BuildInput){
+    // D134: a member's request reserves what that member's model can write, never more than the Run allows.
+    const run={...frozen,outputTokenLimit:outputLimitOf(frozen,budget)};
     // R12: only effective versions are public history; a regenerated Turn sees only slots positioned before it.
     const versions=snapshot.versions??[];
     const affected=affectedVersions(snapshot.messages,versions);
@@ -54,7 +56,8 @@ export function measureContext(run:RunRecord,member:MemberSnapshot,snapshot:Requ
   return {agentId:member.agentId,usedTokens:used,inputBudgetTokens:limit,omittedMessages:omitted,summarizedMessages:summarized,level};
 }
 
-export type ModelBudget={contextWindowTokens:number;counter:ModelTokenCounter};
+const outputLimitOf=(run:{outputTokenLimit:number},budget:ModelBudget)=>Math.min(run.outputTokenLimit,budget.maxOutputTokens??run.outputTokenLimit);
+export type ModelBudget={contextWindowTokens:number;maxOutputTokens?:number;counter:ModelTokenCounter};
 export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:MemberSnapshot)=>ModelBudget|undefined=id=>id==='mock'?mockModelBudget:undefined):RunMessagesBuilder{
   return (run,member,turnIndex,{snapshot,current,repeat,workflowStep,regenerate})=>{
     const budget=resolve(member.modelId,member);
@@ -74,7 +77,7 @@ export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:
       const count=countModelTokens(messages,member.modelId,budget.counter);
       const previous=countModelTokens(original,member.modelId,budget.counter);
       if(count===undefined||previous===undefined)throw new ContractError('unsupported');
-      if(count<previous||count+run.outputTokenLimit>budget.contextWindowTokens)throw new ContractError('invalid_input');
+      if(count<previous||count+outputLimitOf(run,budget)>budget.contextWindowTokens)throw new ContractError('invalid_input');
       return messages;
     }
     const result=contextFor({run,member,turnIndex,preparation:{snapshot,current,workflowStep,regenerate},budget});

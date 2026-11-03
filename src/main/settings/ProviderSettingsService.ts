@@ -7,6 +7,7 @@ import type { ProviderRegistry } from '../providers/ProviderRegistry';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
 import { providerSettingsContracts, type ProviderSettingsApiContract } from '../../shared/contracts/configuration';
 import * as schemas from '../../shared/schemas/configuration';
+import { modelLimits } from '../../shared/schemas/provider';
 import type {
   ConfigurationIdInput, CreateProviderInput, ProviderInput, ProviderIdInput,
   ProviderModelsInput, ProviderConnectionTestInput, SetProviderKeyInput, ConfirmProviderTargetInput, ProviderConfiguration,
@@ -110,11 +111,9 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
         const confirmedBaseUrl = mock || !configuration || !summary.enabled ? undefined : registry.confirmedTarget(summary.id);
         result.push({ providerId: summary.id, keyState: key?.state ?? 'none', targetConfirmed: confirmedBaseUrl !== undefined, confirmedBaseUrl: confirmedBaseUrl ?? null,
           models: ids.map(modelId => {
-            const policy = configuration && !mock ? registry.approvedPolicy(configuration, modelId) : undefined;
-            const reviewedAt = policy && 'currency' in policy.price ? policy.price.reviewedAt : policy?.price.reviewedAt ?? null;
-            const blockedBy = !configuration ? 'invalid' as const : !summary.enabled ? 'disabled' as const : mock ? null : !policy ? 'price' as const
+            const blockedBy = !configuration ? 'invalid' as const : !summary.enabled ? 'disabled' as const : mock ? null
               : !keyUsable ? 'key' as const : !confirmedBaseUrl ? 'target' as const : null;
-            return { modelId, price: mock ? 'free' as const : policy ? 'reviewed' as const : 'unreviewed' as const, priceReviewedAt: reviewedAt, usable: blockedBy === null, blockedBy };
+            return { modelId, ...(configuration ? registry.limits(configuration, modelId) : modelLimits()), usable: blockedBy === null, blockedBy };
           }) });
       }
       return schemas.providerReadinessListSchema.parse(result);

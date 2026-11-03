@@ -18,6 +18,8 @@ export interface AnthropicOptions {
   confirmedBaseUrl: string;
   resolveKey: (providerId: string, reference: KeyReference | null) => Promise<string | undefined>;
   timeoutMs?: number;
+  /** D135: the total for a generation stream; list and authentication calls keep `timeoutMs`. */
+  streamTimeoutMs?: number;
   /** Production must inject the existing guarded/pinned Main transport. */
   fetch?: typeof fetch;
 }
@@ -33,6 +35,7 @@ const silentLogger = { error() {}, warn() {}, info() {}, debug() {} };
 export class AnthropicProvider implements ProviderAdapter {
   private readonly configuration: ProviderConfiguration;
   private readonly timeoutMs: number;
+  private readonly streamTimeoutMs: number;
   private readonly resolveKey: AnthropicOptions['resolveKey'];
   private readonly fetcher: typeof fetch;
 
@@ -43,6 +46,7 @@ export class AnthropicProvider implements ProviderAdapter {
       if (normalizeBase(this.configuration.baseUrl ?? officialBaseUrl) !== officialBaseUrl
         || normalizeBase(options.confirmedBaseUrl) !== officialBaseUrl) throw new ContractError('invalid_input');
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
+      this.streamTimeoutMs = z.number().int().min(1).max(2147483647).parse(options.streamTimeoutMs ?? this.timeoutMs);
       this.resolveKey = options.resolveKey;
       this.fetcher = options.fetch ?? globalThis.fetch;
     } catch (error) { throw new ContractError(error instanceof ContractError ? error.code : 'invalid_input'); }
@@ -83,7 +87,7 @@ export class AnthropicProvider implements ProviderAdapter {
 
   async *streamChat(input: StreamChatInput): AsyncIterable<NormalizedChunk> {
     parse(idSchema, input?.requestId);
-    const scope = new RequestScope(input.signal, this.timeoutMs);
+    const scope = new RequestScope(input.signal, this.streamTimeoutMs);
     try {
       const parsed = parse(streamChatInputSchema, withoutSignal(input)); scope.check();
       if (parsed.outputTokenLimit === undefined) throw new ContractError('invalid_input');

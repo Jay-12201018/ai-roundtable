@@ -89,7 +89,6 @@ async function rehearse(Driver, Database, copy) {
     await db.initialize();
     purged = db.purgeKeyLikeModelIds();
     interrupted = db.markInFlightRunsInterrupted();
-    db.recoverControlledTrials();
   } finally { db.close(); }
   // A second start validates the upgraded file again, and the backup the upgrade made must restore.
   const reopened = new Database(copy);

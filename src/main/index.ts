@@ -6,7 +6,6 @@ import { createElectronKeyBackend } from './security/electronSafeStorage';
 import { KeyService } from './security/KeyService';
 import { ProviderRegistry } from './providers/ProviderRegistry';
 import { NetworkSettingsService } from './settings/NetworkSettings';
-import { deepSeekModelPolicy } from './providers/modelPolicies/deepseek';
 export { ProviderRegistry };
 import { mockModelBudget } from './providers/mock/tokenBudget';
 import { MockProvider } from './providers/mock/MockProvider';
@@ -17,16 +16,10 @@ import { RoomService } from './room/RoomService';
 import { ProviderSettingsService } from './settings/ProviderSettingsService';
 import { registerIpc, type IpcDisposer } from './ipc/registerIpc';
 import { createPublicMessagesBuilder } from './context/wirePublicContext';
-import { ControlledTrialService } from './providers/controlledTrial/ControlledTrialService';
-export { ControlledTrialService };
-export { deepSeekTrialReview } from './providers/controlledTrial/estimate';
-import { confirmTrial, installTrialMenu } from './providers/controlledTrial/menu';
 import { ContractError } from '../shared/contracts/errors';
 import { UsageService } from './usage/UsageService';
 import { ArtifactService } from './artifact/ArtifactService';
 import { CodeExportService } from './export/CodeExportService';
-// D106: replaceable only by a probe that names itself as a fixture clock before Main starts.
-export { settlementClock } from './usage/pricing';
 
 let database: Database | undefined;
 let window: BrowserWindow | undefined;
@@ -40,7 +33,6 @@ let usageService: UsageService | undefined;
 let artifactService: ArtifactService | undefined;
 let codeExportService: CodeExportService | undefined;
 let networkSettings: NetworkSettingsService | undefined;
-let controlledTrial: ControlledTrialService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
 let shutdownExitCode = 0;
@@ -73,19 +65,16 @@ if (!hasLock) {
       const purged = database.purgeKeyLikeModelIds();
       if (purged) console.info(`已清除 ${purged} 处疑似 API Key 的模型 ID`);
       database.markInFlightRunsInterrupted();
-      database.recoverControlledTrials();
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
       // D115: the launch-time proxy comes from the environment or, when that is unset, the settings page.
       networkSettings = new NetworkSettingsService(app.getPath('userData'), process.env);
-      // R13A: the reviewed DeepSeek direct policy is the only approved real-model policy (D089).
-      const providers = new ProviderRegistry(database, keyService, { proxy: networkSettings.proxy, policyResolver: deepSeekModelPolicy });
+      const providers = new ProviderRegistry(database, keyService, { proxy: networkSettings.proxy });
       settingsService = new ProviderSettingsService(database, keyService, providers);
       const modelBudget = (modelId: string | null, member: { providerId: string | null }) =>
         member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined;
       runService = new RunService(database, new MockProvider({ tokenDelayMs: 60 }), createPublicMessagesBuilder(modelBudget), providers,
-        () => { if (controlledTrial?.isBusy()) throw new ContractError('invalid_state'); },
         member => { try { return modelBudget(member.modelId, member); } catch { return undefined; } });
       usageService = new UsageService(database);
       artifactService = new ArtifactService(database, runService);
@@ -97,8 +86,6 @@ if (!hasLock) {
       codeExportService = new CodeExportService(database, runId => artifactsForExport.listCodeCandidates({ runId }), runService,
         { protectedDirs: [...new Set([userData, realUserData])] });
       hostService = new HostService(database, runService);
-      controlledTrial = new ControlledTrialService(database, providers, confirmTrial, () => runService?.hasActiveRuns() ?? true);
-      installTrialMenu(database, controlledTrial, () => runService?.hasActiveRuns() ?? true);
       createAppWindow();
       app.on('activate', () => {
         if (!shutdownRequested && BrowserWindow.getAllWindows().length === 0) createAppWindow();
@@ -148,14 +135,14 @@ function createAppWindow(): void {
         return result.canceled ? undefined : result.filePaths[0];
       }),
     }, network: networkSettings, lifecycle: { relaunch: () => {
-      // A restart stops nothing silently: refuse while a discussion or the controlled trial is still running.
-      if (runService?.hasActiveRuns() || controlledTrial?.isBusy()) throw new ContractError('invalid_state');
+      // A restart stops nothing silently: refuse while a discussion is still running.
+      if (runService?.hasActiveRuns()) throw new ContractError('invalid_state');
       // Answer this call first (registerIpc checks the sender again before replying); quitting destroys the window.
       setImmediate(() => { app.relaunch(); app.quit(); });
     } } });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
-      if (shutdownRequested || (!runService?.hasActiveRuns() && !controlledTrial?.isBusy())) return;
+      if (shutdownRequested || !runService?.hasActiveRuns()) return;
       const result = dialog.showMessageBoxSync(createdWindow, { type: 'warning', buttons: ['取消', '退出并停止生成'], defaultId: 0, cancelId: 0, title: '正在生成', message: '仍有任务正在生成，确定退出吗？' });
       event.preventDefault();
       if (result !== 0) app.quit();
@@ -190,12 +177,7 @@ function requestShutdown(exitCode = 0): void {
     try {
       if (initializationPromise) await initializationPromise;
       try {
-        const results = await Promise.allSettled([
-          Promise.resolve().then(() => runService?.shutdown()),
-          Promise.resolve().then(() => controlledTrial?.shutdown()),
-        ]);
-        const failure = results.find(result => result.status === 'rejected');
-        if (failure?.status === 'rejected') throw failure.reason;
+        await runService?.shutdown();
       }
       finally { await ipcCleanup; }
     } catch (error) {

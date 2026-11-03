@@ -5,9 +5,7 @@ import { requestAttemptSchema,executionMetadataSchema } from '../../../shared/sc
 import { timestampSchema } from '../../../shared/schemas/common';
 import { providerModelSchema } from '../../../shared/schemas/provider';
 import { runEventSchema } from '../../../shared/schemas/run';
-import { trialRecordSchema } from '../../providers/controlledTrial/record';
-import { reconciliationAuditSchema } from '../../providers/controlledTrial/reconciliation';
-import { budgetBlockSchema, requestChargeSchema } from '../../../shared/schemas/budget';
+import { requestUsageSchema } from '../../../shared/schemas/usage';
 import { artifactContentSchemas, artifactIssueSchema, artifactKindSchema, artifactNothingKinds } from '../../../shared/schemas/artifact';
 import { streamChatInputSchema } from '../../../shared/schemas/provider';
 import { errorCodeSchema } from '../../../shared/schemas/error';
@@ -30,8 +28,12 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
     const versions = tables.includes('schema_migrations') ? db.prepare('SELECT version FROM schema_migrations ORDER BY version').pluck().all() as number[] : [];
     if (versions.some((version, index) => version !== index + 1)) throw new Error('Invalid migration ledger');
     const modern = (versions.at(-1)??0)>=2;
-    const reconciliations = (versions.at(-1) ?? 0) >= 5;
-    if ((versions.at(-1) ?? 0) >= 4) {
+    const version = versions.at(-1) ?? 0;
+    // D133: migration 14 dropped the trial and cost tables. An older database about to be upgraded is still checked at
+    // the SQL level (tables, triggers, identities); its rows are not parsed with schemas that no longer exist.
+    const costTables = version < 14;
+    const reconciliations = version >= 5 && costTables;
+    if (version >= 4 && costTables) {
       if (!tables.includes('controlled_trials')) throw new Error('Recovery v4 schema is incomplete');
       const unresolvedIndex = db.prepare("SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_controlled_trial_unresolved'").pluck().get() as string | undefined;
       if (unresolvedIndex?.replace(/\s+/gu, '').toLowerCase().replace(/;$/u, '') !== "createuniqueindexidx_controlled_trial_unresolvedoncontrolled_trials((1))wherestatein('reserved','unknown')" + (reconciliations ? "andreservation_released=0" : "")) throw new Error('Missing trial reservation uniqueness');
@@ -39,10 +41,7 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       if (!indexes.some(index => index.unique === 1 && index.partial === 0 && JSON.stringify((db.prepare(`PRAGMA index_info("${index.name.replaceAll('"', '""')}")`).all() as Array<{ name: string }>).map(column => column.name)) === '["request_id"]')) throw new Error('Missing trial request identity uniqueness');
       const unresolved = db.prepare("SELECT COUNT(*) FROM controlled_trials WHERE state IN ('reserved','unknown')" + (reconciliations ? ' AND reservation_released=0' : '')).pluck().get() as number;
       if (unresolved > 1) throw new Error('Multiple unresolved trial reservations');
-      for (const row of db.prepare('SELECT id,request_id,provider_id,state,data_json FROM controlled_trials').all() as Array<{ id: string; request_id: string; provider_id: string; state: string; data_json: string }>) {
-        const value = trialRecordSchema.parse(JSON.parse(row.data_json));
-        if (value.id !== row.id || value.requestId !== row.request_id || value.providerId !== row.provider_id || value.state !== row.state) throw new Error('Trial reservation identity mismatch');
-      }
+      assertNoRows(db, "SELECT 1 FROM controlled_trials WHERE json_extract(data_json,'$.id') IS NOT id OR json_extract(data_json,'$.requestId') IS NOT request_id OR json_extract(data_json,'$.providerId') IS NOT provider_id OR json_extract(data_json,'$.state') IS NOT state LIMIT 1", 'Trial reservation identity mismatch');
     }
     if (reconciliations) {
       if (!tables.includes('controlled_trial_reconciliations')) throw new Error('Recovery v5 schema is incomplete');
@@ -55,13 +54,10 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       const releaseIndex = db.prepare("SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_controlled_trial_release'").pluck().get() as string | undefined;
       if (releaseIndex?.replace(/\s+/gu, '').toLowerCase().replace(/;$/u, '') !== "createuniqueindexidx_controlled_trial_releaseoncontrolled_trial_reconciliations(trial_id)wheredecision='release_reservation'") throw new Error('Missing reconciliation release uniqueness');
       assertNoRows(db, "SELECT 1 FROM controlled_trials WHERE typeof(reservation_released)<>'integer' OR reservation_released NOT IN (0,1) OR (reservation_released=1 AND state<>'unknown') LIMIT 1", 'Invalid trial release marker');
-      for (const row of db.prepare('SELECT id,trial_id,decision,reviewed_at,data_json FROM controlled_trial_reconciliations').all() as Array<{ id: string; trial_id: string; decision: string; reviewed_at: string; data_json: string }>) {
-        const value = reconciliationAuditSchema.parse(JSON.parse(row.data_json));
-        const original = db.prepare('SELECT data_json FROM controlled_trials WHERE id=?').pluck().get(value.trialId) as string | undefined;
-        if (!original) throw new Error('Missing reconciled trial');
-        const trial = trialRecordSchema.parse(JSON.parse(original));
-        if (value.id !== row.id || value.trialId !== row.trial_id || value.decision !== row.decision || value.reviewedAt !== row.reviewed_at || trial.state !== 'unknown' || value.requestId !== trial.requestId || value.providerId !== trial.providerId || value.keyRevision !== trial.keyRevision) throw new Error('Reconciliation audit identity mismatch');
-      }
+      assertNoRows(db, `SELECT 1 FROM controlled_trial_reconciliations a LEFT JOIN controlled_trials t ON t.id=a.trial_id
+        WHERE t.id IS NULL OR t.state<>'unknown' OR json_extract(a.data_json,'$.id') IS NOT a.id OR json_extract(a.data_json,'$.trialId') IS NOT a.trial_id
+          OR json_extract(a.data_json,'$.decision') IS NOT a.decision OR json_extract(a.data_json,'$.reviewedAt') IS NOT a.reviewed_at
+          OR json_extract(a.data_json,'$.requestId') IS NOT t.request_id OR json_extract(a.data_json,'$.providerId') IS NOT t.provider_id LIMIT 1`, 'Invalid reconciliation audit');
       assertNoRows(db, "SELECT 1 FROM controlled_trials t WHERE t.reservation_released <> EXISTS(SELECT 1 FROM controlled_trial_reconciliations a WHERE a.trial_id=t.id AND a.decision='release_reservation') LIMIT 1", 'Trial release is missing explicit reconciliation evidence');
     }
     if ((versions.at(-1) ?? 0) >= 3) {
@@ -175,7 +171,7 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       if (!columns.includes('finish_reason') || !db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name='request_attempt_finish_once'").get()) throw new Error('Recovery v8 schema is incomplete');
       assertNoRows(db, "SELECT 1 FROM request_attempts WHERE finish_reason IS NOT NULL AND (status<>'completed' OR finish_reason NOT IN ('stop','length')) LIMIT 1", 'Invalid attempt finish reason');
     }
-    if ((versions.at(-1) ?? 0) >= 7) {
+    if (version >= 7 && costTables) {
       for (const table of ['run_budgets', 'request_charges']) if (!tables.includes(table)) throw new Error('Recovery v7 schema is incomplete');
       for (const name of ['run_budget_limit_immutable', 'run_budget_no_delete', 'request_charge_identity_insert', 'request_charge_identity_immutable',
         'request_charge_settle_once', 'request_charge_result_once', 'request_charge_no_delete']) {
@@ -183,43 +179,36 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       }
       assertNoRows(db, 'SELECT 1 FROM workflow_runs r WHERE NOT EXISTS(SELECT 1 FROM run_budgets b WHERE b.run_id=r.id) LIMIT 1', 'Run without budget');
       assertNoRows(db, 'SELECT 1 FROM request_charges c LEFT JOIN request_attempts a ON a.request_id=c.request_id WHERE a.request_id IS NULL OR a.run_id<>c.run_id LIMIT 1', 'Invalid charge identity');
-      for (const row of db.prepare('SELECT blocked_json FROM run_budgets WHERE blocked_json IS NOT NULL').pluck().iterate() as Iterable<string>) {
-        if (!budgetBlockSchema.safeParse(JSON.parse(row)).success) throw new Error('Invalid budget block');
-      }
-      const charges = db.prepare(`SELECT request_id AS requestId,provider_id AS providerId,model_id AS modelId,currency,state,input_token_bound AS inputTokenBound,
-        output_token_limit AS outputTokenLimit,input_micro_per_token AS inputMicroPerToken,output_micro_per_token AS outputMicroPerToken,reserved_micro AS reservedMicro,
-        input_tokens AS inputTokens,output_tokens AS outputTokens,accounted_micro AS accountedMicro,price_reviewed_at AS priceReviewedAt,created_at AS createdAt,updated_at AS updatedAt FROM request_charges`).iterate() as Iterable<Record<string, unknown>>;
-      for (const row of charges) {
-        const chargedMicro = row.state === 'settled' ? row.accountedMicro : row.state === 'not_sent' ? 0 : row.reservedMicro;
-        if (!requestChargeSchema.safeParse({ ...row, chargedMicro }).success) throw new Error('Invalid charge evidence');
-      }
+      assertNoRows(db, "SELECT 1 FROM run_budgets WHERE blocked_json IS NOT NULL AND NOT json_valid(blocked_json) LIMIT 1", 'Invalid budget block');
     }
-    const artifacts = (versions.at(-1) ?? 0) >= 12;
+    const artifacts = version >= 12;
     // R14: from migration 12 artifact requests are a third ledger table that pricing and write-offs may refer to.
-    const artifactCharge = (alias: string, state: string, extra = '') => artifacts
+    const artifactCharge = (alias: string, state: string, extra = '') => artifacts && costTables
       ? ` AND NOT EXISTS(SELECT 1 FROM artifact_charges c WHERE c.request_id=${alias}.request_id AND c.run_id=${alias}.run_id AND c.state='${state}'${extra})` : '';
     if ((versions.at(-1) ?? 0) >= 9) {
-      for (const table of ['run_budget_topups', 'context_summaries', 'summary_requests', 'summary_confirmations', 'summary_charges', 'charge_pricing', 'charge_writeoffs']) {
+      for (const table of ['context_summaries', 'summary_requests', 'summary_confirmations', ...(costTables ? ['run_budget_topups', 'summary_charges', 'charge_pricing', 'charge_writeoffs'] : [])]) {
         if (!tables.includes(table)) throw new Error('Recovery v9 schema is incomplete');
       }
-      for (const name of ['run_budget_topup_insert', 'run_budget_topup_immutable', 'run_budget_topup_no_delete', 'context_summary_immutable', 'context_summary_no_delete',
+      for (const name of ['context_summary_immutable', 'context_summary_no_delete',
         'summary_request_insert', 'summary_request_identity_immutable', 'summary_request_finish_once', 'summary_request_no_delete', 'summary_confirmation_insert',
-        'summary_confirmation_immutable', 'summary_confirmation_no_delete', 'summary_charge_identity_insert', 'summary_charge_identity_immutable', 'summary_charge_settle_once',
-        'summary_charge_result_once', 'summary_charge_no_delete', 'charge_pricing_insert', 'charge_pricing_immutable', 'charge_pricing_no_delete',
-        'charge_writeoff_insert', 'charge_writeoff_immutable', 'charge_writeoff_no_delete']) {
+        'summary_confirmation_immutable', 'summary_confirmation_no_delete',
+        ...(costTables ? ['run_budget_topup_insert', 'run_budget_topup_immutable', 'run_budget_topup_no_delete', 'summary_charge_identity_insert', 'summary_charge_identity_immutable', 'summary_charge_settle_once',
+          'summary_charge_result_once', 'summary_charge_no_delete', 'charge_pricing_insert', 'charge_pricing_immutable', 'charge_pricing_no_delete',
+          'charge_writeoff_insert', 'charge_writeoff_immutable', 'charge_writeoff_no_delete'] : [])]) {
         if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing R13B ledger protection');
       }
       assertNoRows(db, `SELECT 1 FROM context_summaries s LEFT JOIN message_slots m ON m.slot_id=s.id
         WHERE m.slot_id IS NULL OR m.run_id<>s.run_id OR m.turn_id IS NOT NULL LIMIT 1`, 'Summary without its timeline slot');
       assertNoRows(db, `SELECT 1 FROM summary_requests r JOIN messages m ON m.id=r.message_id JOIN message_versions v ON v.message_id=m.id
         WHERE m.sender_type<>'system' OR m.run_id<>r.run_id OR v.slot_id<>r.summary_id LIMIT 1`, 'Invalid summary request identity');
-      assertNoRows(db, "SELECT 1 FROM summary_charges c LEFT JOIN summary_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid summary charge identity');
-      assertNoRows(db, `SELECT 1 FROM charge_pricing p WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled')
+      if (costTables) {
+        assertNoRows(db, "SELECT 1 FROM summary_charges c LEFT JOIN summary_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid summary charge identity');
+        assertNoRows(db, `SELECT 1 FROM charge_pricing p WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled')
         AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=p.request_id AND c.run_id=p.run_id AND c.state='settled')${artifactCharge('p', 'settled')} LIMIT 1`, 'Pricing without a settled charge');
-      assertNoRows(db, `SELECT 1 FROM charge_writeoffs w WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro)
+        assertNoRows(db, `SELECT 1 FROM charge_writeoffs w WHERE NOT EXISTS(SELECT 1 FROM request_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro)
         AND NOT EXISTS(SELECT 1 FROM summary_charges c WHERE c.request_id=w.request_id AND c.run_id=w.run_id AND c.state='unknown' AND w.amount_micro<=c.reserved_micro)${artifactCharge('w', 'unknown', ' AND w.amount_micro<=c.reserved_micro')} LIMIT 1`, 'Write-off without an unknown charge');
-      assertNoRows(db, `SELECT 1 FROM run_budgets b WHERE b.limit_micro + COALESCE((SELECT SUM(t.amount_micro) FROM run_budget_topups t WHERE t.run_id=b.run_id),0) > 1000000000 LIMIT 1`, 'Run budget above the limit');
-      assertChargeEvidence(db, 'summary_charges', 'summary');
+        assertNoRows(db, `SELECT 1 FROM run_budgets b WHERE b.limit_micro + COALESCE((SELECT SUM(t.amount_micro) FROM run_budget_topups t WHERE t.run_id=b.run_id),0) > 1000000000 LIMIT 1`, 'Run budget above the limit');
+      }
     }
     if ((versions.at(-1) ?? 0) >= 10) {
       if (!tables.includes('run_continuations')) throw new Error('Recovery v10 schema is incomplete');
@@ -239,18 +228,18 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         WHERE p.id IS NULL OR p.type<>a.kind OR a.kind='mock' LIMIT 1`, 'Invalid target approval');
     }
     if (artifacts) {
-      for (const table of ['artifacts', 'artifact_versions', 'artifact_sources', 'artifact_requests', 'artifact_charges', 'artifact_adoptions', 'artifact_exports']) {
+      for (const table of ['artifacts', 'artifact_versions', 'artifact_sources', 'artifact_requests', 'artifact_adoptions', 'artifact_exports', ...(costTables ? ['artifact_charges'] : [])]) {
         if (!tables.includes(table)) throw new Error('Recovery v12 schema is incomplete');
       }
       for (const name of ['artifact_insert', 'artifact_immutable', 'artifact_no_delete', 'artifact_version_insert', 'artifact_version_identity_immutable', 'artifact_version_output_once',
         'artifact_version_no_delete', 'artifact_source_insert', 'artifact_source_immutable', 'artifact_source_no_delete', 'artifact_request_insert', 'artifact_request_identity_immutable',
-        'artifact_request_finish_once', 'artifact_request_no_delete', 'artifact_charge_identity_insert', 'artifact_charge_identity_immutable', 'artifact_charge_settle_once',
-        'artifact_charge_result_once', 'artifact_charge_no_delete', 'artifact_adoption_insert', 'artifact_adoption_immutable', 'artifact_adoption_no_delete',
+        'artifact_request_finish_once', 'artifact_request_no_delete',
+        ...(costTables ? ['artifact_charge_identity_insert', 'artifact_charge_identity_immutable', 'artifact_charge_settle_once', 'artifact_charge_result_once', 'artifact_charge_no_delete'] : []), 'artifact_adoption_insert', 'artifact_adoption_immutable', 'artifact_adoption_no_delete',
         'artifact_export_insert', 'artifact_export_immutable', 'artifact_export_no_delete']) {
         if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing R14 artifact protection');
       }
       // The recreated migration 9 cross-checks must also know artifact requests.
-      for (const name of ['charge_pricing_insert', 'charge_writeoff_insert']) {
+      if (costTables) for (const name of ['charge_pricing_insert', 'charge_writeoff_insert']) {
         const sql = db.prepare("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?").pluck().get(name) as string | undefined;
         if (!sql?.includes('FROM artifact_charges')) throw new Error('Missing R14 ledger protection');
       }
@@ -263,7 +252,7 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         WHERE r.run_id<>v.run_id OR r.agent_id IS NOT v.agent_id OR v.origin='edit' OR (v.validation<>'pending' AND r.status<>'completed') LIMIT 1`, 'Invalid artifact request identity');
       assertNoRows(db, `SELECT 1 FROM artifact_sources s JOIN artifact_versions v ON v.id=s.version_id JOIN messages m ON m.id=s.message_id
         WHERE v.run_id<>s.run_id OR m.run_id<>s.run_id LIMIT 1`, 'Artifact source outside its Run');
-      assertNoRows(db, "SELECT 1 FROM artifact_charges c LEFT JOIN artifact_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid artifact charge identity');
+      if (costTables) assertNoRows(db, "SELECT 1 FROM artifact_charges c LEFT JOIN artifact_requests r ON r.request_id=c.request_id WHERE r.request_id IS NULL OR r.run_id<>c.run_id LIMIT 1", 'Invalid artifact charge identity');
       assertNoRows(db, `SELECT 1 FROM artifact_adoptions d LEFT JOIN artifact_versions v ON v.id=d.version_id
         WHERE v.id IS NULL OR v.run_id<>d.run_id OR v.validation<>'valid' OR v.origin='edit' LIMIT 1`, 'Invalid artifact adoption');
       assertNoRows(db, `SELECT 1 FROM artifact_exports e LEFT JOIN artifact_versions v ON v.id=e.version_id LEFT JOIN artifacts a ON a.id=v.artifact_id
@@ -282,7 +271,6 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         const input = streamChatInputSchema.safeParse(JSON.parse(row.input_snapshot));
         if (!input.success || input.data.requestId !== row.request_id) throw new Error('Invalid artifact request input');
       }
-      assertChargeEvidence(db, 'artifact_charges', 'artifact');
     }
     if ((versions.at(-1) ?? 0) >= 13) {
       // R15: code writes are append-only records of an effective code version and what happened to each of its files.
@@ -300,6 +288,25 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (!candidatePathSchema.safeParse(row.path).success || (row.reason !== null && !codeExportReasonSchema.safeParse(row.reason).success)) throw new Error('Invalid code export file');
       }
     }
+    if (!costTables) {
+      // D133: token usage lives in one table; no trial or cost table may come back.
+      if (!tables.includes('request_usage')) throw new Error('Recovery v14 schema is incomplete');
+      for (const table of ['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs']) {
+        if (tables.includes(table)) throw new Error('Recovery v14 schema still holds a cost table');
+      }
+      for (const name of ['request_usage_insert', 'request_usage_identity_immutable', 'request_usage_close_once', 'request_usage_result_once', 'request_usage_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing usage protection');
+      }
+      assertNoRows(db, `SELECT 1 FROM request_usage u
+        LEFT JOIN request_attempts a ON u.kind='turn' AND a.request_id=u.request_id AND a.run_id=u.run_id
+        LEFT JOIN summary_requests s ON u.kind='summary' AND s.request_id=u.request_id AND s.run_id=u.run_id
+        LEFT JOIN artifact_requests r ON u.kind='artifact' AND r.request_id=u.request_id AND r.run_id=u.run_id
+        WHERE a.request_id IS NULL AND s.request_id IS NULL AND r.request_id IS NULL LIMIT 1`, 'Invalid usage identity');
+      for (const row of db.prepare(`SELECT request_id AS requestId,agent_id AS agentId,provider_id AS providerId,model_id AS modelId,kind,state,input_tokens AS inputTokens,
+        output_tokens AS outputTokens,cache_hit_tokens AS cacheHitTokens,created_at AS createdAt,updated_at AS updatedAt FROM request_usage`).iterate() as Iterable<Record<string, unknown>>) {
+        if (!requestUsageSchema.safeParse(row).success) throw new Error('Invalid usage evidence');
+      }
+    }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {
       hash.update(JSON.stringify(table));
@@ -314,17 +321,6 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       evidenceSha256: hash.digest('hex'),
     };
   })();
-}
-
-/** Every ledger row of a Turn-less request table is a well-formed charge of that kind. */
-function assertChargeEvidence(db: Sqlite.Database, table: 'summary_charges' | 'artifact_charges', kind: 'summary' | 'artifact'): void {
-  const rows = db.prepare(`SELECT request_id AS requestId,provider_id AS providerId,model_id AS modelId,currency,state,input_token_bound AS inputTokenBound,
-    output_token_limit AS outputTokenLimit,input_micro_per_token AS inputMicroPerToken,output_micro_per_token AS outputMicroPerToken,reserved_micro AS reservedMicro,
-    input_tokens AS inputTokens,output_tokens AS outputTokens,accounted_micro AS accountedMicro,price_reviewed_at AS priceReviewedAt,created_at AS createdAt,updated_at AS updatedAt FROM ${table}`).iterate() as Iterable<Record<string, unknown>>;
-  for (const row of rows) {
-    const chargedMicro = row.state === 'settled' ? row.accountedMicro : row.state === 'not_sent' ? 0 : row.reservedMicro;
-    if (!requestChargeSchema.safeParse({ ...row, chargedMicro, kind }).success) throw new Error('Invalid charge evidence');
-  }
 }
 
 function assertNoRows(db: Sqlite.Database, sql: string, message: string): void {

@@ -16,6 +16,8 @@ export interface ChatCompletionOptions {
   confirmedBaseUrl: string;
   resolveKey: (providerId: string, reference: KeyReference | null) => Promise<string | undefined>;
   timeoutMs?: number;
+  /** D135: the total for a generation stream; list and authentication calls keep `timeoutMs`. */
+  streamTimeoutMs?: number;
   fetch?: typeof fetch;
   diagnostics?: DiagnosticObserver;
 }
@@ -24,21 +26,22 @@ export interface ChatCompletionCapabilities {
   streamUsage: boolean;
   listModels: boolean;
   authentication: 'models' | 'unsupported';
-  thinkingDisabledForModel?: 'deepseek-flash';
+  /** D135: the service thinks by default; a discussion turn asks it not to. */
+  disableThinking?: boolean;
 }
 const capabilitySchema = z.object({
   outputTokenParameter: z.enum(['max_tokens', 'max_completion_tokens']).nullable(),
   streamUsage: z.boolean(), listModels: z.boolean(), authentication: z.enum(['models', 'unsupported']),
-  thinkingDisabledForModel: z.literal('deepseek-flash').optional(),
+  disableThinking: z.boolean().optional(),
 }).strict();
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const completionChunk = z.object({
   choices: z.array(z.object({ index: z.literal(0), delta: z.object({
-    role: z.literal('assistant').optional(), content: z.string().nullable().optional(),
+    role: z.string().nullable().optional(), content: z.string().nullable().optional(),
     refusal: z.string().nullable().optional(), tool_calls: z.unknown().optional(),
     function_call: z.unknown().optional(), audio: z.unknown().optional(),
   }), finish_reason: z.string().nullable().optional() })).max(1),
-  // R13B (D106): DeepSeek also reports how much of the prompt hit its context cache (hit + miss = prompt_tokens).
+  // DeepSeek also reports how much of the prompt hit its context cache (hit + miss = prompt_tokens).
   usage: z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
     prompt_cache_hit_tokens: tokenCount.optional(), prompt_cache_miss_tokens: tokenCount.optional() }).nullable().optional(),
 });
@@ -52,6 +55,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
   private readonly baseUrl: string;
   private readonly capabilities: ChatCompletionCapabilities;
   private readonly timeoutMs: number;
+  private readonly streamTimeoutMs: number;
   private readonly resolveKey: ChatCompletionOptions['resolveKey'];
   private readonly fetcher: typeof fetch;
   private readonly diagnostics?: DiagnosticObserver;
@@ -65,6 +69,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
       if (kind === 'openai' && this.baseUrl !== officialBaseUrl || normalizeBase(options.confirmedBaseUrl) !== this.baseUrl) throw new ContractError('invalid_input');
       this.capabilities = capabilitySchema.parse(capabilities);
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
+      this.streamTimeoutMs = z.number().int().min(1).max(2147483647).parse(options.streamTimeoutMs ?? this.timeoutMs);
       this.resolveKey = options.resolveKey;
       this.fetcher = options.fetch ?? globalThis.fetch;
       this.diagnostics = options.diagnostics;
@@ -108,7 +113,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
 
   async *streamChat(input: StreamChatInput): AsyncIterable<NormalizedChunk> {
     parse(idSchema, input?.requestId);
-    const scope = new RequestScope(input.signal, this.timeoutMs);
+    const scope = new RequestScope(input.signal, this.streamTimeoutMs);
     const { requestId } = input;
     let parsingStream = false;
     try {
@@ -121,7 +126,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
         model: parsed.modelId, messages: parsed.messages, stream: true,
         [outputParameter]: parsed.outputTokenLimit,
         ...(this.capabilities.streamUsage ? { stream_options: { include_usage: true } } : {}),
-        ...(parsed.modelId === this.capabilities.thinkingDisabledForModel ? { thinking: { type: 'disabled' } } : {}),
+        ...(this.capabilities.disableThinking ? { thinking: { type: 'disabled' } } : {}),
       };
       const response = await scope.wait(() => client.chat.completions.create(body, { signal: scope.signal, maxRetries: 0 }).asResponse());
       scope.check();
@@ -129,11 +134,13 @@ export class ChatCompletionProvider implements ProviderAdapter {
       this.diagnostics?.({ stage: 'stream' });
       yield { type: 'start', requestId };
       let finish: 'stop' | 'length' | 'content_filter' | undefined;
-      let used = false;
+      // D135: compatible services may repeat usage or send it before finish_reason; the last one before [DONE] counts.
+      let usage: Extract<NormalizedChunk, { type: 'usage' }> | undefined;
       for await (const data of readSse(response, scope.signal, () => scope.check())) {
         scope.check();
         if (data === '[DONE]') {
           if (finish === undefined) throw new ContractError('invalid_response');
+          if (usage) { yield usage; scope.check(); }
           yield { type: 'finish', requestId, reason: finish }; return;
         }
         let value: unknown;
@@ -143,7 +150,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
         if (choice !== undefined) {
           if (finish !== undefined) throw new ContractError('invalid_response');
           if (choice.delta.tool_calls != null || choice.delta.function_call != null || choice.delta.audio != null) throw new ContractError('unsupported');
-          if (choice.finish_reason != null) {
+          if (choice.finish_reason) {
             const reason = choice.finish_reason;
             if (reason !== 'stop' && reason !== 'length' && reason !== 'content_filter') throw new ContractError('unsupported');
             finish = reason;
@@ -154,12 +161,10 @@ export class ChatCompletionProvider implements ProviderAdapter {
           scope.check();
         }
         if (chunk.usage != null) {
-          if (used || finish === undefined) throw new ContractError('invalid_response');
-          used = true;
           const { prompt_tokens: inputTokens, prompt_cache_hit_tokens: hit, prompt_cache_miss_tokens: miss } = chunk.usage;
-          // A cache split is used only when it is complete and adds up; otherwise all input is priced as a miss.
+          // A cache split is kept only when it is complete and adds up.
           const cacheHitInputTokens = hit !== undefined && miss !== undefined && hit + miss === inputTokens ? hit : undefined;
-          yield { type: 'usage', requestId, inputTokens, outputTokens: chunk.usage.completion_tokens, ...(cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens }) };
+          usage = { type: 'usage', requestId, inputTokens, outputTokens: chunk.usage.completion_tokens, ...(cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens }) };
         }
       }
       throw new ContractError('invalid_response');

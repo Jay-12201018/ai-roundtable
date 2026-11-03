@@ -17,10 +17,12 @@ export function readLoopbackProxy(env: NodeJS.ProcessEnv): LoopbackProxy | undef
   return Object.freeze({ hostname: match[1] === '[::1]' ? '::1' : '127.0.0.1', port: Number(match[2]) });
 }
 
-export type ProxyTargetKind = 'deepseek' | 'anthropic' | 'gemini';
+export type ProxyTargetKind = 'deepseek' | 'openai' | 'anthropic' | 'gemini';
 // Each reviewed Provider kind has one fixed official host and the exact request shapes its adapter sends.
 const proxyTargets: Record<ProxyTargetKind, { host: string; allows: (url: URL, method: string) => boolean }> = {
-  deepseek: { host: 'api.deepseek.com', allows: (url, method) => method === 'POST' && url.pathname === '/chat/completions' && !url.search },
+  deepseek: { host: 'api.deepseek.com', allows: (url, method) => !url.search && (method === 'POST' ? url.pathname === '/chat/completions' : method === 'GET' && url.pathname === '/models') },
+  // D136: the official OpenAI endpoint, the two request shapes its adapter sends.
+  openai: { host: 'api.openai.com', allows: (url, method) => !url.search && (method === 'POST' ? url.pathname === '/v1/chat/completions' : method === 'GET' && url.pathname === '/v1/models') },
   anthropic: { host: 'api.anthropic.com', allows: (url, method) => method === 'POST' ? url.pathname === '/v1/messages' && !url.search
     : method === 'GET' && url.pathname === '/v1/models' && pagedQuery(url, 'limit', '1000', 'after_id') },
   gemini: { host: 'generativelanguage.googleapis.com', allows: (url, method) => method === 'POST'
