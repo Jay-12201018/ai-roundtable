@@ -131,7 +131,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     : <>{!mock && <span className="is-left wizard-test"><Button size="sm" disabled={busy || (!hasKey && !keySaved)} onClick={runTest}>测试连接</Button>
       {test ? <span role="status" className={test.tone === 'ok' ? 'status-text ok-text' : 'status-text warn-text'}>{test.tone === 'ok' ? <Check aria-hidden /> : <CircleAlert aria-hidden />}{test.text}</span>
         : <span className="small muted">可能产生极少的费用</span>}</span>}
-      {!rekey && <Button disabled={busy} onClick={back}>上一步</Button>}
+      {!rekey && !saved && <Button disabled={busy} onClick={back}>上一步</Button>}
       <Button variant="primary" type="submit" form="connect-form" disabled={busy || (!mock && !hasKey && !keySaved)}>{busy ? '正在保存…' : mock ? '添加演示服务' : '保存'}</Button></>;
 
   return <Modal title={title} description={description} onClose={close} busy={busy} wide footer={footer} className="wizard">

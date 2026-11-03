@@ -440,7 +440,7 @@ export function App() {
     const names = (ids: string[]) => ids.map(id => modeMembers.find(member => member.id === id)?.name ?? '已不在房间').join('、');
     const limit = `最多 ${stored.draft.turnLimit} 回合 · ${stored.draft.durationMinutes} 分钟`;
     return `${stored.draft.phases.map(phase => `${phase.title}：${names(phase.participants)}`).join(' → ')} · ${limit}`;
-  })() : '没有单独设置：参与讨论的成员按顺序轮流发言，共 3 回合。';
+  })() : `没有单独设置：参与讨论的成员按顺序轮流发言，共 ${Math.max(3, enabledMembers?.length ?? 0)} 回合。`;
   const pageBody: Record<Exclude<Page, 'discussion' | 'settings'>, () => ReactNode> = {
     rooms: () => room ? <RoomPage key={room.id} api={api.rooms} room={room} providers={providers} readiness={readiness.rows} runs={directory.runs}
       workflow={{ label: workflowLabel, detail: modeDetail, onChange: () => setWorkflowOpen(true) }}

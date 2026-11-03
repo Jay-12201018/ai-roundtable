@@ -46,7 +46,7 @@ export function ArtifactsPanel({ snapshot, commands, onGenerate, onChoose, onOpe
                 {(() => { const write = lastWrite(artifact); return write && <span className="small muted">已写入 {write.written} 个文件 · {when(write.at)}</span>; })()}</span>
             </button>; })}
         </div>
-        {existing.length === 0 && <div className="art-actions"><Button size="sm" disabled={blocked !== undefined || commands.pending !== undefined} onClick={() => onGenerate(kind)}>生成</Button>
+        {existing.length === 0 && <div className="art-row-actions"><Button size="sm" disabled={blocked !== undefined || commands.pending !== undefined} onClick={() => onGenerate(kind)}>生成</Button>
           {onChoose && <button type="button" className="link-btn small" disabled={blocked !== undefined || commands.pending !== undefined} onClick={() => onChoose(kind)}>换人…</button>}</div>}
       </div>;
     })}

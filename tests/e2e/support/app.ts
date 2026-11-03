@@ -150,11 +150,10 @@ export const statusLine = (page: Page) => page.getByRole('status', { name: '运�
 export const threadItems = (page: Page) => page.locator('.thread-item');
 export const memberTexts = (page: Page) => page.locator('.thread-item .msg-body .md');
 
-/** A DeepSeek service with the fake Key and a confirmed target, and a room of three members (the UI path is covered in key-safety.spec). */
+/** A DeepSeek service with the fake Key, and a room of three members (the UI path is covered in key-safety.spec). */
 export async function seedDeepSeekRoom(running: RunningApp, roomName = 'E2E 讨论') {
   const provider = await running.api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: DEEPSEEK, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await running.api('settings.setKey', { providerId: provider.id, apiKey: FAKE_KEY });
-  await running.api('settings.confirmTarget', { providerId: provider.id, baseUrl: DEEPSEEK, confirmed: true });
   const room = await running.api('rooms.createRoom', { name: roomName, objective: '' });
   const agents = [];
   for (const [index, [displayName, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries())
@@ -177,12 +176,9 @@ export async function openArtifacts(page: Page) {
   await expect(page.locator('.art-panel')).toBeVisible();
 }
 
-/** Generates one artifact from the panel; the row order is PRD, minutes, actions, code. */
+/** Generates one artifact from the panel with one click (D140); the row order is PRD, minutes, actions, code. */
 export async function generateArtifact(page: Page, row: 0 | 1 | 2 | 3) {
-  await page.locator('.artifact').nth(row).getByRole('button', { name: /生成/u }).click();
-  await expect(page.locator('dialog[open] .summary-send')).toBeVisible();
-  // A real model says what it sends; the demo members just say 生成.
-  await page.locator('dialog[open]').getByRole('button', { name: /^生成/u }).click();
+  await page.locator('.artifact').nth(row).getByRole('button', { name: '生成', exact: true }).click();
   return page.locator('dialog.artifact-reader');
 }
 

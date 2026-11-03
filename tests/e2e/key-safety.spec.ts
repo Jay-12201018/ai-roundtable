@@ -16,15 +16,17 @@ test('the Key is used for requests but never appears in the database, logs, expo
 
   // First use: connect DeepSeek through the wizard.
   await page.getByRole('button', { name: '连接…' }).click();
-  await page.getByRole('button', { name: '下一步' }).click();
+  await page.getByRole('button', { name: /^DeepSeek/u }).click();
   await expect(page.locator('.target')).toContainText('Key 只会发往 https://api.deepseek.com');
   const key = page.getByRole('textbox', { name: 'API Key' });
   await key.fill(FAKE_KEY);
-  await page.getByRole('button', { name: '保存并连接' }).click();
-  await expect(page.getByText('Key 有效'), 'The model list answered; nothing was generated').toBeVisible();
+  // 测试连接 asks the model list first, so nothing is generated; it saves what is typed so far.
+  await page.getByRole('button', { name: '测试连接' }).click();
+  await expect(page.getByText('Key 有效，连接正常')).toBeVisible();
   expect(fixture.requests.at(-1)!.path).toBe('/deepseek/models');
-  await expect(page.getByText(/可以用于讨论/u)).toBeVisible();
-  await page.getByRole('button', { name: '去开始讨论' }).click();
+  await expect(key, 'The field is empty once the Key is saved').toHaveValue('');
+  await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
 
   // The wizard made the first room. A full discussion, an artifact, its export and the usage export.
   const rooms = await running.api<{ name: string }[]>('rooms.listRooms');
@@ -35,7 +37,6 @@ test('the Key is used for requests but never appears in the database, logs, expo
   expect(fixture.requests.find(request => request.path?.endsWith('/chat/completions'))!.headers.authorization).toBe(`Bearer ${FAKE_KEY}`);
   await openArtifacts(page);
   const reader = await generateArtifact(page, 2);
-  await reader.getByRole('button', { name: '采用这一版' }).click();
   const exportsDir = join(harness.profile, 'exports');
   mkdirSync(exportsDir);
   await reader.getByRole('button', { name: '另存为…' }).click();

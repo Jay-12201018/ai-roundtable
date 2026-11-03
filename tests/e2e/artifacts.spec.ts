@@ -21,8 +21,8 @@ async function finishedDiscussion(running: RunningApp) {
   await statusHas(running.page, '已完成');
 }
 
-// SPEC: structured results are validated by Zod. A valid one needs the host's adoption before it can leave; an invalid one is kept, explained and cannot be adopted or exported.
-test('a valid artifact is shown safely, adopted by the host and only then exported', async ({ harness }) => {
+// SPEC: structured results are validated by Zod. A valid one can be copied and saved at once (D139); an invalid one is kept, explained and cannot be exported.
+test('one click generates an artifact; a valid one is shown safely and can be exported at once', async ({ harness }) => {
   const { fixture } = harness;
   fixture.reply = body => artifactOf(body) ? validPrd : `${memberOf(body)}的发言。`;
   const running = await harness.launch();
@@ -30,23 +30,14 @@ test('a valid artifact is shown safely, adopted by the host and only then export
   await finishedDiscussion(running);
   const sent = fixture.requests.length;
   await openArtifacts(page);
-  await page.locator('.artifact').first().getByRole('button', { name: /生成/u }).click();
-  await expect(page.locator('dialog[open] .summary-send')).toBeVisible();
-  expect(fixture.requests, 'Opening the dialog sends nothing').toHaveLength(sent);
-  await page.getByRole('button', { name: '生成（发送 1 次请求）' }).click();
-
-  const reader = page.locator('dialog.artifact-reader');
-  await expect(reader).toContainText('候选 · 待采用');
+  const reader = await generateArtifact(page, 0);
+  await expect(reader).toContainText('有效');
   expect(fixture.requests).toHaveLength(sent + 1);
   await expect(reader).toContainText('下单与接单');
   await expect(reader.getByText('<script>window.__pwned = 1</script>', { exact: false }), 'Model HTML is plain text').toBeVisible();
   expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
   await expect(reader.locator('script, img')).toHaveCount(0);
-  await expect(reader.getByRole('button', { name: '复制 Markdown' }), 'A candidate cannot be exported yet').toHaveCount(0);
-  await expect(reader.getByRole('button', { name: '另存为…' })).toHaveCount(0);
-
-  await reader.getByRole('button', { name: '采用这一版' }).click();
-  await expect(reader).toContainText('已采用');
+  await expect(reader.getByRole('button', { name: '复制 Markdown' })).toBeVisible();
   await reader.getByRole('button', { name: '另存为…' }).click();
   const saved = join(harness.profile, 'exports', 'prd.md');
   mkdirSync(join(harness.profile, 'exports'));
@@ -62,7 +53,7 @@ test('a valid artifact is shown safely, adopted by the host and only then export
   await running.quit();
 });
 
-test('an invalid artifact is kept with its problems, cannot be adopted or exported, and is not retried', async ({ harness }) => {
+test('an invalid artifact is kept with its problems, cannot be exported, and is not retried', async ({ harness }) => {
   const { fixture } = harness;
   fixture.reply = body => artifactOf(body) ? invalidMinutes : `${memberOf(body)}的发言。`;
   const running = await harness.launch();
@@ -75,7 +66,7 @@ test('an invalid artifact is kept with its problems, cannot be adopted or export
   await expect(reader).toContainText('应该是列表');
   await expect(reader).toContainText('第 7 条不在这次依据的发言里');
   await expect(reader.locator('.art-raw'), 'The raw output is kept exactly').toContainText('```json');
-  for (const name of ['采用这一版', '复制 Markdown', '复制 JSON', '另存为…', '写入文件夹…']) await expect(reader.getByRole('button', { name })).toHaveCount(0);
+  for (const name of ['复制 Markdown', '复制 JSON', '另存为…', '写入文件夹…']) await expect(reader.getByRole('button', { name })).toHaveCount(0);
   await page.waitForTimeout(1000);
   expect(fixture.requests, 'No automatic retry').toHaveLength(sent + 1);
   const [versions, exports] = harness.sql('SELECT validation FROM artifact_versions', 'SELECT COUNT(*) AS n FROM artifact_exports');
@@ -95,7 +86,7 @@ test('the demo members can produce a valid artifact without any network', async 
   await openArtifacts(page);
   const reader = await generateArtifact(page, 2);
   await expect(reader).toContainText('Mock 行动清单');
-  await expect(reader).toContainText('候选 · 待采用');
+  await expect(reader).toContainText('有效');
   expect(harness.fixture.requests).toHaveLength(0);
   await running.expectNoNetwork();
   await running.quit();

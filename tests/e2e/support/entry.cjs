@@ -64,7 +64,8 @@ shell.openExternal = async url => { state.externalOpens.push(url); };
 const fixturePort = Number(process.env.ROUNDTABLE_E2E_FIXTURE_PORT);
 const originalRequest = http.request;
 http.request = function (url) {
-  const target = new URL(String(url));
+  // The proxy check calls it with an options object; a request to anything but the fixture stops here either way.
+  const target = new URL(typeof url === 'object' && !(url instanceof URL) ? `http://${url.hostname}:${url.port}` : String(url));
   if (target.hostname !== '127.0.0.1' || Number(target.port) !== fixturePort) { state.nodeNetworkAttempts.push(target.origin); throw new Error('Remote HTTP blocked'); }
   return originalRequest.apply(this, arguments);
 };
@@ -96,7 +97,9 @@ app.whenReady().then(() => {
   });
 });
 
-const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.openai.com': 'openai', 'https://api.anthropic.com': 'anthropic', 'https://generativelanguage.googleapis.com': 'gemini', 'https://kimi.e2e.invalid': 'compatible' };
+const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.moonshot.cn': 'kimi', 'https://dashscope.aliyuncs.com': 'qwen', 'https://open.bigmodel.cn': 'glm',
+  'https://ark.cn-beijing.volces.com': 'doubao', 'https://api.minimax.cn': 'minimax', 'https://models.e2e.invalid': 'compatible', 'https://anthropic-gateway.e2e.invalid': 'anthropic',
+  'https://gemini-gateway.e2e.invalid': 'gemini', 'https://api.openai.com': 'openai', 'https://api.anthropic.com': 'anthropic', 'https://generativelanguage.googleapis.com': 'gemini' };
 const build = process.env.ROUNDTABLE_E2E_BUILD ? resolve(process.env.ROUNDTABLE_E2E_BUILD) : resolve(__dirname, '../../../out');
 import(pathToFileURL(join(build, 'main/index.js')).href).then(({ ProviderRegistry }) => {
   const transport = ProviderRegistry.prototype.createTransport;

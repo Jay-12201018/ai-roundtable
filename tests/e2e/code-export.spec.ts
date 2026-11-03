@@ -22,7 +22,7 @@ const tree = (top: string, dir = top): string[] => readdirSync(dir).sort().flatM
   return info.isDirectory() ? [entry, ...tree(top, path)] : [entry];
 });
 
-async function adoptedCode(running: RunningApp, fixtureCode: string, setReply: (code: string) => void) {
+async function writableCode(running: RunningApp, fixtureCode: string, setReply: (code: string) => void) {
   setReply(fixtureCode);
   await seedDeepSeekRoom(running);
   await newDiscussion(running, 'E2E 讨论', '写出试点的费用和夜间规则。');
@@ -30,10 +30,7 @@ async function adoptedCode(running: RunningApp, fixtureCode: string, setReply: (
   await statusHas(running.page, '已完成');
   await openArtifacts(running.page);
   const reader = await generateArtifact(running.page, 3);
-  await expect(reader).toContainText('候选 · 待采用');
-  await expect(reader.getByRole('button', { name: '写入文件夹…' }), 'A candidate not adopted cannot be written').toHaveCount(0);
-  await reader.getByRole('button', { name: '采用这一版' }).click();
-  await expect(reader).toContainText('已采用');
+  await expect(reader).toContainText('有效');
   await reader.getByRole('button', { name: '写入文件夹…' }).click();
   return running.page.locator('dialog.code-export');
 }
@@ -56,7 +53,7 @@ test('preview and cancel write nothing; confirming writes only the ticked files;
   const outsideBefore = tree(outside);
   const projectBefore = tree(project);
 
-  const dialog = await adoptedCode(running, candidate, code => { fixture.reply = body => artifactOf(body) ? code : `${memberOf(body)}的发言。`; });
+  const dialog = await writableCode(running, candidate, code => { fixture.reply = body => artifactOf(body) ? code : `${memberOf(body)}的发言。`; });
   // Cancelling the system folder dialog: back at the intro, nothing checked.
   await dialog.locator('.modal-foot').getByRole('button', { name: '选择文件夹…' }).click();
   await expect(dialog).not.toContainText('请在弹出的窗口里选择文件夹');
@@ -72,12 +69,12 @@ test('preview and cancel write nothing; confirming writes only the ticked files;
   await expect(row('aux.ts'), 'A reserved name is refused').toContainText('系统保留的名字');
   await expect(row('src/fee.ts'), 'An overwrite shows its diff').toContainText('COMMISSION = 0.15');
   await expect(dialog.locator('input[type=checkbox]'), 'Refused files cannot be ticked').toHaveCount(3);
-  await expect(dialog.locator('input[type=checkbox]:checked'), 'Nothing is ticked by default').toHaveCount(0);
+  await expect(dialog.locator('input[type=checkbox]:checked'), 'New files start ticked, the overwrite does not (D141)').toHaveCount(2);
+  await expect(dialog.getByRole('checkbox', { name: '覆盖 src/fee.ts' })).not.toBeChecked();
   expect(tree(project), 'The preview wrote nothing').toEqual(projectBefore);
 
-  // Ticking and closing without confirming writes nothing either.
-  await dialog.getByRole('checkbox', { name: '新建 docs/说明.md' }).click();
-  await expect(dialog.locator('.modal-foot button').last()).toHaveText('写入 1 个文件');
+  // Closing without confirming writes nothing either.
+  await expect(dialog.locator('.modal-foot button').last()).toHaveText('写入 2 个文件');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   expect(tree(project), 'Cancelling wrote nothing').toEqual(projectBefore);
@@ -85,7 +82,7 @@ test('preview and cancel write nothing; confirming writes only the ticked files;
   const reader = page.locator('dialog.artifact-reader');
   await reader.getByRole('button', { name: '写入文件夹…' }).click();
   await expect(dialog).toContainText('没有勾选的文件不会写入');
-  await dialog.getByRole('checkbox', { name: '新建 src/rules/night.sh' }).click();
+  await dialog.getByRole('checkbox', { name: '新建 docs/说明.md' }).click();
   await dialog.getByRole('checkbox', { name: '覆盖 src/fee.ts' }).click();
   await dialog.getByRole('button', { name: '写入 2 个文件（含覆盖 1 个）' }).click();
   await expect(dialog).toContainText('已写入 2 个文件');
@@ -106,7 +103,7 @@ test('preview and cancel write nothing; confirming writes only the ticked files;
 });
 
 // Escapes in the model's own text never reach the disk. A path that is wrong as text fails the candidate's validation,
-// so it cannot be adopted at all; a well-formed path into .git is refused file by file in the preview.
+// so it cannot be written at all; a well-formed path into .git is refused file by file in the preview.
 const escaping = (path: string) => JSON.stringify({ title: '逃逸', summary: '路径逃逸。', notes: [], files: [
   { path, language: 'typescript', description: null, content: 'export const escaped = true;\n' },
   { path: 'ok.ts', language: 'typescript', description: null, content: 'export const ok = true;\n' },
@@ -129,11 +126,10 @@ async function escapeCandidate(harness: Harness, path: string) {
 }
 
 for (const [name, path] of [['a parent-directory escape', '../outside/escape.ts'], ['an absolute path', '/tmp/roundtable-e2e-absolute.ts']] as const) {
-  test(`${name} in a candidate fails validation, so nothing can be adopted or written`, async ({ harness }) => {
+  test(`${name} in a code version fails validation, so nothing can be written`, async ({ harness }) => {
     const { running, reader, outside, outsideBefore } = await escapeCandidate(harness, path);
     await expect(reader).toContainText('格式检查没有通过');
     await expect(reader).toContainText('路径');
-    await expect(reader.getByRole('button', { name: '采用这一版' })).toHaveCount(0);
     await expect(reader.getByRole('button', { name: '写入文件夹…' })).toHaveCount(0);
     expect(tree(outside)).toEqual(outsideBefore);
     expect(existsSync('/tmp/roundtable-e2e-absolute.ts')).toBe(false);
@@ -143,15 +139,13 @@ for (const [name, path] of [['a parent-directory escape', '../outside/escape.ts'
 
 test('a path into .git passes validation but is refused in the preview, and the rest can still be written', async ({ harness }) => {
   const { running, page, reader, project, outside, outsideBefore } = await escapeCandidate(harness, '.git/hooks/pre-commit');
-  await expect(reader).toContainText('候选 · 待采用');
-  await reader.getByRole('button', { name: '采用这一版' }).click();
+  await expect(reader).toContainText('有效');
   await reader.getByRole('button', { name: '写入文件夹…' }).click();
   const dialog = page.locator('dialog.code-export');
   await running.answerOpen(project);
   await dialog.locator('.modal-foot').getByRole('button', { name: '选择文件夹…' }).click();
   await expect(dialog.locator('.cx-summary')).toContainText('新建 1 · 不能写入 1');
   await expect(dialog.locator('input[type=checkbox]')).toHaveCount(1);
-  await dialog.getByRole('checkbox', { name: '新建 ok.ts' }).click();
   await dialog.getByRole('button', { name: '写入 1 个文件' }).click();
   await expect(dialog).toContainText('已写入 1 个文件');
   expect(readFileSync(join(project, 'ok.ts'), 'utf8')).toContain('ok');

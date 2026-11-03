@@ -48,3 +48,4 @@
 .wizard-confirm { display: inline-flex; align-items: center; gap: 6px; }
 .model-limits { flex-basis: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 200px)); gap: 8px 12px; padding: 8px 0 4px; }
 .model-limits > p, .model-limits > .inline-fields { grid-column: 1 / -1; margin: 0; }
+.wizard-test { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
