@@ -303,6 +303,17 @@ describe('links and races (情景：链接越界、覆盖竞态)', () => {
     expect(readdirSync(t.root).sort()).toEqual(['a.ts', 'b.ts']);
   });
 
+  it.each(['beforeTemporary', 'beforeCommit'] as const)('a folder swapped for a link at the last moment (%s) never receives the file', async moment => {
+    let race: () => void = () => undefined;
+    const t = await setup([{ path: 'src/x.ts', content: 'escape\n' }], { hooks: { [moment]: () => race() } }); t.adopt();
+    mkdirSync(join(t.root, 'src'));
+    const { root } = await t.choose();
+    const preview = await t.previewOf(root!.rootId);
+    race = () => { renameSync(join(t.root, 'src'), join(t.base, 'src-moved')); symlinkSync(t.outside, join(t.root, 'src')); };
+    expect(t.outcome(await t.write(preview, [{ path: 'src/x.ts', overwrite: false }]))).toEqual({ 'src/x.ts': 'failed:outside_root' });
+    expect(t.sentinels()).toEqual(t.before);
+  });
+
   it('a new version of the candidate, or a replaced folder, makes the whole preview stale', async () => {
     const t = await setup([{ path: 'a.ts', content: 'a\n' }]); t.adopt();
     const { root } = await t.choose();
@@ -383,6 +394,25 @@ describe('write failures (情景：写入失败)', () => {
     expect(t.outcome(await t.write(preview, [{ path: 'a.ts', overwrite: false }]))).toEqual({ 'a.ts': 'written' });
     expect(readdirSync(t.root)).toEqual(['a.ts']);
     expect(readFileSync(join(t.root, 'a.ts'), 'utf8')).toBe('a\n');
+  });
+});
+
+describe('a direct write on a file system without hard links', () => {
+  it('leaves no partial file behind when it fails', async () => {
+    const t = await setup([{ path: 'a.ts', content: 'a\n' }], { fs: {
+      link: async () => { throw Object.assign(new Error('Not supported'), { code: 'ENOTSUP' }); },
+      open: async (path, flags, mode) => {
+        const fs = await import('node:fs/promises');
+        const handle = await fs.open(path, flags, mode);
+        if (!path.endsWith('a.ts')) return handle;
+        return new Proxy(handle, { get: (target, key) => key === 'writeFile' ? async () => { throw Object.assign(new Error('No space left'), { code: 'ENOSPC' }); }
+          : typeof target[key as keyof typeof target] === 'function' ? (target[key as keyof typeof target] as (...args: unknown[]) => unknown).bind(target) : target[key as keyof typeof target] });
+      },
+    } }); t.adopt();
+    const { root } = await t.choose();
+    const preview = await t.previewOf(root!.rootId);
+    expect(t.outcome(await t.write(preview, [{ path: 'a.ts', overwrite: false }]))).toEqual({ 'a.ts': 'failed:no_space' });
+    expect(readdirSync(t.root)).toEqual([]);
   });
 });
 

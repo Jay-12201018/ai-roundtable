@@ -33,6 +33,8 @@ const nodeFs: ExportFs = {
   rename: (a, b) => fsp.rename(a, b), unlink: path => fsp.unlink(path),
 };
 export type ExportHooks = {
+  /** Called after a file's checks, right before its temporary copy is created (tests race here). */
+  beforeTemporary?(path: string): Promise<void> | void;
   /** Called after a file's checks and temporary copy, right before it is put in place (tests race here). */
   beforeCommit?(path: string): Promise<void> | void;
 };
@@ -358,6 +360,7 @@ export class CodeExportService {
     const temporary = join(parent, `.${randomBytes(8).toString('hex')}.roundtable-tmp`);
     let placed = false;
     try {
+      await this.options.hooks?.beforeTemporary?.(binding.path);
       const handle = await this.fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o644);
       try {
         if (binding.target.kind === 'file') await handle.chmod(binding.target.mode);
@@ -365,6 +368,9 @@ export class CodeExportService {
         await handle.sync();
       } finally { await handle.close(); }
       await this.options.hooks?.beforeCommit?.(binding.path);
+      // The folder chain may have been swapped while the copy was written. After this check a swapped folder no longer
+      // holds the temporary file, so putting it in place fails instead of landing elsewhere (D129).
+      if (await this.fs.realpath(parent) !== parent) return 'outside_root';
       if (binding.target.kind === 'missing') {
         try { await this.fs.link(temporary, target); }
         catch (error) {
@@ -374,7 +380,9 @@ export class CodeExportService {
           const direct = await this.fs.open(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o644).catch((reason: unknown) => {
             if (errno(reason) === 'EEXIST') return undefined; throw reason; });
           if (!direct) return 'target_changed';
-          try { await direct.writeFile(binding.content); await direct.sync(); } finally { await direct.close(); }
+          try { await direct.writeFile(binding.content); await direct.sync(); }
+          catch (reason) { await this.fs.unlink(target).catch(() => undefined); throw reason; }
+          finally { await direct.close(); }
         }
       } else {
         // The last look right before the swap; what changes after this instant is the residual window (D129).
