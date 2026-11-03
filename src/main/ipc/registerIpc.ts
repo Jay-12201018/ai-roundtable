@@ -72,12 +72,9 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'run.continueMessage': ({ runId, messageId }) => service.continueMessage(runId, messageId),
     'run.recoverInterruptedRun': ({ runId, decision }) => service.recoverInterruptedRun(runId, decision),
     'host.command': (input) => host.command(input),
-    'run.addBudget': (input) => service.addBudget(input),
-    'run.resumeAfterBudget': (runId) => service.resumeAfterBudget(runId),
     'run.previewContinuation': (input) => service.previewContinuation(input),
     'run.continueDiscussion': (input) => service.continueDiscussion(input),
     'usage.getReport': (range) => usage.getReport(range),
-    'usage.writeOff': (input) => service.writeOffCharge(input),
     'usage.exportCsv': (range) => usage.exportCsv(window, range),
     'summary.preview': (input) => service.previewSummary(input),
     'summary.generate': (input) => service.generateSummary(input),
@@ -144,8 +141,8 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         ensureSender(event);
         return response;
       })();
-      if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.addBudget' || channel === 'run.continueDiscussion'
-        || channel === 'usage.writeOff' || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'network.saveSettings'
+      if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.continueDiscussion'
+        || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'network.saveSettings'
         || channel === 'artifact.generate' || channel === 'artifact.adopt' || channel === 'artifact.edit' || channel === 'artifact.export' || channel === 'codeExport.write') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));

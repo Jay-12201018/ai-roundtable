@@ -8,7 +8,6 @@ import { ContractError } from './errors';
 import { roomManagementContracts, providerSettingsContracts } from './configuration';
 import { compareRunPositions } from '../schemas/configuration';
 import { hostCommandResultSchema, hostCommandSchema } from '../schemas/host';
-import { addRunBudgetInputSchema, addRunBudgetResultSchema, writeOffChargeInputSchema, writeOffChargeResultSchema } from '../schemas/budget';
 import { summaryCommandResultSchema, summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, summaryPreviewSchema } from '../schemas/summary';
 import { usageExportResultSchema, usageReportInputSchema, usageReportSchema } from '../schemas/usage';
 import { networkSettingsSchema, proxyEndpointSchema, proxySettingsSchema, proxyTestResultSchema } from '../schemas/network';
@@ -39,19 +38,15 @@ export const ipcContracts = {
   'run.continueMessage': { input: continueMessageInputSchema, output: z.undefined() },
   'run.recoverInterruptedRun': { input: recoveryInputSchema, output: z.undefined() },
   'host.command': { input: hostCommandSchema, output: hostCommandResultSchema },
-  // R13B: trusted budget, ledger and summary commands; each write is idempotent per clientRequestId.
-  'run.addBudget': { input: addRunBudgetInputSchema, output: addRunBudgetResultSchema },
-  'run.resumeAfterBudget': { input: idSchema, output: z.undefined() },
   // D111: continue a finished discussion in the same Run; the preview sends and records nothing.
   'run.previewContinuation': { input: continuationPreviewInputSchema, output: continuationPreviewSchema },
   'run.continueDiscussion': { input: continueDiscussionInputSchema, output: continueDiscussionResultSchema },
   'usage.getReport': { input: usageReportInputSchema, output: usageReportSchema },
-  'usage.writeOff': { input: writeOffChargeInputSchema, output: writeOffChargeResultSchema },
   'usage.exportCsv': { input: usageReportInputSchema, output: usageExportResultSchema },
   'summary.preview': { input: summaryPreviewInputSchema, output: summaryPreviewSchema },
   'summary.generate': { input: summaryGenerateInputSchema, output: summaryCommandResultSchema },
   'summary.confirm': { input: summaryConfirmInputSchema, output: summaryCommandResultSchema },
-  // R14: structured artifacts. Generation is an explicit, budgeted request; adopt/edit/export are trusted host writes.
+  // R14: structured artifacts. Generation is an explicit request the host clicks; adopt/edit/export are trusted host writes.
   'artifact.preview': { input: artifactPreviewInputSchema, output: artifactPreviewSchema },
   'artifact.generate': { input: artifactGenerateInputSchema, output: artifactCommandResultSchema },
   'artifact.list': { input: artifactListInputSchema, output: artifactListSchema },
@@ -135,7 +130,7 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
     const request = input as IpcInput<'run.continueDiscussion'>;
     matches = result.runId === request.runId && (request.agentId === undefined || result.agentIds.length === 1 && result.agentIds[0] === request.agentId);
   }
-  if (channel === 'run.addBudget' || channel === 'run.previewContinuation' || channel === 'summary.preview' || channel === 'summary.generate' || channel === 'summary.confirm') {
+  if (channel === 'run.previewContinuation' || channel === 'summary.preview' || channel === 'summary.generate' || channel === 'summary.confirm') {
     matches = (data as { runId: string }).runId === (input as { runId: string }).runId;
   }
   if (channel.startsWith('artifact.')) {
@@ -157,11 +152,6 @@ export function parseIpcOutput<C extends IpcChannel>(channel: C, input: IpcInput
       && (channel !== 'codeExport.preview' || result.root?.rootId === request.rootId)
       && (channel !== 'codeExport.write' || result.previewId === request.previewId
         && request.files!.every(file => result.files!.some(item => item.path === file.path)));
-  }
-  if (channel === 'usage.writeOff') {
-    const result = data as IpcOutput<'usage.writeOff'>;
-    const request = input as IpcInput<'usage.writeOff'>;
-    matches = result.runId === request.runId && result.requestId === request.requestId;
   }
   if (channel.startsWith('rooms.') || channel.startsWith('settings.')) matches = configurationMatches(channel, input, data);
   if (!matches) throw new ContractError('invalid_response');

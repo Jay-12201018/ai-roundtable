@@ -21,7 +21,7 @@ export const continuationPreviewInputSchema = z.object({
   /** Counted into the estimate as the interjection every answering member will read; empty before the host types. */
   content: z.string().max(20000).optional(),
 }).strict();
-export const continuationUnavailableReasonValues = ['not_finished', 'busy', 'member_unavailable', 'context_exceeds', 'budget_insufficient', 'unsupported'] as const;
+export const continuationUnavailableReasonValues = ['not_finished', 'busy', 'member_unavailable', 'context_exceeds', 'unsupported'] as const;
 export const continuationPreviewSchema = z.object({
   runId: idSchema,
   available: z.boolean(),
@@ -33,11 +33,6 @@ export const continuationPreviewSchema = z.object({
    * and the answers before it written to the output limit. Each request is still reserved on its own when it is
    * sent. `firstMicro` (the first answer, a strict bound) must fit in what is left before anything starts.
    */
-  cost: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('free') }).strict(),
-    z.object({ kind: z.literal('priced'), maxMicro: count, firstMicro: count, remainingMicro: count }).strict(),
-    z.object({ kind: z.literal('unavailable') }).strict(),
-  ]),
 }).strict();
 
 /** A continuation as the snapshot shows it: the interjection's action and message, and who answers it. */

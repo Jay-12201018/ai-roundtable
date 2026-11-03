@@ -1,24 +1,34 @@
 import { z } from 'zod';
 import { idSchema, sequenceSchema, timestampSchema } from './common';
-import { chargeWriteOffSchema } from './budget';
 
 const count = sequenceSchema;
 
+/** What a request was for: a discussion turn, a summary or an artifact. */
+export const usageKindValues = ['turn', 'summary', 'artifact'] as const;
+export const usageKindSchema = z.enum(usageKindValues);
 /**
- * R13B usage report (D108): every ledger entry once, split into settled (actual price), unknown (counted at the
- * reservation cap), written off (the host's console amount) and in-flight reservations. All amounts are micro-CNY.
+ * D133: one real request's token usage. `in_flight` is open; `reported` holds the provider's own usage from a terminal
+ * stream; `unknown` means the request was sent but no complete usage came back (interrupted, stopped, or the service
+ * sends none), and is never recorded as zero; `not_sent` means it provably never reached the network.
  */
+export const usageStateValues = ['in_flight', 'reported', 'unknown', 'not_sent'] as const;
+export const requestUsageSchema = z.object({
+  requestId: idSchema, agentId: idSchema, providerId: idSchema, modelId: idSchema, kind: usageKindSchema, state: z.enum(usageStateValues),
+  /** On an `unknown` row these are what was observed before the stream ended, kept as evidence and not totalled. */
+  inputTokens: count.nullable(), outputTokens: count.nullable(), cacheHitTokens: count.nullable(),
+  createdAt: timestampSchema, updatedAt: timestampSchema,
+}).strict().superRefine((usage, ctx) => {
+  if (usage.state === 'reported' && (usage.inputTokens === null || usage.outputTokens === null)
+    || usage.state === 'not_sent' && (usage.inputTokens !== null || usage.outputTokens !== null)
+    || usage.cacheHitTokens !== null && (usage.inputTokens === null || usage.cacheHitTokens > usage.inputTokens)) {
+    ctx.addIssue({ code: 'custom', message: 'Usage does not match its state' });
+  }
+});
+
+/** One group of requests. Only `reported` requests add tokens; the others are counted, never estimated. */
 export const usageBucketSchema = z.object({
-  requests: count,
-  settled: z.object({ count, inputTokens: count, cacheHitTokens: count, outputTokens: count, amountMicro: count,
-    /** What the same usage costs at the peak cache-miss price, the R13A conservative basis. */
-    peakMicro: count, offPeakCount: count }).strict(),
-  unknown: z.object({ count, amountMicro: count }).strict(),
-  writtenOff: z.object({ count, amountMicro: count, capMicro: count }).strict(),
-  reserved: z.object({ count, amountMicro: count }).strict(),
-  notSent: count,
-  /** settled + unknown + written off; in-flight reservations are listed separately. */
-  totalMicro: count,
+  requests: count, reportedRequests: count, inputTokens: count, cacheHitTokens: count, outputTokens: count,
+  unknownRequests: count, inFlightRequests: count, notSentRequests: count,
 }).strict();
 export const usageRunRowSchema = usageBucketSchema.extend({
   runId: idSchema, roomId: idSchema, roomName: z.string(), task: z.string(), createdAt: timestampSchema,
@@ -26,14 +36,13 @@ export const usageRunRowSchema = usageBucketSchema.extend({
 export const usageModelRowSchema = usageBucketSchema.extend({
   providerId: idSchema, providerName: z.string(), modelId: idSchema,
 }).strict();
-/** D120: what the requests were for — discussion turns, summaries or artifacts. */
-export const usageKindRowSchema = usageBucketSchema.extend({ kind: z.enum(['turn', 'summary', 'artifact']) }).strict();
+export const usageKindRowSchema = usageBucketSchema.extend({ kind: usageKindSchema }).strict();
 export const usageDateRowSchema = usageBucketSchema.extend({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u) }).strict();
+/** A request that was sent without complete usage coming back: the provider's console is the only record of it. */
 export const usageUnknownRowSchema = z.object({
-  requestId: idSchema, runId: idSchema, roomName: z.string(), task: z.string(), kind: z.enum(['turn', 'summary', 'artifact']),
-  speaker: z.string(), providerName: z.string(), modelId: idSchema, createdAt: timestampSchema, reservedMicro: count,
+  requestId: idSchema, runId: idSchema, roomName: z.string(), task: z.string(), kind: usageKindSchema,
+  speaker: z.string(), providerName: z.string(), modelId: idSchema, createdAt: timestampSchema,
   observedInputTokens: count.nullable(), observedOutputTokens: count.nullable(),
-  writeOffs: z.array(chargeWriteOffSchema).max(64),
 }).strict();
 /**
  * D117: an optional time range [since, until) over when each request was sent. Absent bounds mean “all”; a Run that spans
@@ -49,12 +58,13 @@ export const usageReportSchema = z.object({
   byRun: z.array(usageRunRowSchema).max(100000),
   byModel: z.array(usageModelRowSchema).max(10000),
   byDate: z.array(usageDateRowSchema).max(100000),
-  unknownCharges: z.array(usageUnknownRowSchema).max(100000),
-  /** Optional for compatibility with R13B readers; Main always sends it. */
-  byKind: z.array(usageKindRowSchema).max(3).optional(),
+  byKind: z.array(usageKindRowSchema).max(3),
+  unknownRequests: z.array(usageUnknownRowSchema).max(100000),
 }).strict();
 export const usageExportResultSchema = z.object({ saved: z.boolean(), fileName: z.string().max(512).optional(), rows: count }).strict();
 
+export type RequestUsage = z.infer<typeof requestUsageSchema>;
+export type UsageKind = z.infer<typeof usageKindSchema>;
 export type UsageBucket = z.infer<typeof usageBucketSchema>;
 export type UsageReport = z.infer<typeof usageReportSchema>;
 export type UsageUnknownRow = z.infer<typeof usageUnknownRowSchema>;

@@ -6,20 +6,21 @@ import { executionMetadataSchema, attemptSnapshotSchema } from './persistence';
 
 import { workflowConfigSchema, workflowProgressSchema } from './workflow';
 import { hostStateSchema, hostUpdatedPayloadSchema, messageVersionSchema } from './host';
-import { requestChargeSchema, runBudgetInputSchema, runBudgetSchema } from './budget';
+import { requestUsageSchema } from './usage';
 import { contextPressureSchema, contextSummarySchema, summaryRequestStatusValues } from './summary';
 import { runContinuationSchema } from './continuation';
 
-/** D103: the default single-output limit; a detailed Chinese review easily exceeds the former 1024 tokens. */
-export const DEFAULT_OUTPUT_TOKEN_LIMIT = 4096;
+/**
+ * D103, D134: the default single-output limit. Current models spend reasoning tokens out of this same limit, so the
+ * former 4096 could be used up before any visible text.
+ */
+export const DEFAULT_OUTPUT_TOKEN_LIMIT = 8192;
 export const startRunInputSchema = z.object({
   roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema.optional(), workflowConfig: workflowConfigSchema.optional(), workflowPreviewId: idSchema.optional(),
   mode: z.enum(['automatic', 'step']).optional(),
   maxTurns: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   maxDurationMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   outputTokenLimit: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
-  // R13A: total spend cap for this Run in micro-CNY; Main defaults to ¥1.
-  budgetMicroCny: runBudgetInputSchema.optional(),
 }).strict();
 export const interruptedRunDecisionSchema = z.enum(['inspect', 'resume', 'retry', 'discard']);
 export const runCursorSchema = z.object({ runId: idSchema, cursor: sequenceSchema }).strict();
@@ -45,7 +46,8 @@ export const runSnapshotSchema = z.object({
   startedAt: timestampSchema.optional(), updatedAt: timestampSchema,
   workflow: workflowProgressSchema.optional(), execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
   versions: z.array(messageVersionSchema).optional(), host: hostStateSchema.optional(),
-  budget: runBudgetSchema.optional(), charges: z.array(requestChargeSchema).optional(),
+  /** D133: token usage of this Run's real requests, one row per request. */
+  usage: z.array(requestUsageSchema).optional(),
   // R13B (D107): conversation summaries and how full the next request's context is.
   summaries: z.array(contextSummarySchema).max(256).optional(), contextPressure: contextPressureSchema.optional(),
   // D111: continuations of a finished discussion, oldest first.
@@ -63,8 +65,8 @@ export const runSnapshotSchema = z.object({
     || snapshot.turns.some((turn) => turn.messageId !== undefined && !snapshot.messages.some((message) => message.id === turn.messageId))
     || new Set(snapshot.attempts?.map(a=>a.requestId)).size !== (snapshot.attempts?.length ?? 0)
     || snapshot.attempts?.some(a=>a.runId!==snapshot.runId || !snapshot.turns.some(t=>t.turnId===a.turnId) || !snapshot.messages.some(m=>m.id===a.messageId))
-    || new Set(snapshot.charges?.map(c=>c.requestId)).size !== (snapshot.charges?.length ?? 0)
-    || snapshot.charges?.some(c=>c.kind==='summary' ? !summaryRequests.has(c.requestId) : c.kind==='artifact' ? !snapshot.artifactRequestIds?.includes(c.requestId) : !snapshot.attempts?.some(a=>a.requestId===c.requestId))
+    || new Set(snapshot.usage?.map(c=>c.requestId)).size !== (snapshot.usage?.length ?? 0)
+    || snapshot.usage?.some(c=>c.kind==='summary' ? !summaryRequests.has(c.requestId) : c.kind==='artifact' ? !snapshot.artifactRequestIds?.includes(c.requestId) : !snapshot.attempts?.some(a=>a.requestId===c.requestId))
     || [...summaryRequests.values()].some(messageId => !snapshot.messages.some(message => message.id === messageId))
     || snapshot.continuations?.some(item => item.messageId !== undefined && !snapshot.messages.some(message => message.id === item.messageId))) {
     ctx.addIssue({ code: 'custom', message: 'Inconsistent snapshot identities' });
@@ -106,6 +108,7 @@ export const runEventSchema = z.discriminatedUnion('type', [
   z.object({ ...base, ...turnIdentity, type: z.literal('turn_failed'), payload: turnErrorPayload }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('host_updated'), payload: hostUpdatedPayloadSchema }).strict(),
   // R13B: run-level ledger and summary notifications; a summary has no Turn, so its text streams as run-level deltas.
+  // D133: nothing emits this any more; old Runs keep these events and recovery still has to read them.
   z.object({ ...base, ...runIdentity, type: z.literal('budget_updated'), payload: z.object({ reason: z.enum(['top_up', 'write_off']) }).strict() }).strict(),
   z.object({ ...base, ...runIdentity, type: z.literal('summary_updated'), payload: z.object({ summaryId: idSchema, messageId: idSchema,
     status: z.enum([...summaryRequestStatusValues, 'confirmed']),

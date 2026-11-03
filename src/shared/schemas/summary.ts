@@ -18,7 +18,7 @@ export const summaryCandidateSchema = z.object({
 export const summaryAgentOptionSchema = z.object({
   agentId: idSchema, name: z.string().min(1), providerId: idSchema.nullable(), modelId: idSchema.nullable(),
 }).strict();
-export const summaryUnavailableReasonValues = ['busy', 'too_few', 'context_exceeds', 'budget_insufficient', 'unsupported', 'covered'] as const;
+export const summaryUnavailableReasonValues = ['busy', 'too_few', 'context_exceeds', 'unsupported', 'covered'] as const;
 export const summaryPreviewSchema = z.object({
   runId: idSchema,
   available: z.boolean(),
@@ -29,11 +29,6 @@ export const summaryPreviewSchema = z.object({
   agents: z.array(summaryAgentOptionSchema).max(64), agentId: idSchema.optional(),
   /** A confirmed earlier summary this one builds on; its covered originals are not resent. */
   basedOn: z.object({ summaryId: idSchema, lastNumber: position }).strict().optional(),
-  cost: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('free') }).strict(),
-    z.object({ kind: z.literal('priced'), maxMicro: count, remainingMicro: count }).strict(),
-    z.object({ kind: z.literal('unavailable') }).strict(),
-  ]),
   inputTokens: count.optional(), inputBudgetTokens: count.optional(),
 }).strict();
 export const summaryGenerateInputSchema = z.object({

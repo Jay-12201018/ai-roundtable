@@ -182,7 +182,7 @@ export const artifactVersionDetailSchema = z.object({
 }).strict();
 
 export const artifactPreviewInputSchema = z.object({ runId: idSchema, kind: artifactKindSchema, agentId: idSchema.optional(), artifactId: idSchema.optional() }).strict();
-export const artifactUnavailableReasonValues = ['busy', 'too_few', 'context_exceeds', 'budget_insufficient', 'unsupported'] as const;
+export const artifactUnavailableReasonValues = ['busy', 'too_few', 'context_exceeds', 'unsupported'] as const;
 export const artifactPreviewSchema = z.object({
   runId: idSchema, kind: artifactKindSchema, artifactId: idSchema.optional(),
   available: z.boolean(), reason: z.enum(artifactUnavailableReasonValues).optional(),
@@ -190,11 +190,6 @@ export const artifactPreviewSchema = z.object({
   agentId: idSchema.optional(),
   /** Public messages it would be based on; a confirmed summary stands in for 1..summarizedThrough. */
   messageCount: sequenceSchema, lastNumber: position.optional(), summarizedThrough: position.optional(),
-  cost: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('free') }).strict(),
-    z.object({ kind: z.literal('priced'), maxMicro: sequenceSchema, remainingMicro: sequenceSchema }).strict(),
-    z.object({ kind: z.literal('unavailable') }).strict(),
-  ]),
   outputTokenLimit: position, inputTokens: sequenceSchema.optional(), inputBudgetTokens: sequenceSchema.optional(),
 }).strict();
 export const artifactGenerateInputSchema = z.object({

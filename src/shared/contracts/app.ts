@@ -3,7 +3,6 @@ import type { createDemoResultSchema, roomMessageSchema } from '../schemas/app';
 import type { RunApiContract } from './run';
 import type { RoomManagementApiContract, ProviderSettingsApiContract } from './configuration';
 import type { HostCommand, HostCommandResult } from '../schemas/host';
-import type { WriteOffChargeInput, WriteOffChargeResult } from '../schemas/budget';
 import type { SummaryCommandResult, SummaryConfirmInput, SummaryGenerateInput, SummaryPreview, SummaryPreviewInput } from '../schemas/summary';
 import type { ArtifactAdoptInput, ArtifactCommandResult, ArtifactEditInput, ArtifactExportInput, ArtifactExportResult, ArtifactGenerateInput, ArtifactList, ArtifactListInput,
   ArtifactPreview, ArtifactPreviewInput, ArtifactVersionDetail, ArtifactVersionInput, CodeCandidateList } from '../schemas/artifact';
@@ -21,20 +20,19 @@ export interface RoomApiContract {
 export interface HostApiContract {
   command(input: HostCommand): Promise<HostCommandResult>;
 }
-/** R13B usage ledger: the report, a host write-off of an unknown charge and a CSV export saved by Main. */
+/** D133: token usage: the report and a CSV export saved by Main. */
 export interface UsageApiContract {
   /** D117: optional range over when requests were sent; omitted means all. */
   getReport(range?: UsageRange): Promise<UsageReport>;
-  writeOff(input: WriteOffChargeInput): Promise<WriteOffChargeResult>;
   exportCsv(range?: UsageRange): Promise<UsageExportResult>;
 }
-/** R13B conversation summaries: generation is always an explicit, budgeted host request (D107). */
+/** R13B conversation summaries: generation is always an explicit host request (D107). */
 export interface SummaryApiContract {
   preview(input: SummaryPreviewInput): Promise<SummaryPreview>;
   generate(input: SummaryGenerateInput): Promise<SummaryCommandResult>;
   confirm(input: SummaryConfirmInput): Promise<SummaryCommandResult>;
 }
-/** R14 structured artifacts: generation is an explicit, budgeted request; a model's version needs the host's adoption. */
+/** R14 structured artifacts: generation is an explicit request; a model's version needs the host's adoption. */
 export interface ArtifactApiContract {
   preview(input: ArtifactPreviewInput): Promise<ArtifactPreview>;
   generate(input: ArtifactGenerateInput): Promise<ArtifactCommandResult>;
@@ -63,7 +61,7 @@ export interface NetworkApiContract {
   /** One CONNECT handshake to the fixed DeepSeek host through the given loopback proxy; no Key, no request body. */
   testProxy(input: ProxyEndpoint): Promise<ProxyTestResult>;
 }
-/** D115: restart the app so saved network settings apply; refused while a discussion or trial is running. */
+/** D115: restart the app so saved network settings apply; refused while a discussion is running. */
 export interface AppLifecycleApiContract {
   relaunch(): Promise<void>;
 }

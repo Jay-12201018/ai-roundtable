@@ -15,14 +15,15 @@ export const errorMessages = {
   timeout: 'Provider request timed out',
   cancelled: 'Request cancelled',
   network_error: 'Provider connection failed',
+  // D133: nothing raises this any more; events of old Runs keep it and recovery still has to read them.
   budget_exceeded: 'Run budget is insufficient for the next request',
 } as const;
 export const errorCodeSchema = z.enum(Object.keys(errorMessages) as [keyof typeof errorMessages, ...(keyof typeof errorMessages)[]]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 const retryableCodes: readonly ErrorCode[] = ['transport_error', 'rate_limited', 'timeout', 'network_error'];
 const errorFieldSchema = z.enum(['arguments', 'roomId', 'runId', 'turnId', 'messageId', 'cursor', 'task', 'workflowSnapshot', 'mode', 'maxTurns', 'maxDurationMs', 'outputTokenLimit', 'decision',
-  'clientRequestId', 'kind', 'agentId', 'instructionId', 'content', 'budgetMicroCny',
-  'amountMicroCny', 'basis', 'requestId', 'acknowledgedUncertainty', 'throughSlotId', 'summaryId',
+  'clientRequestId', 'kind', 'agentId', 'instructionId', 'content',
+  'requestId', 'throughSlotId', 'summaryId',
   // R14 artifacts.
   'artifactId', 'versionId', 'text', 'sources', 'format', 'target',
   // R15 code export.

@@ -61,7 +61,6 @@ const api: RoundtableApiContract = {
   },
   usage: {
     getReport: (range) => invoke('usage.getReport', range ?? {}),
-    writeOff: (input) => invoke('usage.writeOff', input),
     exportCsv: (range) => invoke('usage.exportCsv', range ?? {}),
   },
   rooms: {
@@ -116,8 +115,6 @@ const api: RoundtableApiContract = {
     retryTurn: (runId, turnId) => invoke('run.retryTurn', { runId, turnId }),
     continueMessage: (runId, messageId) => invoke('run.continueMessage', { runId, messageId }),
     recoverInterruptedRun: (runId, decision) => invoke('run.recoverInterruptedRun', { runId, decision }),
-    addBudget: (input) => invoke('run.addBudget', input),
-    resumeAfterBudget: (runId) => invoke('run.resumeAfterBudget', runId),
     previewContinuation: (input) => invoke('run.previewContinuation', input),
     continueDiscussion: (input) => invoke('run.continueDiscussion', input),
     onEvent: (listener) => {
