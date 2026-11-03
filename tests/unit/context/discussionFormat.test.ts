@@ -4,7 +4,7 @@ import { buildPublicContext } from '../../../src/main/context/buildPublicContext
 import { agentBriefText, builtInRoleGuides, discussionRulesText, isAssistantEntry, quoteText, renderEntry, revisionRuleText } from '../../../src/main/context/transcript';
 import { buildAnthropicMessages } from '../../../src/main/providers/anthropic/messages';
 import { buildGeminiContents } from '../../../src/main/providers/gemini/GeminiProvider';
-import { countDeepSeekInputUpperBound } from '../../../src/main/providers/modelPolicies/deepseek';
+import { countInputUpperBound } from '../../../src/main/providers/ProviderRegistry';
 import type { ContextInput, ModelTokenCounter } from '../../../src/main/context/types';
 import type { ProviderMessage } from '../../../src/main/providers/types';
 import { contextInput, fixtureCounter } from './fixtures';
@@ -206,16 +206,16 @@ describe('D095 token bound on the final messages', () => {
   });
 
   it('keeps the DeepSeek byte upper bound valid for what is sent, and trims history by the same count', () => {
-    const deepSeek = { modelId: 'fixture', kind: 'upper_bound' as const, method: 'deepseek byte bound', countMessages: countDeepSeekInputUpperBound };
+    const deepSeek = { modelId: 'fixture', kind: 'upper_bound' as const, method: 'byte bound', countMessages: countInputUpperBound };
     const input = sequence(['a', 'b', 'c', 'a', 'b'], 'c', (speaker, index) => `${speaker} 的中文发言 ${index} `.repeat(20));
     const full = build(input, deepSeek);
     const bytes = full.messages.reduce((total, m) => total + Buffer.byteLength(m.content, 'utf8'), 0);
-    expect(full.report.budget.inputTokens).toBe(countDeepSeekInputUpperBound(full.messages));
+    expect(full.report.budget.inputTokens).toBe(countInputUpperBound(full.messages));
     expect(full.report.budget.inputTokens).toBeGreaterThan(bytes);
     input.contextWindowTokens = full.report.budget.inputTokens! + input.run.outputTokenLimit - 1;
     const trimmed = build(input, deepSeek);
     expect(trimmed.selectedHistory.length).toBeLessThan(full.selectedHistory.length);
-    expect(countDeepSeekInputUpperBound(trimmed.messages)).toBe(trimmed.report.budget.inputTokens);
+    expect(countInputUpperBound(trimmed.messages)).toBe(trimmed.report.budget.inputTokens);
     expect(trimmed.report.budget.inputTokens! + input.run.outputTokenLimit).toBeLessThanOrEqual(input.contextWindowTokens);
   });
 

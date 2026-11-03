@@ -23,7 +23,7 @@ describe('Renderer subscription coordination', () => {
       vi.mocked(api.run.subscribe).mockResolvedValue({ ...subscription(saved), resyncRequired: true });
       for (const code of ['timeout','internal_error'] as const) emit({version:1,runId:'run',sequence:3,type:'turn_failed',turnId:'run-turn',requestId:'run-request',timestamp:time,payload:{turnId:'run-turn',messageId:'run-message',error:publicError(code)}});
       await flush();
-      expect(state().error).toContain('请检查输入预算');
+      expect(state().error).toContain('请检查讨论长度和单次输出上限');
       expect(state().snapshot?.messages[0].content).toBe('保留文本');
     } finally { dispose(); }
   });
@@ -43,7 +43,7 @@ describe('Renderer subscription coordination', () => {
       response.resolve({ ...subscription(saved), resyncRequired: true });
       await loading;
       expect(state().syncStatus).toBe('ready');
-      expect(state().error).toContain('请检查输入预算');
+      expect(state().error).toContain('请检查讨论长度和单次输出上限');
       expect(state().error).not.toContain('请求已超时');
       expect(api.run.subscribe).toHaveBeenCalledTimes(1);
     } finally { dispose(); }

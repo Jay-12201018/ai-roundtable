@@ -18,7 +18,7 @@ describe('讨论方式 dialog', () => {
     for (const template of ['free-chat', 'two-model-dialogue', 'review-revision', 'deep-debate'] as const) {
       const draft = createWorkflowDraft(template, members);
       expect(draft.phases.flatMap(phase => phase.participants)).not.toContain('x');
-      expect(workflowConfigFromDraft(draft).limits).toEqual({ maxTurns: 12, maxDurationMs: 300000, outputTokenLimit: 4096 });
+      expect(workflowConfigFromDraft(draft).limits).toEqual({ maxTurns: 12, maxDurationMs: 300000, outputTokenLimit: 8192 });
     }
     expect(createWorkflowDraft('review-revision', [members[2], members[1], members[0]]).phases.map(phase => phase.participants[0])).toEqual(['a', 'b', 'a', 'b', 'a']);
   });

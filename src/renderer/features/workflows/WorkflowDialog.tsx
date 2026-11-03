@@ -89,7 +89,7 @@ export function WorkflowDialog({ roomName, members, initial, onCheck, onSave, on
     <div className="wf-limits">
       <Field label="最多回合">{props => <input {...props} className="input" inputMode="numeric" value={draft.turnLimit} onChange={event => edit({ turnLimit: event.target.value.trim() })} />}</Field>
       <Field label="时长上限" help="分钟，暂停不计时">{props => <input {...props} className="input" inputMode="numeric" value={draft.durationMinutes} onChange={event => edit({ durationMinutes: event.target.value.trim() })} />}</Field>
-      <Field label="单次发言上限" help="tokens；4096 约等于 3,000 汉字">{props => <input {...props} className="input" inputMode="numeric" value={draft.outputTokens} onChange={event => edit({ outputTokens: event.target.value.trim() })} />}</Field>
+      <Field label="单次发言上限" help="tokens；8192 约等于 6,000 汉字，模型的思考也算在内">{props => <input {...props} className="input" inputMode="numeric" value={draft.outputTokens} onChange={event => edit({ outputTokens: event.target.value.trim() })} />}</Field>
     </div>
     <div className={cx('callout', ok ? 'is-accent' : check.result && !check.result.ok && !check.pending ? 'is-warn' : '')} role="status" aria-live="polite">
       {ok ? <Check aria-hidden /> : <CircleAlert aria-hidden />}

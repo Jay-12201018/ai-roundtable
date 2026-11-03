@@ -115,9 +115,9 @@ it('refreshes member Provider summaries when a settings mutation settles after l
   fireEvent.click(screen.getByRole('button', { name: '保存名称' }));
   await openRoom('房间');
   fireEvent.click(await screen.findByRole('button', { name: /「成员」：编辑/u })); fireEvent.click(screen.getByRole('menuitem', { name: '编辑…' }));
-  expect(within(screen.getByRole('dialog')).getByRole('option', { name: '旧 Provider（不联网、不花钱）' })).toBeTruthy();
+  expect(within(screen.getByRole('dialog')).getByRole('option', { name: '旧 Provider（不联网）' })).toBeTruthy();
   await act(async () => gate.resolve());
-  await within(screen.getByRole('dialog')).findByRole('option', { name: '新 Provider（不联网、不花钱）' });
+  await within(screen.getByRole('dialog')).findByRole('option', { name: '新 Provider（不联网）' });
 });
 
 it('persists explicit theme preference and can return to following the system', async () => {

@@ -13,9 +13,9 @@ export const kindDescriptions: Record<ArtifactKind, string> = {
 
 /** D124: what the model says when the discussion holds nothing of this kind; the request is paid either way. */
 const nothingNotes: Partial<Record<ArtifactKind, string>> = {
-  code: '讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会产生费用。',
-  prd: '讨论不是关于产品或功能时，模型会如实说明“没有可整理的内容”，不会硬凑需求；这次请求仍会产生费用。',
-  actions: '讨论里没有要做的事时，模型会如实说明“没有可整理的内容”，不会硬凑事项；这次请求仍会产生费用。',
+  code: '讨论里没有涉及代码时，模型会如实说明“没有可整理的内容”，不会硬凑代码；这次请求仍会计入服务商的用量。',
+  prd: '讨论不是关于产品或功能时，模型会如实说明“没有可整理的内容”，不会硬凑需求；这次请求仍会计入服务商的用量。',
+  actions: '讨论里没有要做的事时，模型会如实说明“没有可整理的内容”，不会硬凑事项；这次请求仍会计入服务商的用量。',
 };
 
 const reasonText = (preview: ArtifactPreview): string => {

@@ -166,15 +166,15 @@ describe('Renderer command ownership', () => {
 describe('R13A start refusals', () => {
   it.each([
     ['forbidden', '启动失败：成员使用的 Provider 尚未在本次会话确认请求目标，或 Key 已更换。请到“模型设置”勾选“我已核对请求目标”并点“确认本次会话目标”。'],
-    ['unsupported', '启动失败：成员使用的模型没有已审核的计数与价格，不能发送真实请求。'],
+    ['unsupported', '启动失败：有成员的模型现在不能发送请求，请到房间里检查成员的模型。'],
     ['internal_error', '启动协作失败，请检查当前任务状态。'],
-  ] as const)('explains a %s start refusal and passes the budget through', async (code, message) => {
+  ] as const)('explains a %s start refusal and passes the limit through', async (code, message) => {
     const { api, session, state, dispose } = setup();
     vi.mocked(api.room.createDemo).mockResolvedValue({ roomId: 'room' });
     vi.mocked(api.run.start).mockRejectedValue(publicError(code));
     state().setDraft('目标');
-    await session.startRun(undefined, { budgetMicroCny: 50_000 });
-    expect(api.run.start).toHaveBeenCalledWith(expect.objectContaining({ budgetMicroCny: 50_000 }));
+    await session.startRun(undefined, { outputTokenLimit: 2000 });
+    expect(api.run.start).toHaveBeenCalledWith(expect.objectContaining({ outputTokenLimit: 2000 }));
     expect(state().error).toBe(message);
     dispose();
   });
@@ -184,7 +184,7 @@ describe('R13A start refusals', () => {
     vi.mocked(api.room.createDemo).mockResolvedValue({ roomId: 'room' });
     vi.mocked(api.run.start).mockRejectedValue(publicError('invalid_input', 'outputTokenLimit'));
     state().setDraft('目标');
-    await session.startRun(undefined, { budgetMicroCny: 50_000, outputTokenLimit: 40_000, mode: 'step' });
+    await session.startRun(undefined, { outputTokenLimit: 40_000, mode: 'step' });
     expect(api.run.start).toHaveBeenCalledWith(expect.objectContaining({ outputTokenLimit: 40_000, mode: 'step' }));
     expect(state().error).toBe('启动失败：单次输出上限超过了成员所用模型允许的最大值，请在“更多设置”里调小后再开始。');
     dispose();

@@ -131,7 +131,8 @@ export class AnthropicProvider implements ProviderAdapter {
       return response;
     };
     return new Anthropic({ apiKey: key, authToken: null, baseURL: officialBaseUrl, maxRetries: 0,
-      timeout: this.timeoutMs, logLevel: 'off', logger: silentLogger, fetch: fetcher });
+      // The scope ends every call at its own total, so the SDK's limit only has to allow the longest of them.
+      timeout: this.streamTimeoutMs, logLevel: 'off', logger: silentLogger, fetch: fetcher });
   }
 
   private async models(scope: RequestScope) {

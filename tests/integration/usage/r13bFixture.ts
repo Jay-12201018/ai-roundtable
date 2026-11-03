@@ -6,16 +6,9 @@ import { RunService } from '../../../src/main/services/RunService';
 import { HostService } from '../../../src/main/host/HostService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
-import { deepSeekModelPolicy } from '../../../src/main/providers/modelPolicies/deepseek';
-import { settlementClock } from '../../../src/main/usage/pricing';
 import type { HostCommand } from '../../../src/shared/schemas/host';
 
 export type Mode = 'ok' | 'no-usage' | 'hang' | 'network';
-/** Beijing local time as an instant (UTC+8). Friday 2026-10-23 10:00 is peak; 21:00 is off-peak. */
-export const beijing = (local: string) => new Date(`${local}+08:00`);
-export const PEAK = '2026-10-23T10:00:00';
-export const OFF_PEAK = '2026-10-23T21:00:00';
-
 const cleanup: Array<() => unknown> = [];
 export async function closeR13bFixtures() { vi.restoreAllMocks(); for (const f of cleanup.splice(0).reverse()) await f(); }
 
@@ -24,13 +17,10 @@ function sse(events: unknown[], done = true) {
 }
 
 /**
- * A DeepSeek Run against an owned fetch: the real policy, registry, ledger and context builder, a fixed settlement
- * clock and scripted usage (300 prompt tokens, 6 completion tokens, optionally with a cache split).
+ * A DeepSeek Run against an owned fetch: the real registry, usage records and context builder and scripted usage (300 prompt tokens, 6 completion tokens, optionally with a cache split).
  */
-export async function deepSeekFixture(options: { modes?: Mode[]; clock?: string; cacheHit?: number; filename?: string; members?: Array<{ name: string; role: string }>;
+export async function deepSeekFixture(options: { modes?: Mode[]; cacheHit?: number; filename?: string; members?: Array<{ name: string; role: string }>;
   /** R14: the reply text for a request, instead of the default scripted text. */ reply?: (body: Record<string, unknown>) => string | undefined } = {}) {
-  let now = beijing(options.clock ?? PEAK);
-  vi.spyOn(settlementClock, 'now').mockImplementation(() => now);
   const db = new Database(options.filename ?? ':memory:');
   await db.initialize();
   db.createRoom({ id: 'room', name: '用量房间' });
@@ -56,19 +46,19 @@ export async function deepSeekFixture(options: { modes?: Mode[]; clock?: string;
     if (mode === 'network') throw new TypeError('fetch failed');
     return sse([text, stop, { choices: [], usage: { prompt_tokens: 300, completion_tokens: 6, ...split } }]);
   });
-  const registry = new ProviderRegistry(db, keys, { policyResolver: deepSeekModelPolicy, transportFactory: guard => async (url, init) => { guard(); return transport(url, init); } });
+  const registry = new ProviderRegistry(db, keys, { transportFactory: guard => async (url, init) => { guard(); return transport(url, init); } });
   registry.confirmTarget({ providerId: 'deepseek', baseUrl: 'https://api.deepseek.com', confirmed: true });
   const people = options.members ?? [{ name: '起草者', role: '起草' }, { name: '审查者', role: '审查' }, { name: '综合者', role: '综合' }];
   people.forEach((member, index) => db.createAgent({ id: `a${index}`, roomId: 'room', displayName: member.name, roleTemplateId: member.role, systemPrompt: '', providerId: 'deepseek', modelId: 'deepseek-flash', displayOrder: index }));
   const budgetOf = (member: { providerId: string | null; modelId: string | null }) => member.providerId ? registry.budget(member.providerId, member.modelId!) : undefined;
-  const run = new RunService(db, new MockProvider(), createPublicMessagesBuilder((_model, member) => budgetOf(member)), registry, () => {}, member => budgetOf(member));
+  const run = new RunService(db, new MockProvider(), createPublicMessagesBuilder((_model, member) => budgetOf(member)), registry, member => budgetOf(member));
   const host = new HostService(db, run);
   // Reversed on cleanup: stop the Run service first, then close its database.
   cleanup.push(() => db.close(), () => { release(); return run.shutdown(); });
   let counter = 0;
   const command = (input: Record<string, unknown>) => host.command({ clientRequestId: `client-${++counter}`, ...input } as HostCommand);
   const start = (extra: Record<string, unknown> = {}) => run.start({ roomId: 'room', task: '设计一个校园跑腿平台', workflowSnapshot: {}, maxTurns: 2, outputTokenLimit: 256, ...extra });
-  return { db, keys, registry, run, host, command, start, transport, bodies, release, setClock: (local: string) => { now = beijing(local); } };
+  return { db, keys, registry, run, host, command, start, transport, bodies, release };
 }
 export type R13bFixture = Awaited<ReturnType<typeof deepSeekFixture>>;
 

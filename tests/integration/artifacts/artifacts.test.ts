@@ -42,10 +42,10 @@ describe('structured artifacts (D118–D123)', () => {
     for (const kind of artifactKindValues) {
       const before = f.provider.inputs.length;
       const { preview, result, version } = await generate(f, runId, kind, `g-${kind}`);
-      expect(preview).toMatchObject({ kind, agentId: 'a', messageCount: 3, lastNumber: 3, cost: { kind: 'free' }, outputTokenLimit: kind === 'code' ? 8192 : 4096 });
+      expect(preview).toMatchObject({ kind, agentId: 'a', messageCount: 3, lastNumber: 3, outputTokenLimit: 8192 });
       expect(f.provider.inputs.length).toBe(before + 1);
       const request = f.provider.inputs.at(-1)!;
-      expect(request).toMatchObject({ agentRole: `artifact:${kind}`, outputTokenLimit: kind === 'code' ? 8192 : 4096 });
+      expect(request).toMatchObject({ agentRole: `artifact:${kind}`, outputTokenLimit: 8192 });
       const transcript = request.messages.at(-1)!.content;
       // The kind's requirements come after the discussion, right before the answer (D120).
       expect(transcript).toContain('只输出一个 JSON 对象');
@@ -120,7 +120,7 @@ describe('structured artifacts (D118–D123)', () => {
     f.provider.outcomes.set(f.provider.inputs.length, 'length');
     const cut = await generate(f, runId, 'prd', 'g1', text(validDocuments.prd).slice(0, 200));
     expect(cut.version().version).toMatchObject({ status: 'invalid', request: { status: 'completed', finishReason: 'length' } });
-    expect(cut.version().version.issues[0].message).toBe('输出达到 4096 tokens 的上限被截断，内容不完整');
+    expect(cut.version().version.issues[0].message).toBe('输出达到 8192 tokens 的上限被截断，内容不完整');
     f.provider.outcomes.set(f.provider.inputs.length, 'fail');
     const failed = await generate(f, runId, 'prd', 'g2', '{"title": "半截', cut.result.artifactId);
     expect(failed.version()).toMatchObject({ rawOutput: '{"title": "半截', version: { status: 'failed', request: { status: 'failed' }, issues: [] } });
@@ -393,7 +393,7 @@ describe('structured artifacts (D118–D123)', () => {
       expect(again.artifacts[2].versions[0].request).toMatchObject({ requestId: held.requestId, status: 'interrupted' });
       expect(new ArtifactService(reopened, { notifyArtifact: () => {} }).getVersion({ runId, versionId: result.versionId }).rawOutput).toBe('不是 JSON');
       const raw = new Sqlite(filename, { readonly: true });
-      try { expect(validateDatabase(raw).schemaVersion).toBe(13); } finally { raw.close(); }
+      try { expect(validateDatabase(raw).schemaVersion).toBe(14); } finally { raw.close(); }
       reopened.close();
       const calls = f.provider.inputs.length;
       await new Promise(resolve => setTimeout(resolve, 30));
@@ -431,10 +431,9 @@ describe('recovery validation of migration 12', () => {
         const source = new Sqlite(filename); source.pragma('wal_checkpoint(TRUNCATE)'); source.close();
         copyFileSync(filename, copy);
         const raw = new Sqlite(copy);
-        try { expect(validateDatabase(raw).schemaVersion).toBe(13); raw.exec(tamper); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
+        try { expect(validateDatabase(raw).schemaVersion).toBe(14); raw.exec(tamper); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
       };
       check('DROP TRIGGER artifact_version_output_once', /Missing R14 artifact protection/u);
-      check(`DROP TRIGGER charge_pricing_insert; CREATE TRIGGER charge_pricing_insert BEFORE INSERT ON charge_pricing BEGIN SELECT 1; END;`, /Missing R14 ledger protection/u);
       check(`DROP TRIGGER artifact_version_output_once; UPDATE artifact_versions SET content_json='{"title":""}'`, /Missing R14 artifact protection/u);
       check(`DROP TRIGGER artifact_source_insert; DROP TRIGGER artifact_source_immutable; DROP TRIGGER artifact_source_no_delete;
         CREATE TRIGGER artifact_source_insert BEFORE INSERT ON artifact_sources BEGIN SELECT 1; END;

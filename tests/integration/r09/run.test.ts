@@ -4,16 +4,13 @@ import { once } from 'node:events';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
 import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/KeyService';
-import { ProviderRegistry, type ApprovedModelPolicy } from '../../../src/main/providers/ProviderRegistry';
+import { ProviderRegistry } from '../../../src/main/providers/ProviderRegistry';
 import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 
 const cleanup: Array<()=>Promise<unknown>|unknown> = [];
 afterEach(async()=>{for(const f of cleanup.splice(0).reverse()) await f();});
-const policy:ApprovedModelPolicy={evidence:'owned local fixture',outputTokenParameter:'max_tokens',contextWindowTokens:100000,maxOutputTokens:4096,
- counter:{modelId:'fixture',kind:'upper_bound',method:'fixture packet UTF8 bound',countMessages:ms=>32+ms.reduce((n,m)=>n+16+Buffer.byteLength(m.content),0)},
- price:{inputUsdPerMillion:0,outputUsdPerMillion:0,maxRequestUsd:0,evidence:'owned fixture is free'}};
 async function fixture(mode:'normal'|'hang'|'broken'|'length'='normal'){
  const calls:Array<{path:string;key:string|undefined;body:any}>=[];
  let notify!:()=>void; const partial=new Promise<void>(r=>{notify=r;});
@@ -35,7 +32,7 @@ async function fixture(mode:'normal'|'hang'|'broken'|'length'='normal'){
  db.createRoom({id:'room',name:'Room'});
  db.createProvider({id:'p',name:'local',kind:'openai-compatible',baseUrl:`http://127.0.0.1:${port}/v1`,customModels:[{id:'fixture',name:'fixture'}]});
  const keys=new KeyService(db,createMemoryKeyBackend());await keys.storeKey('p','fake-p');
- const registry=new ProviderRegistry(db,keys,{policyResolver:(_p,m)=>m==='fixture'?policy:undefined,capabilitiesResolver:()=>({outputTokenParameter:'max_tokens',streamUsage:true,listModels:true,authentication:'models'})});
+ const registry=new ProviderRegistry(db,keys,{capabilitiesResolver:()=>({outputTokenParameter:'max_tokens',streamUsage:true,listModels:true,authentication:'models'})});
  registry.confirmTarget({providerId:'p',baseUrl:`http://127.0.0.1:${port}/v1`,confirmed:true});
  for(let i=0;i<3;i++)db.createAgent({id:`a${i}`,roomId:'room',displayName:`Agent${i}`,roleTemplateId:`Role${i}`,systemPrompt:`System${i}`,providerId:'p',modelId:'fixture',displayOrder:i});
  const mock=new MockProvider(); const mockCall=vi.spyOn(mock,'streamChat');

@@ -456,3 +456,23 @@ describe('OpenAI Compatible failures, cancellation and deadlines', () => {
     expectSanitized(events);
   });
 });
+
+describe('D135 compatible services differ in when they report usage', () => {
+  const stop = { id: 'x', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+  const provider = (events: unknown[], capabilities = {}) => new OpenAICompatibleProvider({ configuration, confirmedBaseUrl: baseUrl, resolveKey: async () => 'owned-fake-key',
+    capabilities: { outputTokenParameter: 'max_tokens', streamUsage: true, listModels: true, authentication: 'models', ...capabilities },
+    fetch: async () => sse(events) });
+  const all = async (stream: AsyncIterable<NormalizedChunk>) => { const events: NormalizedChunk[] = []; for await (const event of stream) events.push(event); return events; };
+  const request = { requestId: 'main-request', modelId: 'manual-chat-model', outputTokenLimit: 8, messages: [{ role: 'user' as const, content: 'hi' }] };
+  it('keeps the last report when usage is repeated, and emits it once before finish', async () => {
+    const events = await all(provider([{ ...chunk({ content: '好' }), usage: { prompt_tokens: 5, completion_tokens: 0 } }, { ...stop, usage: { prompt_tokens: 5, completion_tokens: 2 } }, { ...stop, choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } }]).streamChat(request));
+    expect(events.filter(event => event.type === 'usage')).toEqual([expect.objectContaining({ inputTokens: 5, outputTokens: 3 })]);
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+    expect(events.at(-2)).toMatchObject({ type: 'usage' });
+  });
+  it('accepts usage before finish_reason and an empty finish_reason on a content chunk', async () => {
+    const events = await all(provider([{ ...chunk({ content: '好' }, ''), usage: { prompt_tokens: 5, completion_tokens: 1 } }, stop]).streamChat(request));
+    expect(events.filter(event => event.type === 'usage')).toEqual([expect.objectContaining({ inputTokens: 5, outputTokens: 1 })]);
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+  });
+});

@@ -9,9 +9,9 @@ const deepseek: ProviderSummary = { id: 'ds', name: 'DeepSeek', kind: 'openai-co
 const openai: ProviderSummary = { id: 'oa', name: 'OpenAI', kind: 'openai', enabled: true, isDefault: false, defaultModelId: 'gpt-4o-mini', customModels: [], configurationValid: true, hasStoredKey: true };
 const mock: ProviderSummary = { id: 'mk', name: '演示（Mock）', kind: 'mock', enabled: true, isDefault: false, defaultModelId: 'mock', customModels: [], configurationValid: true, hasStoredKey: false };
 const readiness: ProviderReadiness[] = [
-  { providerId: 'ds', keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', price: 'reviewed', priceReviewedAt: timestamp, usable: true, blockedBy: null }] },
-  { providerId: 'oa', keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.openai.com/v1', models: [{ modelId: 'gpt-4o-mini', price: 'unreviewed', priceReviewedAt: null, usable: false, blockedBy: 'price' }] },
-  { providerId: 'mk', keyState: 'none', targetConfirmed: false, confirmedBaseUrl: null, models: [{ modelId: 'mock', price: 'free', priceReviewedAt: null, usable: true, blockedBy: null }] },
+  { providerId: 'ds', keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
+  { providerId: 'oa', keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.openai.com/v1', models: [{ modelId: 'gpt-4o-mini', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'target' }] },
+  { providerId: 'mk', keyState: 'none', targetConfirmed: false, confirmedBaseUrl: null, models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
 ];
 const member = (id: string, displayName: string, role: string, extra: Partial<AgentConfiguration> = {}): AgentConfiguration =>
   ({ ...agent(id, displayName), roleTemplateId: role, providerId: 'ds', modelId: 'deepseek-flash', ...extra });
@@ -31,7 +31,7 @@ describe('房间页: members', () => {
     show([member('a', '起草者', '起草'), member('b', '审查者', '审查', { providerId: 'oa', modelId: 'gpt-4o-mini' }), member('c', '综合者', '综合', { providerId: null, modelId: null }),
       member('d', '老周', '反方')]);
     await waitFor(() => expect(row('起草者').textContent).toContain('DeepSeek Flash · 可以使用'));
-    expect(row('审查者').textContent).toContain('gpt-4o-mini · 价格尚未审核，暂时不能用于讨论');
+    expect(row('审查者').textContent).toContain('gpt-4o-mini · 需要在设置里确认地址');
     expect(row('综合者').textContent).toContain('还没选模型，暂时不会参与讨论');
     expect(within(row('综合者')).getByRole('button', { name: '去选择' })).toBeTruthy();
     // The role tag is shown only when the name does not already say it.
@@ -115,7 +115,7 @@ describe('添加成员 (D5-A)', () => {
     expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('审查者');
     expect((screen.getByLabelText('角色') as HTMLInputElement).value).toBe('审查');
     expect((screen.getByLabelText('设定可选') as HTMLTextAreaElement).value).toContain('你负责审查');
-    expect(screen.getByRole('status').textContent).toBe('可以使用：Key 已保存，价格已核对。');
+    expect(screen.getByRole('status').textContent).toBe('可以使用：Key 已保存，地址已确认。');
     fireEvent.change(screen.getByLabelText('名字'), { target: { value: '老周' } });
     fireEvent.click(screen.getByRole('button', { name: '添加' }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ roomId: 'r1', displayName: '老周', roleTemplateId: '审查', providerId: 'ds', modelId: 'deepseek-flash', displayOrder: 3 })));
@@ -125,7 +125,7 @@ describe('添加成员 (D5-A)', () => {
     expect((screen.getByLabelText('模型') as HTMLSelectElement).value).toBe('');
     expect(screen.getByRole('status').textContent).toContain('还没选模型，暂时不会参与讨论');
     fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'oa\u0000gpt-4o-mini' } });
-    expect(screen.getByRole('status').textContent).toContain('暂时不能参与讨论：价格尚未审核，暂时不能用于讨论');
+    expect(screen.getByRole('status').textContent).toContain('暂时不能参与讨论：需要在设置里确认地址');
     fireEvent.click(screen.getByRole('button', { name: '去设置' })); expect(onOpenSettings).toHaveBeenCalled();
   });
   it('keeps the draft and shows a save failure inside the dialog', async () => {

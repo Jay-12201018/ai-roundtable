@@ -44,21 +44,21 @@ afterEach(cleanup);
 describe('设置 › 模型服务', () => {
   it('states each service in words, as Main decides it (D114)', async () => {
     const { api } = fixture([
-      ready('ds', { keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', price: 'reviewed', priceReviewedAt: '2026-10-22T01:00:00.000Z', usable: true, blockedBy: null }] }),
-      ready('oa', { keyState: 'missing', models: [{ modelId: 'gpt-4o-mini', price: 'unreviewed', priceReviewedAt: null, usable: false, blockedBy: 'price' }] }),
-      ready('km', { keyState: 'configured', targetConfirmed: false, models: [{ modelId: 'moonshot', price: 'unreviewed', priceReviewedAt: null, usable: false, blockedBy: 'price' }] }),
-      ready('mk', { keyState: 'none', models: [{ modelId: 'mock', price: 'free', priceReviewedAt: null, usable: true, blockedBy: null }] }),
+      ready('ds', { keyState: 'configured', targetConfirmed: true, confirmedBaseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
+      ready('oa', { keyState: 'missing', models: [{ modelId: 'gpt-4o-mini', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
+      ready('km', { keyState: 'configured', targetConfirmed: false, models: [{ modelId: 'moonshot', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
+      ready('mk', { keyState: 'none', models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
     ]);
     show(api);
     await waitFor(() => expect(within(card('DeepSeek')).getByText('可以使用')).toBeTruthy());
     expect(within(card('OpenAI')).getByText('还没填写 Key')).toBeTruthy();
     expect(within(card('Kimi')).getByText('需要确认地址')).toBeTruthy();
     expect(within(card('演示（Mock）')).getByText('内置')).toBeTruthy();
-    // DeepSeek is open: address confirmed when the Key was saved, the Key never shown, price reviewed per model.
+    // DeepSeek is open: address confirmed when the Key was saved, the Key never shown, each model's limits stated.
     await within(card('DeepSeek')).findByText('https://api.deepseek.com');
     expect(card('DeepSeek').textContent).toContain('官方地址，保存 Key 时已确认');
     expect(card('DeepSeek').textContent).toContain('已保存（不显示）');
-    expect(card('DeepSeek').textContent).toContain('价格已核对 · 10/22');
+    expect(card('DeepSeek').textContent).toContain('上下文 128,000 · 最大输出 8,192');
   });
 
   it('confirms a remembered address in one click for the exact target written beside it', async () => {
@@ -71,12 +71,12 @@ describe('设置 › 模型服务', () => {
     await waitFor(() => expect(api.confirmTarget).toHaveBeenCalledWith({ providerId: 'km', baseUrl: 'https://kimi.example/v1', confirmed: true }));
   });
 
-  it('checks the connection for free and says honestly when the Key cannot be checked for free', async () => {
-    const { api } = fixture([ready('ds', { keyState: 'configured', targetConfirmed: true, models: [{ modelId: 'deepseek-flash', price: 'reviewed', priceReviewedAt: null, usable: true, blockedBy: null }] })]);
+  it('checks the connection and says honestly when the service has no way to check the Key', async () => {
+    const { api } = fixture([ready('ds', { keyState: 'configured', targetConfirmed: true, models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
     show(api);
     const deepseekCard = card('DeepSeek');
     fireEvent.click(await within(deepseekCard).findByRole('button', { name: '检查连接' }));
-    await within(deepseekCard).findByText(/这个服务没有免费检查 Key 的接口/u);
+    await within(deepseekCard).findByText(/这个服务没有模型列表接口/u);
     expect(vi.mocked(api.testConnection).mock.calls.map(([input]) => input.level)).toEqual(['configuration', 'authentication']);
     // A generation only happens on its own button, with explicit consent.
     fireEvent.click(within(deepseekCard).getByRole('button', { name: '试发一条' }));

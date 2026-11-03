@@ -53,7 +53,6 @@ function Harness({ snapshot, api, onApplied = () => {}, tab = 'members', provide
     {interjectionBoxFor(snapshot, ['running', 'pausing', 'paused', 'cancelling'].includes(snapshot.status)) && <HostComposer snapshot={snapshot} commands={commands} instructionsWritable />}
   </>;
 }
-const budgetFixture = { currency: 'CNY' as const, limitMicro: 10, settledMicro: 9, unknownMicro: 0, reservedMicro: 0, remainingMicro: 1, overrunMicro: 0 };
 const hostApi = (implementation?: HostApiContract['command']) => ({ command: vi.fn(implementation ?? (async input => ({ runId: input.runId, actionId: 'action', kind: input.kind, duplicate: false }))) });
 
 describe('R12 host projection model', () => {
@@ -97,8 +96,6 @@ describe('R12 host projection model', () => {
     // A stopped Turn stays unsettled: it is retried or continued, not continued past.
     const stopped = pausedSnapshot({ status: 'cancelled', turns: base.turns.map(t => t.turnId === 't2' ? { ...t, status: 'aborted' as const } : t) });
     expect(canContinueRun(stopped)).toBe(false);
-    // A budget stop has its own path (top up and resume).
-    expect(canContinueRun(pausedSnapshot({ status: 'error', budget: { ...budgetFixture, blocked: { reason: 'insufficient', requiredMicro: 2, remainingMicro: 1, at: time } } }))).toBe(false);
     expect(canContinueRun(pausedSnapshot({ status: 'error' }))).toBe(true);
   });
 
@@ -306,8 +303,6 @@ describe('D102 truncated replies in the timeline', () => {
     render(<Harness snapshot={truncatedSnapshot()} api={api} />);
     const slot = slotOf('回应');
     expect(truncatedNote(slot)!.querySelector('.note-body')!.textContent).toBe('写到单次上限停下了，内容可能不完整。续写会生成一个新版本，按新请求计费。');
-    // The one next step, with what it may cost: a Mock member costs nothing.
-    expect(truncatedNote(slot)!.querySelector('.note-cost')!.textContent).toBe('内置 Mock，不花钱');
     const button = within(slot).getByRole('button', { name: '续写' }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     fireEvent.click(button);

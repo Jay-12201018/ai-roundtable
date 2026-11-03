@@ -10,12 +10,11 @@ import { execFileSync } from 'node:child_process';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { createSafeFetch } from '../../../src/main/providers/network';
 import { readLoopbackProxy } from '../../../src/main/providers/loopbackProxy';
-import { TrialDiagnostics } from '../../../src/main/providers/diagnostics';
+import type { DiagnosticEvent } from '../../../src/main/providers/diagnostics';
 import { ContractError } from '../../../src/shared/contracts/errors';
 import { Database } from '../../../src/main/database/Database';
 import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/KeyService';
 import { ProviderRegistry } from '../../../src/main/providers/ProviderRegistry';
-import { ControlledTrialService } from '../../../src/main/providers/controlledTrial/ControlledTrialService';
 
 vi.mock('node:tls', async actual => { const real = await actual<typeof import('node:tls')>(); return { ...real, connect: vi.fn(real.connect) }; });
 const target = 'https://api.deepseek.com/chat/completions';
@@ -69,7 +68,13 @@ async function fixture(mode: 'ok' | 'wrong-host' | 'no-ca' | 'extra' | 'malforme
   vi.mocked(tls.connect).mockImplementation(((options: tls.ConnectionOptions) => real.connect({ ...options, ...(mode === 'no-ca' ? {} : { ca }) })) as typeof tls.connect);
   const proxyConfig = readLoopbackProxy({ ROUNDTABLE_CONNECT_PROXY: `http://127.0.0.1:${(proxy.address() as { port: number }).port}`, ROUNDTABLE_TRUST_PROXY_DNS: '1' })!;
   const resolver = vi.fn(async () => [{ address: '198.18.0.12', family: 4 }]);
-  const diagnostic = new TrialDiagnostics(() => {});
+  // What the transport reported, merged the way a reader would: the first failure's stage and category stay.
+  const seen: { stage?: string; category?: string | null; evidence?: string; httpStatus?: number } = {};
+  const diagnostic = { snapshot: () => ({ ...seen }), observe: (event: DiagnosticEvent) => {
+    if (!seen.category) { if (event.stage) seen.stage = event.stage; if (event.category) seen.category = event.category; }
+    if (event.evidence && event.evidence !== 'not_started' && seen.evidence !== 'http_response') seen.evidence = event.evidence;
+    if (event.evidence === 'http_response') seen.httpStatus = event.httpStatus;
+  } };
   const send = (signal?: AbortSignal, guard?: () => void) => createSafeFetch(guard, resolver as never, diagnostic.observe, proxyConfig)(target, {
     method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${fakeKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'user', content: 'Reply OK.' }], max_tokens: 128, thinking: { type: 'disabled' } }), signal,
@@ -137,24 +142,18 @@ it('rejects target revocation at CONNECT before TLS or any API bytes', async () 
   await expect(f.send(undefined, () => { if (++count >= 8) throw new ContractError('forbidden'); })).rejects.toBeDefined();
   expect(f.calls).toHaveLength(0); expect(f.resolver).not.toHaveBeenCalled();
 });
-it('persists proxy failure as unknown and retains the entire reservation across recovery', async () => {
-  const f = await fixture(407); vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-19T12:00:00Z'));
-  const database = new Database(join(root, 'owned-proxy-reservation.db')); database.initialize();
-  cleanups.push(async () => database.close());
+it('D136: a proxy failure reaches the caller as a network error and the Key never reaches the proxy', async () => {
+  const f = await fixture(407);
+  const database = new Database(':memory:'); database.initialize(); cleanups.push(async () => database.close());
   database.createProvider({ id: 'p', name: 'Owned proxy fixture', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: 'deepseek-flash', name: 'Flash' }] });
   const keys = new KeyService(database, createMemoryKeyBackend()); await keys.storeKey('p', fakeKey);
   const registry = new ProviderRegistry(database, keys, { proxy: f.proxyConfig });
   registry.confirmTarget({ providerId: 'p', baseUrl: 'https://api.deepseek.com', confirmed: true });
-  const service = new ControlledTrialService(database, registry, async () => true); cleanups.push(async () => service.shutdown());
-  const row = await service.execute(service.prepare('p').id);
-  expect(row).toMatchObject({ state: 'unknown', outcome: 'error', accountedMicroCny: null, reservedMicroCny: 50000,
-    diagnostics: { stage: 'proxy', category: 'proxy_rejected', evidence: 'client_invoked' } });
-  expect(row.diagnostics?.httpStatus).toBeUndefined(); expect(f.calls).toHaveLength(0); expect(f.connectHeaders).toHaveLength(1);
-  database.recoverControlledTrials(); database.recoverControlledTrials();
-  expect(database.listControlledTrials()).toEqual([row]); expect(() => service.prepare('p')).toThrow();
-  expect(JSON.stringify(row)).not.toContain(fakeKey);
-  const restored = new Database(join(root, 'owned-proxy-reservation.db')); restored.initialize();
-  try { restored.recoverControlledTrials(); expect(restored.listControlledTrials()).toEqual([row]); } finally { restored.close(); }
+  const chunks = [];
+  for await (const chunk of registry.getAdapter('p', 'deepseek-flash').streamChat({ requestId: 'r', modelId: 'deepseek-flash', outputTokenLimit: 8, messages: [{ role: 'user', content: 'Reply OK.' }] })) chunks.push(chunk);
+  expect(chunks.at(-1)).toMatchObject({ type: 'error', error: { code: 'network_error' } });
+  expect(f.calls).toHaveLength(0); expect(f.connectHeaders).toHaveLength(1);
+  expect(JSON.stringify(f.connectHeaders)).not.toContain(fakeKey);
 });
 it('rejects non-reviewed proxy origins before resolving any Key', async () => {
   const f = await fixture(); const database = new Database(':memory:'); database.initialize(); cleanups.push(async () => database.close());

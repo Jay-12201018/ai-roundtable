@@ -60,6 +60,8 @@ function loadDatabaseClass() {
 const sha256File = path => createHash('sha256').update(fs.readFileSync(path)).digest('hex');
 const quoted = name => `"${name.replaceAll('"', '""')}"`;
 // Contents that no migration or recovery step may change, compared by hash where the table and columns exist.
+// D133: migration 14 drops these on purpose; their token usage moves to request_usage and the rest stays in the verified backup.
+const retired = new Set(['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs']);
 const unchanged = { rooms: ['id', 'name'], messages: ['id', 'sender_name', 'content'], key_records: ['id', 'provider_id', 'encrypted_value'] };
 
 function inspect(Driver, path) {
@@ -106,9 +108,12 @@ async function rehearse(Driver, Database, copy) {
   const after = inspect(Driver, copy);
   const problems = [];
   for (const [table, count] of Object.entries(before.rows)) {
+    if (retired.has(table)) continue;
     if (!(table in after.rows)) problems.push(`表 ${table} 不见了`);
     else if (after.rows[table] < count) problems.push(`表 ${table} 少了 ${count - after.rows[table]} 行`);
   }
+  const usageBefore = ['request_charges', 'summary_charges', 'artifact_charges'].reduce((total, table) => total + (before.rows[table] ?? 0), 0);
+  if (before.version < 14 && after.version >= 14 && (after.rows.request_usage ?? 0) < usageBefore) problems.push(`token 用量少了 ${usageBefore - (after.rows.request_usage ?? 0)} 行`);
   for (const [table, hash] of Object.entries(before.hashes)) if (after.hashes[table] !== hash) problems.push(`表 ${table} 的内容变了`);
   if (before.version < after.version && !restoreChecked) problems.push('升级没有留下可恢复的备份');
   const rows = Object.keys(after.rows).map(table => ({ table, before: before.rows[table] ?? null, after: after.rows[table] }));

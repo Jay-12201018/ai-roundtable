@@ -4,12 +4,20 @@ import { idSchema } from '../../shared/schemas/common';
 import { runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../shared/schemas/run';
 import type { RunEvent,InterruptedRunDecision } from '../../shared/types/run';
 import { createRendererStore,canRecover, type RendererCommand } from '../store/rendererStore';
-import { apiErrorSchema } from '../../shared/schemas/error';
+import { apiErrorSchema, type ErrorCode } from '../../shared/schemas/error';
 
 // Start refusals the host can act on get their own reason; anything else keeps the generic message.
 const startFailures: Partial<Record<string, string>> = {
   forbidden: '启动失败：成员使用的 Provider 尚未在本次会话确认请求目标，或 Key 已更换。请到“模型设置”勾选“我已核对请求目标”并点“确认本次会话目标”。',
   unsupported: '启动失败：有成员的模型现在不能发送请求，请到房间里检查成员的模型。',
+};
+
+// What the service or the network said, in plain words; nothing from its response body ever reaches here.
+const turnFailureMessages: Partial<Record<ErrorCode, string>> = {
+  invalid_response: '模型未完整完成响应，部分输出已保留。', timeout: '请求已超时，部分输出已保留。', cancelled: '请求已停止，部分输出已保留。',
+  authentication_failed: '服务商拒绝了这把 Key：可能无效或已过期，请到“设置 › 模型服务”检查。', forbidden: '这个服务的地址还没确认，或服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
+  rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，请检查成员用的模型名。', network_error: '连不上这个服务：请检查网络、地址或代理设置。部分输出已保留。',
+  invalid_input: '服务商拒绝了这次请求：可能是讨论太长放不进模型的上下文（可以生成讨论摘要后重试）、模型名或上限不对，或账户余额不足。',
 };
 
 type RunControl = 'pause' | 'stop' | 'step' | 'resumeRun';
@@ -33,7 +41,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
     }
     if((event.type==='turn_failed'||event.type==='turn_aborted')&&event.sequence>lastRunningSequence&&(!publicFailure||event.sequence>publicFailure.sequence)){
       const code=event.payload.error.code;
-      publicFailure={sequence:event.sequence,message:code==='invalid_response'?'模型未完整完成响应，部分输出已保留。':code==='timeout'?'请求已超时，部分输出已保留。':code==='cancelled'?'请求已停止，部分输出已保留。':'模型请求失败，部分输出已保留。'};
+      publicFailure={sequence:event.sequence,message:turnFailureMessages[code]??'模型请求失败，部分输出已保留。'};
     }
   }
 
@@ -129,7 +137,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
             lastRunningSequence=Math.max(lastRunningSequence,parsed.data.snapshot.sequence);
             if(publicFailure&&publicFailure.sequence<=lastRunningSequence)publicFailure=undefined;
           }
-          if(parsed.data.snapshot.status==='error')store.getState().setError(publicFailure&&publicFailure.sequence<=parsed.data.snapshot.sequence?publicFailure.message:'运行失败，请检查输入预算、模型配置或响应限制。历史输出已保留。',generation);
+          if(parsed.data.snapshot.status==='error')store.getState().setError(publicFailure&&publicFailure.sequence<=parsed.data.snapshot.sequence?publicFailure.message:'运行失败，请检查讨论长度和单次输出上限、模型配置或响应限制。历史输出已保留。',generation);
           // The subscription snapshot already includes its replay events.
           if (applyBuffered()) {
             store.getState().setSyncStatus('ready', generation);

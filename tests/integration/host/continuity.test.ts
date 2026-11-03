@@ -65,7 +65,7 @@ describe('D111 continuing a finished discussion in the same Run', () => {
     await f.run.waitForIdle(run.runId);
     const before = f.run.getSnapshot(run.runId);
     expect(before.status).toBe('completed');
-    expect(f.run.previewContinuation({ runId: run.runId, agentId: 'c', content: '@成员 c 请总结' })).toEqual({ runId: run.runId, available: true, agentIds: ['c'], cost: { kind: 'free' } });
+    expect(f.run.previewContinuation({ runId: run.runId, agentId: 'c', content: '@成员 c 请总结' })).toEqual({ runId: run.runId, available: true, agentIds: ['c'] });
     const result = await continueWith(f, run.runId, '@成员 c 请总结', 'c', 'summary-please');
     expect(result).toMatchObject({ runId: run.runId, agentIds: ['c'], duplicate: false });
     await f.run.waitForIdle(run.runId);

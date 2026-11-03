@@ -215,7 +215,8 @@ export class ChatCompletionProvider implements ProviderAdapter {
       return response;
     };
     return new OpenAI({ apiKey: key, baseURL: baseUrl, organization: null, project: null, webhookSecret: null,
-      maxRetries: 0, timeout: this.timeoutMs, logLevel: 'off', fetch: fetcher });
+      // The scope ends every call at its own total, so the SDK's limit only has to allow the longest of them.
+      maxRetries: 0, timeout: this.streamTimeoutMs, logLevel: 'off', fetch: fetcher });
   }
 
   private async models(scope: RequestScope) {

@@ -2,17 +2,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
 import { KeyService, createMemoryKeyBackend } from '../../../src/main/security/KeyService';
-import { ProviderRegistry, type ApprovedModelPolicy } from '../../../src/main/providers/ProviderRegistry';
+import { ProviderRegistry } from '../../../src/main/providers/ProviderRegistry';
 import { ProviderSettingsService } from '../../../src/main/settings/ProviderSettingsService';
 
 const databases: Database[] = [];
 afterEach(() => { vi.restoreAllMocks(); databases.splice(0).forEach(db => db.close()); });
 const baseUrl = 'http://127.0.0.1:12345/v1';
-const policy: ApprovedModelPolicy = {
-  evidence: 'owned deterministic fixture only', outputTokenParameter: 'max_tokens', contextWindowTokens: 1000, maxOutputTokens: 32,
-  counter: { modelId: 'fixture', method: 'fixture packet bytes', kind: 'exact', countMessages: messages => 8 + messages.reduce((n, m) => n + Buffer.byteLength(m.content), 0) },
-  price: { inputUsdPerMillion: 0, outputUsdPerMillion: 0, maxRequestUsd: 0, evidence: 'owned fixture has no billable requests' },
-};
 function fixture(approved = true) {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
   db.createProvider({ id: 'p', name: 'Fixture', kind: 'openai-compatible', baseUrl });
@@ -20,7 +15,7 @@ function fixture(approved = true) {
   const requests: Request[] = [];
   const registry = new ProviderRegistry(db, keys, {
     capabilitiesResolver: () => ({ outputTokenParameter: 'max_tokens', streamUsage: false, listModels: true, authentication: 'models' }),
-    policyResolver: (_configuration, modelId) => approved && modelId === 'fixture' ? policy : undefined,
+    
     transportFactory: guard => async (resource, init) => {
       guard(); const request = new Request(resource, init); requests.push(request);
       if (request.method === 'GET') return Response.json({ data: [{ id: 'listed-model' }] });
@@ -44,7 +39,7 @@ it('keeps configuration checking local and requires explicit Main approval for r
   expect(requests.map(request => [request.method, request.url])).toEqual([['GET', `${baseUrl}/models`], ['GET', `${baseUrl}/models`]]);
 });
 
-it('requires generation authorization and applies the same reviewed policy to the fixed eight-token probe', async () => {
+it('requires generation authorization for the fixed eight-token probe', async () => {
   const { service, keys, requests } = fixture();
   await keys.storeKey('p', 'fake-settings-key'); await service.confirmTarget(confirmation);
   expect(await service.testConnection({ providerId: 'p', level: 'generation', modelId: 'fixture' })).toMatchObject({ result: { ok: false, error: { code: 'forbidden' } } });
@@ -52,14 +47,6 @@ it('requires generation authorization and applies the same reviewed policy to th
   expect(await service.testConnection({ providerId: 'p', level: 'generation', modelId: 'fixture', allowGeneration: true })).toMatchObject({ result: { ok: true, level: 'generation' } });
   expect(requests).toHaveLength(1);
   expect(await requests[0].json()).toEqual({ model: 'fixture', messages: [{ role: 'user', content: 'Reply OK.' }], stream: true, max_tokens: 8 });
-});
-
-it('rejects unknown model policy before decrypting credentials or starting a generation request', async () => {
-  const { service, keys, requests } = fixture(false);
-  await keys.storeKey('p', 'fake-settings-key'); await service.confirmTarget(confirmation);
-  const resolve = vi.spyOn(keys, 'resolveKey');
-  expect(await service.testConnection({ providerId: 'p', level: 'generation', modelId: 'fixture', allowGeneration: true })).toMatchObject({ result: { ok: false, error: { code: 'unsupported' } } });
-  expect(resolve).not.toHaveBeenCalled(); expect(requests).toEqual([]);
 });
 
 it('validates confirmation input and rejects unsupported runtime without inventing approval', async () => {

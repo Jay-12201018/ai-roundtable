@@ -68,7 +68,7 @@ describe('D098 run controls sit where the host just clicked', () => {
       fireEvent.click(screen.getByRole('button', { name: '停止' }));
       const confirm = screen.getByRole('dialog', { name: '确认停止运行' });
       expect(confirm.textContent).toContain('已生成的部分文字会保留');
-      expect(confirm.textContent).toContain('可能已经计费');
+      expect(confirm.textContent).toContain('服务商可能已经计入用量');
       // The safe choice holds focus; Pause stays usable while the question is open.
       expect(document.activeElement).toBe(within(confirm).getByRole('button', { name: '不停止' }));
       expect((screen.getByRole('button', { name: '暂停' }) as HTMLButtonElement).disabled).toBe(false);
@@ -139,7 +139,7 @@ describe('D099 step-by-step from the start', () => {
 });
 
 describe('D103 output limit before starting', () => {
-  it('keeps the limit folded under 更多设置 with the 4096 default, stays open while invalid and starts with the chosen value', async () => {
+  it('keeps the limit folded under 更多设置 with the 8192 default, stays open while invalid and starts with the chosen value', async () => {
     const f = setup('输出上限');
     try {
       render(<App />);
@@ -155,8 +155,8 @@ describe('D103 output limit before starting', () => {
       expect(panel.compareDocumentPosition(document.querySelector('.composer')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(slot()).toBe(start);
       const field = screen.getByLabelText('单次输出上限（token）') as HTMLInputElement;
-      expect(field.value).toBe('4096');
-      expect(document.getElementById('output-limit-help')!.textContent).toContain('每次请求按这个上限预留费用');
+      expect(field.value).toBe('8192');
+      expect(document.getElementById('output-limit-help')!.textContent).toContain('模型的思考也算在内');
       fireEvent.change(field, { target: { value: '0' } });
       expect(screen.getByRole('alert').textContent).toBe('单次输出上限请输入 1 到 65536 之间的整数。');
       expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(true);

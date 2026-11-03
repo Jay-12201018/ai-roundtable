@@ -32,7 +32,7 @@ describe('migration 10: run_continuations is append-only evidence (D111)', () =>
     expect(() => db.prepare("UPDATE run_continuations SET agent_ids_json='[\"a\"]'").run()).toThrow(/append-only/u);
     expect(() => db.prepare('UPDATE run_continuations SET elapsed_base_ms=0').run()).toThrow(/append-only/u);
     expect(() => db.prepare('DELETE FROM run_continuations').run()).toThrow(/append-only/u);
-    expect(validateDatabase(db).schemaVersion).toBe(13);
+    expect(validateDatabase(db).schemaVersion).toBe(14);
   });
 
   it('accepts only an interjection of the same discussion as its action', async () => {

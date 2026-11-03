@@ -39,10 +39,8 @@ const fixture = vi.hoisted(() => {
     resolveReady: () => {},
     app: { requestSingleInstanceLock: vi.fn(), on: vi.fn(), whenReady: vi.fn(), isReady: vi.fn(), getPath: vi.fn(), quit: vi.fn(), exit: vi.fn(), relaunch: vi.fn() },
     dialog: { showErrorBox: vi.fn(), showMessageBoxSync: vi.fn() },
-    database: { initialize: vi.fn(), purgeKeyLikeModelIds: vi.fn(() => 0), markInFlightRunsInterrupted: vi.fn(), recoverControlledTrials: vi.fn(), close: vi.fn() },
+    database: { initialize: vi.fn(), purgeKeyLikeModelIds: vi.fn(() => 0), markInFlightRunsInterrupted: vi.fn(), close: vi.fn() },
     service: { shutdown: vi.fn(), hasActiveRuns: vi.fn() },
-    trial: { shutdown: vi.fn(), isBusy: vi.fn() },
-    confirmTrial: vi.fn(), installTrialMenu: vi.fn(),
     rooms: {}, settings: {}, host: {}, keys: { getStatus: async () => ({}) },
     createWindow: vi.fn(),
     windowLoad: vi.fn(),
@@ -60,8 +58,6 @@ vi.mock('../../src/main/settings/ProviderSettingsService', () => ({ ProviderSett
 vi.mock('../../src/main/providers/mock/MockProvider', () => ({ MockProvider: vi.fn() }));
 vi.mock('../../src/main/services/RunService', () => ({ RunService: vi.fn(function () { return fixture.service; }) }));
 vi.mock('../../src/main/host/HostService', () => ({ HostService: vi.fn(function () { return fixture.host; }) }));
-vi.mock('../../src/main/providers/controlledTrial/ControlledTrialService', () => ({ ControlledTrialService: vi.fn(function () { return fixture.trial; }) }));
-vi.mock('../../src/main/providers/controlledTrial/menu', () => ({ confirmTrial: fixture.confirmTrial, installTrialMenu: fixture.installTrialMenu }));
 vi.mock('../../src/main/windows/createMainWindow', () => ({ createMainWindow: fixture.createWindow }));
 vi.mock('../../src/main/ipc/registerIpc', () => ({ registerIpc: fixture.registerIpc }));
 
@@ -98,9 +94,6 @@ beforeEach(() => {
   fixture.app.quit.mockImplementation(() => emit('before-quit'));
   fixture.service.shutdown.mockResolvedValue(undefined);
   fixture.service.hasActiveRuns.mockReturnValue(false);
-  fixture.trial.shutdown.mockResolvedValue(undefined);
-  fixture.trial.isBusy.mockReturnValue(false);
-  fixture.confirmTrial.mockResolvedValue(false);
   fixture.windowLoad.mockResolvedValue(undefined);
   fixture.createWindow.mockImplementation(() => {
     const window = new fixture.Window();
@@ -126,22 +119,16 @@ describe('application lifecycle', () => {
     expect(registry).toBeInstanceOf(ProviderRegistry);
     expect(ProviderSettingsService).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.keys, registry);
     expect(vi.mocked(RunService).mock.calls[0][3]).toBe(registry);
-    const { ControlledTrialService } = await import('../../src/main/providers/controlledTrial/ControlledTrialService');
-    expect(ControlledTrialService).toHaveBeenCalledExactlyOnceWith(fixture.database, registry, fixture.confirmTrial, expect.any(Function));
-    expect(fixture.database.recoverControlledTrials).toHaveBeenCalledOnce();
-    expect(fixture.installTrialMenu).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.trial, expect.any(Function));
     expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
       usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(), lifecycle: { relaunch: expect.any(Function) },
       artifacts: { list: expect.any(Function), getVersion: expect.any(Function), adopt: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
   });
 
-  it('relaunches only after the 立即重启 call has been answered, and refuses while a discussion or the trial runs', async () => {
+  it('relaunches only after the 立即重启 call has been answered, and refuses while a discussion runs', async () => {
     await startApp();
     const { relaunch } = fixture.registerIpc.mock.calls[0][1].lifecycle as { relaunch: () => void };
     fixture.service.hasActiveRuns.mockReturnValueOnce(true);
-    expect(() => relaunch()).toThrow(expect.objectContaining({ code: 'invalid_state' }));
-    fixture.trial.isBusy.mockReturnValueOnce(true);
     expect(() => relaunch()).toThrow(expect.objectContaining({ code: 'invalid_state' }));
     await new Promise(resolve => setImmediate(resolve));
     expect(fixture.app.relaunch).not.toHaveBeenCalled();
@@ -386,10 +373,8 @@ describe('application lifecycle', () => {
     } finally { errorLog.mockRestore(); }
   });
 
-  it.each(['synchronous', 'asynchronous'])('waits for trial cleanup before closing SQLite after a %s Run shutdown failure', async failure => {
+  it.each(['synchronous', 'asynchronous'])('closes SQLite once and exits 1 after a %s Run shutdown failure', async failure => {
     await startApp();
-    let finishTrial!: () => void;
-    fixture.trial.shutdown.mockReturnValue(new Promise<void>(resolve => { finishTrial = resolve; }));
     fixture.service.shutdown.mockImplementation(() => {
       if (failure === 'synchronous') throw new Error('Run cleanup failed');
       return Promise.reject(new Error('Run cleanup failed'));
@@ -398,19 +383,11 @@ describe('application lifecycle', () => {
     try {
       const first = emit('before-quit');
       const repeated = emit('before-quit');
-      await vi.waitFor(() => expect(fixture.service.shutdown).toHaveBeenCalledOnce());
-      expect(fixture.trial.shutdown).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledWith(1));
       expect(first.preventDefault).toHaveBeenCalledOnce();
       expect(repeated.preventDefault).toHaveBeenCalledOnce();
-      expect(fixture.database.close).not.toHaveBeenCalled();
-      expect(fixture.app.exit).not.toHaveBeenCalled();
-    } finally {
-      finishTrial();
-      await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledWith(1));
-      errorLog.mockRestore();
-    }
+    } finally { errorLog.mockRestore(); }
     expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-    expect(fixture.trial.shutdown).toHaveBeenCalledOnce();
     expect(fixture.database.close).toHaveBeenCalledOnce();
     expect(fixture.app.exit).toHaveBeenCalledOnce();
   });
@@ -534,39 +511,6 @@ describe('application lifecycle', () => {
     expect(fixture.windows[0]!.destroyed).toBe(false);
     expect(fixture.service.shutdown).not.toHaveBeenCalled();
     expect(fixture.database.close).not.toHaveBeenCalled();
-  });
-
-  it('keeps a trial-only generation and its window active when closing is cancelled', async () => {
-    await startApp();
-    fixture.trial.isBusy.mockReturnValue(true);
-    fixture.dialog.showMessageBoxSync.mockReturnValue(0);
-    fixture.windows[0]!.close();
-    expect(fixture.dialog.showMessageBoxSync).toHaveBeenCalledOnce();
-    expect(fixture.windows[0]!.destroyed).toBe(false);
-    expect(fixture.app.quit).not.toHaveBeenCalled();
-    expect(fixture.trial.shutdown).not.toHaveBeenCalled();
-    expect(fixture.service.shutdown).not.toHaveBeenCalled();
-    expect(fixture.database.close).not.toHaveBeenCalled();
-    expect(fixture.unregister[0]).not.toHaveBeenCalled();
-  });
-
-  it('waits for trial-only cleanup when the user confirms closing the window', async () => {
-    await startApp();
-    fixture.trial.isBusy.mockReturnValue(true);
-    fixture.dialog.showMessageBoxSync.mockReturnValue(1);
-    let finishTrial!: () => void;
-    fixture.trial.shutdown.mockReturnValue(new Promise<void>(resolve => { finishTrial = resolve; }));
-    fixture.windows[0]!.close();
-    try {
-      expect(fixture.dialog.showMessageBoxSync).toHaveBeenCalledOnce();
-      expect(fixture.app.quit).toHaveBeenCalledOnce();
-      await vi.waitFor(() => expect(fixture.trial.shutdown).toHaveBeenCalledOnce());
-      expect(fixture.service.shutdown).toHaveBeenCalledOnce();
-      expect(fixture.database.close).not.toHaveBeenCalled();
-      expect(fixture.app.exit).not.toHaveBeenCalled();
-    } finally { finishTrial(); }
-    await vi.waitFor(() => expect(fixture.app.exit).toHaveBeenCalledWith(0));
-    expect(fixture.database.close).toHaveBeenCalledOnce();
   });
 
   it('reopens and rebinds IPC on a second instance after macOS window close', async () => {
