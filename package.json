@@ -16,6 +16,7 @@
     "test:watch": "node scripts/electron-node.cjs node_modules/vitest/vitest.mjs",
     "pree2e": "pnpm build && node scripts/ensure-native.cjs",
     "e2e": "playwright test",
+    "e2e:packaged": "playwright test --config playwright.packaged.config.ts",
     "prepreview": "node scripts/ensure-native.cjs",
     "preview": "electron-vite preview",
     "pack": "pnpm build && electron-builder",
@@ -23,7 +24,8 @@
     "native:electron": "electron-rebuild --force --which-module better-sqlite3",
     "native:check": "node scripts/ensure-native.cjs",
     "trial": "pnpm build && node scripts/ensure-native.cjs && electron scripts/trial/main.cjs",
-    "trial:reset": "node scripts/trial/reset.cjs"
+    "trial:reset": "node scripts/trial/reset.cjs",
+    "rehearse:upgrade": "node scripts/electron-node.cjs scripts/rehearse-upgrade.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.62.0",

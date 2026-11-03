@@ -29,6 +29,10 @@ test('three Mock members finish one discussion in one room, shown live and store
   expect(shown[1]).toContain('Mock 审查');
   expect(shown[2]).toContain('Mock 定稿');
   await expect(page.locator('.msg-name')).toHaveText(['起草者', '审查者', '综合者']);
+  // What the side panel says about money and requests is true for demo members.
+  await expect(page.locator('.run-panel')).toContainText('演示成员不联网、不花钱');
+  await expect(page.locator('.run-panel')).not.toContainText('DeepSeek');
+  await expect(page.locator('.run-panel')).not.toContainText('真实请求');
 
   // Stored while the app still runs: the same text, in order, in one room.
   const [runs, messages, turns] = harness.sql(

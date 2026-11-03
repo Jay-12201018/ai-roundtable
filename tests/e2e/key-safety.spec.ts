@@ -53,6 +53,10 @@ test('the Key is used for requests but never appears in the database, logs, expo
   expect(state.ipc.events).toBeGreaterThan(3);
   expect(state.ipc.leaks).toEqual([]);
   expect(state.fakeSafeStorage.encrypt, 'The Key went through the protected backend').toBeGreaterThan(0);
+  // The check itself works: looking for a word that is in an answer finds it.
+  await running.app.evaluate((_e, word) => { (globalThis as any).__e2e.secret = word; }, rooms[0]!.name);
+  await running.api('rooms.listRooms');
+  expect((await running.state()).ipc.leaks.length, 'The IPC check detects what it looks for').toBeGreaterThan(0);
 
   // What the page keeps: nothing in its storage, nothing on screen, nothing left in the field.
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }) + document.documentElement.outerHTML);
@@ -68,7 +72,9 @@ test('the Key is used for requests but never appears in the database, logs, expo
     for (const form of forms(FAKE_KEY)) expect(bytes.includes(form), `${file} holds the Key`).toBe(false);
   }
   for (const form of forms(FAKE_KEY)) expect(running.output.includes(form), 'Process output holds the Key').toBe(false);
-  // The scan does see the database's stored form, so it is reading the right bytes: the record exists and is not the Key.
+  // The scan reads the right bytes: text the host typed is found the same way, and the Key record exists without the Key.
+  const typed = Buffer.from('Key 安全的目标。').toString('latin1');
+  expect(files.some(file => readFileSync(file).toString('latin1').includes(typed)), 'The file scan detects what it looks for').toBe(true);
   const [records] = harness.sql('SELECT encrypted_value, backend FROM key_records');
   expect(records).toHaveLength(1);
   expect(records[0].encrypted_value).not.toContain(FAKE_KEY);

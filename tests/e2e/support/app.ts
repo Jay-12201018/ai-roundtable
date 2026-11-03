@@ -75,7 +75,7 @@ export class RunningApp {
   async quit() { await this.app.close(); }
 }
 
-const clean = (env: NodeJS.ProcessEnv) => {
+export const clean = (env: NodeJS.ProcessEnv) => {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) if (value !== undefined && name !== 'NODE_OPTIONS' && !name.startsWith('ELECTRON_') && !name.startsWith('ROUNDTABLE_')) out[name] = value;
   return out;

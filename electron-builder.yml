@@ -6,6 +6,14 @@ directories:
 files:
   - out/**/*
   - package.json
+  # Runtime only: no third-party source maps; of better-sqlite3 just lib/ and the compiled addon.
+  - "!**/*.map"
+  - "!node_modules/better-sqlite3/{deps,src,bin}{,/**/*}"
+  - "!node_modules/better-sqlite3/binding.gyp"
+  - "!node_modules/better-sqlite3/build/{deps,Release/obj,Release/obj.target,Release/.deps}{,/**/*}"
+  - "!node_modules/better-sqlite3/build/*.{gypi,mk,Makefile,target.mk}"
+  - "!node_modules/better-sqlite3/build/Makefile"
+  - "!node_modules/better-sqlite3/build/Release/test_extension.node"
 asar: true
 asarUnpack:
   - node_modules/better-sqlite3/**/*
@@ -16,6 +24,9 @@ beforeBuild: scripts/rebuild-native.cjs
 afterPack: scripts/verify-native.cjs
 mac:
   category: public.app-category.productivity
+  # Ad-hoc: seals the bundle so it verifies and Apple Silicon runs it; not Developer ID, not notarized (D132).
+  identity: "-"
+  hardenedRuntime: false
   target:
     - dmg
     - zip
