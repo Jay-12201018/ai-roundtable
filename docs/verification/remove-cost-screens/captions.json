@@ -1,0 +1,82 @@
+[
+ {
+  "file": "01-welcome.png",
+  "caption": "首次启动：欢迎页写明支持哪些服务、几位成员可以各用一家、费用由服务商收取。"
+ },
+ {
+  "file": "02-wizard-choose.png",
+  "caption": "选服务：内置服务只是预填地址和建议模型名；也可以选自定义服务。"
+ },
+ {
+  "file": "03-wizard-key.png",
+  "caption": "贴 Key：写明 Key 只会发往哪里、费用由谁收取；模型已选好一个。保存就能用，没有确认地址这一步。"
+ },
+ {
+  "file": "04-first-discussion.png",
+  "caption": "保存后直接到第一场讨论：房间和三位成员已经建好，写下目标就能开始。"
+ },
+ {
+  "file": "05-custom-service.png",
+  "caption": "自定义服务：名称、接口类型、地址、Key、模型名，保存就能用。"
+ },
+ {
+  "file": "06-services.png",
+  "caption": "设置 › 模型服务：四个服务都可以使用，保存时没有发任何请求。"
+ },
+ {
+  "file": "07-room.png",
+  "caption": "房间：四位成员各用一个服务，三种接口类型混在一起，都写着“可以使用”。"
+ },
+ {
+  "file": "08-paused.png",
+  "caption": "暂停：这一回合说完才停。发言页脚显示 token 数；点开是输入、输出和缓存命中。"
+ },
+ {
+  "file": "09-finished.png",
+  "caption": "讨论结束：四个服务依次发言，都显示 token 用量，没有金额。"
+ },
+ {
+  "file": "10-summary.png",
+  "caption": "一键摘要：点了就生成，默认综合者来写，写完直接生效；旁边可以撤销、修改、换人。"
+ },
+ {
+  "file": "11-artifact.png",
+  "caption": "产物：格式检查通过就能复制、另存；没有“采用”这一步。"
+ },
+ {
+  "file": "12-usage-run.png",
+  "caption": "用量页 · 按讨论：只有请求数和 token；写明费用由服务商收取。"
+ },
+ {
+  "file": "13-network-off.png",
+  "caption": "设置 › 网络：默认关闭，直接连接。文案不提任何软件和用途。"
+ },
+ {
+  "file": "14-network-system.png",
+  "caption": "打开开关：马上读到系统代理并写在开关旁，不用重启；测试连接只做一次握手。"
+ },
+ {
+  "file": "15-network-socks.png",
+  "caption": "系统代理是 SOCKS：说明不支持、请求不会发出，并指向手动填写；不会悄悄直连。"
+ },
+ {
+  "file": "16-network-dark.png",
+  "caption": "深色主题：网络。"
+ },
+ {
+  "file": "17-services-dark.png",
+  "caption": "深色主题：模型服务。"
+ },
+ {
+  "file": "18-wizard-custom-dark.png",
+  "caption": "深色主题：自定义服务表单。"
+ },
+ {
+  "file": "19-discussion-dark.png",
+  "caption": "1280 宽、深色：讨论页。"
+ },
+ {
+  "file": "20-usage-dark.png",
+  "caption": "1280 宽、深色：用量页。"
+ }
+]
