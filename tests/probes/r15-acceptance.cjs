@@ -95,6 +95,7 @@ async function main() {
     fs.writeFileSync(join(project, 'src/pilot/fee.ts'), feeOld); fs.writeFileSync(join(project, 'config/settings.json'), settingsOld); fs.writeFileSync(join(project, 'README.md'), readme);
     fs.writeFileSync(join(outside, 'config.ts'), 'export const leaked = false;\n'); fs.writeFileSync(join(outside, 'secret.txt'), '根外的哨兵文件\n');
     fs.symlinkSync('../outside', join(project, 'shared'));
+    fs.mkdirSync(join(project, '.git/hooks'), { recursive: true });
     const outsideBefore = tree(outside);
 
     // Setup (accepted hands-on in R13A–R16): DeepSeek with a fake Key and a confirmed target, a room of three members.
@@ -136,6 +137,12 @@ async function main() {
     await until(`!(document.querySelector('dialog.code-export')?.innerText ?? '').includes('请在弹出的窗口里选择文件夹')`, 'cancel handled');
     check(result.openDialogs.length === 1 && result.openDialogs[0].title === '选择要写入的文件夹' && result.openDialogs[0].properties.includes('openDirectory'), 'Main asked for a folder in its own dialog');
     check((await exportText()).includes('选择文件夹…') && !(await exportText()).includes('新建 '), 'Cancelling the folder dialog leaves the intro, nothing previewed');
+
+    answers.push({ canceled: false, filePaths: [join(project, '.git/hooks')] });
+    await click('选择文件夹…', { scope: 'dialog.code-export .modal-foot' });
+    await exportHas('这个文件夹在 .git 里面：那里的文件可能被 Git 自动执行，不能写入。请另选一个文件夹。');
+    check(!(await exportText()).includes('新建 ') && fs.readdirSync(join(project, '.git/hooks')).length === 0, 'A folder inside .git is refused, nothing previewed or written');
+    await capture('git-folder-refused', '在系统对话框里选了项目的 .git/hooks：Main 拒绝这个文件夹，对话框原地写明原因（那里的文件可能被 Git 自动执行），可以另选。', 'dialog.code-export');
 
     // ── 3. Preview: create, overwrite with diff, same, invalid, link refused ─
     const before = tree(workspace);
@@ -189,7 +196,7 @@ async function main() {
     await openCode(); await openExport();
     // The folder chosen in this window is checked again at once (checking only reads).
     await exportHas('没有勾选的文件不会写入');
-    check(result.openDialogs.length === 2, 'The remembered folder needs no new dialog');
+    check(result.openDialogs.length === 3, 'The remembered folder needs no new dialog');
     check((await rowText('src/pilot/fee.ts')).includes('和现有文件完全一样') && (await rowText('config/settings.json')).includes('+2 −2 行'), 'The new check reflects the first write');
     await click('覆盖 config/settings.json', { selector: 'input[type=checkbox]' });
     await capture('second-preview', '再次打开“写入文件夹…”：同一窗口里上次选的文件夹会立即重新检查（只读）。fee.ts 和 night.ts 现在“内容相同”；勾选覆盖 config/settings.json。', 'dialog.code-export');
