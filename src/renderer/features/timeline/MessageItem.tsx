@@ -102,7 +102,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? '等待输出…' : '（没有生成文字）'}</p>}</div>}
     {can.truncated && <Note icon={Scissors}
       action={shown.active && slot.author === 'agent' ? <Button size="sm" disabled={disabled || !can.continue} title={can.continue ? undefined : '运行暂停或结束后可以续写'}
-        onClick={() => void commands.send(`continue:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId, mode: 'continue' }, '已发送续写请求：会生成一个新版本，并按新请求预留和结算费用。')}>续写</Button> : undefined}>
+        onClick={() => void commands.send(`continue:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId, mode: 'continue' }, '已发送续写请求：会生成一个新版本，这是一次新请求。')}>续写</Button> : undefined}>
       <b>写到单次上限停下了</b>{usage?.outputTokens ? ` · ${usage.outputTokens.toLocaleString('zh-CN')} tokens` : ''}，内容可能不完整。续写会生成一个新版本，按新请求计费。{shown.active && !can.continue ? '运行暂停或结束后可以续写。' : ''}
     </Note>}
     {shown.affectedBy.length > 0 && <Note icon={TriangleAlert}

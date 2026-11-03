@@ -397,7 +397,7 @@ async function main() {
   check(continuation.at(-2).role === 'assistant' && continuation.at(-2).content === original && continuation.at(-1).content === 'Continue the previous response from where it stopped.', 'The continuation sends the kept text and asks to continue');
   check(slotVersions[1].origin === 'continue' && slotVersions[1].active && extended.messages.find(m => m.id === slotVersions[1].messageId).content.startsWith(original), 'The continuation is the new effective version and starts from the kept text');
   check(extended.usage.length === 4 && extended.usage.every(c => c.state === 'reported'), 'The continuation is its own request with its own usage');
-  await capture('continued', '运行结束后点"续写"：发出新请求（携带原回复并请求接着写，单独预留和结算费用），生成"续写 · 当前有效 · 版本 2/2"，内容从原来的文字接着写、不再标注截断；原版本保留为版本 1，后面两条发言标为"受影响"，可按需重新生成。', 0);
+  await capture('continued', '运行结束后点"续写"：发出新请求（携带原回复并请求接着写），生成"续写 · 当前有效 · 版本 2/2"，内容从原来的文字接着写、不再标注截断；原版本保留为版本 1，后面两条发言标为"受影响"，可按需重新生成。', 0);
 
   // The reviewer saw the drafter's reply as quoted discussion on the user side, never as its own assistant turn.
   check(reviewer.filter(m => m.role !== 'system').map(m => m.role).join(',') === 'user', 'The reviewer request has one user block and no assistant message');

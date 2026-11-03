@@ -1,6 +1,6 @@
 # 移除费用、开放模型、去掉多余步骤：验收记录
 
-分支 `codex/remove-cost-open-models`，代码提交 `89c0b92`（之后只增加本记录和截图）。决策见 [DECISIONS](../DECISIONS.md) D133–D142。验证范围按总控 2026-11-04 的缩小要求执行。
+分支 `codex/remove-cost-open-models`，检查在代码提交 `89c0b92` 上执行；之后只改了一句续写提示文案（重跑了涉及的测试），并增加本记录和截图。决策见 [DECISIONS](../DECISIONS.md) D133–D142。验证范围按总控 2026-11-04 的缩小要求执行。
 
 ## 第 1 层：自动化
 
@@ -65,7 +65,8 @@
 |---|---|---|
 | `Welcome.tsx`、`ConnectWizard.tsx`、`Composer.tsx`、`RunPanel.tsx`、`UsagePage.tsx`、`GenerateDialog.tsx`、`SummaryDialog.tsx` | 费用由服务商收取，这里不估算 | 任务要求的一句说明 |
 | `ConnectWizard.tsx`、`ServicesPanel.tsx` | 可能产生极少的费用 | 测试连接可能发一条短消息，要说清楚 |
-| `MessageItem.tsx` | 重新生成、续写处关于再次计费的提示 | 这是一次新请求，要说清楚 |
+| `MessageItem.tsx`、`RunNotices.tsx` | 续写、重试“按新请求计费”“可能再次计费”“为避免重复计费” | 这是一次新请求，要说清楚 |
+| `RunPanel.tsx` | 持续指令的示例“所有金额精确到元” | 是用户讨论内容的示例，与应用费用无关 |
 | `settings/model.ts`、`timeline/failure.ts` | 旧版本的预算限制 | 只为读懂升级前的 Run |
 | `migrations/v14.ts` | 这场讨论是旧版本按预算限制停下的 | 改写旧 Run 的停止原因，不含金额 |
 
