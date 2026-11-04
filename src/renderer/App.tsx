@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useStore } from 'zustand';
 import { Check, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
-import { RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
+import { MemberRoster, memberBlocked, RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
 import { defaultModeLabel, WorkflowDialog, draftProblems, readRoomWorkflow, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
   writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft, type WorkflowMember } from './features/workflows';
 import { errorCodeSchema } from '../shared/schemas/error';
@@ -44,18 +44,6 @@ const workflowRefusal = (error: unknown) => {
     : code === 'invalid_state' || code === 'unsupported' || code === 'forbidden' ? '流程里有成员现在不能发言（可能还没选模型），到房间里看看成员。'
       : code === 'not_found' ? '这个房间已经不存在。' : '没能核对讨论方式，请稍后再试。';
 };
-/** Who speaks, and on which model: nobody finds out from the reply which model a member was given. */
-function membersWithModels(members: readonly AgentConfiguration[], providers: readonly ProviderSummary[]) {
-  const models = members.map(member => {
-    const provider = providers.find(item => item.id === member.providerId);
-    if (!provider || provider.kind === 'mock' || !member.modelId) return undefined;
-    return provider.customModels.find(model => model.id === member.modelId)?.name ?? member.modelId;
-  });
-  const names = members.map(member => member.displayName);
-  if (models.every(model => model === undefined)) return names.join('、');
-  if (models.every(model => model === models[0])) return `${names.join('、')}（都用 ${models[0]}）`;
-  return names.map((name, index) => models[index] ? `${name}（${models[index]}）` : name).join('、');
-}
 const remembered = (key: string, fallback: boolean) => { try { const value = localStorage.getItem(key); return value === null ? fallback : value === 'true'; } catch { return fallback; } };
 const remember = (key: string, value: boolean) => { try { localStorage.setItem(key, String(value)); } catch { /* The choice still applies to this window. */ } };
 const liveStatuses = ['running', 'pausing', 'paused', 'cancelling'];
@@ -68,6 +56,8 @@ export function App() {
   const [bootReady, setBootReady] = useState(false);
   const [roomDialog, setRoomDialog] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
+  // Opened from the new-discussion page: the host comes back to the same room and the same draft.
+  const [connectKeepsRoom, setConnectKeepsRoom] = useState(false);
   const [demo, setDemo] = useState<{ busy: boolean; error?: string }>({ busy: false });
   const layout = useLayout();
   const [theme, setTheme] = useTheme();
@@ -168,6 +158,12 @@ export function App() {
     }).catch(() => { if (!cancelled) { setWorkflowMembers(undefined); setWorkflowMembersError(true); } });
     return () => { cancelled = true; };
   }, [api, roomId, page, generation, roomMembersNeeded, workflowVersion]);
+  const reloadRoomMembers = useCallback(async () => {
+    if (!roomId) return;
+    const members = await api.rooms.listAgentConfigurations({ roomId });
+    setWorkflowMembers({ roomId, members: Array.isArray(members) ? members : [] });
+    void directory.reload();
+  }, [api, roomId]);
   const modeMembers: WorkflowMember[] = roomId && workflowMembers?.roomId === roomId
     ? workflowMembers.members.filter(member => !member.archivedAt).map(member => ({ id: member.id, name: member.displayName, enabled: member.enabled, role: member.roleTemplateId })) : [];
   const stored = useMemo(() => roomId ? readRoomWorkflow(roomId) : { damaged: false }, [roomId, workflowVersion]);
@@ -343,7 +339,10 @@ export function App() {
   const anyDrawer = navOpen || panelDrawer && panelAvailable && layout !== 'wide';
 
   const roomName = room?.name;
-  const enabledMembers = roomId && workflowMembers && workflowMembers.roomId === roomId ? workflowMembers.members.filter(member => member.enabled && !member.archivedAt) : undefined;
+  const roomMembers = roomId && workflowMembers && workflowMembers.roomId === roomId ? workflowMembers.members.filter(member => !member.archivedAt) : undefined;
+  const enabledMembers = roomMembers?.filter(member => member.enabled);
+  // Who stands in the way of starting; the list above the goal says why, on that member's row.
+  const blockedMembers = snapshot ? [] : (enabledMembers ?? []).filter(member => memberBlocked(member, providers, readiness.rows));
   const defaultMode = defaultModeLabel(enabledMembers?.length);
   const workflowLabel = stored.draft ? templateLabel(stored.draft.template) : defaultMode;
   const runMembers = snapshot?.execution?.membersSnapshot?.map(member => member.displayName) ?? enabledMembers?.map(member => member.displayName);
@@ -375,7 +374,8 @@ export function App() {
   const modeNotice = workflowNotice?.roomId === roomId ? workflowNotice?.text
     : stored.damaged ? `这个房间保存的讨论方式读不出来，这次按「${defaultMode}」进行。`
       : lostWorkflow?.roomId === roomId && !stored.draft ? `这台电脑上没有找到这个房间的讨论方式（例如清理过浏览器数据），已退回「${defaultMode}」${lostWorkflow?.label ? `；上次用的是「${lostWorkflow.label}」` : ''}。` : undefined;
-  const taskNotices = (error && !snapshot && syncStatus !== 'error') || modeNotice || workflowMembersError || otherLive ? <div className="composer-alerts">
+  const taskNotices = (error && !snapshot && syncStatus !== 'error') || modeNotice || workflowMembersError || otherLive || blockedMembers.length > 0 ? <div className="composer-alerts">
+    {blockedMembers.length > 0 && <p role="note" className="composer-blocked">还不能开始：{blockedMembers.map(member => member.displayName).join('、')}的模型要先处理，原因写在上面的成员列表里。</p>}
     {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始或继续别的讨论。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}
     {error && !snapshot && syncStatus !== 'error' && !otherLive && <p role="alert" className="field-error">{error}</p>}
     {modeNotice && <p role={workflowNotice ? 'alert' : 'note'} className={workflowNotice ? 'composer-blocked' : 'composer-target'}>{modeNotice}<button type="button" className="link-btn" onClick={() => setWorkflowOpen(true)}>更改讨论方式</button></p>}
@@ -389,7 +389,7 @@ export function App() {
       continueApi={api.run} onContinued={synchronizeHost}
       settledSlot={<Button className="slot" icon={Plus} disabled={!bootReady} onClick={() => newDiscussion(snapshot.roomId)}>新讨论</Button>} />;
     return <TaskComposer draft={draft} setDraft={value => session.store.getState().setDraft(value)}
-      canStart={startEnabled && modeReady && !otherLive && !startChecking && !room?.archivedAt && outputTokenLimit !== undefined}
+      canStart={startEnabled && modeReady && !otherLive && !startChecking && !room?.archivedAt && outputTokenLimit !== undefined && blockedMembers.length === 0}
       starting={pending?.command === 'start' || startChecking} onStart={() => void startRun()} notices={<>{syncNotices}{taskNotices}</>}
       placeholder={snapshot ? '在这个房间开始新的讨论，写下目标和约束…' : undefined}
       settings={{ outputLimitText, setOutputLimitText, outputLimitValid: outputTokenLimit !== undefined,
@@ -414,13 +414,15 @@ export function App() {
       <h2>{directory.rooms?.length ? '选一个房间开始' : '先建一个房间'}</h2>
       <p>{directory.rooms?.length ? '在左侧点一个房间，就能在里面开始新的讨论。' : '房间里放着参加讨论的 AI 成员。新建的房间会带好三位默认成员（起草者、审查者、综合者）。'}</p>
       {!directory.rooms?.length && <Button variant="primary" icon={Plus} disabled={!bootReady} onClick={() => setRoomDialog(true)}>新建房间</Button>}</div></div>;
-    return <div className="discussion-empty"><div className="empty-room">
-      {enabledMembers && enabledMembers.length > 0 && <span className="avatar-stack">{enabledMembers.slice(0, 6).map(member => <Avatar key={member.id} name={member.displayName} />)}</span>}
+    return <div className="discussion-empty is-new"><div className="empty-room">
       <h2>这场讨论要解决什么？</h2>
       <p>{enabledMembers === undefined ? '正在读取房间成员…'
-        : enabledMembers.length === 0 ? <>这个房间还没有参与讨论的成员。<button type="button" className="link-btn" onClick={() => roomId && openRoom(roomId)}>去房间里添加成员</button></>
-        : `${membersWithModels(enabledMembers, providers)}会按「${workflowLabel}」依次发言，不会同时生成。你随时可以暂停、插话或点名。`}</p>
+        : enabledMembers.length === 0 ? '这个房间还没有参与讨论的成员，先在下面添加或打开一位。'
+        : `${enabledMembers.length} 位成员会按「${workflowLabel}」依次发言，不会同时生成。你随时可以暂停、插话或点名。`}</p>
       {recentTasks.length > 0 && <div className="suggest" aria-label="最近的讨论目标">{recentTasks.map(task => <button key={task} type="button" title={`填入：${task}`} onClick={() => session.store.getState().setDraft(task)}>{task}</button>)}</div>}
+      {roomMembers && <MemberRoster api={api.rooms} roomId={roomId} members={roomMembers} providers={providers} readiness={readiness.rows} readOnly={Boolean(room?.archivedAt)}
+        onChanged={reloadRoomMembers} onOpenSettings={() => openSettings()} onConnectMore={() => { setConnectKeepsRoom(true); setConnectOpen(true); }}
+        onShown={() => refreshStaleModels(settingsApi, providers)} />}
     </div></div>;
   })();
 
@@ -507,8 +509,8 @@ export function App() {
     <Drawer side="right" label="本场信息" open={panelDrawer && panelAvailable && layout !== 'wide'} onClose={() => setPanelDrawer(false)}><div id="run-panel" style={{ height: '100%' }}>{panel}</div></Drawer>
     {workflowOpen && roomId && <WorkflowDialog key={`${roomId}:${workflowVersion}`} roomName={roomName ?? '这个房间'} members={modeMembers} initial={stored.draft}
       onCheck={checkWorkflow} onSave={saveWorkflow} onClose={() => setWorkflowOpen(false)} />}
-    {connectOpen && <ConnectWizard api={settingsApi} providers={providers} onClose={() => { setConnectOpen(false); void reloadProviders(); void readiness.reload(); }}
-      onConnected={createFirstRoom} onStart={made => { const target = made ?? roomId; if (target) newDiscussion(target); }} />}
+    {connectOpen && <ConnectWizard api={settingsApi} providers={providers} onClose={() => { setConnectOpen(false); setConnectKeepsRoom(false); void reloadProviders(); void readiness.reload(); }}
+      {...(connectKeepsRoom ? {} : { onConnected: createFirstRoom, onStart: (made: string | undefined) => { const target = made ?? roomId; if (target) newDiscussion(target); } })} />}
     {roomDialog && <RoomDialog note="新房间会带好三位成员：起草者、审查者、综合者，都可以再改。" onClose={() => setRoomDialog(false)} onSave={async value => {
       const created = await createStarterRoom(api.rooms, value, defaultModelFor(providers, readiness.rows));
       setRoomDialog(false); void directory.reload(); openRoom(created.id);

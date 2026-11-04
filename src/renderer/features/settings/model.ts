@@ -67,7 +67,7 @@ export function discoveryText(discovery: ProviderReadiness['discovery']): string
   switch (discovery?.outcome) {
     case 'listed': return `已按服务商的列表更新（${new Date(discovery.checkedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}），新发现的模型排在后面。`;
     case 'unsupported': return '这家服务没有给出可用的模型列表，继续用内置列表。';
-    case 'authentication_failed': return 'Key 没有通过，模型列表没有更新；内置列表照常可选。';
+    case 'authentication_failed': return '模型列表接口没有接受这把 Key，可能是 Key 的问题，也可能是这家的接口不接受这种访问。内置列表和讨论不受影响；想确认 Key，点“测试连接”。';
     case 'failed': return '这次没连上服务商，模型列表没有更新；内置列表照常可选。';
     default: return '还没向服务商查过模型列表，现在显示内置列表。';
   }

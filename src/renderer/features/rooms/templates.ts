@@ -51,6 +51,9 @@ export async function createStarterRoom(api: RoomManagementApiContract, input: {
 }
 
 /** Fixed Chinese text per error code, never the error message itself. */
+/** What updateAgent takes, from what the page holds. */
+export const agentInput = (agent: AgentConfiguration) => { const { archivedAt: _a, createdAt: _c, updatedAt: _u, withheldModelId: _w, ...rest } = agent; return rest; };
+
 export function roomErrorText(error: unknown): string {
   const value = error && typeof error === 'object' ? error as { code?: unknown; detail?: { code?: unknown } } : undefined;
   const parsed = errorCodeSchema.safeParse(value?.detail?.code ?? value?.code);

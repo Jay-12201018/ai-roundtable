@@ -187,7 +187,7 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
       return 'listed';
     } catch (error) {
       const { code } = toPublicError(error);
-      const outcome: ModelDiscoveryOutcome = code === 'not_found' || code === 'unsupported' ? 'unsupported' : code === 'authentication_failed' || code === 'forbidden' ? 'authentication_failed' : 'failed';
+      const outcome: ModelDiscoveryOutcome = code === 'not_found' || code === 'unsupported' || code === 'forbidden' ? 'unsupported' : code === 'authentication_failed' ? 'authentication_failed' : 'failed';
       this.database.saveModelDiscovery(providerId, outcome);
       return outcome;
     }

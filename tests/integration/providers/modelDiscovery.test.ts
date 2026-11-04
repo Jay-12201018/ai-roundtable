@@ -99,7 +99,7 @@ describe('D143 asking a service for its models', () => {
     expect(sent).toHaveBeenCalledTimes(1);
   });
   it.each([
-    [() => new Response('', { status: 404 }), 'unsupported'], [() => new Response('', { status: 405 }), 'failed'], [() => new Response('', { status: 401 }), 'authentication_failed'], [() => new Response('', { status: 403 }), 'authentication_failed'],
+    [() => new Response('', { status: 404 }), 'unsupported'], [() => new Response('', { status: 405 }), 'failed'], [() => new Response('', { status: 401 }), 'authentication_failed'], [() => new Response('', { status: 403 }), 'unsupported'],
     [() => new Response('', { status: 503 }), 'failed'], [() => { throw new TypeError('fixture network failure'); }, 'failed'], [() => new Response(`{"echo":"${FAKE_KEY}"}`, { headers: { 'content-type': 'text/plain' } }), 'failed'],
     [() => Response.json({ nothing: true }), 'failed'], [list('vendor-x1'), 'unsupported'], [list(), 'unsupported'],
   ] as Array<[() => Response, string]>)('falls back to the built-in list and keeps no secret: answer %#', async (answer, outcome) => {

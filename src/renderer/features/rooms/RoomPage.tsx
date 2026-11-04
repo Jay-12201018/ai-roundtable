@@ -6,7 +6,7 @@ import { Avatar, Button, Field, IconButton, Modal, Pill, Switch, Tag, cx, useDis
 import { statusLabels } from '../../locales/zhCN';
 import { delistedText, modelBlockText } from '../settings/model';
 import { MemberDialog } from './MemberDialog';
-import { roleShown, roomErrorText } from './templates';
+import { agentInput as input, roleShown, roomErrorText } from './templates';
 import './rooms.css';
 
 const liveStatuses = ['running', 'pausing', 'paused', 'cancelling'];
@@ -15,6 +15,19 @@ const when = (iso: string) => {
   const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
   return today ? `今天 ${time}` : `${date.getMonth() + 1}/${date.getDate()} ${time}`;
 };
+
+/** Whether Main would refuse this member at the start of a discussion. A model the service's list dropped may still work, and that is the host's call. */
+export function memberBlocked(agent: AgentConfiguration, providers: readonly ProviderSummary[], readiness: readonly ProviderReadiness[] | undefined): boolean {
+  if (!readiness) return false;
+  if (agent.withheldModelId || !agent.providerId || !agent.modelId) return true;
+  const provider = providers.find(item => item.id === agent.providerId);
+  if (!provider || !provider.enabled) return true;
+  if (provider.kind === 'mock') return false;
+  const row = readiness.find(item => item.providerId === provider.id);
+  if (!row) return false;
+  const state = row.models.find(model => model.modelId === agent.modelId);
+  return row.supported === false || !state || !state.usable;
+}
 
 /** One line per member: which model and whether it can take part now, as Main decides it (D114). */
 export function memberLine(agent: AgentConfiguration, providers: readonly ProviderSummary[], readiness: readonly ProviderReadiness[] | undefined): { text: string; warn: boolean } {
@@ -82,7 +95,6 @@ export function RoomPage({ api, room, providers, readiness, runs, workflow, onNe
     if (from < 0 || to < 0 || to >= ids.length) return;
     ids.splice(to, 0, ...ids.splice(from, 1)); void reorder(ids);
   };
-  const input = (agent: AgentConfiguration) => { const { archivedAt: _a, createdAt: _c, updatedAt: _u, withheldModelId: _w, ...rest } = agent; return rest; };
   const archivedRoom = Boolean(room.archivedAt);
   const live = runs.some(run => liveStatuses.includes(run.status));
 

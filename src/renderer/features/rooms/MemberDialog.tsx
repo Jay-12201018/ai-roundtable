@@ -21,9 +21,29 @@ export function modelOptions(providers: readonly ProviderSummary[], readiness: r
       const listed = catalogServiceAt(serviceCatalog, row?.baseUrl)?.models.find(model => model.id === modelId);
       const note = listed && modelNote(listed);
       return [{ value: `${provider.id}${SEPARATOR}${modelId}`, providerId: provider.id, group: provider.name, modelId, multimodal: Boolean(listed?.multimodal), mock: provider.kind === 'mock',
-        label: provider.kind === 'mock' ? '演示（不联网）' : `${name}（${modelId}）${note ? ` · ${note}` : ''}`, usable: state?.usable, reason: state?.delisted ? delistedText : modelBlockText(state) }];
+        label: provider.kind === 'mock' ? '演示（不联网）' : `${name === modelId ? modelId : `${name}（${modelId}）`}${note ? ` · ${note}` : ''}`, usable: state?.usable, reason: state?.delisted ? delistedText : modelBlockText(state) }];
     });
   });
+}
+
+/** The value a model select holds for this member; empty when none is chosen. */
+export const modelValue = (agent: Pick<AgentConfiguration, 'providerId' | 'modelId'>) => agent.providerId && agent.modelId ? `${agent.providerId}${SEPARATOR}${agent.modelId}` : '';
+/** What that value means for the member's two fields. */
+export function modelChoice(value: string): { providerId: string | null; modelId: string | null } {
+  const [providerId, modelId] = value ? value.split(SEPARATOR) : [null, null];
+  return { providerId: providerId ?? null, modelId: modelId ?? null };
+}
+
+/** The choices of a model select, under each service's name. A choice no longer on offer stays visible and says so; nothing replaces it. */
+export function ModelOptions({ options, value }: { options: readonly Option[]; value: string }) {
+  return <>
+    <option value="">暂不选择</option>
+    {value !== '' && !options.some(option => option.value === value) && <option value={value}>原来的选择已不可用，请换一个模型</option>}
+    {[...new Set(options.map(option => option.providerId))].map(providerId => {
+      const group = options.filter(option => option.providerId === providerId);
+      return <optgroup key={providerId} label={group[0]!.group}>{group.map(option => <option key={option.value} value={option.value}>{option.label}{option.reason ? ` — ${option.reason}` : ''}</option>)}</optgroup>;
+    })}
+  </>;
 }
 
 export type MemberDialogProps = {
@@ -38,7 +58,7 @@ export function MemberDialog({ agent, roomId, order, providers, readiness, onSav
   const [name, setName] = useState(agent?.displayName ?? roleTemplates[0].name);
   const [role, setRole] = useState(agent?.roleTemplateId ?? roleTemplates[0].role);
   const [prompt, setPrompt] = useState(agent?.systemPrompt ?? roleTemplates[0].prompt);
-  const [model, setModel] = useState(agent?.providerId && agent.modelId ? `${agent.providerId}${SEPARATOR}${agent.modelId}` : fallback ? `${fallback.providerId}${SEPARATOR}${fallback.modelId}` : '');
+  const [model, setModel] = useState(agent?.providerId && agent.modelId ? modelValue(agent) : fallback ? modelValue(fallback) : '');
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const options = modelOptions(providers, readiness);
   const selected = options.find(option => option.value === model);
@@ -50,8 +70,7 @@ export function MemberDialog({ agent, roomId, order, providers, readiness, onSav
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const [providerId, modelId] = model ? model.split(SEPARATOR) : [null, null];
-    const parsed = createAgentInputSchema.safeParse({ roomId, displayName: name, roleTemplateId: role, systemPrompt: prompt, providerId, modelId, enabled: agent?.enabled ?? true, displayOrder: agent?.displayOrder ?? order });
+    const parsed = createAgentInputSchema.safeParse({ roomId, displayName: name, roleTemplateId: role, systemPrompt: prompt, ...modelChoice(model), enabled: agent?.enabled ?? true, displayOrder: agent?.displayOrder ?? order });
     if (!parsed.success) { setError(!name.trim() ? '请填写名字。' : !role.trim() ? '请填写角色，例如“审查”。' : '有一项填写不对，请检查。'); return; }
     setBusy(true); setError('');
     try { await onSave(parsed.data); }
@@ -69,12 +88,7 @@ export function MemberDialog({ agent, roomId, order, providers, readiness, onSav
       </div>
       <Field label="设定" optional help="写给这位成员的长期要求，每次发言都会带上。">{props => <textarea {...props} className="textarea" rows={3} value={prompt} disabled={busy} onChange={event => setPrompt(event.target.value)} />}</Field>
       <Field label="模型">{props => <select {...props} className="select input" value={model} disabled={busy} onChange={event => { setModel(event.target.value); setError(''); }}>
-        <option value="">暂不选择</option>
-        {stale && <option value={model}>原来的选择已不可用，请换一个模型</option>}
-        {[...new Set(options.map(option => option.providerId))].map(providerId => {
-          const group = options.filter(option => option.providerId === providerId);
-          return <optgroup key={providerId} label={group[0]!.group}>{group.map(option => <option key={option.value} value={option.value}>{option.label}{option.reason ? ` — ${option.reason}` : ''}</option>)}</optgroup>;
-        })}
+        <ModelOptions options={options} value={model} />
       </select>}</Field>
       <p className="model-state" role="status">{selected?.mock ? <span className="status-text muted"><FlaskConical aria-hidden />演示成员不联网，回复是预先写好的示例，不代表真实模型的水平。</span>
         : selected?.usable && selected.reason ? <span className="status-text warn-text"><CircleAlert aria-hidden />{selected.reason}。还可以继续用，由你决定。</span>

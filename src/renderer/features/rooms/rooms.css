@@ -14,3 +14,22 @@
 .run-list .run-dot.is-live { background: var(--accent); }
 .run-list .run-dot.is-warn { background: var(--warn); }
 .model-state { margin: -8px 0 0; }
+
+/* 新讨论 › 参与成员: sits right above the goal. Below this width the model list takes a line of its own. */
+.discussion-empty.is-new .empty-room { display: flex; flex-direction: column; justify-content: flex-end; box-sizing: border-box; min-height: 100%; max-width: 760px; padding: 24px 24px 12px; }
+.roster { container-type: inline-size; width: 100%; margin-top: 4px; text-align: left; }
+.roster h3 { margin: 0 0 2px; font-size: 14px; line-height: 20px; font-weight: 600; }
+.roster > p.small { margin: 0 0 8px; }
+.roster-list { list-style: none; margin: 0; padding: 0; }
+.roster-row { display: grid; grid-template-columns: auto minmax(84px, .55fr) minmax(0, 2fr) auto auto; align-items: center; gap: 4px 10px; padding: 8px 10px 8px 12px; }
+.roster-row + .roster-row { border-top: 1px solid var(--line); }
+.roster-row.is-off .avatar, .roster-row.is-off .roster-who { opacity: .55; }
+.roster-who { min-width: 0; overflow-wrap: anywhere; }
+.roster-who .tag { vertical-align: 1px; margin-left: 2px; }
+.roster-model { width: 100%; min-width: 0; height: 32px; font-size: 13px; text-overflow: ellipsis; }
+.roster-row .roster-note { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; }
+.roster-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 8px 0 0; }
+@container (max-width: 520px) {
+  .roster-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .roster-model { grid-column: 1 / -1; grid-row: 2; }
+}

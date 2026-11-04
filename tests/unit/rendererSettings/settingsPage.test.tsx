@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage, type SettingsSection } from '../../../src/renderer/features/settings';
 import type { ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../src/shared/contracts/configuration';
+import { discoveryText } from '../../../src/renderer/features/settings/model';
 import { publicError } from '../../../src/shared/schemas/error';
 
 const at = '2026-10-16T00:00:00.000Z';
@@ -113,6 +114,16 @@ describe('设置 › 模型服务', () => {
     expect(within(oldCard).queryByLabelText('服务名称')).toBeNull();
     expect(within(oldCard).getByRole('button', { name: '删除 Key…' })).toBeTruthy();
     expect(within(oldCard).getByRole('button', { name: '删除服务…' })).toBeTruthy();
+  });
+});
+
+describe('模型列表的提示', () => {
+  it('does not blame the Key when the list was refused, and points at what can tell', () => {
+    const text = discoveryText({ outcome: 'authentication_failed', checkedAt: at });
+    expect(text).toContain('可能是 Key 的问题，也可能是这家的接口不接受这种访问');
+    expect(text).toContain('测试连接');
+    expect(discoveryText({ outcome: 'unsupported', checkedAt: at })).toContain('继续用内置列表');
+    expect(discoveryText(null)).toContain('内置列表');
   });
 });
 
