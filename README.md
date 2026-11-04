@@ -63,7 +63,7 @@ pnpm dev
 pnpm trial
 ```
 
-它会先构建，再用独立目录启动：macOS 为 `~/Library/Application Support/ai-roundtable-trial`（Windows 为 `%APPDATA%\ai-roundtable-trial`，Linux 为 `~/.config/ai-roundtable-trial`）。正式数据目录不会被打开；试用目录如果是指向它的链接，启动会被拒绝。启动前设置 `ROUNDTABLE_CONNECT_PROXY=http://127.0.0.1:端口` 和 `ROUNDTABLE_TRUST_PROXY_DNS=1`。
+它会先构建，再用独立目录启动：macOS 为 `~/Library/Application Support/ai-roundtable-trial`（Windows 为 `%APPDATA%\ai-roundtable-trial`，Linux 为 `~/.config/ai-roundtable-trial`）。正式数据目录不会被打开；试用目录如果是指向它的链接，启动会被拒绝。
 
 ```bash
 pnpm trial:reset
