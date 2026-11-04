@@ -112,6 +112,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'settings.getKeyStorageStatus': () => settings.getKeyStorageStatus(),
     'settings.testConnection': (input) => settings.testConnection(input),
     'settings.listModelReadiness': () => settings.listModelReadiness ? settings.listModelReadiness() : unsupported(),
+    'settings.refreshModels': (input) => settings.refreshModels ? settings.refreshModels(input) : unsupported(),
   };
   const register = <C extends IpcChannel>(channel: C) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {

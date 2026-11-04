@@ -3,7 +3,7 @@ import { Check, CircleAlert, FlaskConical, Info, Lock } from 'lucide-react';
 import type { KeyStorageStatus, ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
 import { Button, Choice, Field, Modal } from '../../components/ui';
 import { presets, presetOf, targetOf, type ServicePreset } from './presets';
-import { errorMessage, testService, type ServiceTest } from './model';
+import { errorMessage, refreshStaleModels, testService, type ServiceTest } from './model';
 
 /** What the app did after a connection: the room it created for the first real service, if any. */
 export type ConnectedRoom = { roomId: string; roomName: string; memberNames: string[]; modelName: string | null };
@@ -36,17 +36,20 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [saved, setSaved] = useState<ProviderConfiguration | undefined>(rekey);
   const [test, setTest] = useState<ServiceTest>();
+  // D143: models the service's own list adds, once it has been asked with the saved Key.
+  const [listed, setListed] = useState<string[]>([]);
   const secret = useRef<HTMLInputElement>(null); const alive = useRef(true); const lock = useRef(false);
   const existingReal = useRef(providers.some(provider => provider.kind !== null && provider.kind !== 'mock'));
   const clearSecret = () => { if (secret.current) secret.current.value = ''; setHasKey(false); };
   useEffect(() => { alive.current = true; void api.getKeyStorageStatus().then(value => { if (alive.current) setStorage(value); }, () => {}); return () => { alive.current = false; clearSecret(); }; }, [api]);
+  useEffect(() => { refreshStaleModels(api, providers); }, [api]);
 
   const mock = !rekey && preset.id === 'mock';
   const target = rekey ? targetOf(rekey) : preset.baseUrl;
   const displayName = rekey?.name ?? preset.name;
 
   function choose(next: ServicePreset) {
-    setPreset(next); setModelId(next.models[0]?.id ?? ''); setError(''); setTest(undefined); clearSecret();
+    setPreset(next); setModelId(next.models[0]?.id ?? ''); setError(''); setTest(undefined); setListed([]); clearSecret();
     setPicking(false);
   }
   function close() { clearSecret(); onClose(); }
@@ -84,6 +87,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     void guarded(async () => {
       const provider = await store();
       if (!provider) return;
+      if (provider.kind !== 'mock') void api.refreshModels?.({ providerId: provider.id, force: true })?.catch(() => {});
       let current: ProviderReadiness | undefined;
       try { current = (await api.listModelReadiness?.())?.find(row => row.providerId === provider.id); } catch { current = undefined; }
       const firstReal = provider.kind !== 'mock' && !existingReal.current && !rekey;
@@ -102,9 +106,17 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     void guarded(async () => {
       const provider = await store();
       if (!provider) return;
-      const result = await testService(api, provider, modelId || provider.defaultModelId || provider.customModels[0]?.id);
+      const [result] = await Promise.all([testService(api, provider, modelId || provider.defaultModelId || provider.customModels[0]?.id), lookAtModelList(provider)]);
       if (alive.current) setTest(result);
     });
+  }
+  /** A saved Key is the moment to ask; what it adds goes after the built-in models. */
+  async function lookAtModelList(provider: ProviderConfiguration) {
+    try {
+      await api.refreshModels?.({ providerId: provider.id, force: true });
+      const current = await api.getProviderConfiguration({ id: provider.id });
+      if (alive.current) setListed(current.customModels.map(model => model.id).filter(id => !preset.models.some(model => model.id === id)));
+    } catch { /* The built-in list is still there. */ }
   }
 
   const title = picking ? '连接模型服务' : mock ? '添加演示服务' : rekey ? `更换 ${displayName} 的 API Key` : `连接 ${displayName}`;
@@ -128,9 +140,10 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
         {props => <input {...props} ref={secret} className="input mono" type="password" autoComplete="off" spellCheck={false} disabled={busy} autoFocus placeholder={keySaved ? '已保存；要更换就重新粘贴' : undefined}
           onChange={event => setHasKey(event.target.value.length > 0)} />}</Field>}
       {mock && <div className="callout"><Info aria-hidden /><span className="grow">演示服务没有地址，也不需要 Key。演示成员的回复是预先写好的示例，不代表真实模型的水平，也不会出现在用量统计里。</span></div>}
-      {!rekey && !mock && <Field label="模型" help="每位成员可以单独换模型。">
+      {!rekey && !mock && <Field label="模型" help="这家服务的默认模型。第一次连接时，建好的三位成员都用它；每位成员可以单独换。">
         {props => <select {...props} className="select input" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)}>
-          {preset.models.map(model => <option key={model.id} value={model.id}>{model.name}（{model.id}）{model.note ? ` · ${model.note}` : ''}</option>)}</select>}</Field>}
+          {preset.models.map(model => <option key={model.id} value={model.id}>{model.name}（{model.id}）{model.note ? ` · ${model.note}` : ''}</option>)}
+          {listed.map(id => <option key={id} value={id}>{id}</option>)}</select>}</Field>}
       {error && <p className="field-error" role="alert">{error}</p>}
     </form>}
   </Modal>;

@@ -4,7 +4,7 @@ import type { ProviderConfiguration, ProviderKeyState, ProviderReadiness, Provid
 import { DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS, DEFAULT_MODEL_MAX_OUTPUT_TOKENS, MAX_MODEL_LIMIT_TOKENS, MIN_MODEL_CONTEXT_WINDOW_TOKENS } from '../../../shared/schemas/provider';
 import { Button, Field, IconButton, Pill, Switch, Tag, cx } from '../../components/ui';
 import { presetOf, targetOf } from './presets';
-import { errorMessage, modelBlockText, serviceStatus, testService, type ServiceTest } from './model';
+import { delistedText, discoveryText, errorMessage, modelBlockText, refreshStaleModels, serviceStatus, testService, type ServiceTest } from './model';
 
 /** D134: why these limits cannot be saved; Main's schema refuses the same values. */
 function limitsError({ context, output }: { context: string; output: string }): string | undefined {
@@ -30,6 +30,9 @@ export function ServicesPanel({ api, providers, loadState, readiness, onChanged,
     for (const provider of providers) known.current.add(provider.id);
     if (added) setOpen(added.id); else if (open === undefined) setOpen(providers.find(provider => provider.kind !== 'mock' && provider.enabled)?.id);
   }, [providers]);
+  // Once the list is there: opening this page is one of the moments a service's model list may be looked at again.
+  const looked = useRef(false);
+  useEffect(() => { if (!looked.current && loadState === 'ready') { looked.current = true; refreshStaleModels(api, providers); } }, [api, loadState, providers]);
   return <>
     <div className="page-head"><div className="grow"><h1>模型服务</h1><p>成员用哪个服务、哪个模型，在房间里为每位成员选。这里管理连接和 Key。</p></div>
       <div className="actions"><Button variant="primary" icon={Plus} onClick={onAdd}>添加服务</Button></div></div>
@@ -89,6 +92,10 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
   const subline = mock || outside ? status.detail : [modelCount ? `${modelCount} 个模型` : undefined,
     keySaved ? keyNow === 'session' ? 'Key 只在这次运行有效' : 'Key 在钥匙串' : undefined, status.detail || undefined].filter(Boolean).join(' · ');
 
+  function refreshList() {
+    if (!config) return;
+    void act(async () => { await api.refreshModels?.({ providerId: config.id, force: true }); onChanged(); void load(); });
+  }
   function runCheck() {
     if (!config) return;
     void act(async () => {
@@ -141,9 +148,13 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
             : <>还没填写 <Button size="sm" variant="primary" onClick={() => onRekey(config)}>填写 Key</Button></>}</dd>
       </dl>}
       {config && !mock && !outside && <div className="svc-models">
+        <p className="small muted svc-pad">默认模型只影响之后新建的成员，已有成员的选择不变。每位成员的模型在房间里单独选。</p>
+        <div className="model-row svc-discovery"><Button size="sm" disabled={busy || !keySaved || !config.enabled} title={keySaved ? '向服务商查一次模型列表，不生成内容' : '先填写 Key'} onClick={refreshList}>刷新模型列表</Button>
+          <span className="small muted" role="status">{discoveryText(readiness?.discovery)}</span></div>
         {models.map(model => {
           const state = readiness?.models.find(item => item.modelId === model.id);
-          return <div className="model-row" key={model.id}><span className="model-name"><b>{model.name}{config.defaultModelId === model.id && <Tag tone="accent">默认</Tag>}</b><code>{model.id}</code></span>
+          return <div className="model-row" key={model.id}><span className="model-name"><b>{model.name}{config.defaultModelId === model.id && <Tag tone="accent">默认</Tag>}</b><span><code>{model.id}</code>{preset?.models.find(item => item.id === model.id)?.note && <small> · {preset.models.find(item => item.id === model.id)!.note}</small>}</span>
+              {state?.delisted && <span className="small warn-text">{delistedText}</span>}</span>
             <span className="push small muted tabular">{state ? `上下文 ${state.contextWindowTokens.toLocaleString('zh-CN')} · 最大输出 ${state.maxOutputTokens.toLocaleString('zh-CN')}` : ''}</span>
             <IconButton size="sm" icon={SlidersHorizontal} label={`${model.name} 的上限`} aria-expanded={limitsOf === model.id} disabled={busy || !state} onClick={() => openLimits(model.id, state)} />
             {config.defaultModelId !== model.id && <Button size="sm" variant="quiet" disabled={busy} onClick={() => void save({ defaultModelId: model.id }, `默认模型改为 ${model.name}`)}>设为默认</Button>}

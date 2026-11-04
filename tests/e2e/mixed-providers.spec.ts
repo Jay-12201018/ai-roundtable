@@ -10,7 +10,8 @@ import { FAKE_KEY, expect, generateArtifact, memberTexts, newDiscussion, openArt
 const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUNDTABLE_E2E_SCREENS) : undefined;
 const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
   'settings-sections', 'services-dark', 'wizard-choose-dark', 'wizard-key-dark', 'discussion-dark', 'usage-dark',
-  'stopped-service', 'stopped-member', 'stopped-service-dark', 'stopped-member-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
+  'stopped-service', 'stopped-member', 'stopped-service-dark', 'stopped-member-dark',
+  'discover-wizard', 'discover-members', 'discover-services', 'discover-delisted', 'discover-delisted-dark', 'pick-model', 'picked-discussion', 'picked-members', 'picked-member-dialog', 'picked-default', 'picked-finished', 'picked-members-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
 
@@ -67,21 +68,27 @@ async function connect(running: RunningApp, service: RegExp, shots?: { form?: st
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
 
-async function changeMember(running: RunningApp, name: string, option: string) {
+/** Picks a model the way a person reads it: under its service's heading, by its ID. */
+async function pickModel(page: Page, choice: { service: string; id: string }) {
+  const value = await page.locator(`dialog[open] select optgroup[label="${choice.service}"] option`, { hasText: `（${choice.id}）` }).getAttribute('value');
+  await page.getByLabel('模型').selectOption(value!);
+}
+
+async function changeMember(running: RunningApp, name: string, option: { service: string; id: string }) {
   const { page } = running;
   await page.getByRole('button', { name: `「${name}」：编辑、排序、归档、删除` }).click();
   await page.getByRole('menuitem', { name: /编辑/u }).click();
-  await page.getByLabel('模型').selectOption({ label: option });
+  await pickModel(page, option);
   await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
 
-async function addMember(running: RunningApp, role: RegExp, name: string, option: string, shot?: string) {
+async function addMember(running: RunningApp, role: RegExp, name: string, option: { service: string; id: string }, shot?: string) {
   const { page } = running;
   await page.getByRole('button', { name: '添加成员' }).click();
   await page.getByRole('button', { name: role }).click();
   await page.getByLabel('名字').fill(name);
-  await page.getByLabel('模型').selectOption({ label: option });
+  await pickModel(page, option);
   if (shot) await capture(running, shot, '添加成员：每位成员独立选“服务 + 模型”。');
   await page.locator('dialog[open]').getByRole('button', { name: '添加' }).click();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
@@ -154,9 +161,9 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   const rooms = await running.api<{ name: string }[]>('rooms.listRooms');
   const roomName = rooms[0]!.name;
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
-  await changeMember(running, '审查者', 'Kimi · Kimi K3.1 Pro（kimi-k3.1-pro）');
-  await changeMember(running, '综合者', '智谱 GLM · GLM-5.3（glm-5.3）');
-  await addMember(running, /^反方/u, '反方', '豆包 · Doubao Seed 2.1 Pro（doubao-seed-2-1-pro-260915）');
+  await changeMember(running, '审查者', { service: 'Kimi', id: 'kimi-k3.1-pro' });
+  await changeMember(running, '综合者', { service: '智谱 GLM', id: 'glm-5.3' });
+  await addMember(running, /^反方/u, '反方', { service: '豆包', id: 'doubao-seed-2-1-pro-260915' });
   await capture(running, 'room', '房间：四位成员各用一家服务，都写着“可以使用”。');
 
   // The first reply is held so 暂停 and 点名 happen as a person would do them.
@@ -333,8 +340,8 @@ test('D143 what an older version left behind: a service outside the catalog stay
   expect(fixture.requests, 'Nothing is sent for a discussion that cannot start').toEqual([]);
 
   await page.locator('.sidebar .sb-item', { hasText: 'E2E 讨论' }).first().click();
-  await changeMember(running, '审查者', 'DeepSeek 直连 · DeepSeek Flash（deepseek-flash）');
-  await changeMember(running, '综合者', 'DeepSeek 直连 · DeepSeek V4 Pro（deepseek-v4-pro）');
+  await changeMember(running, '审查者', { service: 'DeepSeek 直连', id: 'deepseek-flash' });
+  await changeMember(running, '综合者', { service: 'DeepSeek 直连', id: 'deepseek-v4-pro' });
   await newDiscussion(running, 'E2E 讨论', '试点方案。');
   await page.getByRole('button', { name: '开始讨论' }).click();
   await statusHas(page, '已完成');
@@ -347,6 +354,145 @@ test('D143 what an older version left behind: a service outside the catalog stay
   await stopped.getByRole('button', { name: '删除服务…' }).click();
   await stopped.getByRole('button', { name: '确认删除服务' }).click();
   await expect(stopped).toHaveCount(0);
+  await running.quit();
+});
+
+test('D143 the host picks the model: every model of a service is offered, nothing is swapped, and what goes out is what was picked', async ({ harness }) => {
+  test.setTimeout(120_000);
+  const { fixture } = harness;
+  fixture.reply = body => `${memberOf(body) ?? '成员'}（${body.model}）的发言。`;
+  const running = await harness.launch();
+  const { page } = running;
+  await theme(running, 'light');
+
+  // The list is on screen with its default visible, and can be changed before saving.
+  await page.getByRole('button', { name: '连接…' }).click();
+  await page.getByRole('button', { name: /^通义千问/u }).click();
+  const dialog = page.locator('dialog[open]');
+  const list = dialog.getByRole('combobox', { name: '模型' });
+  await expect(list).toBeVisible();
+  await expect(list).toHaveValue('qwen3.7-plus');
+  expect((await list.locator('option').allTextContents()).length, 'Every model of the service is offered').toBe(12);
+  await list.selectOption('qwen3.8-flash');
+  await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
+  await capture(running, 'pick-model', '连接通义千问：模型下拉框始终显示，默认项看得见，这里改成 Qwen3.8 Flash；每个模型都有一句说明。');
+  await dialog.getByRole('button', { name: '保存' }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+
+  // The three members made for this service use what was picked, and the page says so.
+  await expect(page.getByText('起草者、审查者、综合者（都用 Qwen3.8 Flash）', { exact: false })).toBeVisible();
+  await capture(running, 'picked-discussion', '第一场讨论：写明三位成员都用 Qwen3.8 Flash。');
+  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
+  await expect(page.locator('.room-page').getByText('Qwen3.8 Flash · 可以使用')).toHaveCount(3);
+  await capture(running, 'picked-members', '房间：三位成员都显示 Qwen3.8 Flash。');
+
+  // One member takes another model of the same service, from the list grouped by service.
+  await page.getByRole('button', { name: '「审查者」：编辑、排序、归档、删除' }).click();
+  await page.getByRole('menuitem', { name: /编辑/u }).click();
+  await expect(page.locator('dialog[open] select optgroup[label="通义千问"] option')).toHaveCount(12);
+  await pickModel(page, { service: '通义千问', id: 'qwen3.7-max' });
+  await capture(running, 'picked-member-dialog', '编辑成员：模型按服务分组，这位成员单独换成 Qwen3.7 Max。');
+  await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  await expect(page.locator('.room-page').getByText('Qwen3.7 Max · 可以使用')).toHaveCount(1);
+
+  // Changing the service's default leaves the members as they are.
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  const card = page.getByRole('region', { name: '通义千问' });
+  await expect(card).toContainText('默认模型只影响之后新建的成员');
+  await card.locator('.model-row', { hasText: 'qwen3.8-max' }).getByRole('button', { name: '设为默认' }).click();
+  await expect(card.locator('.model-row', { hasText: 'qwen3.8-max' })).toContainText('默认');
+  await capture(running, 'picked-default', '设置 › 模型服务：随时可以改默认模型，已有成员不变。');
+  await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
+  await expect(page.locator('.room-page').getByText('Qwen3.8 Flash · 可以使用')).toHaveCount(2);
+  await expect(page.locator('.room-page').getByText('Qwen3.7 Max · 可以使用')).toHaveCount(1);
+  await theme(running, 'dark');
+  await capture(running, 'picked-members-dark', '深色主题：成员各自的模型。');
+  await theme(running, 'light');
+
+  await newDiscussion(running, roomName, '试点方案。');
+  await expect(page.getByText('起草者（Qwen3.8 Flash）、审查者（Qwen3.7 Max）、综合者（Qwen3.8 Flash）', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await statusHas(page, '已完成');
+  await capture(running, 'picked-finished', '讨论结束：服务收到的 model 就是所选的模型。');
+  expect(discussionRequests(fixture).map(request => [request.service, request.raw.model])).toEqual([['qwen', 'qwen3.8-flash'], ['qwen', 'qwen3.7-max'], ['qwen', 'qwen3.8-flash']]);
+  if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
+  await running.quit();
+});
+
+test('D143 a service\'s own list adds its new model: only its own, picked by the host, sent as picked; a model that leaves is not replaced', async ({ harness }) => {
+  test.setTimeout(120_000);
+  const { fixture } = harness;
+  fixture.reply = body => `${memberOf(body) ?? '成员'}（${body.model}）的发言。`;
+  fixture.modelList = () => ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v9', 'vendor-x1', 'deepseek-translation-1'];
+  const running = await harness.launch();
+  const { page } = running;
+  await theme(running, 'light');
+  expect(fixture.modelListRequests, 'Nothing is asked at startup').toEqual([]);
+
+  await page.getByRole('button', { name: '连接…' }).click();
+  await page.getByRole('button', { name: /^DeepSeek/u }).click();
+  const dialog = page.locator('dialog[open]');
+  const list = dialog.getByRole('combobox', { name: '模型' });
+  await expect(list.locator('option', { hasText: 'deepseek-v9' }), 'Nothing is asked before a Key is saved').toHaveCount(0);
+  await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
+  await page.getByRole('button', { name: '测试连接' }).click();
+  await expect(page.getByText('已收到回复，连接正常')).toBeVisible();
+  await expect(list.locator('option', { hasText: 'deepseek-v9' })).toHaveCount(1);
+  const labels = await list.locator('option').allTextContents();
+  expect(labels.at(-1), 'New models come last, by their ID and with no note').toBe('deepseek-v9');
+  expect(labels.join()).not.toContain('vendor-x1');
+  expect(labels.join()).not.toContain('translation');
+  await list.selectOption('deepseek-v9');
+  await capture(running, 'discover-wizard', '服务商列表多了一个本品牌新模型：排在内置模型后面，只显示模型 ID；其他品牌和翻译模型都没有进来。');
+  await dialog.getByRole('button', { name: '保存' }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  for (const request of fixture.modelListRequests) {
+    expect(request.path, 'Only the fixed address').toBe('/deepseek/models');
+    expect(request.headers.authorization).toBe(`Bearer ${FAKE_KEY}`);
+  }
+
+  await expect(page.getByText('起草者、审查者、综合者（都用 deepseek-v9）', { exact: false })).toBeVisible();
+  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
+  await expect(page.locator('.room-page').getByText('deepseek-v9 · 可以使用')).toHaveCount(3);
+  await capture(running, 'discover-members', '三位成员用的就是选中的新模型。');
+  await newDiscussion(running, roomName, '试点方案。');
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await statusHas(page, '已完成');
+  expect(fixture.requests.filter(request => request.maxTokens !== 8).map(request => request.raw.model)).toEqual(['deepseek-v9', 'deepseek-v9', 'deepseek-v9']);
+
+  // The card says where the list came from and can ask again.
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  const card = page.getByRole('region', { name: 'DeepSeek' });
+  await expect(card).toContainText('已按服务商的列表更新');
+  await expect(card.locator('.model-row', { hasText: 'deepseek-v9' })).toBeVisible();
+  await capture(running, 'discover-services', '服务卡片：写明模型列表来自服务商，旁边是“刷新模型列表”；上限和内置模型一样可以改。');
+
+  // The list drops the new model and a built-in one. Nothing changes by itself; the page says so.
+  const asked = fixture.modelListRequests.length;
+  fixture.modelList = () => ['deepseek-flash'];
+  await card.getByRole('button', { name: '刷新模型列表' }).click();
+  await expect(card.locator('.model-row', { hasText: 'deepseek-v4-pro' })).toContainText('服务商列表里已经没有这个模型，可能已下线');
+  await expect(card.locator('.model-row', { hasText: 'deepseek-v9' })).toHaveCount(0);
+  expect(fixture.modelListRequests.length, 'One press, one request').toBe(asked + 1);
+  await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
+  await expect(page.locator('.room-page').getByText('deepseek-v9 · 服务商列表里已经没有这个模型，可能已下线，请换一个')).toHaveCount(3);
+  await capture(running, 'discover-delisted', '模型从服务商列表消失：成员的选择不变，写明可能已下线，由主持人决定。');
+  await theme(running, 'dark');
+  await capture(running, 'discover-delisted-dark', '深色主题：模型可能已下线。');
+  await theme(running, 'light');
+  const [agents] = harness.sql('SELECT DISTINCT model_id AS model FROM agents');
+  expect(agents).toEqual([{ model: 'deepseek-v9' }]);
+
+  // A failure leaves the built-in list and says so plainly.
+  fixture.modelList = () => undefined;
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  await card.getByRole('button', { name: '刷新模型列表' }).click();
+  await expect(card).toContainText('这家服务没有给出可用的模型列表，继续用内置列表');
+  await expect(card.locator('.model-row', { hasText: 'deepseek-flash' })).toBeVisible();
+  if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
   await running.quit();
 });
 

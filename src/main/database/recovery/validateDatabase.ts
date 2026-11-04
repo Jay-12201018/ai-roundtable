@@ -292,7 +292,7 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
       for (const table of ['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs', 'provider_target_approvals', 'artifact_adoptions']) {
         if (tables.includes(table)) throw new Error('Recovery v14 schema still holds a removed table');
       }
-      if (!tables.includes('summary_use_events')) throw new Error('Recovery v14 schema is incomplete');
+      if (!tables.includes('summary_use_events') || !tables.includes('provider_model_discovery')) throw new Error('Recovery v14 schema is incomplete');
       for (const name of ['summary_use_event_insert', 'summary_use_event_immutable', 'summary_use_event_no_delete']) {
         if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing summary use protection');
       }

@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server, type ServerRespons
 import type { AddressInfo } from 'node:net';
 
 export type FixtureMode = 'ok' | 'hang';
-export type FixtureService = 'deepseek' | 'kimi' | 'glm' | 'doubao';
+export type FixtureService = 'deepseek' | 'kimi' | 'glm' | 'doubao' | 'qwen';
 type Message = { role: string; content: string };
 export type FixtureRequest = { path?: string; service: FixtureService; model: string; maxTokens: number; mode: FixtureMode; messages: Message[]; headers: IncomingHttpHeaders; raw: Record<string, any> };
 type ReplyBody = { model: string; max_tokens: number; service: FixtureService; messages: Message[] };
@@ -25,11 +25,23 @@ export class DeepSeekFixture {
 
   get port() { return (this.server!.address() as AddressInfo).port; }
 
+  /** What `GET /models` lists for a service; without it the service has no such interface. Kept apart from `requests`: nothing is generated. */
+  modelList?: (service: FixtureService) => string[] | undefined;
+  readonly modelListRequests: Array<{ path: string; headers: IncomingHttpHeaders }> = [];
+
   async start() {
     this.server = createServer(async (req, res) => {
       const parts: Buffer[] = [];
       for await (const part of req) parts.push(part as Buffer);
       const service = /^\/([a-z]+)\//u.exec(req.url ?? '')?.[1] as FixtureService;
+      if (req.method === 'GET') {
+        this.modelListRequests.push({ path: req.url ?? '', headers: req.headers });
+        const ids = this.modelList?.(service);
+        if (!ids) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ object: 'list', data: ids.map(id => ({ id, object: 'model' })) }));
+        return;
+      }
       const raw = JSON.parse(Buffer.concat(parts).toString()) as Record<string, any>;
       const body: ReplyBody = { model: raw.model, max_tokens: raw.max_tokens, messages: raw.messages, service };
       const mode = typeof this.mode === 'function' ? this.mode(body) : this.mode;

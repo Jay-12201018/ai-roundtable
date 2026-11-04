@@ -44,14 +44,38 @@ describe('D143 a service is saved only as the catalog has it', () => {
     await expect(settings.createProvider({ name: 'D', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'kimi-k3' })).rejects.toMatchObject({ code: 'model_unsupported' });
     expect(db.listProviderSummaries()).toEqual([]);
   });
-  it.each(serviceCatalog.map(service => [service.id, service] as const))('accepts %s with each of its models', async (_id, service) => {
-    const { settings } = fixture();
+  it.each(serviceCatalog.map(service => [service.id, service] as const))('%s: every model can be saved and sends its own ID to the catalog address', async (_id, service) => {
+    const { settings, sent } = fixture();
     for (const model of service.models) {
       const saved = await settings.createProvider({ name: service.name, kind: 'compatible', baseUrl: service.baseUrl, defaultModelId: model.id });
       const shown = await settings.getProviderConfiguration({ id: saved.id });
       expect(shown.defaultModelId).toBe(model.id);
       expect(catalogServiceAt(serviceCatalog, shown.baseUrl)).toBe(service);
+      await settings.setKey({ providerId: saved.id, apiKey: 'owned-fake-key' });
+      sent.mockClear();
+      expect(await settings.testConnection({ providerId: saved.id, level: 'generation', modelId: model.id, allowGeneration: true })).toMatchObject({ result: { ok: true } });
+      const [url, init] = sent.mock.calls[0]!;
+      expect(String(url)).toBe(`${service.baseUrl}/chat/completions`);
+      expect(JSON.parse(String(init!.body))).toMatchObject({ model: model.id });
     }
+  });
+  it('lists models once each, with a short note that says nothing about price', () => {
+    for (const service of serviceCatalog) {
+      expect(new Set(service.models.map(model => model.id)).size).toBe(service.models.length);
+      for (const model of service.models) {
+        expect(model.note, model.id).toBeTruthy();
+        expect(model.note).not.toMatch(/价格|便宜|免费|成本|元|¥/u);
+      }
+    }
+  });
+  it('a model the catalog knows is short keeps that limit, unless the host sets another', async () => {
+    const { settings, registry } = fixture();
+    const saved = await settings.createProvider({ name: '通义千问', kind: 'compatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModelId: 'qwen-max' });
+    expect(registry.budget(saved.id, 'qwen-max').contextWindowTokens).toBe(32000);
+    expect(registry.budget(saved.id, 'qwen3.7-plus').contextWindowTokens).toBe(128000);
+    const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = await settings.getProviderConfiguration({ id: saved.id });
+    await settings.updateProvider({ ...input, customModels: input.customModels.map(model => model.id === 'qwen-max' ? { ...model, contextWindowTokens: 16000, maxOutputTokens: 4000 } : model) });
+    expect(registry.budget(saved.id, 'qwen-max').contextWindowTokens).toBe(16000);
   });
   it('keeps a saved service from moving outside the catalog, and its Key where it was', async () => {
     const { settings, keys } = fixture();
@@ -132,6 +156,37 @@ describe('D143 a member outside the catalog is told to change model when a discu
     try {
       await expect(run.start({ roomId: 'r', task: 't', workflowSnapshot: {}, maxTurns: 1, outputTokenLimit: 8 })).rejects.toMatchObject({ code });
       expect(resolve).not.toHaveBeenCalled(); expect(sent).not.toHaveBeenCalled();
+    } finally { await run.shutdown(); }
+  });
+});
+
+describe('D143 nothing changes a model behind the host', () => {
+  it('changing the default leaves existing members alone, and only a new choice uses it', async () => {
+    const { db, settings } = fixture();
+    const provider = await settings.createProvider({ name: 'Kimi', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1', defaultModelId: 'kimi-k3.1-pro' });
+    db.createRoom({ id: 'r', name: 'R' });
+    db.createAgent({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'draft', providerId: provider.id, modelId: 'kimi-k3.1-pro' });
+    const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = await settings.getProviderConfiguration({ id: provider.id });
+    await settings.updateProvider({ ...input, defaultModelId: 'kimi-k3' });
+    expect((await settings.getProviderConfiguration({ id: provider.id })).defaultModelId).toBe('kimi-k3');
+    expect(db.getAgentConfiguration('a')?.modelId).toBe('kimi-k3.1-pro');
+  });
+  it('a retired model stays on the member, and neither saving nor starting replaces it', async () => {
+    const { db, settings, keys, registry, sent } = fixture();
+    db.createProvider({ id: 'ds', name: 'DeepSeek', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'gone-model', customModels: [{ id: 'gone-model', name: 'gone' }] });
+    await keys.storeKey('ds', 'owned-fake-key');
+    db.createRoom({ id: 'r', name: 'R' });
+    db.createAgent({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'draft', providerId: 'ds', modelId: 'gone-model' });
+    const run = new RunService(db, new MockProvider(), () => [{ role: 'user', content: 'x' }], registry);
+    try {
+      await expect(run.start({ roomId: 'r', task: 't', workflowSnapshot: {}, maxTurns: 1, outputTokenLimit: 8 })).rejects.toMatchObject({ code: 'model_unsupported' });
+      const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = await settings.getProviderConfiguration({ id: 'ds' });
+      // The page shows no default rather than picking one.
+      expect(input.defaultModelId).toBeNull();
+      await settings.updateProvider({ ...input, name: '改名' });
+      expect(db.getAgentConfiguration('a')?.modelId).toBe('gone-model');
+      await expect(run.start({ roomId: 'r', task: 't', workflowSnapshot: {}, maxTurns: 1, outputTokenLimit: 8 })).rejects.toMatchObject({ code: 'model_unsupported' });
+      expect(sent).not.toHaveBeenCalled();
     } finally { await run.shutdown(); }
   });
 });

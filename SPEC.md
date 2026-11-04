@@ -42,9 +42,9 @@ PolyForm Noncommercial 1.0.0 为优先考虑的许可证，禁止未经授权的
 
 ## 多服务商与 Provider Preset Catalog（2026-10-20 用户追加）
 
-支持国内主流大模型，只能使用内置目录里的服务和模型（D143）：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。Coding 套餐/订阅账号不自动具有 API 权益。
+支持国内主流大模型，只能使用内置目录里的服务（D143）：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。每家的通用文本模型都列出来由用户选；服务商新出的本品牌模型从它自己的接口自动发现，不用等发版。Coding 套餐/订阅账号不自动具有 API 权益。
 
-区分服务商/渠道的 Provider 配置实例、具体 Model 和协议 Adapter。沿用 providerId 与 (providerId, modelId) 身份；所有服务共用一个通用 Adapter。内置目录（`src/shared/serviceCatalog.ts`）是服务、地址和模型的唯一来源，Main 在保存配置和发请求时强制；目录不含凭据，同一服务可创建多个独立实例。
+区分服务商/渠道的 Provider 配置实例、具体 Model 和协议 Adapter。沿用 providerId 与 (providerId, modelId) 身份；所有服务共用一个通用 Adapter。内置目录（`src/shared/serviceCatalog.ts`）是服务和地址的唯一来源，模型来自目录和服务商自己的列表，Main 在保存配置和发请求时强制；目录不含凭据，同一服务可创建多个独立实例。
 
 能力、上下文、stream、推理和 usage 支持/不支持/未知须如实标注，不按模型名猜能力，不以连通或列出模型代替生成验收。继续保持 Keychain/Main-only Key、地址校验/TLS/网络防护和显式触发（D136、D143）。多个 Provider/模型应能作为独立成员加入同一房间，保留公共上下文和历史冻结身份。
 

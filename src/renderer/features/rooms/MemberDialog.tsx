@@ -2,23 +2,25 @@ import { useState, type FormEvent } from 'react';
 import { Check, CircleAlert, FlaskConical } from 'lucide-react';
 import type { AgentConfiguration, CreateAgentInput, ProviderReadiness, ProviderSummary } from '../../../shared/contracts/configuration';
 import { createAgentInputSchema } from '../../../shared/schemas/configuration';
+import { catalogServiceAt, serviceCatalog } from '../../../shared/serviceCatalog';
 import { Button, Choice, Field, Modal } from '../../components/ui';
-import { modelBlockText } from '../settings/model';
+import { delistedText, modelBlockText } from '../settings/model';
 import { defaultModelFor, roleTemplates, roomErrorText } from './templates';
 
 const SEPARATOR = '\u0000';
-type Option = { value: string; providerId: string; modelId: string; label: string; usable?: boolean; reason: string; mock: boolean };
+type Option = { value: string; providerId: string; group: string; modelId: string; label: string; usable?: boolean; reason: string; mock: boolean };
 /** Every configured model of every usable service, labelled with why it cannot take part when it cannot. */
 export function modelOptions(providers: readonly ProviderSummary[], readiness: readonly ProviderReadiness[] | undefined): Option[] {
   return providers.filter(provider => provider.enabled && provider.configurationValid && provider.kind !== null).flatMap(provider => {
-    const ids = provider.kind === 'mock' ? ['mock'] : [...new Set([provider.defaultModelId, ...provider.customModels.map(model => model.id)].filter((id): id is string => Boolean(id)))];
+    const ids = provider.kind === 'mock' ? ['mock'] : [...new Set([...provider.customModels.map(model => model.id), provider.defaultModelId].filter((id): id is string => Boolean(id)))];
     const row = readiness?.find(item => item.providerId === provider.id);
     return ids.flatMap(modelId => {
       const state = row?.models.find(model => model.modelId === modelId);
       if (row && !state || state?.blockedBy === 'unsupported') return [];
-      const name = provider.kind === 'mock' ? '演示' : provider.customModels.find(model => model.id === modelId)?.name ?? modelId;
-      return [{ value: `${provider.id}${SEPARATOR}${modelId}`, providerId: provider.id, modelId, mock: provider.kind === 'mock',
-        label: provider.kind === 'mock' ? `${provider.name}（不联网）` : `${provider.name} · ${name}（${modelId}）`, usable: state?.usable, reason: modelBlockText(state) }];
+      const name = provider.customModels.find(model => model.id === modelId)?.name ?? modelId;
+      const note = catalogServiceAt(serviceCatalog, row?.baseUrl)?.models.find(model => model.id === modelId)?.note;
+      return [{ value: `${provider.id}${SEPARATOR}${modelId}`, providerId: provider.id, group: provider.name, modelId, mock: provider.kind === 'mock',
+        label: provider.kind === 'mock' ? '演示（不联网）' : `${name}（${modelId}）${note ? ` · ${note}` : ''}`, usable: state?.usable, reason: state?.delisted ? delistedText : modelBlockText(state) }];
     });
   });
 }
@@ -68,12 +70,16 @@ export function MemberDialog({ agent, roomId, order, providers, readiness, onSav
       <Field label="模型">{props => <select {...props} className="select input" value={model} disabled={busy} onChange={event => { setModel(event.target.value); setError(''); }}>
         <option value="">暂不选择</option>
         {stale && <option value={model}>原来的选择已不可用，请换一个模型</option>}
-        {options.map(option => <option key={option.value} value={option.value}>{option.label}{option.reason ? ` — ${option.reason}` : ''}</option>)}
+        {[...new Set(options.map(option => option.providerId))].map(providerId => {
+          const group = options.filter(option => option.providerId === providerId);
+          return <optgroup key={providerId} label={group[0]!.group}>{group.map(option => <option key={option.value} value={option.value}>{option.label}{option.reason ? ` — ${option.reason}` : ''}</option>)}</optgroup>;
+        })}
       </select>}</Field>
       <p className="model-state" role="status">{selected?.mock ? <span className="status-text muted"><FlaskConical aria-hidden />演示成员不联网，回复是预先写好的示例，不代表真实模型的水平。</span>
+        : selected?.usable && selected.reason ? <span className="status-text warn-text"><CircleAlert aria-hidden />{selected.reason}。还可以继续用，由你决定。</span>
         : selected?.usable ? <span className="status-text ok-text"><Check aria-hidden />可以使用：Key 已保存。</span>
           : selected ? <span className="status-text warn-text"><CircleAlert aria-hidden />暂时不能参与讨论：{selected.reason || '状态未知'}。<button type="button" className="link-btn" onClick={onOpenSettings}>去设置</button></span>
-            : <span className="status-text warn-text"><CircleAlert aria-hidden />{agent?.withheldModelId ? '之前填的模型名像 API Key，已隐藏且不会使用；请重新选择。' : stale ? '原来选的服务已删除或停用，请重新选择。' : '还没选模型，暂时不会参与讨论。'}
+            : <span className="status-text warn-text"><CircleAlert aria-hidden />{agent?.withheldModelId ? '之前填的模型名像 API Key，已隐藏且不会使用；请重新选择。' : stale ? '原来选的模型已不可用，请重新选择。' : '还没选模型，暂时不会参与讨论。'}
               {options.length === 0 && <> 还没有可用的服务，<button type="button" className="link-btn" onClick={onOpenSettings}>去连接一个</button>。</>}</span>}</p>
       {error && <p className="field-error" role="alert">{error}</p>}
     </form>

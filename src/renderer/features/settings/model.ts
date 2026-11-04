@@ -57,3 +57,21 @@ export async function testService(api: Pick<ProviderSettingsApiContract, 'testCo
   const reply = (await api.testConnection({ providerId: provider.id, level: 'generation', modelId, allowGeneration: true })).result;
   return reply.ok ? { tone: 'ok', text: '已收到回复，连接正常' } : { tone: 'warn', text: errorMessage(reply.error) };
 }
+
+export const delistedText = '服务商列表里已经没有这个模型，可能已下线';
+
+/** D143: where the model list on the page comes from, in one plain sentence. */
+export function discoveryText(discovery: ProviderReadiness['discovery']): string {
+  switch (discovery?.outcome) {
+    case 'listed': return `已按服务商的列表更新（${new Date(discovery.checkedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}），新发现的模型排在后面。`;
+    case 'unsupported': return '这家服务没有给出可用的模型列表，继续用内置列表。';
+    case 'authentication_failed': return 'Key 没有通过，模型列表没有更新；内置列表照常可选。';
+    case 'failed': return '这次没连上服务商，模型列表没有更新；内置列表照常可选。';
+    default: return '还没向服务商查过模型列表，现在显示内置列表。';
+  }
+}
+
+/** D143: on opening a page that shows models. Main looks at most once a day per service; nothing here waits for it. */
+export function refreshStaleModels(api: Pick<ProviderSettingsApiContract, 'refreshModels'>, providers: readonly ProviderSummary[]) {
+  for (const provider of providers) if (provider.enabled && provider.kind !== null && provider.kind !== 'mock') void api.refreshModels?.({ providerId: provider.id })?.catch(() => {});
+}

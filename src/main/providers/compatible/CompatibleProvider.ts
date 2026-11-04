@@ -31,6 +31,7 @@ const completionChunk = z.object({
   usage: z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
     prompt_cache_hit_tokens: tokenCount.optional(), prompt_cache_miss_tokens: tokenCount.optional() }).nullable().optional(),
 });
+const modelList = z.object({ data: z.array(z.object({ id: z.string() })).max(10000) });
 const thinkOpen = '<think>';
 const thinkClose = '</think>';
 
@@ -189,8 +190,39 @@ export class CompatibleProvider implements ProviderAdapter {
     finally { scope.close(); }
   }
 
+  /** D143: the model IDs the service lists for this Key. Nothing is generated. */
+  async listModels(input: { requestId: string; signal?: AbortSignal }): Promise<string[]> {
+    parse(idSchema, input?.requestId);
+    const scope = new RequestScope(input.signal, this.timeoutMs);
+    try {
+      const response = await this.send(scope, { method: 'GET' });
+      if (!/^application\/json(?:\s*;|$)/iu.test(response.headers.get('content-type') ?? '') || !response.body) {
+        void response.body?.cancel().catch(() => {}); throw new ContractError('invalid_response');
+      }
+      const reader = response.body.getReader(); const decoder = new TextDecoder('utf-8', { fatal: true });
+      let text = ''; let bytes = 0;
+      try {
+        while (true) {
+          const next = await scope.wait(() => reader.read());
+          if (next.done) break;
+          bytes += next.value.byteLength;
+          if (bytes > 2 * 1024 * 1024) throw new ContractError('invalid_response');
+          text += decoder.decode(next.value, { stream: true });
+        }
+        text += decoder.decode();
+        let data: unknown;
+        try { data = JSON.parse(text); } catch { throw new ContractError('invalid_response'); }
+        return [...new Set(parse(modelList, data, 'invalid_response').data.map(model => model.id))];
+      } catch (error) {
+        if (error instanceof TypeError) throw new ContractError('invalid_response');
+        throw error;
+      } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
+    } catch (error) { throw this.failure(error, scope); }
+    finally { scope.close(); }
+  }
+
   /** One request, never repeated. The Key goes in one header; an error's body and headers are dropped unread. */
-  private async send(scope: RequestScope, init: { method: 'POST'; body: string }): Promise<Response> {
+  private async send(scope: RequestScope, init: { method: 'POST'; body: string } | { method: 'GET' }): Promise<Response> {
     this.diagnostics?.({ stage: 'credential' });
     let key: string | undefined;
     try { key = await scope.wait(() => this.resolveKey(this.configuration.id, this.configuration.keyReference)); scope.check(); }
@@ -202,8 +234,8 @@ export class CompatibleProvider implements ProviderAdapter {
       this.diagnostics?.({ stage: 'credential', category: 'credential_unavailable' }); throw new ContractError('authentication_failed');
     }
     this.diagnostics?.({ stage: 'network_client', evidence: 'client_invoked' });
-    const headers = { authorization: `Bearer ${key}`, accept: 'text/event-stream', 'content-type': 'application/json' };
-    const pending = this.fetcher(`${this.baseUrl}/chat/completions`, { ...init, headers, redirect: 'error', signal: scope.signal });
+    const headers: Record<string, string> = init.method === 'GET' ? { authorization: `Bearer ${key}`, accept: 'application/json' } : { authorization: `Bearer ${key}`, accept: 'text/event-stream', 'content-type': 'application/json' };
+    const pending = this.fetcher(`${this.baseUrl}${init.method === 'GET' ? '/models' : '/chat/completions'}`, { ...init, headers, redirect: 'error', signal: scope.signal });
     // A transport that ignored the signal may still answer after the deadline; nothing reads that body.
     void pending.then(late => { if (scope.signal.aborted) void late.body?.cancel().catch(() => {}); }, () => {});
     const response = await scope.wait(() => pending);

@@ -14,7 +14,7 @@ afterEach(() => { cleanup(); localStorage.clear(); databases.splice(0).forEach(d
 function fixture() {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
   const keys = new KeyService(db, createMemoryKeyBackend());
-  const network = vi.fn(async () => { throw new Error('no network in this test'); });
+  const network = vi.fn(async (_url: Parameters<typeof fetch>[0], _init?: RequestInit): Promise<Response> => { throw new Error("no network in this test"); });
   const registry = new ProviderRegistry(db, keys, { transportFactory: () => network, });
   const fake = bridge();
   window.roundtable = { ...fake.api, host: { command: vi.fn() }, summary: { preview: vi.fn(), generate: vi.fn(), confirm: vi.fn(), revoke: vi.fn() }, usage: { getReport: vi.fn(async () => { throw new Error('none'); }), writeOff: vi.fn(), exportCsv: vi.fn() },
@@ -51,5 +51,8 @@ it('D6-A connecting the first real service creates 我的第一场讨论 on its 
   const [room] = f.db.listRooms();
   expect(f.db.listAgentConfigurations(room.id).every(agent => agent.modelId === 'deepseek-flash')).toBe(true);
   await waitFor(() => expect(screen.getByRole('status', { name: '运行状态' }).textContent).toContain('我的第一场讨论'));
-  expect(f.network).not.toHaveBeenCalled(); expect(f.api.run.start).not.toHaveBeenCalled();
+  // Nothing is generated: the only request is the service's model list (D143).
+  await waitFor(() => expect(f.network).toHaveBeenCalledTimes(1));
+  expect(f.network.mock.calls[0]).toMatchObject([expect.stringMatching(/\/models$/u), { method: 'GET' }]);
+  expect(f.api.run.start).not.toHaveBeenCalled();
 });

@@ -59,8 +59,8 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
   const server = http.createServer(async (req, res) => {
     try {
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
-      // The connect wizard checks a Key with the model list; nothing is generated.
-      if (req.method === 'GET') { fixture.requests.push({ path: req.url, method: 'GET', model: '', maxTokens: 0, mode: 'ok', messages: [] }); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'deepseek-flash' }] })); return; }
+      // A service's model list: nothing is generated, so it is not counted with the requests.
+      if (req.method === 'GET') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'deepseek-flash' }] })); return; }
       const body = JSON.parse(Buffer.concat(chunks).toString());
       const mode = typeof fixture.mode === 'function' ? fixture.mode(body) : fixture.mode;
       fixture.requests.push({ path: req.url, model: body.model, maxTokens: body.max_tokens, mode, messages: body.messages });

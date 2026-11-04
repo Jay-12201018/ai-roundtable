@@ -46,3 +46,4 @@
 .model-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .model-name b { display: inline-flex; align-items: center; gap: 8px; }
 .model-name code { font: 12px var(--font-mono); color: var(--text-3); overflow-wrap: anywhere; }
+.model-name small { font-size: 12px; color: var(--text-3); }

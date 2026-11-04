@@ -96,7 +96,7 @@ app.whenReady().then(() => {
   });
 });
 
-const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.moonshot.cn': 'kimi', 'https://open.bigmodel.cn': 'glm', 'https://ark.cn-beijing.volces.com': 'doubao' };
+const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.moonshot.cn': 'kimi', 'https://open.bigmodel.cn': 'glm', 'https://ark.cn-beijing.volces.com': 'doubao', 'https://dashscope.aliyuncs.com': 'qwen' };
 const build = process.env.ROUNDTABLE_E2E_BUILD ? resolve(process.env.ROUNDTABLE_E2E_BUILD) : resolve(__dirname, '../../../out');
 import(pathToFileURL(join(build, 'main/index.js')).href).then(({ ProviderRegistry }) => {
   // This entry alone adds the loopback fixture to what the transport may reach; the app's own entry has no way to.

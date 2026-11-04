@@ -9,7 +9,7 @@ import { countModelTokens } from '../context/buildPublicContext';
 import { MockProvider } from './mock/MockProvider';
 import { mockModelBudget } from './mock/tokenBudget';
 import { CompatibleProvider } from './compatible/CompatibleProvider';
-import { catalogHas, catalogHosts, catalogServiceAt, serviceCatalog, type CatalogService } from '../../shared/serviceCatalog';
+import { catalogHosts, catalogServiceAt, modelAllowed, serviceCatalog, type CatalogService } from '../../shared/serviceCatalog';
 import type { ProviderMessage } from './types';
 import { createSafeFetch, type AllowedHosts } from './network';
 import type { DiagnosticObserver } from './diagnostics';
@@ -67,12 +67,14 @@ export class ProviderRegistry {
   assertSelection(providerId: string, modelId: string): void {
     // D143: what is outside the catalog says so, even if it is also stopped.
     const stored = this.database.getProviderConfiguration(providerId);
-    if (stored && stored.kind !== 'mock' && !catalogHas(this.catalogService(stored), modelId)) throw new ContractError('model_unsupported');
+    if (stored && stored.kind !== 'mock' && !modelAllowed(this.catalogService(stored), modelId, this.database.getModelDiscovery(providerId)?.modelIds ?? [])) throw new ContractError('model_unsupported');
     this.database.validateModelSelection(providerId, modelId);
   }
   /** D134: the limits a model's requests use now; they never depend on the model's name. */
   limits(configuration: ProviderConfiguration, modelId: string): { contextWindowTokens: number; maxOutputTokens: number } {
-    return modelLimits(configuration.customModels.find(model => model.id === modelId));
+    // What the catalog says of a short model, unless the host set otherwise.
+    const listed = catalogServiceAt(this.catalog(), configuration.baseUrl)?.models.find(model => model.id === modelId);
+    return modelLimits({ ...listed, ...configuration.customModels.find(model => model.id === modelId) });
   }
   budget(providerId: string, modelId: string): ModelBudget {
     this.assertSelection(providerId, modelId);
@@ -94,7 +96,7 @@ export class ProviderRegistry {
   }
 
   private createRealAdapter(configuration: ProviderConfiguration, binding: Binding, guard: () => void, diagnostics?: DiagnosticObserver,
-    onDispatch?: () => void): ProviderAdapter {
+    onDispatch?: () => void): CompatibleProvider {
     const providerId = configuration.id;
     const safeTransport = this.createTransport(guard, diagnostics);
     const options = { configuration, confirmedBaseUrl: binding.baseUrl, diagnostics, streamTimeoutMs: STREAM_TIMEOUT_MS,
@@ -109,6 +111,18 @@ export class ProviderRegistry {
       fetch: (async (url, init) => { guard(); onDispatch?.(); return safeTransport(url, init); }) as typeof fetch,
     };
     return new CompatibleProvider(options);
+  }
+
+  /** D143: asks the service at its catalog address which models this Key can use. The Provider must be usable, as for any request. */
+  listModels(providerId: string, requestId: string): Promise<string[]> {
+    const configuration = this.configuration(providerId);
+    if (configuration.kind === 'mock') throw new ContractError('unsupported');
+    const binding = this.bound(providerId);
+    const guard = () => {
+      const current = this.bound(providerId);
+      if (current.kind !== binding.kind || current.baseUrl !== binding.baseUrl || current.revision !== binding.revision) throw new ContractError('forbidden');
+    };
+    return this.createRealAdapter(configuration, binding, guard).listModels({ requestId });
   }
 
   getAdapter(providerId: string, modelId?: string, onDispatch?: () => void): ProviderAdapter {

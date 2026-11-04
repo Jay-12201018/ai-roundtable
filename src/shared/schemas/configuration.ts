@@ -97,16 +97,23 @@ export const providerConnectionTestResultSchema = providerIdInputSchema.extend({
  * `blockedBy` names the first reason a send would be refused: the Provider is disabled or its configuration is broken,
  * or no usable Key. The limits are the ones a request would use now (D134).
  */
+const modelDiscoveryOutcomeSchema = z.enum(['listed', 'unsupported', 'authentication_failed', 'failed']);
 export const modelReadinessSchema = z.object({
   modelId: idSchema, contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive(),
   usable: z.boolean(), blockedBy: z.enum(['disabled', 'invalid', 'unsupported', 'key']).nullable(),
+  /** D143: the service's own list no longer has it. Nothing is changed; the host decides. */
+  delisted: z.boolean().optional(),
 }).strict().refine(value => value.usable === (value.blockedBy === null), 'A model is usable exactly when nothing blocks it');
+export const refreshModelsInputSchema = providerIdInputSchema.extend({ force: z.boolean().optional() }).strict();
+export const refreshModelsResultSchema = providerIdInputSchema.extend({ outcome: z.union([modelDiscoveryOutcomeSchema, z.literal('skipped')]) }).strict();
 export const providerReadinessSchema = z.object({
   providerId: idSchema, keyState: z.enum(['missing', 'configured', 'session', 'unavailable', 'none']),
   /** D143: false when the service is not in the built-in catalog: it stays only for its history. */
   supported: z.boolean(),
   /** Where this service's Key and content go. */
   baseUrl: z.string().max(2048).nullable(), models: z.array(modelReadinessSchema).max(512),
+  /** D143: how the last look at the service's own model list went, if there was one. */
+  discovery: z.object({ outcome: modelDiscoveryOutcomeSchema, checkedAt: z.string().max(64) }).strict().nullable().optional(),
 }).strict();
 export const providerReadinessListSchema = z.array(providerReadinessSchema);
 

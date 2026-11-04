@@ -235,6 +235,7 @@ const migrations = [
   migration14,
 ];
 
+export type ModelDiscovery = { modelIds: string[]; outcome: 'listed' | 'unsupported' | 'authentication_failed' | 'failed'; checkedAt: string; listedAt: string | null };
 export class Database {
   private readonly db: DatabaseDriver.Database;
   private readonly filename: string;
@@ -1320,6 +1321,28 @@ export class Database {
       this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(id);
       this.db.prepare('DELETE FROM providers WHERE id=?').run(id);
     });
+  }
+
+  /** D143: what the service's own model list said last, if it was ever asked. */
+  getModelDiscovery(providerId: string): ModelDiscovery | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare('SELECT model_ids_json AS ids, outcome, checked_at AS checkedAt, listed_at AS listedAt FROM provider_model_discovery WHERE provider_id=?').get(providerId) as { ids: string; outcome: ModelDiscovery['outcome']; checkedAt: string; listedAt: string | null } | undefined;
+    if (!row) return undefined;
+    let ids: unknown;
+    try { ids = JSON.parse(row.ids); } catch { ids = []; }
+    return { modelIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [], outcome: row.outcome, checkedAt: row.checkedAt, listedAt: row.listedAt };
+  }
+  /** A list that could not be read keeps the one before it. */
+  saveModelDiscovery(providerId: string, outcome: ModelDiscovery['outcome'], modelIds?: readonly string[]): void {
+    this.assertInitialized();
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO provider_model_discovery(provider_id,model_ids_json,outcome,checked_at,listed_at) VALUES(?,?,?,?,?)
+      ON CONFLICT(provider_id) DO UPDATE SET model_ids_json=coalesce(?,model_ids_json), outcome=excluded.outcome, checked_at=excluded.checked_at, listed_at=coalesce(excluded.listed_at,listed_at)`)
+      .run(providerId, JSON.stringify(modelIds ?? []), outcome, now, modelIds ? now : null, modelIds ? JSON.stringify(modelIds) : null);
+  }
+  clearModelDiscovery(providerId: string): void {
+    this.assertInitialized();
+    this.db.prepare('DELETE FROM provider_model_discovery WHERE provider_id=?').run(providerId);
   }
 
   getProviderKeyRevision(providerId: string): string {

@@ -4,7 +4,7 @@ import type { AgentConfiguration, CreateAgentInput, ProviderReadiness, ProviderS
 import { createRoomInputSchema } from '../../../shared/schemas/configuration';
 import { Avatar, Button, Field, IconButton, Modal, Pill, Switch, Tag, cx, useDismiss } from '../../components/ui';
 import { statusLabels } from '../../locales/zhCN';
-import { modelBlockText } from '../settings/model';
+import { delistedText, modelBlockText } from '../settings/model';
 import { MemberDialog } from './MemberDialog';
 import { roleShown, roomErrorText } from './templates';
 import './rooms.css';
@@ -28,12 +28,15 @@ export function memberLine(agent: AgentConfiguration, providers: readonly Provid
   const state = row?.models.find(model => model.modelId === agent.modelId);
   if (row?.supported === false) return { text: `${name} · 这个服务已不再支持，请换一个模型`, warn: true };
   if (!provider.enabled) return { text: `${name} · 服务已停用`, warn: true };
-  if (row && !state || state?.blockedBy === 'unsupported') return { text: `${name} · 这个模型已不再支持，请换一个`, warn: true };
+  if (row && !state || state?.blockedBy === 'unsupported') return { text: `${name} · ${row?.discovery?.outcome === 'listed' ? delistedText : '这个模型已不再支持'}，请换一个`, warn: true };
   if (!state) return { text: name, warn: false };
+  if (state.usable && state.delisted) return { text: `${name} · ${delistedText}`, warn: true };
   return state.usable ? { text: `${name} · 可以使用`, warn: false } : { text: `${name} · ${modelBlockText(state)}`, warn: true };
 }
 
 export type RoomPageProps = {
+  /** The member dialog shows the models: a moment a service's list may be looked at again. */
+  onEditMember?: () => void;
   api: RoomManagementApiContract; room: RoomConfiguration; providers: readonly ProviderSummary[]; readiness: readonly ProviderReadiness[] | undefined;
   runs: RunSummary[]; workflow: { label: string; detail: string; onChange: () => void };
   onNewDiscussion: () => void; onOpenRun: (runId: string) => void; onOpenSettings: () => void;
@@ -42,7 +45,7 @@ export type RoomPageProps = {
 };
 
 /** 房间: one page — the room, its members (order, on/off, menu), its discussion mode, its discussions, and archive or delete. */
-export function RoomPage({ api, room, providers, readiness, runs, workflow, onNewDiscussion, onOpenRun, onOpenSettings, onChanged, onDeleted }: RoomPageProps) {
+export function RoomPage({ api, room, providers, readiness, runs, workflow, onNewDiscussion, onOpenRun, onOpenSettings, onChanged, onDeleted, onEditMember }: RoomPageProps) {
   const [agents, setAgents] = useState<AgentConfiguration[]>(); const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [editor, setEditor] = useState<AgentConfiguration | 'new'>(); const [editingRoom, setEditingRoom] = useState(false);
@@ -50,6 +53,7 @@ export function RoomPage({ api, room, providers, readiness, runs, workflow, onNe
   const [showArchived, setShowArchived] = useState(false);
   const [dragging, setDragging] = useState<string>(); const [dropBefore, setDropBefore] = useState<string>();
   const request = useRef(0); const alive = useRef(true); const lock = useRef(false);
+  useEffect(() => { if (editor) onEditMember?.(); }, [Boolean(editor)]);
   // Keyboard reordering keeps focus on the moved member's grip, so ↑/↓ can be pressed again.
   const refocus = useRef<string | undefined>(undefined);
   useEffect(() => { if (!refocus.current || !agents) return; document.querySelector<HTMLElement>(`[data-grip="${refocus.current}"]`)?.focus(); refocus.current = undefined; }, [agents]);

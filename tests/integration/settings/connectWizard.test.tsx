@@ -71,8 +71,10 @@ it('D136 connects a service with a pasted Key: pick it, paste, save, and the dis
   // The room just made, not whichever room was open before (an earlier demo room, say).
   expect(onStart).toHaveBeenCalledWith('starter-room');
   expect(document.body.textContent).not.toContain('owned-fake-wizard-key');
-  // Saving sends nothing: the network is used only when the host asks for 测试连接.
-  expect(network).not.toHaveBeenCalled();
+  // Saving generates nothing: the one request is the service's model list (D143).
+  await waitFor(() => expect(network).toHaveBeenCalledTimes(1));
+  expect(String(network.mock.calls[0]![0])).toBe('https://api.deepseek.com/models');
+  expect(network.mock.calls[0]![1]).toMatchObject({ method: 'GET' });
 });
 
 it('D134 a second service works right after its Key is saved, and does not take the default', async () => {

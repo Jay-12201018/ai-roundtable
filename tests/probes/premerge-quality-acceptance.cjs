@@ -63,6 +63,8 @@ const requests = []; let port; let holdNext = false; let lengthNext = false; con
 const fixture = http.createServer(async (req, res) => {
   try {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    // A service's model list is not part of a discussion; this fixture has none.
+    if (req.method === 'GET') { res.writeHead(404); res.end(); return; }
     const body = JSON.parse(Buffer.concat(chunks).toString());
     requests.push({ method: req.method, path: req.url, model: body.model, maxTokens: body.max_tokens, thinking: body.thinking, keyMatches: req.headers.authorization === `Bearer ${fakeKey}`, messages: body.messages });
     assert.equal(req.method, 'POST'); assert.equal(req.url, '/deepseek/chat/completions');

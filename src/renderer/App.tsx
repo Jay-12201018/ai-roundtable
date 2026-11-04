@@ -7,6 +7,7 @@ import { defaultModeLabel, WorkflowDialog, draftProblems, readRoomWorkflow, stag
   writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft, type WorkflowMember } from './features/workflows';
 import { errorCodeSchema } from '../shared/schemas/error';
 import { ConnectWizard, SettingsPage, useReadiness, type ConnectedRoom, type SettingsSection } from './features/settings';
+import { refreshStaleModels } from './features/settings/model';
 import { Welcome, startDemo } from './features/onboarding';
 import type { ProviderConfiguration, ProviderReadiness } from '../shared/contracts/configuration';
 import { timelineSlots, useHostCommands, useSummaryCommands } from './features/host';
@@ -43,6 +44,18 @@ const workflowRefusal = (error: unknown) => {
     : code === 'invalid_state' || code === 'unsupported' || code === 'forbidden' ? '流程里有成员现在不能发言（可能还没选模型），到房间里看看成员。'
       : code === 'not_found' ? '这个房间已经不存在。' : '没能核对讨论方式，请稍后再试。';
 };
+/** Who speaks, and on which model: nobody finds out from the reply which model a member was given. */
+function membersWithModels(members: readonly AgentConfiguration[], providers: readonly ProviderSummary[]) {
+  const models = members.map(member => {
+    const provider = providers.find(item => item.id === member.providerId);
+    if (!provider || provider.kind === 'mock' || !member.modelId) return undefined;
+    return provider.customModels.find(model => model.id === member.modelId)?.name ?? member.modelId;
+  });
+  const names = members.map(member => member.displayName);
+  if (models.every(model => model === undefined)) return names.join('、');
+  if (models.every(model => model === models[0])) return `${names.join('、')}（都用 ${models[0]}）`;
+  return names.map((name, index) => models[index] ? `${name}（${models[index]}）` : name).join('、');
+}
 const remembered = (key: string, fallback: boolean) => { try { const value = localStorage.getItem(key); return value === null ? fallback : value === 'true'; } catch { return fallback; } };
 const remember = (key: string, value: boolean) => { try { localStorage.setItem(key, String(value)); } catch { /* The choice still applies to this window. */ } };
 const liveStatuses = ['running', 'pausing', 'paused', 'cancelling'];
@@ -121,6 +134,11 @@ export function App() {
       getKeyStorageStatus: () => api.settings.getKeyStorageStatus(),
       testConnection: input => api.settings.testConnection(input),
       ...(api.settings.listModelReadiness ? { listModelReadiness: () => api.settings.listModelReadiness!() } : {}),
+      ...(api.settings.refreshModels ? { refreshModels: async input => {
+        const result = await api.settings.refreshModels!(input);
+        if (result.outcome !== 'skipped') void reloadProviders();
+        return result;
+      } } : {}),
     };
   }, [api, reloadProviders]);
   useEffect(() => {
@@ -401,7 +419,7 @@ export function App() {
       <h2>这场讨论要解决什么？</h2>
       <p>{enabledMembers === undefined ? '正在读取房间成员…'
         : enabledMembers.length === 0 ? <>这个房间还没有参与讨论的成员。<button type="button" className="link-btn" onClick={() => roomId && openRoom(roomId)}>去房间里添加成员</button></>
-        : `${enabledMembers.map(member => member.displayName).join('、')}会按「${workflowLabel}」依次发言，不会同时生成。你随时可以暂停、插话或点名。`}</p>
+        : `${membersWithModels(enabledMembers, providers)}会按「${workflowLabel}」依次发言，不会同时生成。你随时可以暂停、插话或点名。`}</p>
       {recentTasks.length > 0 && <div className="suggest" aria-label="最近的讨论目标">{recentTasks.map(task => <button key={task} type="button" title={`填入：${task}`} onClick={() => session.store.getState().setDraft(task)}>{task}</button>)}</div>}
     </div></div>;
   })();
@@ -435,7 +453,7 @@ export function App() {
     return `${stored.draft.phases.map(phase => `${phase.title}：${names(phase.participants)}`).join(' → ')} · ${limit}`;
   })() : `没有单独设置：参与讨论的成员按顺序轮流发言，共 ${Math.max(3, enabledMembers?.length ?? 0)} 回合。`;
   const pageBody: Record<Exclude<Page, 'discussion' | 'settings'>, () => ReactNode> = {
-    rooms: () => room ? <RoomPage key={room.id} api={api.rooms} room={room} providers={providers} readiness={readiness.rows} runs={directory.runs}
+    rooms: () => room ? <RoomPage key={room.id} onEditMember={() => refreshStaleModels(settingsApi, providers)} api={api.rooms} room={room} providers={providers} readiness={readiness.rows} runs={directory.runs}
       workflow={{ label: workflowLabel, detail: modeDetail, onChange: () => setWorkflowOpen(true) }}
       onNewDiscussion={() => newDiscussion(room.id)} onOpenRun={selectRun} onOpenSettings={() => openSettings()}
       onChanged={() => { void directory.reload(); setWorkflowVersion(version => version + 1); }}

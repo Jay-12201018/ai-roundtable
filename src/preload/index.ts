@@ -92,6 +92,7 @@ const api: RoundtableApiContract = {
     getKeyStorageStatus: () => invoke('settings.getKeyStorageStatus', undefined),
     testConnection: (input) => invoke('settings.testConnection', input),
     listModelReadiness: () => invoke('settings.listModelReadiness', undefined),
+    refreshModels: (input) => invoke('settings.refreshModels', input),
   },
   run: {
     previewWorkflow: (input) => invoke('run.previewWorkflow', input),

@@ -87,6 +87,7 @@ export const ipcContracts = {
   'settings.testConnection': providerSettingsContracts.testConnection,
   // D114: per-model readiness as Main decides it.
   'settings.listModelReadiness': providerSettingsContracts.listModelReadiness,
+  'settings.refreshModels': providerSettingsContracts.refreshModels,
 } as const;
 export type IpcChannel = keyof typeof ipcContracts;
 export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcContracts)[C]['input']>;
@@ -162,7 +163,7 @@ function configurationMatches(channel: IpcChannel, input: unknown, data: unknown
     return agents.every(agent => agent.roomId === request.roomId)
       && (channel !== 'rooms.reorderAgents' || agents.length === request.agentIds!.length && agents.every((agent,index) => agent.id === request.agentIds![index]));
   }
-  if (['settings.setKey','settings.getProviderKeyState','settings.testConnection'].includes(channel)
+  if (['settings.setKey','settings.getProviderKeyState','settings.refreshModels','settings.testConnection'].includes(channel)
     && entity.providerId !== request.providerId) return false;
   if (channel === 'settings.testConnection' && entity.result?.level !== request.level) return false;
   if (channel === 'rooms.listRoomMessages') {

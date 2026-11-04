@@ -76,6 +76,15 @@ UPDATE providers SET enabled=0, is_default=0 WHERE type='compatible' AND (base_u
   'https://api.deepseek.com', 'https://ark.cn-beijing.volces.com/api/v3', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://api.moonshot.cn/v1',
   'https://open.bigmodel.cn/api/paas/v4', 'https://qianfan.baidubce.com/v2', 'https://tokenhub.tencentmaas.com/v1', 'https://api.minimax.cn/v1'));
 
+-- D143: what a service's own model list said last. Only Main writes it, and the list is checked against the service's naming rule again when read.
+CREATE TABLE provider_model_discovery (
+  provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
+  model_ids_json TEXT NOT NULL CHECK(json_valid(model_ids_json) AND json_type(model_ids_json)='array'),
+  outcome TEXT NOT NULL CHECK(outcome IN ('listed','unsupported','authentication_failed','failed')),
+  checked_at TEXT NOT NULL,
+  listed_at TEXT
+);
+
 -- D139: a version that passed validation is usable at once. The same rules as migrations 12 and 13, without adoption.
 DROP TRIGGER artifact_export_insert;
 CREATE TRIGGER artifact_export_insert BEFORE INSERT ON artifact_exports BEGIN

@@ -84,15 +84,63 @@
   "caption": "深色主题：房间里的成员。"
  },
  {
-  "file": "22-thinking-wait.png",
+  "file": "22-pick-model.png",
+  "caption": "连接通义千问：模型下拉框始终显示，默认项看得见，这里改成 Qwen3.8 Flash；每个模型都有一句说明。"
+ },
+ {
+  "file": "23-picked-discussion.png",
+  "caption": "第一场讨论：写明三位成员都用 Qwen3.8 Flash。"
+ },
+ {
+  "file": "24-picked-members.png",
+  "caption": "房间：三位成员都显示 Qwen3.8 Flash。"
+ },
+ {
+  "file": "25-picked-member-dialog.png",
+  "caption": "编辑成员：模型按服务分组，这位成员单独换成 Qwen3.7 Max。"
+ },
+ {
+  "file": "26-picked-default.png",
+  "caption": "设置 › 模型服务：随时可以改默认模型，已有成员不变。"
+ },
+ {
+  "file": "27-picked-members-dark.png",
+  "caption": "深色主题：成员各自的模型。"
+ },
+ {
+  "file": "28-picked-finished.png",
+  "caption": "讨论结束：服务收到的 model 就是所选的模型。"
+ },
+ {
+  "file": "29-discover-wizard.png",
+  "caption": "服务商列表多了一个本品牌新模型：排在内置模型后面，只显示模型 ID；其他品牌和翻译模型都没有进来。"
+ },
+ {
+  "file": "30-discover-members.png",
+  "caption": "三位成员用的就是选中的新模型。"
+ },
+ {
+  "file": "31-discover-services.png",
+  "caption": "服务卡片：写明模型列表来自服务商，旁边是“刷新模型列表”；上限和内置模型一样可以改。"
+ },
+ {
+  "file": "32-discover-delisted.png",
+  "caption": "模型从服务商列表消失：成员的选择不变，写明可能已下线，由主持人决定。"
+ },
+ {
+  "file": "33-discover-delisted-dark.png",
+  "caption": "深色主题：模型可能已下线。"
+ },
+ {
+  "file": "34-thinking-wait.png",
   "caption": "思考期间：<think> 块和 reasoning_content 都不显示；第二位成员还没有正文，写明正在思考或生成，不像卡住。"
  },
  {
-  "file": "23-quota-used-up.png",
+  "file": "35-quota-used-up.png",
   "caption": "额度用完：第三位成员 8192 全用在思考上，没有正文。写明原因和解决办法，旁边就是“重新生成”。"
  },
  {
-  "file": "24-quota-regenerated.png",
+  "file": "36-quota-regenerated.png",
   "caption": "调高最大输出后重新生成：这次请求按 16000 发出，写出了正文。"
  }
 ]
