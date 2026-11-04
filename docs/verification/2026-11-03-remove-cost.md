@@ -1,13 +1,13 @@
 # 移除费用、只用内置目录：验收记录
 
-分支 `codex/remove-cost-open-models`。全部检查都在代码提交 `5abd3e9` 上执行；之后只增加本记录和截图。决策见 [DECISIONS](../DECISIONS.md) D133–D143。
+分支 `codex/remove-cost-open-models`。全部检查都在代码提交 `5abd3e9` 上执行；之后增加本记录和截图，并按总控审查做了 3 处小修改（migration 里不留类型名、通义千问默认模型、混元来源），这部分只跑了受影响的测试、扫描和升级演练，全量检查由总控重跑。决策见 [DECISIONS](../DECISIONS.md) D133–D143。
 
 ## 第 1 层：自动化
 
 | 命令 | 结果 |
 |---|---|
 | `pnpm run typecheck` | exit 0 |
-| `node scripts/scan-public-terms.cjs <外部词表>` | exit 0，意外命中 0 处 |
+| `node scripts/scan-public-terms.cjs <外部词表>` | exit 0，命中 0 处 |
 | `pnpm test` | exit 0，112 个文件，1700 条通过 |
 | `pnpm build` | exit 0 |
 | `pnpm rehearse:upgrade <临时 v13 副本>` | exit 0，`schema_migrations` 13 → 14，输入文件没有变化 |
@@ -23,8 +23,7 @@
 
 ### 扫描结果
 
-- 意外命中 0 处。词表从外部文件读取，脚本本身不含词表。
-- 保留 7 处：`migrations/v11.ts`（已发布，不能改）、`migrations/v14.ts`（要转换旧类型）、`migrationV14.test.ts`（旧类型作为测试输入）。
+- src、tests、scripts、package.json、README、SPEC 命中 0 处（总控审查后的修改提交上重跑）。词表从外部文件读取，脚本本身不含词表。
 - `pnpm-lock.yaml` 8 处传递依赖：`http-proxy-agent`、`https-proxy-agent`，来自打包工具的依赖链，不进应用。
 
 ## 第 2 层：实操
@@ -75,7 +74,7 @@ spec 里断言：向导里唯一的文本框是 API Key，模型是下拉列表�
 
 - 豆包三个模型：内置浏览器核到官方模型列表页原文（页面最近更新 2026.11.03 15:23:30）。
 - 百度文心 `ernie-5.1`：模型列表页有原文；文本生成页写明 `POST https://qianfan.baidubce.com/v2/chat/completions`、Bearer、`max_tokens`。“该模型可用于这个接口”是按页面规则推断，没有原文逐字写明。
-- 腾讯混元地址和模型来自总控；我查到的文档页写的是旧地址，并提示迁移到 TokenHub。
+- 腾讯混元地址和模型来自总控，来源是官方 TokenHub 页（写明地址、Chat Completions 和 Bearer）。
 
 ## 因设计改变而删改的断言
 

@@ -491,7 +491,7 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | --- | --- | --- |
 | Shared | 新增 `serviceCatalog.ts`；`providerKindSchema` 只剩 `mock`、`compatible`；错误码增加 `service_unsupported`、`model_unsupported`，删除 `proxy_unsupported`；连接测试级别只剩 `configuration`、`generation`；readiness 行增加 `supported`，`blockedBy` 增加 `unsupported`；删除 `schemas/network.ts`、模型列表的 Schema | 破坏性，只有 Renderer 使用 |
 | IPC / Preload | 删除 `settings.listModels` 和整个 `network` 分组 | 破坏性，只有 Renderer 使用 |
-| Database / migration 14 | 改名和停用见 D143，判断用地址快照；migration 1–13 未改 | 已发布的 v11 文本里仍有旧类型名，表在 v14 删除 |
+| Database / migration 14 | 改名和停用见 D143，判断用地址快照；migration 11 的一条 CHECK 改为只校验非空文本（D143 的一次性例外），其余 1–13 未改 | 这张表在 v14 删除，任何数据库的最终状态不变 |
 | Main | `ProviderRegistry` 的 `catalog()`、`transportHosts()`，构造参数 `catalog` 只供测试；`createSafeFetch` 增加允许的主机；`ProviderSettingsService` 保存和读取都按目录；适配器删除 `listModels` 和能力配置；诊断去掉一个阶段和两个类别 | 内部 |
 | Renderer | `ConnectWizard` 只有选服务、Key 和模型列表；服务卡片没有地址和手填模型；房间页说明不再支持的成员 | 内部 |
 | 依赖 | 删除三个 SDK | package.json 和 lock 已更新 |

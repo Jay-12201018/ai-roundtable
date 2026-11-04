@@ -3,18 +3,12 @@
 // usage: node scripts/scan-public-terms.cjs <word list file>
 // The file has one case-insensitive regular expression per line; a line starting with `!` is text removed before matching,
 // and one starting with `#` is a comment.
-// Exit codes: 0 nothing unexpected; 1 unexpected hits; 2 no usable list. Lines that must stay (see `kept`) and lockfile hits are listed, and do not fail.
+// Exit codes: 0 no hits; 1 hits; 2 no usable list. Lockfile hits are listed, and do not fail.
 const fs = require('node:fs');
 const { join, relative, resolve } = require('node:path');
 
 const root = resolve(__dirname, '..');
 const scanned = ['src', 'tests', 'scripts', 'package.json', 'README.md', 'SPEC.md'];
-// Published migrations are never edited (AGENTS.md); migration 14 has to name what it converts.
-const kept = [
-  { file: 'src/main/database/migrations/v11.ts', why: 'published migration' },
-  { file: 'src/main/database/migrations/v14.ts', why: 'converts the old values' },
-  { file: 'tests/integration/persistence/migrationV14.test.ts', why: 'old values as a test input' },
-];
 
 function readList(path) {
   if (!path || !fs.existsSync(path)) { console.error('usage: node scripts/scan-public-terms.cjs <word list file>'); process.exit(2); }
@@ -42,23 +36,19 @@ function hits(path) {
 }
 
 let unexpected = 0;
-const retained = [];
 for (const start of scanned) {
   for (const path of files(join(root, start))) {
     const file = relative(root, path).split('\\').join('/');
     if (/\.(png|jpg|ico|icns)$/iu.test(file)) continue;
-    const allowed = kept.find(item => item.file === file);
     for (const hit of hits(path)) {
-      if (allowed) { retained.push(`${file}:${hit.line} [${allowed.why}]`); continue; }
       unexpected++;
       console.log(`${file}:${hit.line} ${hit.text}`);
     }
   }
 }
-if (retained.length) { console.log(`\n保留 ${retained.length} 处：`); for (const line of retained) console.log(`  ${line}`); }
 const lock = join(root, 'pnpm-lock.yaml');
 // Checksums match by chance.
 const locked = fs.existsSync(lock) ? hits(lock).filter(hit => !hit.text.startsWith('resolution:')) : [];
 if (locked.length) { console.log(`\npnpm-lock.yaml 里的传递依赖 ${locked.length} 处：`); for (const hit of locked) console.log(`  ${hit.line} ${hit.text}`); }
-console.log(`\n意外命中 ${unexpected} 处。`);
+console.log(`\n命中 ${unexpected} 处。`);
 process.exit(unexpected ? 1 : 0);

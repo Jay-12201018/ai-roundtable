@@ -7,7 +7,7 @@
  * - Kimi: https://platform.kimi.com/docs/guide/start-using-kimi-api
  * - 智谱 GLM: https://docs.bigmodel.cn/cn/guide/start/model-overview
  * - 百度文心: https://cloud.baidu.com/doc/qianfan-docs/s/7m95lyy43 , https://cloud.baidu.com/doc/qianfan-api/s/3m7of64lb
- * - 腾讯混元: https://cloud.tencent.com/document/product/1729/104753
+ * - 腾讯混元: https://cloud.tencent.com/document/product/1823/132252
  * - MiniMax: https://platform.minimax.cn/docs/guides/models-intro
  */
 export type CatalogModel = { id: string; name: string; note?: string };
@@ -20,7 +20,7 @@ export const serviceCatalog: readonly CatalogService[] = [
     { id: 'doubao-seed-2-1-pro-260915', name: 'Doubao Seed 2.1 Pro', note: '能力最强' }, { id: 'doubao-seed-2-1-lite-260915', name: 'Doubao Seed 2.1 Lite', note: '均衡' },
     { id: 'doubao-seed-2-1-turbo-260628', name: 'Doubao Seed 2.1 Turbo', note: '更快' }] },
   { id: 'qwen', name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [
-    { id: 'qwen3.8-max', name: 'Qwen3.8 Max', note: '复杂推理' }, { id: 'qwen3.7-plus', name: 'Qwen3.7 Plus', note: '性能和速度均衡' }, { id: 'qwen3.8-flash', name: 'Qwen3.8 Flash', note: '更快' }] },
+    { id: 'qwen3.7-plus', name: 'Qwen3.7 Plus', note: '性能和速度均衡' }, { id: 'qwen3.8-max', name: 'Qwen3.8 Max', note: '复杂推理' }, { id: 'qwen3.8-flash', name: 'Qwen3.8 Flash', note: '更快' }] },
   { id: 'kimi', name: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', models: [
     { id: 'kimi-k3.1-pro', name: 'Kimi K3.1 Pro' }, { id: 'kimi-k3.1-pro-highspeed', name: 'Kimi K3.1 Pro 高速版', note: '更快' }, { id: 'kimi-k3', name: 'Kimi K3' }] },
   { id: 'glm', name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', models: [

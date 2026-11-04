@@ -163,10 +163,11 @@ describe('migration 14 (D133)', () => {
   it('D143: one interface type and only catalog addresses; the rest stay as stopped ones, with their names, history and members', async () => {
     const path = historical(13);
     const seed = new Sqlite(path);
-    const rows = [['generic', 'openai-compatible', 'https://api.deepseek.com', 0], ['slash', 'openai-compatible', 'https://api.moonshot.cn/v1/', 0],
-      ['stopped-a', 'openai', null, 0], ['stopped-b', 'anthropic', null, 0], ['stopped-c', 'gemini', 'https://gateway.example/v1', 0],
-      ['foreign-default', 'openai', 'https://api.deepseek.com', 0], ['typed', 'openai-compatible', 'https://models.example/v1', 1], ['typed-null', 'openai-compatible', null, 0],
-      ['near', 'openai-compatible', 'https://api.deepseek.com.example.com', 0], ['local', 'openai-compatible', 'http://localhost:11434/v1', 0], ['demo', 'mock', null, 0]] as const;
+    // The rule goes by the shape of the type, not by any name: `…-compatible` was the generic one, and the rest were other kinds.
+    const rows = [['generic', 'vendor-compatible', 'https://api.deepseek.com', 0], ['slash', 'vendor-compatible', 'https://api.moonshot.cn/v1/', 0], ['already', 'compatible', 'https://open.bigmodel.cn/api/paas/v4', 0],
+      ['stopped-a', 'vendor-a', null, 0], ['stopped-b', 'vendor-b', null, 0], ['stopped-c', 'vendor-c', 'https://gateway.example/v1', 0],
+      ['other-kind', 'vendor-a', 'https://api.deepseek.com', 0], ['typed', 'vendor-compatible', 'https://models.example/v1', 1], ['typed-null', 'vendor-compatible', null, 0],
+      ['near', 'vendor-compatible', 'https://api.deepseek.com.example.com', 0], ['local', 'vendor-compatible', 'http://localhost:11434/v1', 0], ['demo', 'mock', null, 0]] as const;
     for (const [id, type, base, isDefault] of rows)
       seed.prepare('INSERT INTO providers(id,name,type,base_url,enabled,is_default,custom_models_json,key_revision,created_at,updated_at) VALUES(?,?,?,?,1,?,?,?,?,?)').run(id, `原名 ${id}`, type, base, isDefault, id === 'demo' ? '[]' : '[{"id":"m","name":"m"}]', 0, time, time);
     seed.prepare("INSERT INTO agents(id,room_id,display_name,role_template_id,provider_id,model_id,configuration_version,created_at,updated_at) VALUES('catalog-agent','room','成员','draft','typed','m',1,?,?)").run(time, time);
@@ -176,7 +177,8 @@ describe('migration 14 (D133)', () => {
       const byId = Object.fromEntries(db.listProviderSummaries().map(row => [row.id, row]));
       expect(byId.generic).toMatchObject({ name: '原名 generic', kind: 'compatible', enabled: true, configurationValid: true });
       expect(byId.slash).toMatchObject({ kind: 'compatible', enabled: true });
-      for (const id of ['stopped-a', 'stopped-b', 'stopped-c', 'foreign-default', 'typed', 'typed-null', 'near', 'local'])
+      expect(byId.already).toMatchObject({ kind: 'compatible', enabled: true });
+      for (const id of ['stopped-a', 'stopped-b', 'stopped-c', 'other-kind', 'typed', 'typed-null', 'near', 'local'])
         expect(byId[id]).toMatchObject({ name: `原名 ${id}`, kind: 'compatible', enabled: false, isDefault: false, configurationValid: true, customModels: [{ id: 'm', name: 'm' }] });
       expect(byId.demo).toMatchObject({ kind: 'mock', enabled: true });
       expect(db.getProviderConfiguration('stopped-a')).toMatchObject({ baseUrl: null, enabled: false });

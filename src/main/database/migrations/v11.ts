@@ -5,7 +5,7 @@ export const migration11 = `
 -- changed target gives the Provider a new key_revision, so the row then no longer authorizes anything.
 CREATE TABLE provider_target_approvals (
   provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK(kind IN ('openai','openai-compatible','anthropic','gemini')),
+  kind TEXT NOT NULL CHECK(typeof(kind)='text' AND length(kind) > 0),
   base_url TEXT NOT NULL CHECK(length(base_url) BETWEEN 1 AND 2048),
   key_revision TEXT NOT NULL CHECK(typeof(key_revision)='text' AND length(key_revision) > 0),
   confirmed_at TEXT NOT NULL
