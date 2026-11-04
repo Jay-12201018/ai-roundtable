@@ -3,7 +3,7 @@ import { artifactKindLabels, artifactNothingKinds, type ArtifactKind } from '../
 import type { ProviderMessage } from '../providers/types';
 import type { ActiveSummary, PublicSlot } from '../context/summary';
 import { affectedVersions } from '../host/versions';
-import { boundaryText, hasRevisionNote, renderEntry, taskText, type TranscriptEntry } from '../context/transcript';
+import { boundaryText, hasRevisionNote, recordedImageNote, renderEntry, taskText, type TranscriptEntry } from '../context/transcript';
 import type { Database } from '../database/Database';
 
 type Snapshot = ReturnType<Database['readRunSnapshot']>;
@@ -133,12 +133,12 @@ export function buildArtifactRequest(input: ArtifactPlanInput): { messages: Prov
   for (const slot of input.slots) {
     const revised = basedOn?.revisedSlotIds.includes(slot.slotId) ?? false;
     if (basedOn && slot.number <= basedOn.lastNumber && !revised) continue;
-    if (slot.message.status !== 'completed' || !slot.message.content.trim()) continue;
+    if (slot.message.status !== 'completed' || !slot.message.content.trim() && !slot.message.attachments?.length) continue;
     const member = slot.agentId ? input.members.find(item => item.agentId === slot.agentId) : undefined;
     if (slot.author === 'agent' && !member) continue;
     const truncated = input.snapshot.attempts.find(attempt => attempt.messageId === slot.message.id)?.finishReason === 'length';
     entries.push({ speaker: slot.author === 'host' ? 'host' : 'member', ...(member ? { member } : {}), content: slot.message.content, number: slot.number,
-      editedByHost: slot.active.origin === 'edit', basedOnRevisedHistory: (affected.get(slot.message.id)?.length ?? 0) > 0, truncated, ...(revised ? { revisedAfterSummary: true } : {}) });
+      editedByHost: slot.active.origin === 'edit', basedOnRevisedHistory: (affected.get(slot.message.id)?.length ?? 0) > 0, truncated, ...(revised ? { revisedAfterSummary: true } : {}), ...recordedImageNote(slot.message.attachments) });
     basis.push(slot.message.id);
     if (!numbers.includes(slot.number)) numbers.push(slot.number);
   }
@@ -150,7 +150,7 @@ export function buildArtifactRequest(input: ArtifactPlanInput): { messages: Prov
       { role: 'system', content: artifactRoleText },
       // The kind's requirements close the user message, right before the answer: the common prefix stays cacheable,
       // and every Provider takes a final user turn (a system message mid-conversation is not portable).
-      { role: 'user', content: [taskText(input.task), ...entries.map(renderEntry), artifactRulesText(input.kind, entries.some(hasRevisionNote)),
+      { role: 'user', content: [taskText(input.task, recordedImageNote(input.snapshot.taskAttachments).imageNote), ...entries.map(renderEntry), artifactRulesText(input.kind, entries.some(hasRevisionNote)),
         artifactCueText(input.kind, lastNumber)].join('\n\n') },
     ],
     basis, numbers: numbers.sort((a, b) => a - b),

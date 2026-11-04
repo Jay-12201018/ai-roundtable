@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { messageTextOf } from '../../../src/shared/schemas/provider';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -89,7 +90,7 @@ describe('R11 plan/SQLite/R05/Mock fixture seam (not production RunService integ
       expect(input.agentRole).toBe(step.kind);
       expect(input.messages.filter(m => m.role === 'system').map(m => m.content)).toContain(workflowStageInstruction(step.kind));
       const earlier = db.readRunSnapshot('run').messages.slice(0, -1);
-      for (const message of earlier) expect(input.messages.some(m => m.role !== 'system' && m.content.includes(message.content))).toBe(true);
+      for (const message of earlier) expect(input.messages.some(m => m.role !== 'system' && messageTextOf(m.content).includes(message.content))).toBe(true);
       expect(db.getAttempt(input.requestId)?.inputSnapshot).toEqual(input);
     }
     expect(db.listTurns('run').map(t => t.agentId)).toEqual(snapshot.steps.map(s => s.agentId));
@@ -101,8 +102,8 @@ describe('R11 plan/SQLite/R05/Mock fixture seam (not production RunService integ
     const db = open(); const snapshot = seed(db); const provider = new RecordingMock(true);
     await consumeOne(db, provider); await consumeOne(db, provider);
     expect(provider.inputs[1].agentRole).toBe('review');
-    expect(provider.inputs[1].messages.some(m => m.role !== 'system' && m.content.includes('@Override'))).toBe(true);
-    expect(provider.inputs[1].messages.some(m => m.role === 'system' && m.content.includes('@Override'))).toBe(false);
+    expect(provider.inputs[1].messages.some(m => m.role !== 'system' && messageTextOf(m.content).includes('@Override'))).toBe(true);
+    expect(provider.inputs[1].messages.some(m => m.role === 'system' && messageTextOf(m.content).includes('@Override'))).toBe(false);
     expect(readWorkflowSnapshot(db.getRun('run')!.workflowSnapshot)).toEqual(snapshot);
     expect(nextWorkflowStep(snapshot, db.getRun('run')!, db.listTurns('run'))).toMatchObject({ kind: 'next', step: { kind: 'revise', agentId: 'a' } });
   });

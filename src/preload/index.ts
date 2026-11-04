@@ -59,6 +59,9 @@ const api: RoundtableApiContract = {
     preview: (input) => invoke('codeExport.preview', input),
     write: (input) => invoke('codeExport.write', input),
   },
+  attachment: {
+    addImage: (input) => invoke('attachment.addImage', input),
+  },
   usage: {
     getReport: (range) => invoke('usage.getReport', range ?? {}),
     exportCsv: (range) => invoke('usage.exportCsv', range ?? {}),

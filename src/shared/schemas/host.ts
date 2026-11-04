@@ -1,10 +1,16 @@
 import { z } from 'zod';
 import { idSchema, timestampSchema } from './common';
+import { attachmentIdsSchema } from './attachment';
 
 // Host text is kept verbatim (no trimming); whitespace-only input is rejected.
 const hostText = (max: number) => z.string().min(1).max(max).refine(value => value.trim().length > 0, 'Host text cannot be blank');
 export const hostMessageContentSchema = hostText(20000);
 export const hostInstructionContentSchema = hostText(4000);
+/** D147: an interjection may be only images; without images it needs words, as before. */
+const hostMessageMaxChars = 20000;
+export const interjectionFields = { content: z.string().max(hostMessageMaxChars), attachmentIds: attachmentIdsSchema.optional() };
+export const interjectionHasContent = (input: { content: string; attachmentIds?: readonly string[] }) => input.content.trim().length > 0 || (input.attachmentIds?.length ?? 0) > 0;
+const blankInterjection = { message: 'Host text cannot be blank', path: ['content'] };
 
 export const hostCommandKindValues = ['interject', 'setOverride', 'cancelOverride', 'setInstruction', 'clearInstruction',
   'editMessage', 'regenerateMessage', 'selectVersion', 'abortGeneration'] as const;
@@ -14,7 +20,7 @@ export const hostActionStatusSchema = z.enum(['applied', 'pending', 'consumed', 
 const command = { runId: idSchema, clientRequestId: idSchema };
 /** Trusted host commands come only from the typed UI/IPC; model text is never parsed into one. */
 export const hostCommandSchema = z.discriminatedUnion('kind', [
-  z.object({ ...command, kind: z.literal('interject'), content: hostMessageContentSchema }).strict(),
+  z.object({ ...command, kind: z.literal('interject'), ...interjectionFields }).strict().refine(interjectionHasContent, blankInterjection),
   z.object({ ...command, kind: z.literal('setOverride'), agentId: idSchema }).strict(),
   z.object({ ...command, kind: z.literal('cancelOverride') }).strict(),
   z.object({ ...command, kind: z.literal('setInstruction'), instructionId: idSchema.optional(), content: hostInstructionContentSchema }).strict(),

@@ -69,6 +69,7 @@ export function SummaryDialog({ snapshot, summaries, summaryId, onClose }: { sna
         <p className="field-help">默认由综合类角色来写，并保留最近 2 条发言原文；摘要请求使用该成员的模型和 Key。{preview.basedOn ? `会在第 1–${preview.basedOn.lastNumber} 条的已确认摘要基础上续写，不再重发这些原文。` : ''}</p>
       </label>
     </div>
+    {(snapshot.taskAttachments?.length || snapshot.messages.some(message => message.attachments?.length)) ? <p className="field-help" role="note">摘要只依据文字：图片不会发给写摘要的成员。确认后，被摘要代替的插话里的图片也不再发给之后的成员；讨论目标里的图片照常发送。</p> : null}
     <p className="summary-send">{mock ? '演示成员不联网，不发送真实请求。' : '点生成后向所选成员的服务发送 1 次请求，费用由服务商收取。'}</p>
     {preview.reason && <p role="alert" className="summary-reason">{reasonText(preview)}</p>}
     {summaries.error?.key === 'generate' && <p role="alert" className="field-error">{summaries.error.message}</p>}

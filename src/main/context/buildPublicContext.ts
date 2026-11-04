@@ -2,7 +2,7 @@ import { contextInputSchema } from './types';
 import type { ContextInput, ContextReport, ContextRejection, ContextResult, ContextSource, ModelTokenCounter } from './types';
 import type { ProviderMessage } from '../providers/types';
 import { selectHistory, type HistoryCandidate } from './selectHistory';
-import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText, hasRevisionNote, type TranscriptEntry } from './transcript';
+import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText, hasRevisionNote, withImages, type TranscriptEntry } from './transcript';
 
 /** Main-only: accepts explicit safe projections, never a Renderer draft, database handle or SDK object. */
 export function buildPublicContext(input: ContextInput, counter?: ModelTokenCounter): ContextResult {
@@ -52,8 +52,9 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   const optional = history.candidates.filter(candidate => !candidate.entry.revisedAfterSummary);
   // The task, quoted history and the turn cue are assembled into the exact final messages before every count.
   const assemble = (selected: readonly HistoryCandidate[]) => {
-    const entries = [...summaryEntries, ...forced.map(candidate => candidate.entry), ...selected.map(candidate => candidate.entry)];
-    const discussion = assembleDiscussion(run.task!, entries, member, prefix.length);
+    const images = withImages(input.taskImages ?? [], [...summaryEntries, ...forced.map(candidate => candidate.entry), ...selected.map(candidate => candidate.entry)], input.imagesVisible ?? false);
+    const { entries } = images;
+    const discussion = assembleDiscussion(run.task!, entries, member, prefix.length, images.task);
     const head = prefix.map(message => ({ ...message }));
     head[rulesIndex].content = discussionRulesText(entries.some(hasRevisionNote));
     return { ...discussion, messages: [...head, ...discussion.messages] };

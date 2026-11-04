@@ -11,6 +11,7 @@ const messages: Record<ErrorCode, string> = {
   target_rejected: '这个服务的地址解析到了内网或保留地址，请求没有发出。请检查网络后再试。',
   service_unsupported: '这个服务已不再支持，可以删除它。', model_unsupported: '这个模型已不再支持，请换一个。',
   budget_exceeded: '这是旧版本因预算限制留下的记录。',
+  image_unsupported: '只支持 PNG、JPEG 和 WebP 图片。', attachment_missing: '有一张图片的文件读不出来了，这次请求没有发出。',
 };
 /** A fixed Chinese message per error code; never the error text itself, which could carry an echoed secret. */
 export function errorMessage(error: unknown): string {
@@ -76,7 +77,7 @@ export async function testService(api: Pick<ProviderSettingsApiContract, 'testCo
 }
 
 /** D143: such a model takes part with text; nothing on the page should suggest images can be sent. */
-export const multimodalText = '标“多模态”的模型能看图，目前在圆桌里只用文字讨论。';
+export const multimodalText = '标“多模态”的模型能看图：讨论里附的图片会发给它。';
 export const delistedText = '服务商列表里已经没有这个模型，可能已下线';
 
 /** D143: where the model list on the page comes from, in one plain sentence. */

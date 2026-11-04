@@ -15,6 +15,7 @@ import { artifactCommandResultSchema, artifactEditInputSchema, artifactExportInp
 import { codeExportChooseRootInputSchema, codeExportChooseRootResultSchema, codeExportPreviewInputSchema, codeExportPreviewSchema, codeExportWriteInputSchema,
   codeExportWriteResultSchema } from '../schemas/codeExport';
 import { continuationPreviewInputSchema, continuationPreviewSchema, continueDiscussionInputSchema, continueDiscussionResultSchema } from '../schemas/continuation';
+import { addImageInputSchema, imageAttachmentSchema } from '../schemas/attachment';
 
 export function ipcResponseSchema<T extends z.ZodType>(data: T) {
   return z.discriminatedUnion('ok', [
@@ -60,6 +61,8 @@ export const ipcContracts = {
   'codeExport.chooseRoot': { input: codeExportChooseRootInputSchema, output: codeExportChooseRootResultSchema },
   'codeExport.preview': { input: codeExportPreviewInputSchema, output: codeExportPreviewSchema },
   'codeExport.write': { input: codeExportWriteInputSchema, output: codeExportWriteResultSchema },
+  // D147: the page hands over bytes; Main checks them and answers with what it stored. There is no read or path channel.
+  'attachment.addImage': { input: addImageInputSchema, output: imageAttachmentSchema },
   'rooms.createRoom': roomManagementContracts.createRoom,
   'rooms.updateRoom': roomManagementContracts.updateRoom,
   'rooms.getRoomConfiguration': roomManagementContracts.getRoomConfiguration,

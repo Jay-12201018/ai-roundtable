@@ -49,7 +49,8 @@ const fixture = vi.hoisted(() => {
   };
 });
 
-vi.mock('electron', () => ({ app: fixture.app, dialog: fixture.dialog, BrowserWindow: fixture.Window, shell: { openExternal: vi.fn() }, nativeTheme: { shouldUseDarkColors: false } }));
+vi.mock('electron', () => ({ app: fixture.app, dialog: fixture.dialog, BrowserWindow: fixture.Window, shell: { openExternal: vi.fn() }, nativeTheme: { shouldUseDarkColors: false }, protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() } }));
+vi.mock('../../src/main/attachments/AttachmentStore', () => ({ AttachmentStore: vi.fn(function () { return { sweep: vi.fn(), read: vi.fn(), addImage: vi.fn() }; }) }));
 vi.mock('../../src/main/database/Database', () => ({ Database: vi.fn(function () { return fixture.database; }) }));
 vi.mock('../../src/main/security/electronSafeStorage', () => ({ createElectronKeyBackend: vi.fn() }));
 vi.mock('../../src/main/security/KeyService', () => ({ KeyService: vi.fn(function () { return fixture.keys; }) }));
@@ -119,7 +120,7 @@ describe('application lifecycle', () => {
     expect(registry).toBeInstanceOf(ProviderRegistry);
     expect(ProviderSettingsService).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.keys, registry);
     expect(vi.mocked(RunService).mock.calls[0][3]).toBe(registry);
-    expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
+    expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host, attachments: expect.any(Object),
       usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) },
       artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
@@ -239,7 +240,7 @@ describe('application lifecycle', () => {
     emit('activate');
 
     expect(fixture.unregister[0]).toHaveBeenCalledTimes(1);
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host, attachments: expect.any(Object),
       usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) },
       artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
@@ -503,7 +504,7 @@ describe('application lifecycle', () => {
     fixture.windows[0]!.close();
     emit('second-instance');
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
-    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
+    expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host, attachments: expect.any(Object),
       usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) },
       artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });

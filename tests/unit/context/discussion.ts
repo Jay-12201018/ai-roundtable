@@ -1,3 +1,4 @@
+import { messageTextOf } from '../../../src/shared/schemas/provider';
 import type { ProviderMessage } from '../../../src/main/providers/types';
 
 export interface ParsedEntry {
@@ -27,10 +28,10 @@ export function parseDiscussion(messages: readonly ProviderMessage[]): { task: s
   const entries: ParsedEntry[] = [];
   for (const message of chat) {
     if (message.role === 'assistant') {
-      entries.push({ role: 'assistant', speaker: '', own: true, publicText: message.content, editedByHost: false, basedOnRevisedHistory: false, truncated: false });
+      entries.push({ role: 'assistant', speaker: '', own: true, publicText: messageTextOf(message.content), editedByHost: false, basedOnRevisedHistory: false, truncated: false });
       continue;
     }
-    for (const block of message.content.split('\n\n')) {
+    for (const block of messageTextOf(message.content).split('\n\n')) {
       const [label, ...rest] = block.split('\n');
       if (label === '【轮到你发言】') { if (cue !== undefined) throw new Error('second cue'); cue = rest.join('\n'); continue; }
       const notes = rest.filter(line => line.startsWith('（'));

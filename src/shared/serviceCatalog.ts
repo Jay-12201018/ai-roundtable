@@ -1,8 +1,8 @@
 /**
  * D143: the services and models this app works with, and the only source for them. The wizard offers these; Main refuses
  * anything else before a Key is read or a request is sent. Each service lists the models usable for a discussion, newest first,
- * as its official documentation had them on 2026-11-04. Models that can also read images are marked `multimodal`; the app only
- * sends them text for now. Left out: what is being retired, closed to new users, built for one task (translation, role play,
+ * as its official documentation had them on 2026-11-04. Models that can also read images are marked `multimodal`, and only
+ * those are sent the host's images (D147). Left out: what is being retired, closed to new users, built for one task (translation, role play,
  * long documents) or only for generating speech, images or video, and other brands' models hosted there.
  * - DeepSeek: https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
  * - 豆包: https://www.volcengine.com/docs/82379/1330310
@@ -85,6 +85,17 @@ export const serviceCatalog: readonly CatalogService[] = [
 
 /** The note a person reads: what a model can do is said first, so nobody has to guess. */
 export const modelNote = (model: CatalogModel) => model.multimodal ? `多模态${model.note ? `，${model.note}` : ''}` : model.note;
+
+/**
+ * D147: whether a model reads images: the catalog says for its own models. A model the service's list added (D143) is not
+ * something the catalog knows, so it is `unknown`: images are sent, and a refusal is shown as any other failure.
+ */
+export type ImageSupport = 'yes' | 'no' | 'unknown';
+export function imageSupportOf(service: CatalogService | undefined, modelId: string): ImageSupport {
+  if (!service) return 'no';
+  const model = service.models.find(item => item.id === modelId);
+  return !model ? 'unknown' : model.multimodal ? 'yes' : 'no';
+}
 
 const normalized = (address: string) => address.replace(/\/+$/u, '');
 /** The catalog's service at exactly this address, if any. */

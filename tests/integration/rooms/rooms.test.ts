@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { messageTextOf } from '../../../src/shared/schemas/provider';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,7 +68,7 @@ describe('R07 persistence and protected configuration', () => {
       expect(request.modelId).toBe('mock'); expect(request.agentRole).toBe(f.agents[i].roleTemplateId);
       const { signal: _signal, ...persisted } = request;
       expect(f.db.getAttempt(request.requestId)?.inputSnapshot).toEqual(persisted);
-      expect(request.messages.some(m => m.role === 'system' && m.content.includes(f.agents[i].systemPrompt))).toBe(true);
+      expect(request.messages.some(m => m.role === 'system' && messageTextOf(m.content).includes(f.agents[i].systemPrompt))).toBe(true);
     }
     const before = f.db.readRunSnapshot(run.runId);
     await f.rooms.updateAgent({ ...input(f.agents[0]), displayName: '未来姓名', roleTemplateId: '未来角色', enabled: false });

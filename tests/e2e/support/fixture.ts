@@ -3,7 +3,11 @@ import type { AddressInfo } from 'node:net';
 
 export type FixtureMode = 'ok' | 'hang';
 export type FixtureService = 'deepseek' | 'kimi' | 'glm' | 'doubao' | 'qwen';
-type Message = { role: string; content: string };
+type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+type Message = { role: string; content: string | ContentPart[] };
+/** The words of a message as it went out; images are read with `imagesIn`. */
+export const textIn = (message: Message | undefined) => typeof message?.content === 'string' ? message.content : (message?.content ?? []).flatMap(part => part.type === 'text' ? [part.text] : []).join('\n\n');
+export const imagesIn = (messages: readonly Message[]) => messages.flatMap(message => typeof message.content === 'string' ? [] : message.content.flatMap(part => part.type === 'image_url' ? [{ role: message.role, url: part.image_url.url }] : []));
 export type FixtureRequest = { path?: string; service: FixtureService; model: string; maxTokens: number; mode: FixtureMode; messages: Message[]; headers: IncomingHttpHeaders; raw: Record<string, any> };
 type ReplyBody = { model: string; max_tokens: number; service: FixtureService; messages: Message[] };
 
@@ -98,6 +102,6 @@ export class DeepSeekFixture {
 }
 
 /** The member a discussion request is addressed to, as the app words it. */
-export const memberOf = (body: Pick<ReplyBody, 'messages'>) => /现在由你（成员「([^」]+)」/u.exec(body.messages.at(-1)?.content ?? '')?.[1];
+export const memberOf = (body: Pick<ReplyBody, 'messages'>) => /现在由你（成员「([^」]+)」/u.exec(textIn(body.messages.at(-1)))?.[1];
 /** The artifact kind an artifact request asks for, as the app words it. */
-export const artifactOf = (body: Pick<ReplyBody, 'messages'>) => /整理「([^」]+)」。只输出 JSON 对象。$/u.exec(body.messages.at(-1)?.content ?? '')?.[1];
+export const artifactOf = (body: Pick<ReplyBody, 'messages'>) => /整理「([^」]+)」。只输出 JSON 对象。$/u.exec(textIn(body.messages.at(-1)))?.[1];

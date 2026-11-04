@@ -591,7 +591,7 @@ describe('records survive a restart and are protected (migration 13)', () => {
     await closeFixtures();
     const raw = new Sqlite(filename);
     try {
-      expect(validateDatabase(raw).schemaVersion).toBe(14);
+      expect(validateDatabase(raw).schemaVersion).toBe(15);
       expect(() => raw.prepare("UPDATE code_exports SET root_path='/elsewhere'").run()).toThrow('Code exports are append-only');
       expect(() => raw.prepare('DELETE FROM code_export_files').run()).toThrow('Code export files are append-only');
       expect(() => raw.prepare("INSERT INTO code_exports(id,version_id,run_id,client_request_id,root_path,created_at) SELECT 'x','not-a-version',v.run_id,'x','/x','t' FROM artifact_versions v").run()).toThrow('Invalid code export');
@@ -615,7 +615,7 @@ describe('records survive a restart and are protected (migration 13)', () => {
       const copy = join(dir, `copy-${++copies}.db`);
       const source = new Sqlite(filename); await source.backup(copy); source.close();
       const raw = new Sqlite(copy);
-      try { expect(validateDatabase(raw).schemaVersion).toBe(14); raw.exec(sql); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
+      try { expect(validateDatabase(raw).schemaVersion).toBe(15); raw.exec(sql); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
     };
     await tampered('DROP TRIGGER code_export_file_no_delete', 'Missing R15 code export protection');
     await tampered("INSERT INTO code_export_files SELECT export_id,1,'b.ts','none','skipped','made_up',content_sha256,0 FROM code_export_files", 'Invalid code export file');

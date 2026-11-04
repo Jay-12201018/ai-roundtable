@@ -15,7 +15,7 @@ export type InterjectResult = {
  * is never rolled back, and sending again skips an override that is already in place. D110: naming the member the
  * schedule already has next (`scheduled`) sends only the words — an Override would make them speak twice.
  */
-export async function sendInterjection(text: string, options: readonly MentionOption[], currentOverride: string | undefined, request: Request, scheduled?: string): Promise<InterjectResult> {
+export async function sendInterjection(text: string, options: readonly MentionOption[], currentOverride: string | undefined, request: Request, scheduled?: string, attachmentIds: readonly string[] = []): Promise<InterjectResult> {
   const mentioned = mentionedMembers(text, options);
   if (mentioned.length > 1) return { clear: false, steps: { override: 'blocked', interject: 'blocked' },
     error: `一次只能点名一位成员（这里点了${mentioned.map(item => `@${item.name}`).join('、')}）。请只留一个，其余改成普通文字。` };
@@ -35,10 +35,11 @@ export async function sendInterjection(text: string, options: readonly MentionOp
       override = 'sent';
     }
   }
-  if (!hasWords) return { clear: true, steps: { override, interject: 'none' },
+  // D147: images count as something to send, with or without words.
+  if (!hasWords && !attachmentIds.length) return { clear: true, steps: { override, interject: 'none' },
     notice: override === 'scheduled' ? `${target!.name}按计划就是下一位，不用点名。`
       : override === 'already' ? `${target!.name}已经被点名，排在下一回合。` : `已点名${target!.name}，将在下一回合发言（不会打断正在进行的发言）。` };
-  const result = await request('interject', { kind: 'interject', content }, { quiet: true });
+  const result = await request('interject', { kind: 'interject', content, ...(attachmentIds.length ? { attachmentIds: [...attachmentIds] } : {}) }, { quiet: true });
   if (!result.ok) return { clear: false, steps: { override, interject: 'failed' },
     error: override === 'sent' || override === 'already'
       ? `已点名${target!.name}，排在下一回合；但插话没有发送：${result.message}内容保留在输入框里，可以再发一次（不会重复点名）。`

@@ -1,3 +1,4 @@
+import { MessageImages } from '../attachments/images';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Ellipsis, Info, Pencil, RefreshCw, Scissors, Sparkles, Square, TriangleAlert } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
@@ -152,21 +153,23 @@ export function HostMessage({ slot, snapshot, commands, coveredBy, revisedAfterS
   const can = slotAbilities(snapshot, slot, shown);
   const disabled = !commands.available || commands.pending !== undefined;
   const replaced = coveredBy && !revisedAfterSummary;
+  const images = shown.message.attachments;
   const save = (content: string) => void commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content }, '已保存为新版本。')
     .then(ok => { if (ok) { setEditing(false); setViewing(undefined); } });
   return <article className={cx('msg', 'is-host', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · 主持人`}>
     <div className="host-label"><span>{snapshot.continuations?.some(item => item.messageId === slot.slotId) ? '主持人 · 继续讨论' : '主持人插话'}</span><span aria-hidden>·</span><span>#{slot.number}</span>
       {replaced && <Tag title="原文保留；之后的请求用已确认的讨论摘要代替它">已由摘要代替</Tag>}
       {coveredBy && revisedAfterSummary && <Tag tone="accent" title="摘要生成后修改过，所以这条会照常发给之后的成员">摘要后已修改 · 照常发送</Tag>}</div>
-    {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
-      : <div className="bubble">{shown.message.content}</div>}
+    <MessageImages images={images} />
+    {editing ? <EditForm label="修改消息内容" help={images?.length ? '修改为新版本（原文和图片都保留）' : '修改为新版本（原文保留）'} initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
+      : (shown.message.content.trim() || !images?.length) && <div className="bubble">{shown.message.content}</div>}
     {shown.affectedBy.length > 0 && <Note icon={TriangleAlert}><b>受影响</b> · 依据的{upstream(snapshot, shown.affectedBy)}已变化。</Note>}
     <div className="msg-foot" role="group" aria-label="主持人 的消息操作">
       <VersionSwitch slot={slot} index={index} onView={setViewing} />
       {slot.versions.length > 1 && <span>{originLabels[shown.origin]}{shown.active ? '' : ' · 未生效的历史版本'}</span>}
-      {slot.versions.length < 2 && <span>从下一回合起所有成员可见</span>}
+      {slot.versions.length < 2 && <span>{images?.length ? '从下一回合起发给成员；看不了图的成员只收到一句说明' : '从下一回合起所有成员可见'}</span>}
       {can.select && <Button size="sm" disabled={disabled} onClick={() => void commands.send(`select:${slot.slotId}`, { kind: 'selectVersion', messageId: shown.messageId }, '已切换当前有效版本。').then(ok => { if (ok) setViewing(undefined); })}>设为当前版本</Button>}
-      <CopyButton text={shown.message.content} />
+      <CopyButton text={[shown.message.content.trim() ? shown.message.content : '', images?.length ? `[附图 ${images.length} 张]` : ''].filter(Boolean).join('\n\n')} />
       {can.edit && !editing && <IconButton size="sm" icon={Pencil} label="修改" disabled={disabled} onClick={() => setEditing(true)} />}
     </div>
   </article>;

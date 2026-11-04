@@ -8,6 +8,7 @@ import type { ArtifactCommandResult, ArtifactEditInput, ArtifactExportInput, Art
   ArtifactPreview, ArtifactPreviewInput, ArtifactVersionDetail, ArtifactVersionInput, CodeCandidateList } from '../schemas/artifact';
 import type { CodeExportChooseRootInput, CodeExportChooseRootResult, CodeExportPreview, CodeExportPreviewInput, CodeExportWriteInput, CodeExportWriteResult } from '../schemas/codeExport';
 import type { UsageExportResult, UsageRange, UsageReport } from '../schemas/usage';
+import type { AddImageInput, ImageAttachment } from '../schemas/attachment';
 
 export type RoomMessage = z.infer<typeof roomMessageSchema>;
 export type CreateDemoResult = z.infer<typeof createDemoResultSchema>;
@@ -24,6 +25,10 @@ export interface UsageApiContract {
   /** D117: optional range over when requests were sent; omitted means all. */
   getReport(range?: UsageRange): Promise<UsageReport>;
   exportCsv(range?: UsageRange): Promise<UsageExportResult>;
+}
+/** D147: images the host attaches. Main checks the bytes, stores them and says what it stored. */
+export interface AttachmentApiContract {
+  addImage(input: AddImageInput): Promise<ImageAttachment>;
 }
 /** R13B conversation summaries: generation is always an explicit host request (D107). */
 export interface SummaryApiContract {
@@ -60,6 +65,8 @@ export interface RoundtableApiContract {
   host: HostApiContract;
   summary: SummaryApiContract;
   /** Optional for pages built before R14; Preload always provides it. */
+  /** Optional for pages built before D147; Preload always provides it. */
+  attachment?: AttachmentApiContract;
   artifact?: ArtifactApiContract;
   /** Optional for pages built before R15; Preload always provides it. */
   codeExport?: CodeExportApiContract;

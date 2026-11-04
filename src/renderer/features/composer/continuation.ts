@@ -33,12 +33,12 @@ export function useContinuation(api: Pick<RunApiContract, 'previewContinuation' 
     }, 250);
     return () => { current = false; clearTimeout(timer); };
   }, [api, runId, enabled, content, agentId]);
-  const send = useCallback(async (input: { content: string; agentId?: string }): Promise<ContinuationOutcome> => {
+  const send = useCallback(async (input: { content: string; attachmentIds?: string[]; agentId?: string }): Promise<ContinuationOutcome> => {
     if (!api || !runId) return { ok: false, message: '这场讨论还没有开始，暂时不能继续。' };
     if (inFlight.current) return { ok: false, message: '上一个操作还在等待主进程确认，请稍后再试。' };
     inFlight.current = true; setSending(true);
     try {
-      const result = await api.continueDiscussion({ runId, clientRequestId: newRequestId(), content: input.content, ...(input.agentId ? { agentId: input.agentId } : {}) });
+      const result = await api.continueDiscussion({ runId, clientRequestId: newRequestId(), content: input.content, ...(input.attachmentIds?.length ? { attachmentIds: input.attachmentIds } : {}), ...(input.agentId ? { agentId: input.agentId } : {}) });
       onApplied();
       return { ok: true, agentIds: result.agentIds };
     } catch (failure) {

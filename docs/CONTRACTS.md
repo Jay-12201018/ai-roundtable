@@ -499,3 +499,17 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | Main | 不带流程的讨论，默认时长改为每人至少 1 分钟（至少 5 分钟） | 内部 |
 | Renderer | 新讨论页三步见 D144；`ConnectWizard` 只有选服务、Key 和模型列表；成员对话框按服务分组；服务卡片没有地址和手填模型，有“刷新模型列表”；房间页说明不再支持或可能已下线的模型，讨论页写明成员用的模型 | 内部 |
 | 依赖 | 删除三个 SDK | package.json 和 lock 已更新 |
+
+## 讨论里发图片（2026-11-05，子会话候选，未合 main）
+
+决策见 D147。总控授权本任务新增 migration 15 和下列契约。
+
+- **IPC**：新增 `attachment.addImage`，输入 `{ bytes: Uint8Array }`（1 字节到 10 MB），输出 `{ id, mediaType, byteCount }`。没有读文件或传路径的通道。Preload 新增 `attachment.addImage`。`registerIpc` 新增可选服务 `attachments`。
+- **输入**：`run.start` 增加可选 `attachmentIds`。`host.command` 的 `interject` 和 `run.continueDiscussion` 增加可选 `attachmentIds`，且 `content` 可以为空字符串，前提是带了图；没有图时仍须有文字。`attachmentIds` 是 1–4 个不重复的 SHA-256 十六进制串，Main 还要确认它们已经存储，否则 `invalid_input`（`field: attachmentIds`）。
+- **输出**：`RunSnapshot.messages[].attachments`、`RunSnapshot.taskAttachments`，都是可选的 `{ id, mediaType, byteCount }[]`；旧数据没有这些字段。`rooms.listRoomMessages`、`room.getMessages` 不变。
+- **Provider**：`providerMessageSchema.content` 为 `string | ProviderContentPart[]`，分片是 `{ type: 'text', text }` 或 `{ type: 'image', attachmentId, mediaType }`，只有 `user` 能用分片。旧的 `input_snapshot` 都是字符串，继续有效。适配器发送时把引用换成 `image_url` 的 base64 data URL；`CompatibleOptions.readImage`、`ProviderRegistry` 选项 `readImage`。`ModelBudget.imageSupport` 是 `yes | no | unknown`。上下文输入增加可选 `taskImages`、`imagesVisible`，消息增加可选 `attachments`。
+- **错误码**：新增 `image_unsupported`、`attachment_missing`；字段新增 `attachmentIds`、`bytes`。
+- **数据库**：migration 15（`attachments`、`message_attachments`、`run_task_attachments`），不改动已有对象和数据；`validateDatabase` 检查新表和保护触发器。
+- **协议与 CSP**：`rt-image://local/<sha256>`，由 Main 的 `protocol.handle` 服务；`img-src` 加 `rt-image:`。
+- **Shared**：`src/shared/schemas/attachment.ts`；`serviceCatalog.ts` 的 `imageSupportOf`。
+

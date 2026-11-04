@@ -1,5 +1,6 @@
 import type { ProviderMessage } from '../types';
 import type { ModelTokenCounter } from '../../context/types';
+import { IMAGE_INPUT_TOKENS, messageImagesOf, messageTextOf } from '../../../shared/schemas/provider';
 
 // Test-model vocabulary only: each text token has at most four Unicode scalars.
 export function mockTextTokens(text:string):string[]{
@@ -9,7 +10,7 @@ export function mockTextTokens(text:string):string[]{
 }
 // Request start/end; each message has start, role, content separator and end tokens.
 export function countMockInputTokens(messages:readonly Readonly<ProviderMessage>[]):number{
-  return 2+messages.reduce((total,message)=>total+4+mockTextTokens(message.content).length,0);
+  return 2+messages.reduce((total,message)=>total+4+mockTextTokens(messageTextOf(message.content)).length+messageImagesOf(message.content).length*IMAGE_INPUT_TOKENS,0);
 }
 export const mockModelBudget:{contextWindowTokens:number;counter:ModelTokenCounter}={
   contextWindowTokens:32768,

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { idSchema, sequenceSchema } from '../../shared/schemas/common';
 import { storedRunSchema, requestAttemptSchema } from '../../shared/schemas/persistence';
 import type { ProviderMessage } from '../providers/types';
+import { imageAttachmentsSchema } from '../../shared/schemas/attachment';
 
 const instructionSchema = z.object({ id: idSchema, content: z.string().min(1) }).strict();
 const runSchema = storedRunSchema.pick({
@@ -13,7 +14,7 @@ const turnSchema = z.object({
 }).strict();
 const messageSchema = z.object({
   id: idSchema, roomId: idSchema, runId: idSchema, turnId: idSchema.optional(),
-  senderType: z.string(), senderName: z.string(), content: z.string(), status: z.string().optional(),
+  senderType: z.string(), senderName: z.string(), content: z.string(), status: z.string().optional(), attachments: imageAttachmentsSchema.optional(),
 }).strict();
 const attemptSchema = z.object({
   requestId: requestAttemptSchema.shape.requestId, runId: requestAttemptSchema.shape.runId,
@@ -34,6 +35,8 @@ export const contextInputSchema = z.object({
   visibleMessageIds: z.array(idSchema), applicationInstructions: z.array(instructionSchema),
   hostInstructions: z.array(instructionSchema.extend({ roomId: idSchema, runId: idSchema }).strict()),
   contextWindowTokens: sequenceSchema.refine(n => n > 0),
+  // D147: the goal's images, and whether this member's model gets images at all. Without a word on it, it does not.
+  taskImages: imageAttachmentsSchema.optional(), imagesVisible: z.boolean().optional(),
   // R13B (D107): a host-confirmed summary that stands in for every version of the slots it covers.
   summary: z.object({
     messageId: idSchema, content: z.string().min(1), firstNumber: z.number().int().min(1), lastNumber: z.number().int().min(1),

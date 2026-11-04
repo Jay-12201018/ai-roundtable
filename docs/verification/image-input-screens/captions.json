@@ -1,0 +1,98 @@
+[
+  {
+    "file": "01-setup-rows.png",
+    "caption": "新讨论页：成员行写明这个模型能否看图；回形针在输入框左下角。"
+  },
+  {
+    "file": "02-paperclip.png",
+    "caption": "点回形针选一张：马上显示缩略图；下面就地写明审查者看不到图片，不拦截开始。"
+  },
+  {
+    "file": "03-dragging.png",
+    "caption": "拖入图片时，输入框换底色并描边，表示可以松手。"
+  },
+  {
+    "file": "04-three-ways.png",
+    "caption": "回形针、粘贴、拖入各加了一张，共三张；缩略图不把输入框撑开。"
+  },
+  {
+    "file": "05-refused-type.png",
+    "caption": "文件头不对：就地写明原因，已有的三张不受影响。"
+  },
+  {
+    "file": "06-four-limit.png",
+    "caption": "第五张没有加上，并说明原因；四张缩略图排得下。"
+  },
+  {
+    "file": "07-goal-needs-words.png",
+    "caption": "目标必须有文字：开始按钮不可用，并写明原因。"
+  },
+  {
+    "file": "08-tray-dark.png",
+    "caption": "深色：输入框、缩略图和提示。"
+  },
+  {
+    "file": "09-narrow.png",
+    "caption": "800×600 窄窗口：四张缩略图和提示都在，没有横向溢出。"
+  },
+  {
+    "file": "10-goal-card.png",
+    "caption": "讨论开始后：目标卡片里是三张缩略图，第一位成员已经回应。"
+  },
+  {
+    "file": "11-viewer.png",
+    "caption": "点缩略图看大图：写明类型和大小，可以上一张、下一张。"
+  },
+  {
+    "file": "12-viewer-dark.png",
+    "caption": "深色的大图。"
+  },
+  {
+    "file": "13-interject-tray.png",
+    "caption": "插话框：粘贴一张图，发送处写明谁看不到。"
+  },
+  {
+    "file": "14-blind-member.png",
+    "caption": "只有图的插话显示在时间线右侧；看不了图的审查者照常发言，它收到的是一句说明。"
+  },
+  {
+    "file": "15-interject-words.png",
+    "caption": "中文插话加一张拖入的图：缩略图在上，文字气泡在下。"
+  },
+  {
+    "file": "16-summary-note.png",
+    "caption": "生成摘要前写明：图片不进摘要，被代替的插话里的图片不再发送，目标里的图片照常发送。"
+  },
+  {
+    "file": "17-finished-dark.png",
+    "caption": "深色：讨论完成后的时间线。"
+  },
+  {
+    "file": "18-timeline-narrow-dark.png",
+    "caption": "深色 800×600：时间线里的缩略图不撑破窗口。"
+  },
+  {
+    "file": "19-continue.png",
+    "caption": "讨论结束后继续：同样可以附图。"
+  },
+  {
+    "file": "20-after-restart.png",
+    "caption": "重启后打开这场讨论：目标和插话里的图片都还在，从磁盘读出。"
+  },
+  {
+    "file": "21-all-blind.png",
+    "caption": "全员都看不了图：同样就地提示，开始按钮仍然可用。"
+  },
+  {
+    "file": "22-unknown-model.png",
+    "caption": "自动发现的模型：成员行写“能否看图未知”，发送处提醒服务商可能拒绝。"
+  },
+  {
+    "file": "23-unknown-refused.png",
+    "caption": "服务商拒绝：显示它的错误码，并建议换一个能看图的模型；服务商的原话不显示。"
+  },
+  {
+    "file": "24-unknown-refused-dark.png",
+    "caption": "深色的失败提示。"
+  }
+]

@@ -20,6 +20,9 @@ export const errorMessages = {
   // D143: not in the built-in catalog.
   service_unsupported: 'This service is not supported',
   model_unsupported: 'This model is not supported',
+  // D147: bytes that are not a PNG, JPEG or WebP; a stored image that can no longer be read.
+  image_unsupported: 'Only PNG, JPEG and WebP images are supported',
+  attachment_missing: 'A stored image could not be read',
   // D133: nothing raises this any more; events of old Runs keep it and recovery still has to read them.
   budget_exceeded: 'Run budget is insufficient for the next request',
 } as const;
@@ -32,7 +35,9 @@ const errorFieldSchema = z.enum(['arguments', 'roomId', 'runId', 'turnId', 'mess
   // R14 artifacts.
   'artifactId', 'versionId', 'text', 'sources', 'format', 'target',
   // R15 code export.
-  'rootId', 'previewId', 'files']);
+  'rootId', 'previewId', 'files',
+  // D147 images.
+  'attachmentIds', 'bytes']);
 export type ErrorField = z.infer<typeof errorFieldSchema>;
 
 /** What the service said went wrong: its HTTP status and its own error code, when that looks like one. Never its words. */

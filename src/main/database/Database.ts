@@ -16,6 +16,8 @@ import { migration11 } from './migrations/v11';
 import { migration12 } from './migrations/v12';
 import { migration13 } from './migrations/v13';
 import { migration14 } from './migrations/v14';
+import { migration15 } from './migrations/v15';
+import { attachmentIdsSchema, imageAttachmentSchema, type ImageAttachment } from '../../shared/schemas/attachment';
 import { requestUsageSchema, type RequestUsage, type UsageKind } from '../../shared/schemas/usage';
 import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
 import { ContractError } from '../../shared/contracts/errors';
@@ -52,6 +54,8 @@ export type MessageRecord = {
   content: string;
   status?: string;
   turnId?: string;
+  /** D147: what the host attached; absent when nothing was. */
+  attachments?: ImageAttachment[];
 };
 
 export type TurnRecord = {
@@ -233,6 +237,7 @@ const migrations = [
   migration12,
   migration13,
   migration14,
+  migration15,
 ];
 
 export type ModelDiscovery = { modelIds: string[]; outcome: 'listed' | 'unsupported' | 'authentication_failed' | 'failed'; checkedAt: string; listedAt: string | null };
@@ -371,7 +376,7 @@ export class Database {
     return rows.map((row) => ({ id: row.id, roomId: row.room_id, displayName: row.display_name, roleTemplateId: row.role_template_id, displayOrder: row.display_order, systemPrompt: row.system_prompt, providerId: row.provider_id, modelId: row.model_id }));
   }
 
-  insertRun(run: Omit<Pick<RunRecord,'id'|'roomId'|'status'|'workflowSnapshot'>,'status'> & {status:string} & Partial<ExecutionMetadata>): void {
+  insertRun(run: Omit<Pick<RunRecord,'id'|'roomId'|'status'|'workflowSnapshot'>,'status'> & {status:string} & Partial<ExecutionMetadata>, attachmentIds: readonly string[] = []): void {
     this.assertInitialized();
     const timestamp = now();
     const value=storedRunSchema.parse({id:run.id,roomId:run.roomId,status:run.status,workflowSnapshot:run.workflowSnapshot,lastError:null,
@@ -380,7 +385,39 @@ export class Database {
       currentTurnId:null,currentAgentId:null,startedAt:null,finishedAt:null,createdAt:timestamp,updatedAt:timestamp});
     this.db.prepare('INSERT INTO workflow_runs(id,room_id,status,mode,workflow_snapshot,max_turns,max_duration_ms,output_token_limit,created_at,updated_at,task,members_snapshot,next_turn_index,elapsed_execution_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(value.id,value.roomId,value.status,value.mode,JSON.stringify(value.workflowSnapshot),value.maxTurns,value.maxDurationMs,value.outputTokenLimit,timestamp,timestamp,value.task,value.membersSnapshot===null?null:JSON.stringify(value.membersSnapshot),value.nextTurnIndex,value.elapsedExecutionMs);
+    attachmentIds.forEach((id,position)=>this.db.prepare('INSERT INTO run_task_attachments(run_id,position,sha256) VALUES(?,?,?)').run(value.id,position,id));
   }
+
+  // D147: images. The bytes are in AttachmentStore's files; this is what they are and who uses them.
+  insertAttachment(attachment: ImageAttachment): void {
+    this.assertInitialized();
+    const value = imageAttachmentSchema.parse(attachment);
+    this.db.prepare('INSERT OR IGNORE INTO attachments(sha256,media_type,byte_count,created_at) VALUES(?,?,?,?)').run(value.id,value.mediaType,value.byteCount,now());
+  }
+  getAttachment(id: string): ImageAttachment | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare('SELECT sha256 AS id,media_type AS mediaType,byte_count AS byteCount FROM attachments WHERE sha256=?').get(id);
+    return row ? imageAttachmentSchema.parse(row) : undefined;
+  }
+  /** What the host asked to attach, in that order; anything Main did not store is refused, whatever the page says. */
+  assertAttachmentIds(ids: readonly string[] | undefined): string[] {
+    if (ids === undefined || ids.length === 0) return [];
+    if (!attachmentIdsSchema.safeParse(ids).success || ids.some(id => !this.getAttachment(id))) throw new ContractError('invalid_input', 'attachmentIds');
+    return [...ids];
+  }
+  /** Removes the records nothing uses and answers with what remains. */
+  sweepUnusedAttachments(): ImageAttachment[] {
+    this.assertInitialized();
+    return this.transaction(() => {
+      this.db.prepare('DELETE FROM attachments WHERE sha256 NOT IN (SELECT sha256 FROM message_attachments) AND sha256 NOT IN (SELECT sha256 FROM run_task_attachments)').run();
+      return (this.db.prepare('SELECT sha256 AS id,media_type AS mediaType,byte_count AS byteCount FROM attachments').all() as unknown[]).map(row => imageAttachmentSchema.parse(row));
+    });
+  }
+  private attachmentsOf(table: 'message_attachments' | 'run_task_attachments', column: 'message_id' | 'run_id', ownerId: string): ImageAttachment[] {
+    return (this.db.prepare(`SELECT a.sha256 AS id,a.media_type AS mediaType,a.byte_count AS byteCount FROM ${table} l JOIN attachments a ON a.sha256=l.sha256 WHERE l.${column}=? ORDER BY l.position`).all(ownerId) as unknown[])
+      .map(row => imageAttachmentSchema.parse(row));
+  }
+  getTaskAttachments(runId: string): ImageAttachment[] { this.assertInitialized(); return this.attachmentsOf('run_task_attachments', 'run_id', runId); }
 
   /** D133: open one real request's usage row, in the transaction that records the request. */
   openUsage(input: { requestId: string; runId: string; agentId: string; providerId: string; modelId: string; kind: UsageKind }): void {
@@ -838,6 +875,7 @@ export class Database {
         .run(message.id, message.runId, slotId, number, version.origin ?? (slot ? 'retry' : 'original'), version.actionId ?? null, version.basis === undefined ? null : JSON.stringify(version.basis));
       if (!slot) this.db.prepare('INSERT INTO message_slots(slot_id,run_id,turn_id,active_message_id,updated_at) VALUES(?,?,?,?,?)').run(slotId, message.runId, message.turnId ?? null, message.id, timestamp);
       else if (version.activate !== false) this.db.prepare('UPDATE message_slots SET active_message_id=?,updated_at=? WHERE slot_id=?').run(message.id, timestamp, slotId);
+      message.attachments?.forEach((attachment, position) => this.db.prepare('INSERT INTO message_attachments(message_id,position,sha256) VALUES(?,?,?)').run(message.id, position, attachment.id));
     }).immediate();
   }
 
@@ -946,7 +984,9 @@ export class Database {
   getMessage(id: string): MessageRecord | undefined {
     this.assertInitialized();
     const row = this.db.prepare('SELECT id, room_id, run_id, turn_id, sender_type, sender_name, content, status FROM messages WHERE id = ?').get(id) as RawMessage | undefined;
-    return row ? { id: row.id, roomId: row.room_id, runId: row.run_id, turnId: row.turn_id ?? undefined, senderType: row.sender_type, senderName: row.sender_name, content: row.content, status: row.status } : undefined;
+    if (!row) return undefined;
+    const attachments = this.attachmentsOf('message_attachments', 'message_id', id);
+    return { id: row.id, roomId: row.room_id, runId: row.run_id, turnId: row.turn_id ?? undefined, senderType: row.sender_type, senderName: row.sender_name, content: row.content, status: row.status, ...(attachments.length ? { attachments } : {}) };
   }
 
   listMessages(roomId: string): MessageRecord[] {
@@ -1020,7 +1060,8 @@ export class Database {
       const run = this.getRun(runId);
       if (!run) throw new Error('Run not found');
       const ids = this.db.prepare('SELECT id FROM messages WHERE run_id=? ORDER BY sort_key').pluck().all(runId) as string[];
-      return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
+      const taskAttachments=this.getTaskAttachments(runId);
+      return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),...(taskAttachments.length?{taskAttachments}:{}),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
         versions:this.listVersions(runId),hostActions:this.listHostActions(runId),instructions:this.listInstructionRevisions(runId),
         usage:this.listRunUsage(runId),summaries:this.listSummaries(runId),continuations:this.listContinuations(runId),
         artifactRequestIds:this.db.prepare('SELECT request_id FROM artifact_requests WHERE run_id=? ORDER BY created_at,rowid').pluck().all(runId) as string[]};

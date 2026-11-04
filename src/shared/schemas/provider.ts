@@ -1,10 +1,35 @@
 import { z } from 'zod';
 import { idSchema, modelIdSchema, sequenceSchema } from './common';
 import { apiErrorSchema } from './error';
+import { attachmentIdSchema, imageMediaTypeSchema } from './attachment';
 
+/**
+ * D147: a message is plain text, or text and images in order. What is stored and compared is a reference to the image;
+ * its bytes are read only when the request is written to the network. Only the `user` side carries images.
+ */
+export const providerTextPartSchema = z.object({ type: z.literal('text'), text: z.string() }).strict();
+export const providerImagePartSchema = z.object({ type: z.literal('image'), attachmentId: attachmentIdSchema, mediaType: imageMediaTypeSchema }).strict();
+export const providerContentPartSchema = z.discriminatedUnion('type', [providerTextPartSchema, providerImagePartSchema]);
+export type ProviderContentPart = z.infer<typeof providerContentPartSchema>;
+export type ProviderImagePart = z.infer<typeof providerImagePartSchema>;
 export const providerMessageSchema = z.object({
-  role: z.enum(['system', 'user', 'assistant']), content: z.string(),
-}).strict();
+  role: z.enum(['system', 'user', 'assistant']), content: z.union([z.string(), z.array(providerContentPartSchema).min(1)]),
+}).strict().refine(message => typeof message.content === 'string' || message.role === 'user', 'Only the user side carries images');
+/** The words of a message, whichever form it has. */
+export const messageTextOf = (content: string | readonly ProviderContentPart[]) => typeof content === 'string' ? content
+  : content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n\n');
+export const messageImagesOf = (content: string | readonly ProviderContentPart[]) => typeof content === 'string' ? []
+  : content.filter((part): part is ProviderImagePart => part.type === 'image');
+/**
+ * D147: what one image counts for in the input bound, whatever its size: no vendor's formula is guessed. A count this
+ * size holds for the sizes these services read images at, and text is already overstated 1.5–4 times next to it.
+ */
+export const IMAGE_INPUT_TOKENS = 4096;
+/**
+ * D147: the most image bytes one request may carry. Each one is sent in full on every request that includes it, so a long
+ * discussion with many images has to leave the oldest out rather than build a body no service would read.
+ */
+export const MAX_REQUEST_IMAGE_BYTES = 64 * 1024 * 1024;
 /**
  * D134: conservative defaults for a model with no limits of its own. No model name or vendor decides these. 128,000 is
  * the smallest context mainstream models share, and input is counted as an upper bound, so a request that passes fits

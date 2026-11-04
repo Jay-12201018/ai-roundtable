@@ -72,6 +72,7 @@ const summarySenderName = '讨论摘要';
 const hostSenderName = '主持人';
 // A member whose role reads as a synthesizer writes summaries by default (same vocabulary as the built-in role guide).
 const summarizerPattern = /综合|总结|汇总|整合|归纳|synth|summar|integrat/iu;
+const imagesPlaceholder = (count: number) => count ? `[图片 ${count} 张]` : '';
 const excerpt = (text: string) => { const flat = text.replace(/\s+/gu, ' ').trim(); return flat.length > 60 ? `${flat.slice(0, 60)}…` : flat; };
 
 
@@ -169,6 +170,7 @@ export class RunService {
     input = parsed.data;
     this.assertAvailable();
     if (!this.database.getRoom(input.roomId)) throw new ContractError('not_found');
+    const taskAttachmentIds = this.database.assertAttachmentIds(input.attachmentIds);
     let workflow: WorkflowSnapshot | undefined;
     if (input.workflowConfig) {
       workflow = this.compileCurrentWorkflow(input.roomId, input.workflowConfig);
@@ -190,7 +192,7 @@ export class RunService {
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
     this.schedule(context, () => {
       this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: workflow ?? input.workflowSnapshot ?? {}, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
-        task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 });
+        task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 }, taskAttachmentIds);
       this.setRunState(runId, { status: 'running', startedAt: new Date().toISOString() }, { status: 'running' });
     });
     if (input.workflowPreviewId) this.workflowPreviews.delete(input.workflowPreviewId);
@@ -231,7 +233,8 @@ export class RunService {
           return {turnId:turn.id,runId:turn.runId,agentId:turn.agentId,turnIndex:turn.turnIndex,status:turn.status,requestId:attempt?.requestId??turn.requestId,messageId:message?.id,outputText:message?.content??turn.partialContent,
             ...(turn.overrideActionId?{overrideActionId:turn.overrideActionId}:{})};
         }),
-        messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed' })),
+        messages: messages.map((message) => ({ id: message.id, senderName: message.senderName, content: message.content, status: message.status ?? 'completed', ...(message.attachments ? { attachments: message.attachments } : {}) })),
+        ...(data.taskAttachments ? { taskAttachments: data.taskAttachments } : {}),
         updatedAt: run.updatedAt,startedAt:run.startedAt??undefined,execution,
         attempts:attempts.map(({inputSnapshot,providerRequestId,...safe})=>safe),
         versions, host: this.hostView(data), usage: data.usage,
@@ -522,13 +525,14 @@ export class RunService {
     if (!parsed.success) throw new ContractError('invalid_input', parsed.error.issues[0]?.path[0] === 'content' ? 'content' : undefined);
     input = parsed.data;
     const run = this.requireRun(input.runId);
-    const fingerprint = createHash('sha256').update(JSON.stringify(['continueDiscussion', input.runId, input.content, input.agentId ?? null])).digest('hex');
+    const fingerprint = createHash('sha256').update(JSON.stringify(['continueDiscussion', input.runId, input.content, input.agentId ?? null, ...(input.attachmentIds?.length ? [input.attachmentIds] : [])])).digest('hex');
     const previous = this.database.findHostAction(run.id, input.clientRequestId);
     if (previous) {
       const continuation = this.database.listContinuations(run.id).find(item => item.actionId === previous.id);
       if (previous.fingerprint !== fingerprint || !continuation || !previous.resultMessageId) throw new ContractError('invalid_input', 'clientRequestId');
       return { runId: run.id, actionId: previous.id, messageId: previous.resultMessageId, agentIds: continuation.agentIds, duplicate: true };
     }
+    const attachments = this.database.assertAttachmentIds(input.attachmentIds).map(id => this.database.getAttachment(id)!);
     const plan = this.planContinuation(run, input.agentId);
     if (plan.reason === 'unsupported') throw new ContractError('unsupported');
     if (plan.reason === 'context_exceeds') throw new ContractError('invalid_input', 'content');
@@ -542,7 +546,7 @@ export class RunService {
       // An Override left from before the stop is replaced by what the host asks for now.
       const pending = this.database.getPendingOverride(run.id);
       if (pending) this.database.settleHostAction(pending.id, 'superseded');
-      this.database.insertMessage({ id: messageId, roomId: run.roomId, runId: run.id, senderType: 'user', senderName: hostSenderName, content: input.content, status: 'completed' });
+      this.database.insertMessage({ id: messageId, roomId: run.roomId, runId: run.id, senderType: 'user', senderName: hostSenderName, content: input.content, status: 'completed', ...(attachments.length ? { attachments } : {}) });
       this.database.insertHostAction({ id: actionId, runId: run.id, clientRequestId: input.clientRequestId, kind: 'interject', status: 'applied', fingerprint, resultMessageId: messageId });
       this.database.insertContinuation({ actionId, runId: run.id, agentIds: plan.agentIds, elapsedBaseMs });
       this.appendEvent(run.id, 'host_updated', { actionId, kind: 'interject' });
@@ -598,7 +602,7 @@ export class RunService {
       runId: snapshot.run.id, available: plan.reason === undefined, ...(plan.reason ? { reason: plan.reason } : {}),
       candidates: slots.map(slot => ({ slotId: slot.slotId, number: slot.number,
         speaker: slot.author === 'host' ? '主持人' : snapshot.run.membersSnapshot?.find(member => member.agentId === slot.agentId)?.displayName ?? slot.message.senderName,
-        excerpt: excerpt(slot.message.content) })),
+        excerpt: excerpt(slot.message.content) || imagesPlaceholder(slot.message.attachments?.length ?? 0) })),
       ...(plan.through ? { throughSlotId: plan.through.slotId, firstNumber: 1, lastNumber: plan.through.number } : {}),
       agents, ...(plan.member ? { agentId: plan.member.agentId } : {}),
       ...(plan.basedOn ? { basedOn: { summaryId: plan.basedOn.record.id, lastNumber: plan.basedOn.lastNumber } } : {}),

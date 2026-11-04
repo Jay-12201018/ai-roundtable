@@ -19,6 +19,7 @@ import type { ArtifactExportInput, ArtifactExportResult } from '../../shared/sch
 import type { CodeExportService } from '../export/CodeExportService';
 import type { CodeExportChooseRootInput, CodeExportChooseRootResult } from '../../shared/schemas/codeExport';
 import { isTrustedIpcSender, isTrustedRenderer } from '../windows/createMainWindow';
+import type { AttachmentApiContract } from '../../shared/contracts/app';
 
 /** R14: artifact reads and host writes; a file export asks Main's save dialog, owned by this window. */
 export type ArtifactIpcService = Pick<ArtifactService, 'list' | 'getVersion' | 'edit' | 'listCodeCandidates'> & {
@@ -32,8 +33,8 @@ export type IpcDisposer = (() => void) & { drain(): Promise<void> };
 let currentDisposer: IpcDisposer | undefined;
 
 export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract; usage: UsageIpcService;
-  artifacts?: ArtifactIpcService; codeExport?: CodeExportIpcService }): IpcDisposer {
-  const { run: service, rooms, settings, host, usage, artifacts, codeExport } = services;
+  artifacts?: ArtifactIpcService; codeExport?: CodeExportIpcService; attachments?: AttachmentApiContract }): IpcDisposer {
+  const { run: service, rooms, settings, host, usage, artifacts, codeExport, attachments } = services;
   const unsupported = (): never => { throw new ContractError('unsupported'); };
   currentDisposer?.();
   let disposed = false;
@@ -86,6 +87,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'codeExport.chooseRoot': (input) => codeExport ? codeExport.chooseRoot(window, input) : unsupported(),
     'codeExport.preview': (input) => codeExport ? codeExport.preview(input) : unsupported(),
     'codeExport.write': (input) => codeExport ? codeExport.write(input) : unsupported(),
+    'attachment.addImage': (input) => attachments ? attachments.addImage(input) : unsupported(),
     'rooms.createRoom': (input) => rooms.createRoom(input),
     'rooms.updateRoom': (input) => rooms.updateRoom(input),
     'rooms.getRoomConfiguration': (input) => rooms.getRoomConfiguration(input),
@@ -134,7 +136,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
       })();
       if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.continueDiscussion'
         || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'summary.revoke'
-        || channel === 'artifact.generate' || channel === 'artifact.edit' || channel === 'artifact.export' || channel === 'codeExport.write') {
+        || channel === 'artifact.generate' || channel === 'artifact.edit' || channel === 'artifact.export' || channel === 'codeExport.write' || channel === 'attachment.addImage') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));
       }

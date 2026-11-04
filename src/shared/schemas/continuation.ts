@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { idSchema, sequenceSchema, timestampSchema } from './common';
-import { hostMessageContentSchema } from './host';
+import { interjectionFields, interjectionHasContent } from './host';
 
 const count = sequenceSchema;
 
@@ -10,8 +10,8 @@ const count = sequenceSchema;
  * Main decides who answers and what it may cost; the Renderer only shows it.
  */
 export const continueDiscussionInputSchema = z.object({
-  runId: idSchema, clientRequestId: idSchema, content: hostMessageContentSchema, agentId: idSchema.optional(),
-}).strict();
+  runId: idSchema, clientRequestId: idSchema, ...interjectionFields, agentId: idSchema.optional(),
+}).strict().refine(interjectionHasContent, { message: 'Host text cannot be blank', path: ['content'] });
 export const continueDiscussionResultSchema = z.object({
   runId: idSchema, actionId: idSchema, messageId: idSchema, agentIds: z.array(idSchema).min(1).max(64), duplicate: z.boolean(),
 }).strict();

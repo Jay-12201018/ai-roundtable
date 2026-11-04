@@ -62,7 +62,9 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, re
       <p className="notice-hint">点了才会发送：{retry.enabled ? '没说完的这位成员会重新回复' : '下一位成员接着发言'}，可能产生费用。继续后最多再运行 {durationText(snapshot.durationStop.nextAllowanceMs)}。</p>
     </NoticeCard>}
     {snapshot.status === 'error' && !snapshot.durationStop && <NoticeCard tone="danger" icon={TriangleAlert} title="运行失败">
-      <p>{error ?? '运行失败，历史输出已保留。'}</p>{repeatButtons}
+      <p>{error ?? '运行失败，历史输出已保留。'}</p>
+      {snapshot.lastFailure?.code === 'invalid_input' && (snapshot.taskAttachments?.length || snapshot.messages.some(message => message.attachments?.length)) ? <p>这场讨论带了图片。如果这个模型不接受图片，开始新讨论时给这位成员换一个能看图的模型。</p> : null}
+      {repeatButtons}
     </NoticeCard>}
     {error && snapshot.status !== 'error' && <p className="run-error" role="alert">{error}</p>}
     {!summaryOpen && <ContextHint snapshot={snapshot} onSummarize={onSummarize} />}

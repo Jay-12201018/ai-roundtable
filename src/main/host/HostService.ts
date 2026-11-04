@@ -33,10 +33,11 @@ export class HostService {
     switch (command.kind) {
       case 'interject': {
         this.assertWritable(run.status, false);
+        const attachments = this.database.assertAttachmentIds(command.attachmentIds).map(id => this.database.getAttachment(id)!);
         return this.runs.applyHostChange(run.id, () => {
           const messageId = randomUUID();
           // A host interjection is public history attributed to the host, never to an Agent.
-          this.database.insertMessage({ id: messageId, roomId: run.roomId, runId: run.id, senderType: 'user', senderName: hostSenderName, content: command.content, status: 'completed' });
+          this.database.insertMessage({ id: messageId, roomId: run.roomId, runId: run.id, senderType: 'user', senderName: hostSenderName, content: command.content, status: 'completed', ...(attachments.length ? { attachments } : {}) });
           return this.result(record({ resultMessageId: messageId }));
         });
       }
@@ -95,7 +96,7 @@ export class HostService {
           const action = record({ messageId: message.id, resultMessageId: editedId });
           // R13B (D107): a summary edit records the covered versions it now stands for and is confirmed by its author.
           const summary = snapshot.summaries.find(item => item.id === version.slotId);
-          this.database.insertMessage({ id: editedId, roomId: run.roomId, runId: run.id, turnId: message.turnId, senderType: message.senderType, senderName: message.senderName, content: command.content, status: 'completed' },
+          this.database.insertMessage({ id: editedId, roomId: run.roomId, runId: run.id, turnId: message.turnId, senderType: message.senderType, senderName: message.senderName, content: command.content, status: 'completed', ...(message.attachments ? { attachments: message.attachments } : {}) },
             { origin: 'edit', slotId: version.slotId, parentMessageId: message.id, actionId: action.id, ...(summary ? { basis: summaryBasis(snapshot, summary) } : {}) });
           if (summary) this.database.confirmSummaryVersion({ messageId: editedId, summaryId: summary.id, runId: run.id });
           return this.result(action);

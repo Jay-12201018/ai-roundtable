@@ -309,6 +309,13 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (!requestUsageSchema.safeParse(row).success) throw new Error('Invalid usage evidence');
       }
     }
+    if (version >= 15) {
+      for (const table of ['attachments', 'message_attachments', 'run_task_attachments']) if (!tables.includes(table)) throw new Error('Recovery v15 schema is incomplete');
+      for (const name of ['attachment_immutable', 'message_attachment_immutable', 'message_attachment_no_delete', 'run_task_attachment_immutable', 'run_task_attachment_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing attachment protection');
+      }
+      assertNoRows(db, "SELECT 1 FROM message_attachments l JOIN messages m ON m.id=l.message_id WHERE m.sender_type<>'user' LIMIT 1", 'Attachment on a message the host did not write');
+    }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {
       hash.update(JSON.stringify(table));

@@ -5,7 +5,7 @@ import { providerBaseUrlSchema, providerConfigurationSchema } from '../../../sha
 import { connectionLevelSchema, streamChatInputSchema, testConnectionInputSchema } from '../../../shared/schemas/provider';
 import { idSchema, looksLikeApiKey } from '../../../shared/schemas/common';
 import type { ErrorCode } from '../../../shared/schemas/error';
-import type { ConnectionTestResult, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../types';
+import type { ConnectionTestResult, NormalizedChunk, ProviderAdapter, ProviderMessage, StreamChatInput, TestConnectionInput } from '../types';
 import { readSse } from './sse';
 import type { DiagnosticObserver } from '../diagnostics';
 
@@ -19,6 +19,8 @@ export interface CompatibleOptions {
   streamTimeoutMs?: number;
   fetch?: typeof fetch;
   diagnostics?: DiagnosticObserver;
+  /** D147: a stored image's bytes, read only when the request is written. */
+  readImage?: (attachmentId: string) => Promise<Uint8Array>;
 }
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const completionChunk = z.object({
@@ -81,6 +83,7 @@ export class CompatibleProvider implements ProviderAdapter {
   private readonly resolveKey: CompatibleOptions['resolveKey'];
   private readonly fetcher: typeof fetch;
   private readonly diagnostics?: DiagnosticObserver;
+  private readonly readImage?: CompatibleOptions['readImage'];
 
   constructor(options: CompatibleOptions) {
     try {
@@ -94,6 +97,7 @@ export class CompatibleProvider implements ProviderAdapter {
       this.resolveKey = options.resolveKey;
       this.fetcher = options.fetch ?? globalThis.fetch;
       this.diagnostics = options.diagnostics;
+      this.readImage = options.readImage;
     } catch (error) { throw new ContractError(error instanceof ContractError ? error.code : 'invalid_input'); }
   }
 
@@ -127,7 +131,7 @@ export class CompatibleProvider implements ProviderAdapter {
       const parsed = parse(streamChatInputSchema, withoutSignal(input)); scope.check();
       if (parsed.outputTokenLimit === undefined) throw new ContractError('invalid_input');
       const body = {
-        model: parsed.modelId, messages: parsed.messages, stream: true, max_tokens: parsed.outputTokenLimit,
+        model: parsed.modelId, messages: await scope.wait(() => this.wireMessages(parsed.messages)), stream: true, max_tokens: parsed.outputTokenLimit,
         stream_options: { include_usage: true },
       };
       const response = await this.send(scope, { method: 'POST', body: JSON.stringify(body) });
@@ -183,7 +187,7 @@ export class CompatibleProvider implements ProviderAdapter {
       const failure = this.failure(error, scope);
       if (failure.code === 'cancelled' || failure.code === 'timeout') this.diagnostics?.({ category: failure.code === 'timeout' ? 'request_timeout' : 'cancelled' });
       else if (failure.code === 'invalid_response' || parsingStream && failure.code === 'unsupported') this.diagnostics?.({ stage: 'stream', category: 'response_invalid' });
-      else if (error instanceof ContractError && ['forbidden', 'invalid_input', 'unsupported', 'invalid_state'].includes(error.code)) this.diagnostics?.({ category: 'policy_rejected' });
+      else if (error instanceof ContractError && ['forbidden', 'invalid_input', 'unsupported', 'invalid_state', 'attachment_missing'].includes(error.code)) this.diagnostics?.({ category: 'policy_rejected' });
       else this.diagnostics?.({ category: 'network_unknown' });
       yield { type: 'error', requestId, error: failure.detail };
     }
@@ -219,6 +223,27 @@ export class CompatibleProvider implements ProviderAdapter {
       } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
     } catch (error) { throw this.failure(error, scope); }
     finally { scope.close(); }
+  }
+
+  /**
+   * D147: an image goes out as a base64 data URL in an `image_url` part. This is the only place its bytes meet a request:
+   * snapshots keep the reference, and nothing here reaches diagnostics or an error. An image that cannot be read stops the
+   * request before anything is sent, instead of asking the model about a picture it never got.
+   */
+  private async wireMessages(messages: readonly ProviderMessage[]) {
+    return Promise.all(messages.map(async message => {
+      if (typeof message.content === 'string') return message;
+      const content = await Promise.all(message.content.map(async part => {
+        if (part.type === 'text') return part;
+        let bytes: Uint8Array;
+        try {
+          if (!this.readImage) throw new Error('No image reader');
+          bytes = await this.readImage(part.attachmentId);
+        } catch { throw new ContractError('attachment_missing'); }
+        return { type: 'image_url' as const, image_url: { url: `data:${part.mediaType};base64,${Buffer.from(bytes).toString('base64')}` } };
+      }));
+      return { role: message.role, content };
+    }));
   }
 
   /** One request, never repeated. The Key goes in one header; an error's body and headers are dropped unread. */

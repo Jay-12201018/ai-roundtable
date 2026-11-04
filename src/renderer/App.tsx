@@ -25,6 +25,9 @@ import { statusLabels, runStatusLabel } from './locales/zhCN';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT } from '../shared/schemas/run';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
 import { createRendererSession } from './subscriptions/rendererSession';
+import { MessageImages } from './features/attachments/images';
+import { useImageDraft } from './features/attachments/useImageDraft';
+import { imageAudienceNotes, memberImageSupport } from './features/attachments/support';
 import './features/shell/shell.css';
 
 // D103: whole tokens within the workflow schema's ceiling; Main still refuses anything above the member's model limit.
@@ -85,6 +88,8 @@ export function App() {
   const [workflowNotice, setWorkflowNotice] = useState<{ roomId: string; text: string }>();
   const [lostWorkflow, setLostWorkflow] = useState<{ roomId: string; label?: string }>();
   const [startChecking, setStartChecking] = useState(false);
+  // D147: images going with the goal; like its words, they wait here until the discussion starts.
+  const taskImages = useImageDraft(api.attachment);
   const draft = useStore(session.store, state => state.draft);
   const title = useStore(session.store, selectTaskTitle);
   const error = useStore(session.store, state => state.error);
@@ -202,11 +207,11 @@ export function App() {
       finally { setStartChecking(false); }
       if (session.store.getState().roomId !== room) return;
     }
-    void session.startRun(workflow, { outputTokenLimit, mode: stepMode ? 'step' : 'automatic' })
+    void session.startRun(workflow, { outputTokenLimit, mode: stepMode ? 'step' : 'automatic', attachmentIds: taskImages.attachmentIds })
       .then(() => {
         // Once the goal has become a Run, the box is empty for the next one, so a finished discussion is not restarted by accident.
         const state = session.store.getState();
-        if (state.snapshot?.execution?.task === task && state.draft.trim() === task) state.setDraft('');
+        if (state.snapshot?.execution?.task === task && state.draft.trim() === task) { state.setDraft(''); taskImages.clear(); }
       });
   };
 
@@ -389,12 +394,13 @@ export function App() {
     if (page !== 'discussion') return null;
     if (snapshot && interjectionBoxFor(snapshot, runActive)) return <HostComposer key={snapshot.runId} snapshot={snapshot} commands={hostCommands} controls={controls}
       instructionsWritable={snapshot.status !== 'idle' && snapshot.status !== 'cancelling'} notices={<>{syncNotices}{otherLive && !runActive ? taskNotices : undefined}</>}
-      continueApi={api.run} onContinued={synchronizeHost}
+      continueApi={api.run} onContinued={synchronizeHost} attachmentApi={api.attachment} imageSupport={member => memberImageSupport(member, providers, readiness.rows)}
       settledSlot={<Button className="slot" icon={Plus} disabled={!bootReady} onClick={() => newDiscussion(snapshot.roomId)}>新讨论</Button>} />;
     return <TaskComposer draft={draft} setDraft={value => session.store.getState().setDraft(value)}
       canStart={startEnabled && modeReady && !otherLive && !startChecking && !room?.archivedAt && outputTokenLimit !== undefined && blockedMembers.length === 0}
       starting={pending?.command === 'start' || startChecking} onStart={() => void startRun()} notices={<>{syncNotices}{taskNotices}</>}
       placeholder={snapshot ? '在这个房间开始新的讨论，写下目标和约束…' : undefined}
+      images={taskImages} imageNotes={roomMembers ? imageAudienceNotes(speakersOf(stored.draft, roomMembers).map(member => ({ name: member.displayName, support: member.providerId || member.builtInDemo ? memberImageSupport(member, providers, readiness.rows) : undefined }))) : []}
       settings={{ outputLimitText, setOutputLimitText, outputLimitValid: outputTokenLimit !== undefined,
         stepMode, setStepMode, workflowLabel, onOpenWorkflow: roomId && snapshot ? () => setWorkflowOpen(true) : undefined }} />;
   })();
@@ -403,7 +409,7 @@ export function App() {
   const discussionBody = (() => {
     if (snapshot) return <DiscussionTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} summaries={summaryCommands}
       onRegenerateSummary={summaryId => void summarizeNow(summaryId)} onChooseSummary={openSummary} reveal={reveal}
-      header={<><div className="goal-card"><div className="label">讨论目标</div><p>{snapshot.execution?.task?.trim() || '历史任务（目标未记录）'}</p></div>
+      header={<><div className="goal-card"><div className="label">讨论目标</div><p>{snapshot.execution?.task?.trim() || '历史任务（目标未记录）'}</p><MessageImages images={snapshot.taskAttachments} /></div>
         <div className="sys-line">{snapshot.workflow ? workflowTemplateLabels[snapshot.workflow.templateId] : '按顺序轮流发言'}{runMembers?.length ? ` · ${runMembers.join(' → ')}` : ''}</div></>}
       footer={<RunNotices snapshot={snapshot} error={error} syncFailed={syncStatus === 'error'} onRetrySync={synchronizeHost}
         retry={{ enabled: retryEnabled, run: () => void session.repeat('retryTurn') }} resume={{ enabled: continueEnabled, run: () => void session.repeat('continueMessage') }}

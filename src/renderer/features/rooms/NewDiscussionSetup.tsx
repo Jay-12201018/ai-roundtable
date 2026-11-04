@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, Minus, Pencil, Plus } from 'lucide-react';
+import { CircleAlert, Image, ImageOff, Minus, Pencil, Plus } from 'lucide-react';
 import type { AgentConfiguration, AgentInput, CreateAgentInput, ProviderReadiness, ProviderSummary, RoomManagementApiContract } from '../../../shared/contracts/configuration';
 import { Avatar, IconButton, Tag } from '../../components/ui';
 import { MAX_PARTICIPANTS, MIN_PARTICIPANTS, isFixedPair, modeSummary, nextDraft, participantsFor, speakersOf, speakingOrder, templates, type WorkflowDraft, type WorkflowTemplate } from '../workflows/model';
@@ -7,6 +7,8 @@ import { readRoomCount, writeRoomCount } from '../workflows/storage';
 import { MemberDialog, ModelOptions, modelChoice, modelOptions, modelValue } from './MemberDialog';
 import { memberLine } from './RoomPage';
 import { agentInput, defaultModelFor, nextMemberInput, roleShown, roomErrorText } from './templates';
+import { imageSupportLabels, memberImageSupport } from '../attachments/support';
+import '../attachments/images.css';
 
 export type NewDiscussionSetupProps = {
   api: Pick<RoomManagementApiContract, 'createAgent' | 'updateAgent'>; roomId: string;
@@ -106,9 +108,11 @@ export function NewDiscussionSetup({ api, roomId, members, draft, providers, rea
           const current = { ...agent, ...saving[agent.id] } as AgentConfiguration;
           const value = modelValue(current); const busy = agent.id in saving; const role = roleShown(agent);
           const line = memberLine(current, providers, readiness);
+          const sight = current.providerId || agent.builtInDemo ? memberImageSupport(current, providers, readiness) : undefined;
           return <li key={agent.id} className="setup-row">
             <Avatar name={agent.displayName} />
-            <div className="setup-who"><b>{agent.displayName}</b>{role && <> <Tag>{role}</Tag></>}</div>
+            <div className="setup-who"><b>{agent.displayName}</b>{role && <> <Tag>{role}</Tag></>}
+              {sight && <small className="setup-vision">{sight === 'no' ? <ImageOff aria-hidden size={12} /> : <Image aria-hidden size={12} />}{imageSupportLabels[sight]}</small>}</div>
             <select className="select input setup-model" aria-label={`${agent.displayName} 的模型`} value={value} disabled={busy || disabled}
               onChange={event => void change(agent, modelChoice(event.target.value))}>
               <ModelOptions options={options} value={value} emptyLabel={agent.builtInDemo ? '内置演示（不联网）' : undefined} />

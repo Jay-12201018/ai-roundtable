@@ -9,6 +9,7 @@ import { apiErrorSchema, upstreamText, type ApiError, type ErrorCode } from '../
 
 // Start refusals the host can act on get their own reason; anything else keeps the generic message.
 const startFailures: Partial<Record<string, string>> = {
+  image_unsupported: '启动失败：只支持 PNG、JPEG 和 WebP 图片。',
   service_unsupported: '有成员用的服务已不再支持，请在房间里给 TA 换一个模型。', model_unsupported: '有成员用的模型已不再支持，请在房间里给 TA 换一个模型。',
   forbidden: '启动失败：服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
   unsupported: '启动失败：有成员的模型现在不能发送请求，请到房间里检查成员的模型。',
@@ -16,6 +17,7 @@ const startFailures: Partial<Record<string, string>> = {
 
 // What the service or the network said, in plain words; nothing from its response body ever reaches here.
 const turnFailureMessages: Partial<Record<ErrorCode, string>> = {
+  attachment_missing: '有一张图片的文件读不出来了，这次请求没有发出。历史都保留。',
   invalid_response: '模型未完整完成响应，部分输出已保留。', timeout: '这次请求超时：模型一直没有返回完整的回复（单次请求最长 10 分钟）。已生成的文字保留，可以重试。', cancelled: '请求已停止，部分输出已保留。',
   authentication_failed: '服务商拒绝了这把 Key：可能无效或已过期，请到“设置 › 模型服务”检查。', forbidden: '服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
   rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查。', network_error: '连接不上，请检查网络。',
@@ -181,7 +183,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       if (ownsCommand(token, generation)) store.getState().setError('创建任务失败，请稍后重试。', generation);
     } finally { store.getState().endCommand(token); }
   }
-  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>, limits: Pick<StartRunInput, 'mode' | 'outputTokenLimit'> = {}) {
+  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>, limits: Pick<StartRunInput, 'mode' | 'outputTokenLimit' | 'attachmentIds'> = {}) {
     if (!mounted || options.requireRoom && !store.getState().roomId) return;
     const token = store.getState().beginCommand('start');
     if (token === undefined) return;
@@ -191,7 +193,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       const selectedRoom = roomId ?? (await api.room.createDemo(task)).roomId;
       if (!ownsCommand(token, generation)) return;
       const result = await api.run.start({ roomId: selectedRoom, task, ...(workflow?.workflowConfig ? workflow : { workflowSnapshot: { templateId: 'draft-review-finalize', version: 1 } }),
-        ...(limits.mode ? { mode: limits.mode } : {}), ...(limits.outputTokenLimit === undefined ? {} : { outputTokenLimit: limits.outputTokenLimit }) });
+        ...(limits.attachmentIds?.length ? { attachmentIds: limits.attachmentIds } : {}), ...(limits.mode ? { mode: limits.mode } : {}), ...(limits.outputTokenLimit === undefined ? {} : { outputTokenLimit: limits.outputTokenLimit }) });
       if (!ownsCommand(token, generation)) return;
       const parsed = runSnapshotSchema.safeParse(result);
       if (!parsed.success || parsed.data.roomId !== selectedRoom) throw new Error('Invalid start response');

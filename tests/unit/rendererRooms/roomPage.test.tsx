@@ -115,7 +115,7 @@ describe('添加成员 (D5-A)', () => {
     expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('审查者');
     expect((screen.getByLabelText('角色') as HTMLInputElement).value).toBe('审查');
     expect((screen.getByLabelText('设定可选') as HTMLTextAreaElement).value).toContain('你负责审查');
-    expect(screen.getByRole('status').textContent).toBe('可以使用：Key 已保存。标“多模态”的模型能看图，目前在圆桌里只用文字讨论。');
+    expect(screen.getByRole('status').textContent).toBe('可以使用：Key 已保存。标“多模态”的模型能看图：讨论里附的图片会发给它。');
     fireEvent.change(screen.getByLabelText('名字'), { target: { value: '老周' } });
     fireEvent.click(screen.getByRole('button', { name: '添加' }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ roomId: 'r1', displayName: '老周', roleTemplateId: '审查', providerId: 'ds', modelId: 'deepseek-flash', displayOrder: 3 })));

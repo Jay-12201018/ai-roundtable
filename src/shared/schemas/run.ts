@@ -9,6 +9,7 @@ import { hostStateSchema, hostUpdatedPayloadSchema, messageVersionSchema } from 
 import { requestUsageSchema } from './usage';
 import { contextPressureSchema, contextSummarySchema, summaryRequestStatusValues } from './summary';
 import { runContinuationSchema } from './continuation';
+import { attachmentIdsSchema, imageAttachmentsSchema } from './attachment';
 
 /**
  * D103, D134: the default single-output limit. Current models spend reasoning tokens out of this same limit, so the
@@ -16,7 +17,7 @@ import { runContinuationSchema } from './continuation';
  */
 export const DEFAULT_OUTPUT_TOKEN_LIMIT = 8192;
 export const startRunInputSchema = z.object({
-  roomId: idSchema, task: z.string().trim().min(1), workflowSnapshot: workflowSnapshotSchema.optional(), workflowConfig: workflowConfigSchema.optional(), workflowPreviewId: idSchema.optional(),
+  roomId: idSchema, task: z.string().trim().min(1), attachmentIds: attachmentIdsSchema.optional(), workflowSnapshot: workflowSnapshotSchema.optional(), workflowConfig: workflowConfigSchema.optional(), workflowPreviewId: idSchema.optional(),
   mode: z.enum(['automatic', 'step']).optional(),
   maxTurns: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   maxDurationMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
@@ -38,11 +39,15 @@ export const turnSnapshotSchema = z.object({
 }).strict();
 export const messageSnapshotSchema = z.object({
   id: idSchema, senderName: z.string().trim().min(1), content: z.string(), status: z.enum(messageStatusValues),
+  /** D147: what the host attached. Agents never have any. */
+  attachments: imageAttachmentsSchema.optional(),
 }).strict();
 export const runSnapshotSchema = z.object({
   runId: idSchema, roomId: idSchema, status: z.enum(runStatusValues), sequence: sequenceSchema,
   workflowSnapshot: workflowSnapshotSchema, currentTurnId: idSchema.optional(), activeAgentId: idSchema.optional(),
   turns: z.array(turnSnapshotSchema), messages: z.array(messageSnapshotSchema),
+  /** D147: the images attached to the goal. */
+  taskAttachments: imageAttachmentsSchema.optional(),
   startedAt: timestampSchema.optional(), updatedAt: timestampSchema,
   workflow: workflowProgressSchema.optional(), execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
   versions: z.array(messageVersionSchema).optional(), host: hostStateSchema.optional(),

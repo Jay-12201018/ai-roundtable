@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { messageTextOf } from '../../../src/shared/schemas/provider';
 import { afterEach, describe, expect, it } from 'vitest';
 import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +47,7 @@ describe('structured artifacts (D118–D123)', () => {
       expect(f.provider.inputs.length).toBe(before + 1);
       const request = f.provider.inputs.at(-1)!;
       expect(request).toMatchObject({ agentRole: `artifact:${kind}`, outputTokenLimit: 8192 });
-      const transcript = request.messages.at(-1)!.content;
+      const transcript = messageTextOf(request.messages.at(-1)!.content);
       // The kind's requirements come after the discussion, right before the answer (D120).
       expect(transcript).toContain('只输出一个 JSON 对象');
       expect(transcript).toContain('对应字段写 null，表示“未知”');
@@ -224,9 +225,9 @@ describe('structured artifacts (D118–D123)', () => {
     const prefix = (content: string) => content.slice(0, content.indexOf('【整理要求'));
     for (const request of requests.slice(1)) {
       expect(request.messages.slice(0, -1)).toEqual(requests[0].messages.slice(0, -1));
-      expect(prefix(request.messages.at(-1)!.content)).toBe(prefix(requests[0].messages.at(-1)!.content));
+      expect(prefix(messageTextOf(request.messages.at(-1)!.content))).toBe(prefix(messageTextOf(requests[0].messages.at(-1)!.content)));
     }
-    expect(prefix(requests[0].messages.at(-1)!.content)).toContain('【第 3 条 · 成员');
+    expect(prefix(messageTextOf(requests[0].messages.at(-1)!.content))).toContain('【第 3 条 · 成员');
     expect(new Set(requests.map(request => request.messages.at(-1)!.content)).size).toBe(4);
   });
 
@@ -263,7 +264,7 @@ describe('structured artifacts (D118–D123)', () => {
     f.run.confirmSummary({ runId, clientRequestId: 'c1', messageId: summary.messageId! });
     const { preview: artifactPreview, version } = await generate(f, runId, 'actions', 'g1');
     expect(artifactPreview).toMatchObject({ summarizedThrough: 3, lastNumber: 5 });
-    const transcript = f.provider.inputs.at(-1)!.messages.at(-1)!.content;
+    const transcript = messageTextOf(f.provider.inputs.at(-1)!.messages.at(-1)!.content);
     expect(transcript).toContain('【讨论摘要 · 覆盖第 1–3 条】');
     expect(transcript).not.toContain('【第 1 条');
     expect(transcript).toContain('【第 4 条 · 成员');
@@ -380,7 +381,7 @@ describe('structured artifacts (D118–D123)', () => {
       expect(again.artifacts[2].versions[0].request).toMatchObject({ requestId: held.requestId, status: 'interrupted' });
       expect(new ArtifactService(reopened, { notifyArtifact: () => {} }).getVersion({ runId, versionId: result.versionId }).rawOutput).toBe('不是 JSON');
       const raw = new Sqlite(filename, { readonly: true });
-      try { expect(validateDatabase(raw).schemaVersion).toBe(14); } finally { raw.close(); }
+      try { expect(validateDatabase(raw).schemaVersion).toBe(15); } finally { raw.close(); }
       reopened.close();
       const calls = f.provider.inputs.length;
       await new Promise(resolve => setTimeout(resolve, 30));
@@ -418,7 +419,7 @@ describe('recovery validation of migration 12', () => {
         const source = new Sqlite(filename); source.pragma('wal_checkpoint(TRUNCATE)'); source.close();
         copyFileSync(filename, copy);
         const raw = new Sqlite(copy);
-        try { expect(validateDatabase(raw).schemaVersion).toBe(14); raw.exec(tamper); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
+        try { expect(validateDatabase(raw).schemaVersion).toBe(15); raw.exec(tamper); expect(() => validateDatabase(raw)).toThrow(message); } finally { raw.close(); }
       };
       check('DROP TRIGGER artifact_version_output_once', /Missing R14 artifact protection/u);
       check(`DROP TRIGGER artifact_version_output_once; UPDATE artifact_versions SET content_json='{"title":""}'`, /Missing R14 artifact protection/u);

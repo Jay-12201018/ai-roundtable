@@ -276,7 +276,7 @@ async function main() {
   const Sqlite = require('better-sqlite3');
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
-    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 14, 'Migration 14');
+    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 15, 'Migration 15');
     check(db.prepare('SELECT COUNT(*) FROM code_exports').pluck().get() === 3 && db.prepare('SELECT COUNT(*) FROM code_export_files').pluck().get() === 21, 'Three writes of seven files each are recorded');
     check(db.prepare("SELECT GROUP_CONCAT(reason) FROM code_export_files WHERE outcome='failed'").pluck().get() === 'target_changed', 'The refused overwrite is recorded with its reason');
     check(db.prepare('SELECT DISTINCT root_path FROM code_exports').pluck().all().join() === fs.realpathSync(project), 'The folder is recorded by its real path');

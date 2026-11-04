@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { messageTextOf } from '../../../src/shared/schemas/provider';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,8 +72,8 @@ describe('R11 real RunService / R05 production plan consumer', () => {
       const step = expected.steps[index];
       expect(input).toMatchObject({ agentRole: expected.members.find(m => m.agentId === step.agentId)!.roleTemplateId, turnIndex: step.index, outputTokenLimit: expected.config.limits.outputTokenLimit });
       expect(input.messages.filter(m => m.role === 'system').map(m => m.content)).toContain(workflowStageInstruction(step.kind));
-      expect(input.messages.filter(m => m.role === 'system').some(m => m.content.includes('@Override'))).toBe(false);
-      for (let previous = 1; previous <= index; previous++) expect(input.messages.some(m => m.role !== 'system' && m.content.includes(`Public opinion ${previous}:`))).toBe(true);
+      expect(input.messages.filter(m => m.role === 'system').some(m => messageTextOf(m.content).includes('@Override'))).toBe(false);
+      for (let previous = 1; previous <= index; previous++) expect(input.messages.some(m => m.role !== 'system' && messageTextOf(m.content).includes(`Public opinion ${previous}:`))).toBe(true);
       expect(f.db.getAttempt(input.requestId)?.inputSnapshot).toEqual(input);
     }
     expect(f.service.hasActiveRuns()).toBe(false);
@@ -107,7 +108,7 @@ describe('R11 real RunService / R05 production plan consumer', () => {
       const step = f.service.step(run.runId);
       await expect(f.service.step(run.runId)).rejects.toMatchObject({ code: 'invalid_state' }); await step;
       expect(f.service.getSnapshot(run.runId).status).toBe('paused'); expect(f.provider.inputs).toHaveLength(2);
-      expect(f.provider.inputs[1].messages.some(m => m.role === 'system' && m.content.includes('Changed'))).toBe(false);
+      expect(f.provider.inputs[1].messages.some(m => m.role === 'system' && messageTextOf(m.content).includes('Changed'))).toBe(false);
       expect(f.db.listMessages(roomId)[1].senderName).toBe('成员 b');
       await f.service.resumeRun(run.runId);
       expect(f.service.getSnapshot(run.runId).status).toBe('completed'); expect(f.provider.inputs).toHaveLength(5);

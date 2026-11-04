@@ -18,8 +18,10 @@ const emit = (value: unknown) => { for (const handler of fixture.handlers) handl
 beforeEach(() => { fixture.invoke.mockReset(); fixture.handlers.clear(); });
 describe('restricted Preload contract', () => {
   it('exposes only typed feature methods and sends one explicit undefined argument for no-input requests', async () => {
-    expect(Object.keys(fixture.api!).sort()).toEqual(['artifact', 'codeExport', 'host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
+    expect(Object.keys(fixture.api!).sort()).toEqual(['artifact', 'attachment', 'codeExport', 'host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
     expect(Object.keys(fixture.api!.host)).toEqual(['command']);
+    // D147: bytes go in; nothing reads a file or takes a path.
+    expect(Object.keys(fixture.api!.attachment!)).toEqual(['addImage']);
     // R13B: typed ledger and summary commands only; no file system, Key or generic invoke reaches the page.
     expect(Object.keys(fixture.api!.summary)).toEqual(['preview', 'generate', 'confirm', 'revoke']);
     expect(Object.keys(fixture.api!.usage)).toEqual(['getReport', 'exportCsv']);

@@ -2,14 +2,14 @@ import type { Database } from '../database/Database';
 import type { KeyService } from '../security/KeyService';
 import type { ProviderConfiguration } from '../../shared/contracts/configuration';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
-import { modelLimits, streamChatInputSchema } from '../../shared/schemas/provider';
+import { IMAGE_INPUT_TOKENS, messageImagesOf, messageTextOf, modelLimits, streamChatInputSchema } from '../../shared/schemas/provider';
 import type { ProviderAdapter, StreamChatInput } from './types';
 import type { ModelTokenCounter } from '../context/types';
 import { countModelTokens } from '../context/buildPublicContext';
 import { MockProvider } from './mock/MockProvider';
 import { mockModelBudget } from './mock/tokenBudget';
 import { CompatibleProvider } from './compatible/CompatibleProvider';
-import { catalogHosts, catalogServiceAt, modelAllowed, serviceCatalog, type CatalogService } from '../../shared/serviceCatalog';
+import { catalogHosts, catalogServiceAt, imageSupportOf, modelAllowed, serviceCatalog, type CatalogService, type ImageSupport } from '../../shared/serviceCatalog';
 import type { ProviderMessage } from './types';
 import { createSafeFetch, type AllowedHosts } from './network';
 import type { DiagnosticObserver } from './diagnostics';
@@ -18,9 +18,11 @@ type Options = {
   /** Tests pass their own; the application never does. */
   catalog?: readonly CatalogService[];
   transportFactory?: (guard: () => void, diagnostics?: DiagnosticObserver) => typeof fetch;
+  /** D147: reads a stored image's bytes when a request is written. Without it, a request with images cannot be sent. */
+  readImage?: (attachmentId: string) => Promise<Uint8Array>;
 };
 /** What a request for a model may use: the host's per-model limits or the defaults (D134), with an input counter. */
-export type ModelBudget = { contextWindowTokens: number; maxOutputTokens: number; counter: ModelTokenCounter };
+export type ModelBudget = { contextWindowTokens: number; maxOutputTokens: number; counter: ModelTokenCounter; imageSupport: ImageSupport };
 /** What a request was prepared for; it stops if the service's kind, address or Key changes under it. */
 type Binding = { kind: string; baseUrl: string; revision: string };
 /** D135: a long reply from a slow model must not be cut off; the Run's duration limit is what bounds a discussion. */
@@ -79,8 +81,10 @@ export class ProviderRegistry {
   budget(providerId: string, modelId: string): ModelBudget {
     this.assertSelection(providerId, modelId);
     const configuration = this.configuration(providerId);
-    if (configuration.kind === 'mock') return { ...mockModelBudget, maxOutputTokens: mockModelBudget.contextWindowTokens };
-    return { ...this.limits(configuration, modelId), counter: { modelId, kind: 'upper_bound', method: inputBoundMethod, countMessages: countInputUpperBound } };
+    // The demo's replies are written in advance, so it does not read images, and it says so.
+    if (configuration.kind === 'mock') return { ...mockModelBudget, maxOutputTokens: mockModelBudget.contextWindowTokens, imageSupport: 'no' };
+    return { ...this.limits(configuration, modelId), counter: { modelId, kind: 'upper_bound', method: inputBoundMethod, countMessages: countInputUpperBound },
+      imageSupport: imageSupportOf(catalogServiceAt(this.catalog(), configuration.baseUrl), modelId) };
   }
   checkGeneration(providerId: string, input: StreamChatInput): void {
     // StreamChatInput includes AbortSignal only inside Main; validate its serializable request separately.
@@ -99,7 +103,7 @@ export class ProviderRegistry {
     onDispatch?: () => void): CompatibleProvider {
     const providerId = configuration.id;
     const safeTransport = this.createTransport(guard, diagnostics);
-    const options = { configuration, confirmedBaseUrl: binding.baseUrl, diagnostics, streamTimeoutMs: STREAM_TIMEOUT_MS,
+    const options = { configuration, confirmedBaseUrl: binding.baseUrl, diagnostics, streamTimeoutMs: STREAM_TIMEOUT_MS, readImage: this.options.readImage,
       resolveKey: async (id: string) => {
         guard();
         if (id !== providerId) throw new ContractError('forbidden');
@@ -163,7 +167,7 @@ export class ProviderRegistry {
 
 // Framing allowances are generous on purpose: role markers carry no message bytes, and nothing here is exact.
 const framing = { perRequestTokens: 512, perMessageTokens: 32 };
-const inputBoundMethod = `UTF-8 bytes + ${framing.perMessageTokens}/message + ${framing.perRequestTokens}/request`;
+const inputBoundMethod = `UTF-8 bytes + ${IMAGE_INPUT_TOKENS}/image + ${framing.perMessageTokens}/message + ${framing.perRequestTokens}/request`;
 /**
  * D090, D134: an upper bound on a request's input tokens for any tokenizer that emits at least one byte per token. It
  * overstates Chinese about 1.5–2 times and English about 4 times, which only means a discussion is called full early.
@@ -171,8 +175,7 @@ const inputBoundMethod = `UTF-8 bytes + ${framing.perMessageTokens}/message + ${
 export function countInputUpperBound(messages: readonly Readonly<ProviderMessage>[]): number | undefined {
   let total = framing.perRequestTokens;
   for (const message of messages) {
-    if (typeof message.content !== 'string') return undefined;
-    total += framing.perMessageTokens + Buffer.byteLength(message.content, 'utf8');
+    total += framing.perMessageTokens + Buffer.byteLength(messageTextOf(message.content), 'utf8') + messageImagesOf(message.content).length * IMAGE_INPUT_TOKENS;
   }
   return Number.isSafeInteger(total) ? total : undefined;
 }

@@ -8,6 +8,11 @@ import type { HostCommands } from '../host/useHostCommands';
 import { sendInterjection } from './interject';
 import { mentionedMembers, mentionOptions, mentionQuery, type MentionOption } from './mention';
 import { continuationSummary, useContinuation } from './continuation';
+import { AttachImageButton, ImageTray } from '../attachments/images';
+import { useImageDraft, useImageInput, type DraftImage, type ImageDraft } from '../attachments/useImageDraft';
+import { imageAudienceNotes } from '../attachments/support';
+import type { AttachmentApiContract } from '../../../shared/contracts/app';
+import type { ImageSupport } from '../../../shared/serviceCatalog';
 import './composer.css';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/u.test(navigator.platform || navigator.userAgent);
@@ -21,6 +26,9 @@ export const interjectionBoxFor = (snapshot: RunSnapshot | undefined, live: bool
   !!snapshot && (live || ['error', 'cancelled', 'interrupted'].includes(snapshot.status) && canDirectRun(snapshot) || canContinueRun(snapshot));
 /** Unsent interjections are kept per discussion while the window is open. */
 const interjectionDrafts = new Map<string, string>();
+const interjectionImages = new Map<string, readonly DraftImage[]>();
+
+const AudienceNotes = ({ notes }: { notes: readonly string[] }) => <>{notes.map(note => <p key={note} className="image-note warn-text" role="note">{note}</p>)}</>;
 
 /** Enter while an IME composition is active only confirms the candidate (keyCode 229 covers IMEs that end first). */
 export const isComposing = (event: KeyboardEvent, composing: boolean) => composing || event.nativeEvent.isComposing || event.keyCode === 229;
@@ -33,6 +41,8 @@ function useAutosize(ref: RefObject<HTMLTextAreaElement | null>, value: string) 
   }, [ref, value]);
 }
 
+const noImages: ImageDraft = { available: false, items: [], error: '', uploading: false, attachmentIds: [], addFiles: () => {}, remove: () => {}, clear: () => {} };
+
 export type TaskSettings = {
   outputLimitText: string; setOutputLimitText: (value: string) => void; outputLimitValid: boolean;
   stepMode: boolean; setStepMode: (value: boolean) => void;
@@ -40,10 +50,14 @@ export type TaskSettings = {
 };
 
 /** 未开始: a multi-line goal, the discussion settings as chips, and 开始讨论 in the slot 暂停 will take (D098). */
-export function TaskComposer({ draft, setDraft, canStart, starting, onStart, settings, notices, hint, label = '讨论目标', placeholder }: {
+export function TaskComposer({ draft, setDraft, canStart, starting, onStart, settings, notices, hint, label = '讨论目标', placeholder, images, imageNotes = [] }: {
   draft: string; setDraft: (value: string) => void; canStart: boolean; starting: boolean; onStart: () => void; settings: TaskSettings;
   notices?: ReactNode; hint?: ReactNode; label?: string; placeholder?: string;
+  /** D147: images going with the goal, and who will not see them. */
+  images?: ImageDraft; imageNotes?: readonly string[];
 }) {
+  const imageInput = useImageInput(images ?? noImages);
+  const startable = canStart && !images?.uploading;
   const area = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -66,25 +80,27 @@ export function TaskComposer({ draft, setDraft, canStart, starting, onStart, set
             : <span id="output-limit-help" className="field-error" role="alert">单次输出上限请输入 1 到 65536 之间的整数。</span>}
         </label>
       </div>}
-      <div className="composer">
+      <div className={cx('composer', imageInput.dropping && 'is-dropping')}>
+        {images && <ImageTray draft={images} notes={<>{!draft.trim() && <p className="image-note muted" role="note">讨论目标要写一句文字，图片作为补充。</p>}<AudienceNotes notes={imageNotes} /></>} />}
         <div className="composer-text">
           <textarea ref={area} aria-label={label} value={draft} rows={2} placeholder={placeholder ?? '这场讨论要解决什么？写下目标和约束，例如范围、时间、要交付什么…'}
             onChange={event => setDraft(event.target.value)}
             onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
             onKeyDown={event => {
               if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || isComposing(event, composing.current)) return;
-              event.preventDefault(); if (canStart) onStart();
+              event.preventDefault(); if (startable) onStart();
             }} />
         </div>
         <div className="composer-row">
           <div className="chips" ref={trigger}>
+            {images && <AttachImageButton draft={images} />}
             {settings.onOpenWorkflow && <button type="button" className="chip" onClick={settings.onOpenWorkflow} aria-label={`讨论方式：${settings.workflowLabel}`} title="选择谁在什么时候发言"><Workflow aria-hidden size={15} />{settings.workflowLabel}<ChevronDown aria-hidden size={14} /></button>}
             <label className={cx('chip', 'chip-check', settings.stepMode && 'is-on')} title="每位成员说完一次就停下，方便你插话或点名，再点「下一步」或「继续」">
               <input type="checkbox" checked={settings.stepMode} onChange={event => settings.setStepMode(event.target.checked)} />每回合后暂停</label>
             <IconButton icon={Ellipsis} label="更多设置" className="chip-icon" aria-expanded={open} aria-controls={panelId} onClick={() => setMoreOpen(value => !value)} />
           </div>
           <div className="controls">
-            <Button variant="primary" className="slot" disabled={!canStart} onClick={onStart}>{starting ? '正在开始…' : '开始讨论'}</Button>
+            <Button variant="primary" className="slot" disabled={!startable} onClick={onStart}>{starting ? '正在开始…' : '开始讨论'}</Button>
           </div>
         </div>
       </div>
@@ -148,14 +164,19 @@ function MentionMenu({ id, options, query, active, onPick, onHover, continuing }
  * 运行中: the box is the interjection box. Enter sends, Shift+Enter adds a line, `@` names the next speaker (D4),
  * and 设为持续指令 turns the text into a standing instruction. The run controls sit at its right.
  */
-export function HostComposer({ snapshot, commands, controls, settledSlot, notices, instructionsWritable, continueApi, onContinued }: {
+export function HostComposer({ snapshot, commands, controls, settledSlot, notices, instructionsWritable, continueApi, onContinued, attachmentApi, imageSupport }: {
   snapshot: RunSnapshot; commands: HostCommands; controls?: RunControls;
   /** For a Run that is no longer live: what sits in the primary slot instead of the run controls. */
   settledSlot?: ReactNode; notices?: ReactNode; instructionsWritable: boolean;
   /** D111: with these, a finished discussion is continued in place from this box. */
   continueApi?: Pick<RunApiContract, 'previewContinuation' | 'continueDiscussion'>; onContinued?: () => void;
+  /** D147: with this, the box takes images; `imageSupport` says who will not see them. */
+  attachmentApi?: AttachmentApiContract; imageSupport?: (member: { providerId: string | null; modelId: string | null }) => ImageSupport | undefined;
 }) {
   const key = snapshot.runId;
+  const [rememberedImages] = useState(() => ({ initial: interjectionImages.get(key) ?? [], save: (items: readonly DraftImage[]) => { if (items.length) interjectionImages.set(key, items); else interjectionImages.delete(key); } }));
+  const images = useImageDraft(attachmentApi, rememberedImages);
+  const imageInput = useImageInput(images);
   const [text, setTextState] = useState(() => interjectionDrafts.get(key) ?? '');
   const setText = (value: string) => { setTextState(value); if (value) interjectionDrafts.set(key, value); else interjectionDrafts.delete(key); };
   useEffect(() => { setTextState(interjectionDrafts.get(key) ?? ''); }, [key]);
@@ -177,7 +198,10 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
   const named = continuing ? mentionedMembers(text, options) : [];
   const noop = useCallback(() => {}, []);
   const continuation = useContinuation(continueApi, snapshot.runId, continuing, { content: text, ...(named.length === 1 ? { agentId: named[0].agentId } : {}) }, onContinued ?? noop);
-  const busy = commands.pending !== undefined || continuation.sending;
+  const busy = commands.pending !== undefined || continuation.sending || images.uploading;
+  const hasContent = text.trim().length > 0 || images.attachmentIds.length > 0;
+  const attached = images.attachmentIds.length ? { attachmentIds: images.attachmentIds } : {};
+  const imageNotes = imageAudienceNotes(members.map(member => ({ name: member.displayName, support: imageSupport?.(member) })));
   // When the discussion ends, what was said about the live Run (who was named, what comes next) no longer applies.
   const { report } = commands;
   useEffect(() => { if (continuing) report({}); }, [continuing, report]);
@@ -208,18 +232,18 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
     requestAnimationFrame(() => { areaNode?.focus(); areaNode?.setSelectionRange(position, position); });
   };
   const send = async () => {
-    if (!text.trim() || busy || !commands.available) return;
+    if (!hasContent || busy || !commands.available) return;
     if (continuing) {
       if (named.length > 1) { commands.report({ error: `一次只能让一位成员回应（这里点了${named.map(item => `@${item.name}`).join('、')}）。请只留一个；不带 @ 时所有成员各回应一次。` }); return; }
-      const result = await continuation.send({ content: text, ...(named.length === 1 ? { agentId: named[0].agentId } : {}) });
+      const result = await continuation.send({ content: text, ...attached, ...(named.length === 1 ? { agentId: named[0].agentId } : {}) });
       if (!result.ok) { commands.report({ error: `没有继续：${result.message}内容保留在输入框里。` }); return; }
       commands.report({ notice: `已在这场讨论里继续：${result.agentIds.length === 1 ? `${memberName(result.agentIds[0])}会回应你这段话` : `${result.agentIds.map(memberName).join('、')}会按顺序各回应一次`}，每位都能看到前面的全部讨论。` });
-      setText('');
+      setText(''); images.clear();
       return;
     }
-    const result = await sendInterjection(text, options, override?.agentId, commands.request, scheduledNext(snapshot));
+    const result = await sendInterjection(text, options, override?.agentId, commands.request, scheduledNext(snapshot), images.attachmentIds);
     commands.report({ notice: result.notice, error: result.error });
-    if (result.clear) setText('');
+    if (result.clear) { setText(''); images.clear(); }
   };
   const addInstruction = async () => {
     if (!text.trim() || busy) return;
@@ -268,20 +292,22 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
         {!commands.pending && commands.notice && <p role="status">{commands.notice}</p>}
         {!commands.pending && commands.error && <p role="alert" className="field-error">{commands.error}</p>}
       </div>}
-      <div className="composer">
+      <div className={cx('composer', imageInput.dropping && 'is-dropping')}>
+        <ImageTray draft={images} notes={<AudienceNotes notes={imageNotes} />} />
         <div className="composer-text">
           <textarea ref={area} aria-label={continuing ? '继续讨论' : '主持人插话'} value={text} rows={2} placeholder={placeholder}
             aria-controls={menu ? menuId : undefined} aria-expanded={menu ? true : undefined} aria-activedescendant={menu && filtered[active] ? `${menuId}-${active}` : undefined}
             onChange={event => { setText(event.target.value); syncMenu(event.target.value, event.target.selectionStart ?? event.target.value.length); }}
             onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
             onKeyDown={onKeyDown} />
-          <IconButton icon={ArrowUp} label={continuing ? '发送并继续讨论' : '发送插话'} className="send" disabled={!text.trim() || busy || !commands.available
+          <IconButton icon={ArrowUp} label={continuing ? '发送并继续讨论' : '发送插话'} className="send" disabled={!hasContent || busy || !commands.available
             || continuing && (continuation.preview?.available === false && continuation.preview.reason !== 'busy')} onClick={() => void send()} />
         </div>
         <div className="composer-row">
           <div className="chips">
+            <AttachImageButton draft={images} />
             <button type="button" className="chip" aria-expanded={menu !== undefined} aria-controls={menuId} onClick={() => (menu ? setMenu(undefined) : openMenu())}><AtSign aria-hidden size={15} />点名</button>
-            <button type="button" className="chip" disabled={!text.trim() || busy || !instructionsWritable} title="把这段话作为持续指令：之后每位成员的每次发言都遵守，可随时修改或清除" onClick={() => void addInstruction()}><Pin aria-hidden size={15} />设为持续指令</button>
+            <button type="button" className="chip" disabled={!text.trim() || busy || !instructionsWritable} title="把这段话作为持续指令：之后每位成员的每次发言都遵守，可随时修改或清除。图片不会带进持续指令" onClick={() => void addInstruction()}><Pin aria-hidden size={15} />设为持续指令</button>
           </div>
           {controls ? <LiveControls controls={controls} /> : <div className="controls">{settledSlot}</div>}
         </div>

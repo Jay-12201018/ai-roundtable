@@ -19,6 +19,8 @@ import { ContractError } from '../shared/contracts/errors';
 import { UsageService } from './usage/UsageService';
 import { ArtifactService } from './artifact/ArtifactService';
 import { CodeExportService } from './export/CodeExportService';
+import { AttachmentStore } from './attachments/AttachmentStore';
+import { handleImageRequests, registerImageScheme } from './attachments/imageProtocol';
 
 let database: Database | undefined;
 let window: BrowserWindow | undefined;
@@ -31,11 +33,14 @@ let hostService: HostService | undefined;
 let usageService: UsageService | undefined;
 let artifactService: ArtifactService | undefined;
 let codeExportService: CodeExportService | undefined;
+let attachmentStore: AttachmentStore | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
 let shutdownExitCode = 0;
 let initializationPromise: Promise<void> | undefined;
 
+// D147: Electron takes this only before the app is ready.
+registerImageScheme();
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
@@ -63,10 +68,15 @@ if (!hasLock) {
       const purged = database.purgeKeyLikeModelIds();
       if (purged) console.info(`已清除 ${purged} 处疑似 API Key 的模型 ID`);
       database.markInFlightRunsInterrupted();
+      // D147: drafts do not outlive the window, so before any page exists, what was attached but never sent goes.
+      const attachments = new AttachmentStore(database, join(app.getPath('userData'), 'attachments'));
+      attachments.sweep();
+      attachmentStore = attachments;
+      handleImageRequests(attachments);
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
-      const providers = new ProviderRegistry(database, keyService);
+      const providers = new ProviderRegistry(database, keyService, { readImage: async id => (await attachments.read(id)).bytes });
       settingsService = new ProviderSettingsService(database, keyService, providers);
       const modelBudget = (modelId: string | null, member: { providerId: string | null }) =>
         member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined;
@@ -100,14 +110,15 @@ if (!hasLock) {
 function createAppWindow(): void {
   if (shutdownRequested) return;
   try {
-    if (!runService || !roomService || !settingsService || !hostService || !usageService || !artifactService || !codeExportService) throw new Error('Run service is not initialized');
+    if (!runService || !roomService || !settingsService || !hostService || !usageService || !artifactService || !codeExportService || !attachmentStore) throw new Error('Run service is not initialized');
+    const attachments = attachmentStore;
     const usage = usageService;
     const artifacts = artifactService;
     const codeExport = codeExportService;
     disposeCurrentIpc();
     const createdWindow = createMainWindow();
     window = createdWindow;
-    const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService, host: hostService, usage: {
+    const dispose = registerIpc(createdWindow, { run: runService, rooms: roomService, settings: settingsService, host: hostService, attachments: { addImage: input => attachments.addImage(input) }, usage: {
       getReport: range => usage.getReport(range),
       exportCsv: (owner, range) => usage.exportCsv(async defaultName => {
         const result = await dialog.showSaveDialog(owner, { title: '导出用量明细', defaultPath: join(app.getPath('documents'), defaultName), filters: [{ name: 'CSV', extensions: ['csv'] }] });

@@ -103,7 +103,7 @@ describe('migration 14 (D133)', () => {
     const db = new Database(path); await db.initialize(); db.close();
     const raw = new Sqlite(path, { readonly: true });
     try {
-      expect(validateDatabase(raw).schemaVersion).toBe(14);
+      expect(validateDatabase(raw).schemaVersion).toBe(15);
       expect(raw.prepare('SELECT version FROM schema_backups').pluck().all()).toEqual([version]);
       const tables = raw.prepare("SELECT name FROM sqlite_schema WHERE type='table'").pluck().all() as string[];
       expect(tables.filter(table => removedTables.includes(table))).toEqual([]);

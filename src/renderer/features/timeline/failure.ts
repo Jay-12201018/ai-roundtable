@@ -4,7 +4,7 @@ import type { ErrorCode } from '../../../shared/schemas/error';
 const causes: Partial<Record<ErrorCode, string>> = {
   network_error: '网络中断或连不上服务', timeout: '模型一直没有返回完整的回复（单次请求最长 10 分钟）', rate_limited: '服务商限流（请求太频繁）',
   authentication_failed: 'Key 无效或已过期', invalid_input: '服务商拒绝了这次请求，可能是模型名或参数不对，或账户余额不足', not_found: '服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查', forbidden: '服务商拒绝了这次访问', invalid_response: '服务返回的内容不完整或格式不对', internal_error: '服务商或应用内部出错',
-  budget_exceeded: '旧版本的预算限制', target_rejected: '这个服务的地址解析到了内网或保留地址', service_unsupported: '这个服务已不再支持', model_unsupported: '这个模型已不再支持', unsupported: '这个模型现在不能发送请求', transport_error: '应用内部连接中断',
+  attachment_missing: '有一张图片的文件读不出来了', budget_exceeded: '旧版本的预算限制', target_rejected: '这个服务的地址解析到了内网或保留地址', service_unsupported: '这个服务已不再支持', model_unsupported: '这个模型已不再支持', unsupported: '这个模型现在不能发送请求', transport_error: '应用内部连接中断',
 };
 const nextSteps: Partial<Record<ErrorCode, string>> = {
   authentication_failed: '请到“设置”检查 Key，再重新生成。', rate_limited: '稍等一会儿再重新生成。',

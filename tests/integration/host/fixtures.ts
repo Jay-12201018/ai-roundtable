@@ -1,3 +1,4 @@
+import { messageTextOf } from '../../../src/shared/schemas/provider';
 import { Database } from '../../../src/main/database/Database';
 import { RunService } from '../../../src/main/services/RunService';
 import { HostService } from '../../../src/main/host/HostService';
@@ -83,4 +84,4 @@ export async function startWorkflow(f: ReturnType<typeof hostFixture>, template 
 export function publicHistory(input: Omit<StreamChatInput, 'signal'>) {
   return parseDiscussion(input.messages).entries;
 }
-export const systemTexts = (input: Omit<StreamChatInput, 'signal'>) => input.messages.filter(message => message.role === 'system').map(message => message.content);
+export const systemTexts = (input: Omit<StreamChatInput, 'signal'>) => input.messages.filter(message => message.role === 'system').map(message => messageTextOf(message.content));

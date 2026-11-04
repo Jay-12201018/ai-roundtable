@@ -2,7 +2,7 @@ import type { Database, MessageRecord, SummaryRecord, VersionRecord } from '../d
 import type { MemberSnapshot } from '../../shared/schemas/persistence';
 import type { ProviderMessage } from '../providers/types';
 import { affectedVersions, slotPositions } from '../host/versions';
-import { boundaryText, renderEntry, taskText, type TranscriptEntry } from './transcript';
+import { boundaryText, recordedImageNote, renderEntry, taskText, type TranscriptEntry } from './transcript';
 
 type Snapshot = ReturnType<Database['readRunSnapshot']>;
 
@@ -131,16 +131,16 @@ export function buildSummaryMessages(input: { task: string; members: readonly Me
   for (const slot of input.slots) {
     const revised = input.basedOn?.revisedSlotIds.includes(slot.slotId) ?? false;
     if (slot.number > input.lastNumber || input.basedOn && slot.number <= input.basedOn.lastNumber && !revised) continue;
-    if (slot.message.status !== 'completed' || !slot.message.content.trim()) continue;
+    if (slot.message.status !== 'completed' || !slot.message.content.trim() && !slot.message.attachments?.length) continue;
     const truncated = input.snapshot.attempts.find(attempt => attempt.messageId === slot.message.id)?.finishReason === 'length';
     const member = slot.agentId ? input.members.find(item => item.agentId === slot.agentId) : undefined;
     if (slot.author === 'agent' && !member) continue;
     entries.push({ speaker: slot.author === 'host' ? 'host' : 'member', ...(member ? { member } : {}), content: slot.message.content,
-      editedByHost: slot.active.origin === 'edit', basedOnRevisedHistory: (affected.get(slot.message.id)?.length ?? 0) > 0, truncated, ...(revised ? { revisedAfterSummary: true } : {}) });
+      editedByHost: slot.active.origin === 'edit', basedOnRevisedHistory: (affected.get(slot.message.id)?.length ?? 0) > 0, truncated, ...(revised ? { revisedAfterSummary: true } : {}), ...recordedImageNote(slot.message.attachments) });
   }
   return [
     { role: 'system', content: boundaryText },
     { role: 'system', content: summarizerRulesText },
-    { role: 'user', content: [taskText(input.task), ...entries.map(renderEntry), summaryCueText(input.firstNumber, input.lastNumber)].join('\n\n') },
+    { role: 'user', content: [taskText(input.task, recordedImageNote(input.snapshot.taskAttachments).imageNote), ...entries.map(renderEntry), summaryCueText(input.firstNumber, input.lastNumber)].join('\n\n') },
   ];
 }
