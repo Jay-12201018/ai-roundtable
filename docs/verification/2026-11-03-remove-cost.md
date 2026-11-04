@@ -1,76 +1,81 @@
-# 移除费用、开放模型、去掉多余步骤：验收记录
+# 移除费用、只用内置目录：验收记录
 
-分支 `codex/remove-cost-open-models`，检查在代码提交 `89c0b92` 上执行；之后只改了一句续写提示文案（重跑了涉及的测试），并增加本记录和截图。决策见 [DECISIONS](../DECISIONS.md) D133–D142。验证范围按总控 2026-11-04 的缩小要求执行。
+分支 `codex/remove-cost-open-models`。全部检查都在代码提交 `5abd3e9` 上执行；之后只增加本记录和截图。决策见 [DECISIONS](../DECISIONS.md) D133–D143。
 
 ## 第 1 层：自动化
-
-全部在 `89c0b92` 上实际执行。
 
 | 命令 | 结果 |
 |---|---|
 | `pnpm run typecheck` | exit 0 |
-| `pnpm test` | exit 0，125 个文件，1975 条通过 |
+| `node scripts/scan-public-terms.cjs <外部词表>` | exit 0，意外命中 0 处 |
+| `pnpm test` | exit 0，112 个文件，1700 条通过 |
 | `pnpm build` | exit 0 |
-| `pnpm e2e`（一次） | exit 0，24 条通过 |
+| `pnpm rehearse:upgrade <临时 v13 副本>` | exit 0，`schema_migrations` 13 → 14，输入文件没有变化 |
+| `pnpm e2e` | exit 0，26 条通过 |
 | `pnpm run pack` 后 `pnpm e2e:packaged` | exit 0，3 条通过 |
-| `pnpm rehearse:upgrade <临时 v13 副本>` | exit 0，`schema_migrations` 13 → 14，消息保留，输入文件没有变化 |
-| 探针 r07r08、r09、r10-r11、premerge | 各自 PASS |
-| 探针 r16-batch2（首次、重启、再次重启） | 三个阶段都 PASS |
+| 全部探针 | 都 PASS，见下 |
 
-从 v5、v9、v12、v13 升级由 `tests/integration/persistence/migrationV14.test.ts` 覆盖，讨论、消息、摘要和 token 用量都保留。
+全新建库：`pnpm e2e` 和 `pnpm e2e:packaged` 都从空 profile 启动，迁移到 14。从 v5、v9、v12、v13 升级由 `tests/integration/persistence/migrationV14.test.ts` 覆盖。
 
-其他探针没有在 `89c0b92` 上重跑。r01、r09-native（Electron 模式）、r12、r12-acceptance、r14、r15、r16-acceptance、r16-continuity、r16-longhistory 和 premerge 重启阶段，在通用适配器改动之前的提交上跑过，都通过。按总控安排，合并前由总控跑一次完整检查。
+探针：r01（默认、`--r03-recovery`、`--joint-ui`），r09-electron（首次、重启），r09-native，r12-electron（首次、重启），r12-acceptance，r07r08-electron（首次、重启），r10-r11-electron（首次、重启），r16-batch2（首次、两次重启），r14、r15（首次、重启），r16-acceptance，r16-continuity，r16-longhistory，premerge（首次、重启）。
 
-`node tests/probes/r09-native.cjs` 在这台机器上失败：探针写死 Node 24.18.1，现在的 Homebrew Node 是 24.22.0，与本任务无关，断言没有改。
+上一轮（`a4926bd`）`key-safety.spec.ts` 和 premerge 重启阶段失败，两处都是断言还按旧行为写。改完断言后在 `5abd3e9` 上从头重跑了一遍。
+
+### 扫描结果
+
+- 意外命中 0 处。词表从外部文件读取，脚本本身不含词表。
+- 保留 7 处：`migrations/v11.ts`（已发布，不能改）、`migrations/v14.ts`（要转换旧类型）、`migrationV14.test.ts`（旧类型作为测试输入）。
+- `pnpm-lock.yaml` 8 处传递依赖：`http-proxy-agent`、`https-proxy-agent`，来自打包工具的依赖链，不进应用。
 
 ## 第 2 层：实操
 
-真实构建，隔离 profile，全程用通用接口夹具和假 Key，不联网。路径：贴 Key → 选模型 → 开始讨论，再把成员换成三种接口类型混合讨论。由 `tests/e2e/mixed-providers.spec.ts` 操作，截图在 [remove-cost-screens](remove-cost-screens/)。
+真实构建，隔离 profile，假 Key，本地 fixture，不联网。由 `tests/e2e/mixed-providers.spec.ts` 操作，截图在 [remove-cost-screens](remove-cost-screens/)，每张的说明在 `captions.json`。
 
 | 截图 | 说明 |
 |---|---|
-| 01 | 首次启动：写明支持哪些服务、费用由服务商收取 |
-| 02 | 选服务：内置服务只预填地址和建议模型名，另有自定义服务 |
-| 03 | 贴 Key：写明 Key 只发往哪里；模型名已预填，可以手改；没有确认地址这一步 |
-| 04 | 保存后直接到第一场讨论，房间和三位成员已建好 |
-| 05 | 自定义服务：名称、接口类型、地址、Key、模型名 |
-| 06 | 四个服务都可以使用，保存时没有发请求 |
-| 07 | 四位成员用三种接口类型 |
-| 08 | 暂停：这一回合说完才停，发言下面显示 token |
-| 09 | 讨论结束：四个服务依次发言，没有金额 |
-| 10 | 一键摘要：写完直接生效，可以撤销、修改、换人 |
-| 11 | 产物：校验通过就能复制、另存，没有“采用” |
-| 12 | 用量页：只有请求数和 token |
-| 13–15 | 网络开关：关闭、读到系统代理、SOCKS（如实说明不支持，不悄悄直连） |
-| 16–20 | 深色：网络、模型服务、自定义服务表单、讨论页、用量页 |
+| 01–04 | 新用户：欢迎页 → 选服务（8 家，DeepSeek 推荐，另有演示）→ 贴 Key、选模型 → 第一场讨论 |
+| 05–06 | 四个服务都可以使用，保存时没有发请求；设置只有模型服务、外观、数据与隐私 |
+| 07–12 | 四位成员分属四家服务：暂停、讨论结束、摘要、产物、用量 |
+| 13–17 | 深色：模型服务、选服务、贴 Key（写明北京地域）、讨论、用量 |
+| 18–21 | 旧库：目录外的服务保留原名，显示已停用，只能删除；成员写明不再支持、请换一个（浅色、深色） |
+| 22–24 | 思考期间的提示、额度用完的提示、调高上限后重新生成 |
 
-800 宽没有留截图，spec 里检查了没有横向滚动。
+spec 里断言：向导里唯一的文本框是 API Key，模型是下拉列表；服务卡片没有文本框，“高级与删除”里只有服务名称；没有“手动添加模型”“从服务商获取列表”；设置里没有“网络”。旧库路径：开始讨论被拒且没有发请求，换模型后讨论正常完成，服务可以删除。
 
-实操发现并已修复的问题：
+实操发现并已修复：
 
-- 撤销摘要的状态没有传到界面。
-- 发给模型的摘要标签还写着“由主持人确认”。
-- 演示跑过之后再连接第一个真实服务，打开的是旧房间，不是新建好的房间。
-- 演示成员编造的 token 数被算进了用量页。
-- 房间页写“共 3 回合”，旁边的标签写 6 回合。
-- 欢迎页还把建房间列为一步。
-- 测试连接之后点“上一步”换服务，可能带着已保存的 Key。现在保存过就不再显示“上一步”。
-- 模型名被拒后 Key 还留在输入框。
+- 开始讨论时目录外成员的提示放错了映射表，界面显示笼统的“启动协作失败”。
+- 长模型名那一行“设为默认”会折行，模型名和 ID 改成上下两行。
+- 已停用的服务排在最前并默认展开，改为启用的在前、默认展开第一个启用的。
+- 没展开的卡片图标和模型数不对，改为从 readiness 取。
+- 目录外的服务没有 Key 时仍显示“删除 Key”，已隐藏。
+- 目录外的判断改用 Main 返回的 `supported`，Renderer 不再自己判断。
 
-## 残留词搜索
+## 第 3 层：真实模型
 
-在 `src` 里搜索 `¥`、`预算`、`花费`、`费用`（已发布的 migration 1–13 和历史交付文档除外）。`¥` 和 `花费` 没有结果。
+**未验证。** 留给总控和用户，用真实 Key 跑一场，事先取得用户同意。费用以服务商账单为准；下面的流程大约发十几次短请求。
 
-| 位置 | 文字 | 为什么留着 |
-|---|---|---|
-| `Welcome.tsx`、`ConnectWizard.tsx`、`Composer.tsx`、`RunPanel.tsx`、`UsagePage.tsx`、`GenerateDialog.tsx`、`SummaryDialog.tsx` | 费用由服务商收取，这里不估算 | 任务要求的一句说明 |
-| `ConnectWizard.tsx`、`ServicesPanel.tsx` | 可能产生极少的费用 | 测试连接可能发一条短消息，要说清楚 |
-| `MessageItem.tsx`、`RunNotices.tsx` | 续写、重试“按新请求计费”“可能再次计费”“为避免重复计费” | 这是一次新请求，要说清楚 |
-| `RunPanel.tsx` | 持续指令的示例“所有金额精确到元” | 是用户讨论内容的示例，与应用费用无关 |
-| `settings/model.ts`、`timeline/failure.ts` | 旧版本的预算限制 | 只为读懂升级前的 Run |
-| `migrations/v14.ts` | 这场讨论是旧版本按预算限制停下的 | 改写旧 Run 的停止原因，不含金额 |
+1. 切到这个分支，运行 `pnpm trial`（隔离试用目录，migration 14 只作用于试用库）。
+2. 选一家服务，贴 Key，保存后写目标，开始讨论。
+3. 到设置里再加一两家，把成员换成不同的服务，再开一场。
+4. 讨论中试暂停、点名、插话；结束后一键生成摘要和一份产物，看用量页。
 
-界面上不再有金额。E2E 每一步都检查页面文字里没有 `¥`、`预算`、`花费`、`金额` 等词。
+重点看这几处，出问题先记下错误提示，不要预先按厂商处理：
+
+- Kimi、MiniMax 文档主推 `max_completion_tokens`，这里发 `max_tokens`，看是否被接受。
+- 智谱的请求结构里没有 `stream_options`，看是否被忽略；不返回 usage 时用量应显示“没拿到”。
+- 不再替用户关思考：DeepSeek、豆包、Kimi 默认思考，看 8192 的默认上限够不够。
+- MiniMax 没有 `reasoning_split` 时，看 `<think>` 内容会不会混进发言（开头的已剥离）。
+- 通义千问用文档写明仍可使用的旧地址，Key 要选北京地域；豆包同样。
+- 百度文心、腾讯混元、MiniMax 只凭文档，一次都没有实测。
+
+## 目录来源
+
+地址和模型按官方文档，来源写在 `src/shared/serviceCatalog.ts`：
+
+- 豆包三个模型：内置浏览器核到官方模型列表页原文（页面最近更新 2026.11.03 15:23:30）。
+- 百度文心 `ernie-5.1`：模型列表页有原文；文本生成页写明 `POST https://qianfan.baidubce.com/v2/chat/completions`、Bearer、`max_tokens`。“该模型可用于这个接口”是按页面规则推断，没有原文逐字写明。
+- 腾讯混元地址和模型来自总控；我查到的文档页写的是旧地址，并提示迁移到 TokenHub。
 
 ## 因设计改变而删改的断言
 
@@ -78,30 +83,18 @@
 
 | 文件 | 原因 |
 |---|---|
-| `tests/integration/deepseek/*`（9 个）、`tests/unit/providers/controlledTrialMenu.test.ts`、`tests/probes/controlled-*`、`deepseek-*`、`r13a-*`、`r13b-*` | 受控试用和费用功能删除（D133）；其中用量部分已由新测试覆盖 |
+| `tests/integration/deepseek/*`（9 个）、`tests/unit/providers/controlledTrialMenu.test.ts`、`tests/probes/controlled-*`、`deepseek-*`、`r13a-*`、`r13b-*` | 受控试用和费用功能删除（D133） |
 | `tests/integration/usage/{deepseekPolicy,ledgerR13b,migrationV7,runBudget}.test.ts`、`tests/integration/artifacts/ledger.test.ts`、`tests/unit/usage/pricing.test.ts`、`tests/unit/rendererUsage/r13bViews.test.tsx` | 价格、预留、结算、预算删除（D133） |
-| `tests/integration/r09/contracts.test.ts`、`tests/integration/settings/sessionTargetState.test.ts` | 地址确认删除（D136） |
-| `tests/unit/providers/loopbackProxy.test.ts`，`proxyTunnelTransport.test.ts` 里“拒绝非固定目标” | 代理不再限固定目标（D137），改为断言任意地址走代理且代理看不到 Key |
-| `tests/integration/settings/connectWizard.test.tsx`、`tests/unit/rendererSettings/settingsPage.test.tsx`、`tests/integration/onboarding/firstUse.test.tsx` | 向导去掉步骤、确认地址、试发一条（D136），网络面板改开关（D137），预设改国内（D142） |
-| `tests/integration/usage/summary.test.ts` | 摘要不再等确认（D140），增加撤销和恢复的测试 |
+| `tests/integration/usage/summary.test.ts` | 摘要不再等确认（D140） |
 | `tests/integration/artifacts/artifacts.test.ts`、`tests/integration/codeExport/codeExport.test.ts`、`tests/unit/rendererArtifacts/artifacts.test.tsx`、`tests/e2e/artifacts.spec.ts`、`tests/e2e/code-export.spec.ts` | 去掉“采用”（D139） |
-| `tests/unit/rendererCodeExport/codeExport.test.tsx`、`tests/probes/r15-acceptance.cjs` | 新建文件默认勾选（D141），覆盖仍断言默认不勾 |
-| `tests/unit/providers/gemini/adapter.test.ts` | Gemini 接口接受用户填写的安全地址（D142），不安全的地址仍拒绝 |
-| `tests/integration/providers/mixedProviders.test.ts`、`tests/probes/premerge-quality-acceptance.cjs` | 不再替用户关思考（D135） |
+| `tests/unit/rendererCodeExport/codeExport.test.tsx`、`tests/probes/r15-acceptance.cjs` | 新建文件默认勾选（D141），覆盖仍默认不勾 |
+| `tests/unit/providers/compatible/{adapter,stream}.test.ts`、`tests/unit/contracts/*`、`tests/integration/r09/*`、`tests/integration/r07r08/ipcConfiguration.test.ts` | 模型列表、鉴权级别和能力配置删除（D143）；并发撤销的用例改用生成级别的连接测试，断言不变 |
+| `tests/integration/settings/{providerSettings,connectWizard,targetApproval}.test.*`、`tests/unit/rendererSettings/*`、`tests/integration/onboarding/firstUse.test.tsx`、`tests/e2e/mixed-providers.spec.ts`、`tests/e2e/key-safety.spec.ts` | 自定义服务、手填模型和地址删除（D143） |
+| `tests/unit/providers/network.test.ts` | 198.18.0.0/15 只对目录内域名放行（D143）；其余用例不查主机，新增目录外主机的拒绝用例 |
+| `tests/probes/r07r08-*`、`r09-*`、`r10-r11-*`、`r16-batch2-acceptance`、`premerge-quality-acceptance` | 改走目录服务，测试目录由探针入口注入。premerge 里“把 Key 填进模型名”这一步没有入口了，删除；启动时清除旧值的检查保留 |
 
-## 第 3 层：真实模型
+新增覆盖在 `tests/integration/providers/catalogEnforcement.test.ts`、`network.test.ts`、`migrationV14.test.ts`。
 
-**未验证。** 由总控和用户用真实 Key 跑一场，事先取得用户同意。费用以服务商账单为准；下面的流程大约发十几次短请求。
+## 残留词
 
-1. 切到这个分支，运行 `pnpm trial`（隔离试用目录，migration 14 只作用于试用库，不碰正式数据库）。
-2. 贴一家国内服务的 Key，保存后写目标，开始一场讨论。
-3. 到设置里再加一两家，也可以用自定义服务手填地址和模型名；把成员换成不同的服务，再开一场。
-4. 讨论中试暂停、点名、插话；结束后一键生成摘要和一份产物，看用量页。
-
-重点看这几处，通用路径可能在这里遇到差异。出问题先记下错误提示，不要预先按厂商处理：
-
-- Kimi、MiniMax 的文档主推 `max_completion_tokens`，通用路径发 `max_tokens`，看是否被接受。
-- 智谱的请求结构里没有 `stream_options`，看是否被忽略；不返回 usage 时用量应显示“没拿到”。
-- 不再替用户关思考：DeepSeek、豆包、Kimi 默认思考，看 8192 的默认上限够不够，正文会不会被截断。
-- MiniMax 没有 `reasoning_split` 时，看 `<think>` 内容会不会混进发言。
-- 通义千问用的是文档写明仍可使用的旧地址，Key 要选北京地域。
+`¥`、`花费` 在 `src` 里没有结果。其余“费用”“计费”都是说明费用由服务商收取、测试连接和续写可能产生费用；`settings/model.ts`、`timeline/failure.ts`、`migrations/v14.ts` 里的“预算”只为读懂升级前的记录。E2E 每一步都检查页面文字里没有 `¥`、`预算`、`花费`、`金额` 等词。

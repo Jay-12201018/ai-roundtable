@@ -5,27 +5,27 @@
  },
  {
   "file": "02-wizard-choose.png",
-  "caption": "选服务：内置服务只是预填地址和建议模型名；也可以选自定义服务。"
+  "caption": "选服务：八家国内服务，DeepSeek 排第一并标推荐；另有不联网的演示。没有自定义。"
  },
  {
   "file": "03-wizard-key.png",
-  "caption": "贴 Key：写明 Key 只会发往哪里、费用由谁收取；模型已选好一个。保存就能用，没有确认地址这一步。"
+  "caption": "贴 Key：写明 Key 只会发往哪里、费用由谁收取；模型从列表里选。保存就能用，没有填地址或模型名的地方。"
  },
  {
   "file": "04-first-discussion.png",
   "caption": "保存后直接到第一场讨论：房间和三位成员已经建好，写下目标就能开始。"
  },
  {
-  "file": "05-custom-service.png",
-  "caption": "自定义服务：名称、接口类型、地址、Key、模型名，保存就能用。"
- },
- {
-  "file": "06-services.png",
+  "file": "05-services.png",
   "caption": "设置 › 模型服务：四个服务都可以使用，保存时没有发任何请求。"
  },
  {
+  "file": "06-settings-sections.png",
+  "caption": "设置只有模型服务、外观、数据与隐私。"
+ },
+ {
   "file": "07-room.png",
-  "caption": "房间：四位成员各用一个服务，三种接口类型混在一起，都写着“可以使用”。"
+  "caption": "房间：四位成员各用一家服务，都写着“可以使用”。"
  },
  {
   "file": "08-paused.png",
@@ -48,35 +48,51 @@
   "caption": "用量页 · 按讨论：只有请求数和 token；写明费用由服务商收取。"
  },
  {
-  "file": "13-network-off.png",
-  "caption": "设置 › 网络：默认关闭，直接连接。文案不提任何软件和用途。"
- },
- {
-  "file": "14-network-system.png",
-  "caption": "打开开关：马上读到系统代理并写在开关旁，不用重启；测试连接只做一次握手。"
- },
- {
-  "file": "15-network-socks.png",
-  "caption": "系统代理是 SOCKS：说明不支持、请求不会发出，并指向手动填写；不会悄悄直连。"
- },
- {
-  "file": "16-network-dark.png",
-  "caption": "深色主题：网络。"
- },
- {
-  "file": "17-services-dark.png",
+  "file": "13-services-dark.png",
   "caption": "深色主题：模型服务。"
  },
  {
-  "file": "18-wizard-custom-dark.png",
-  "caption": "深色主题：自定义服务表单。"
+  "file": "14-wizard-choose-dark.png",
+  "caption": "深色主题：选服务。"
  },
  {
-  "file": "19-discussion-dark.png",
+  "file": "15-wizard-key-dark.png",
+  "caption": "深色主题：贴 Key；通义千问写明地域要选北京。"
+ },
+ {
+  "file": "16-discussion-dark.png",
   "caption": "1280 宽、深色：讨论页。"
  },
  {
-  "file": "20-usage-dark.png",
+  "file": "17-usage-dark.png",
   "caption": "1280 宽、深色：用量页。"
+ },
+ {
+  "file": "18-stopped-service.png",
+  "caption": "旧版本留下的服务：保留原名，显示已停用，写明不再支持；只能删除，连同 Key。"
+ },
+ {
+  "file": "19-stopped-service-dark.png",
+  "caption": "深色主题：旧版本留下的服务。"
+ },
+ {
+  "file": "20-stopped-member.png",
+  "caption": "房间：成员还写着原来的选择，并说明不再支持、请换一个。"
+ },
+ {
+  "file": "21-stopped-member-dark.png",
+  "caption": "深色主题：房间里的成员。"
+ },
+ {
+  "file": "22-thinking-wait.png",
+  "caption": "思考期间：<think> 块和 reasoning_content 都不显示；第二位成员还没有正文，写明正在思考或生成，不像卡住。"
+ },
+ {
+  "file": "23-quota-used-up.png",
+  "caption": "额度用完：第三位成员 8192 全用在思考上，没有正文。写明原因和解决办法，旁边就是“重新生成”。"
+ },
+ {
+  "file": "24-quota-regenerated.png",
+  "caption": "调高最大输出后重新生成：这次请求按 16000 发出，写出了正文。"
  }
 ]
