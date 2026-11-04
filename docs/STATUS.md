@@ -1,10 +1,21 @@
 # R00–R18 状态与授权看板
 
-## 当前状态（2026-11-03）
+## 当前状态（2026-11-05）
+
+- **移除费用、只留国产模型：merged / verified。** 分支 `codex/remove-cost-open-models`（`2127663`，基于 main `b7dab53`，30 个提交），以 ff-only 方式合入 main。决策 D133–D146，记录见 [移除费用](verification/2026-11-03-remove-cost.md)。
+  - 彻底移除价格、预算和预计花费，用量页只显示 token。migration 14 建 `request_usage`、`provider_model_discovery`，删除费用相关表，转换并停用旧服务类型。破例改了 v11 的 CHECK 文字（任何数据库的最终状态不变）。
+  - 只有内置目录的 8 家服务（DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax），Main 强制地址和模型；没有代理、自定义服务、本机模型和手填模型名。国外服务的适配器和 SDK 已删除。
+  - 每家子模型可选，含多模态模型（目前只发文字）；用 Key 从固定地址的 `/models` 自动发现本品牌新模型。
+  - 新讨论页三步：讨论方式 → 几位成员 → 每位成员的模型。默认总时长上限改为 2 小时。失败提示带服务商错误码。
+- **这次的检查**：总控在 `2127663` 上跑了完整检查：typecheck、build、117 个文件 / 1889 个测试、`pnpm e2e` 32 项、打包和 `pnpm e2e:packaged` 3 项、全部探针含重启阶段。两处第一次未过：① `r07r08` 在 800×600 下导航抽屉 3 秒内没打开，重跑两遍主流程和重启阶段都通过，判断为偶发，原因未查实，记为已知问题。② 升级演练输入用了已到 v14 的试用库，报 `Untrusted backup path`；换 v13 副本后通过，输入文件未变。
+- **第 3 层（用户亲手，试用版）**：开着网络工具时，DeepSeek Flash 和豆包 Evolving 同场跑完 4 轮双人对话，发言完整，无思考内容混入，互相审查质量好。**未验证**：不开网络工具（用户决定暂缓，发布前在两张卡片上各点一次「测试连接」）；其余 6 家只核对文档并用 fixture 测试；真实服务返回错误码的显示；三人以上混用多家的真实讨论。
+- **下一步路线**：① 讨论里发图片（用户已确认，单独任务）。② 大众化专项。③ 更新发布政策和 AGENTS.md，清理公开内容，做公开副本并发布（`Jay-12201018/ai-roundtable`，推送前确认一次）。④ 自用安装（备份真实数据库并在副本上演练，先问用户）。
+
+## 较早状态（2026-11-03）
 
 - **R17A 真实 Electron E2E 与 Mac 自用包：merged。** 分支 `codex/r17a-e2e-macpack`（`286da03`，基于 main `af5bffb`），以 ff-only 方式合入 main。`pnpm e2e` 在真实 Electron 里跑 V1 验收场景（23 项，连续 3 次通过，空测试集失败）；`pnpm e2e:packaged` 验证打包应用；新增 `pnpm rehearse:upgrade`（只在数据库副本上演练升级，已用夹具测试，未碰真实数据）；README 按当前能力重写；探针改为等实际窗口尺寸；Mac arm64 安装包（dmg / zip，ad-hoc 签名，未公证）。子会话在 `422f923` 上跑了 typecheck、143 个文件 / 2209 个测试、build、37 个探针阶段，之后只改探针和文档，总控审查后未重跑全量。`rendererSelection` 的超时没能复现，延长等待属推断。第 3 层（真实模型、真实钥匙串、真实数据库升级）未验证。记录见 [R17A](verification/2026-11-03-r17a.md)。
-- **发布方向变更（用户 2026-11-03 决定，取代 [发布政策](RELEASE_POLICY.md) 和 AGENTS.md 的非商业授权规定，这两份文件待更新）**：MIT 开源，不做签名和公证；仓库 `qunimadexiaokeai-bit/ai-roundtable` 已由用户创建；首发源码加 Mac 安装包，按常见开源项目的做法，精简公开内容。尚未推送代码。
-- **发布前要处理**：① DeepSeek 价格审核 2026-11-21 到期，到期后真实讨论会被拒绝（`validPrice`），公开发布后所有用户都会受影响，需改到期行为或重新核价。② 4 个旧探针失败（`deepseek-trial-electron`、`deepseek-diagnostics-electron`、`deepseek-final-readiness`、`controlled-launcher-electron`），都涉及 Codex 时期的“受控单次试用”菜单，未确认 main 上是否早已失败；总控建议退役该菜单。③ `legacyMigration.test.ts`、`migrationV2.test.ts` 用 `git show 135bf82` 读原始表结构，重写历史后会失败，要改成固定夹具。④ 待用户决定：发布前是否开放多家模型（目前只有 DeepSeek Flash 能用于真实讨论）。
+- **发布方向变更（用户 2026-11-03 决定，取代 [发布政策](RELEASE_POLICY.md) 和 AGENTS.md 的非商业授权规定，这两份文件待更新）**：MIT 开源，不做签名和公证；仓库已由用户创建（用户名后来改了，现在是 `Jay-12201018/ai-roundtable`）；首发源码加 Mac 安装包，按常见开源项目的做法，精简公开内容。尚未推送代码。
+- **发布前要处理（①②③④ 已由移除费用分支解决，留作记录）**：① DeepSeek 价格审核 2026-11-21 到期，到期后真实讨论会被拒绝（`validPrice`），公开发布后所有用户都会受影响，需改到期行为或重新核价。② 4 个旧探针失败（`deepseek-trial-electron`、`deepseek-diagnostics-electron`、`deepseek-final-readiness`、`controlled-launcher-electron`），都涉及 Codex 时期的“受控单次试用”菜单，未确认 main 上是否早已失败；总控建议退役该菜单。③ `legacyMigration.test.ts`、`migrationV2.test.ts` 用 `git show 135bf82` 读原始表结构，重写历史后会失败，要改成固定夹具。④ 待用户决定：发布前是否开放多家模型（目前只有 DeepSeek Flash 能用于真实讨论）。
 - **自用安装（待用户同意）**：安装包使用正式数据目录，装之前要先备份真实数据库并在副本上演练升级；步骤见 R17A 记录。
 
 - **R15 安全代码导出：merged / verified。** 分支 `codex/r15-safe-code-export`（`6c61748`，基于 main `9cb0a1b`），以 ff-only 方式合入 main。决策 D126–D131；**migration 13**（`code_exports`、`code_export_files`，只追加，不存文件内容）；新增窄接口 `codeExport.chooseRoot / preview / write`，没有通用文件读写，也不执行任何生成的代码。
