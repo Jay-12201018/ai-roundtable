@@ -10,28 +10,27 @@ const config = (value: Partial<ProviderConfiguration> & Pick<ProviderConfigurati
 const summary = (value: ProviderConfiguration): ProviderSummary => ({ id: value.id, name: value.name, kind: value.kind, enabled: value.enabled, isDefault: value.isDefault,
   defaultModelId: value.defaultModelId, customModels: value.customModels, configurationValid: true, hasStoredKey: false });
 const deepseek = config({ id: 'ds', name: 'DeepSeek', kind: 'compatible', baseUrl: 'https://api.deepseek.com/', isDefault: true, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
-const glm = config({ id: 'oa', name: '智谱 GLM', kind: 'compatible', baseUrl: 'https://service.example/v1', defaultModelId: 'kimi-k3.1-pro' });
-const kimi = config({ id: 'km', name: 'Kimi', kind: 'compatible', baseUrl: 'https://kimi.example/v1', defaultModelId: 'moonshot', customModels: [{ id: 'moonshot', name: 'moonshot' }] });
+const glm = config({ id: 'oa', name: '智谱 GLM', kind: 'compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModelId: 'glm-5.3' });
+const old = config({ id: 'old', name: '旧服务', kind: 'compatible', baseUrl: 'https://models.example/v1', enabled: false, defaultModelId: 'old-model', customModels: [{ id: 'old-model', name: 'old-model' }] });
+const kimi = config({ id: 'km', name: 'Kimi', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1', defaultModelId: 'kimi-k3', customModels: [{ id: 'kimi-k3', name: 'Kimi K3' }] });
 const mock = config({ id: 'mk', name: '演示（Mock）', kind: 'mock', defaultModelId: 'mock' });
-const ready = (providerId: string, value: Partial<ProviderReadiness>): ProviderReadiness => ({ providerId, keyState: 'missing', baseUrl: null, models: [], ...value });
+const ready = (providerId: string, value: Partial<ProviderReadiness>): ProviderReadiness => ({ providerId, keyState: 'missing', supported: true, baseUrl: null, models: [], ...value });
 
 function fixture(readiness: ProviderReadiness[]) {
-  const records = new Map([deepseek, glm, kimi, mock].map(value => [value.id, structuredClone(value)]));
+  const records = new Map([deepseek, glm, kimi, mock, old].map(value => [value.id, structuredClone(value)]));
   const api: ProviderSettingsApiContract = {
     listProviderSummaries: vi.fn(async () => [...records.values()].map(summary)),
     getProviderConfiguration: vi.fn(async ({ id }) => structuredClone(records.get(id)!)),
     getProviderKeyState: vi.fn(), getKeyStorageStatus: vi.fn(async () => ({ mode: 'secure', backend: 'f', persistent: true, message: '密钥将使用系统安全存储持久化。' } as const)),
     createProvider: vi.fn(), updateProvider: vi.fn(async input => { const value = { ...records.get(input.id!)!, ...input } as ProviderConfiguration; records.set(value.id, value); return value; }),
     deleteProvider: vi.fn(async () => {}), setKey: vi.fn(), deleteKey: vi.fn(async () => {}),
-    listModels: vi.fn(async ({ providerId }) => ({ providerId, models: [{ id: 'listed-model', name: '列表模型' }] })),
-    testConnection: vi.fn<ProviderSettingsApiContract['testConnection']>(async ({ providerId, level }) => ({ providerId, result: level === 'configuration' ? { requestId: 'r', level, ok: true }
-      : level === 'authentication' ? { requestId: 'r', level, ok: false, error: publicError('unsupported') } : { requestId: 'r', level, ok: true } })),
+    testConnection: vi.fn<ProviderSettingsApiContract['testConnection']>(async ({ providerId, level }) => ({ providerId, result: { requestId: 'r', level, ok: true } })),
     listModelReadiness: vi.fn(async () => readiness),
   };
   return { api, records };
 }
 function show(api: ProviderSettingsApiContract, extra: { section?: SettingsSection } = {}) {
-  const providers = [deepseek, glm, kimi, mock].map(summary);
+  const providers = [deepseek, glm, kimi, mock, old].map(summary);
   return render(<SettingsPage api={api} providers={providers} providerLoadState="ready" onProvidersChanged={() => {}} theme="system" setTheme={() => {}}
     section={extra.section ?? 'services'} onSection={() => {}} />);
 }
@@ -42,14 +41,13 @@ describe('设置 › 模型服务', () => {
   it('states each service in words, as Main decides it (D114)', async () => {
     const { api } = fixture([
       ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
-      ready('oa', { keyState: 'missing', models: [{ modelId: 'kimi-k3.1-pro', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
-      ready('km', { keyState: 'configured', baseUrl: 'https://kimi.example/v1', models: [{ modelId: 'moonshot', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
+      ready('oa', { keyState: 'missing', models: [{ modelId: 'glm-5.3', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
+      ready('km', { keyState: 'configured', baseUrl: 'https://api.moonshot.cn/v1', models: [{ modelId: 'kimi-k3', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
       ready('mk', { keyState: 'none', models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
     ]);
     show(api);
     await waitFor(() => expect(within(card('DeepSeek')).getByText('可以使用')).toBeTruthy());
     expect(within(card('智谱 GLM')).getByText('还没填写 Key')).toBeTruthy();
-    // D136: a Key is all a service needs, whichever address it goes to.
     expect(within(card('Kimi')).getByText('可以使用')).toBeTruthy();
     expect(within(card('演示（Mock）')).getByText('内置')).toBeTruthy();
     // The address is written down, the Key never shown, each model's limits stated.
@@ -60,49 +58,36 @@ describe('设置 › 模型服务', () => {
     expect(card('DeepSeek').textContent).toContain('上下文 128,000 · 最大输出 8,192');
   });
 
-  it('测试连接 uses the free model list first and says what it found', async () => {
+  it('测试连接 sends one very short message and says what it found', async () => {
     const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
-    vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: { requestId: 'r', level, ok: true } }));
     show(api);
     const deepseekCard = card('DeepSeek');
     const button = await within(deepseekCard).findByRole('button', { name: '测试连接' });
     expect(deepseekCard.textContent).toContain('可能产生极少的费用');
     fireEvent.click(button);
-    await within(deepseekCard).findByText(/Key 有效，连接正常/u);
-    expect(vi.mocked(api.testConnection).mock.calls.map(([input]) => input.level)).toEqual(['configuration', 'authentication']);
-    // The two old checks are one button now.
-    expect(within(deepseekCard).queryByRole('button', { name: '试发一条' })).toBeNull();
-    expect(within(deepseekCard).queryByRole('button', { name: '检查连接' })).toBeNull();
-  });
-
-  it('测试连接 falls back to one very short message when the service has no model list', async () => {
-    const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
-    show(api);
-    const deepseekCard = card('DeepSeek');
-    fireEvent.click(await within(deepseekCard).findByRole('button', { name: '测试连接' }));
     await within(deepseekCard).findByText(/已收到回复，连接正常/u);
+    expect(vi.mocked(api.testConnection).mock.calls.map(([input]) => input.level)).toEqual(['configuration', 'generation']);
     expect(api.testConnection).toHaveBeenLastCalledWith({ providerId: 'ds', level: 'generation', modelId: 'deepseek-flash', allowGeneration: true });
   });
 
-  it('测试连接 does not send a message when the Key was refused, and says so', async () => {
+  it('测试连接 says when the Key was refused', async () => {
     const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] })]);
     vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: level === 'configuration' ? { requestId: 'r', level, ok: true } : { requestId: 'r', level, ok: false, error: publicError('authentication_failed') } }));
     show(api);
     const deepseekCard = card('DeepSeek');
     fireEvent.click(await within(deepseekCard).findByRole('button', { name: '测试连接' }));
-    await waitFor(() => expect(vi.mocked(api.testConnection).mock.calls.length).toBe(2));
-    expect(vi.mocked(api.testConnection).mock.calls.map(([input]) => input.level)).toEqual(['configuration', 'authentication']);
+    await within(deepseekCard).findByText(/Key 无效或已过期/u);
     expect(within(deepseekCard).queryByText(/连接正常/u)).toBeNull();
   });
 
-  it('refuses a pasted Key as a model name and keeps dangerous deletions behind a second, red confirmation', async () => {
+  it('D143 nothing takes an address or a model name; dangerous deletions stay behind a second, red confirmation', async () => {
     const { api } = fixture([ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [] })]);
     show(api);
     const deepseekCard = card('DeepSeek');
-    fireEvent.click(await within(deepseekCard).findByRole('button', { name: '手动添加模型' }));
-    fireEvent.change(within(deepseekCard).getByLabelText('模型名'), { target: { value: 'sk-abcdefghijklmnopqrstuvwxyz0123456789' } });
-    expect(within(deepseekCard).getByRole('alert').textContent).toContain('这看起来是 API Key');
-    fireEvent.click(within(deepseekCard).getByRole('button', { name: '添加' }));
+    await within(deepseekCard).findByRole('button', { name: '测试连接' });
+    for (const name of ['手动添加模型', '从服务商获取列表']) expect(within(deepseekCard).queryByRole('button', { name })).toBeNull();
+    expect(within(deepseekCard).queryByLabelText('模型名')).toBeNull();
+    expect(within(deepseekCard).queryByLabelText('请求地址')).toBeNull();
     expect(api.updateProvider).not.toHaveBeenCalled();
     fireEvent.click(within(deepseekCard).getByText('高级与删除'));
     fireEvent.click(within(deepseekCard).getByRole('button', { name: '删除 Key…' }));
@@ -113,16 +98,21 @@ describe('设置 › 模型服务', () => {
     await waitFor(() => expect(api.deleteKey).toHaveBeenCalledWith({ providerId: 'ds' }));
   });
 
-  it('warns that changing a typed address deletes the saved Key before it is saved', async () => {
-    const { api } = fixture([ready('km', { keyState: 'configured', baseUrl: 'https://kimi.example/v1', models: [] })]);
+  it('D143 a service outside the catalog stays with its name, and only its Key and itself can be removed', async () => {
+    const { api } = fixture([ready('old', { supported: false, keyState: 'configured', baseUrl: 'https://models.example/v1', models: [{ modelId: 'old-model', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'disabled' }] })]);
     show(api);
-    fireEvent.click(await screen.findByRole('button', { name: '展开 Kimi' }));
-    const kimiCard = card('Kimi');
-    fireEvent.click(await within(kimiCard).findByText('高级与删除'));
-    fireEvent.change(within(kimiCard).getByLabelText('请求地址'), { target: { value: 'https://other.example/v1' } });
-    fireEvent.click(within(kimiCard).getByRole('button', { name: '保存（会删除已保存的 Key）' }));
-    await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(expect.objectContaining({ id: 'km', baseUrl: 'https://other.example/v1' })));
-    await within(kimiCard).findByText('地址已更改；原来的 Key 已删除，请重新填写。');
+    const oldCard = card('旧服务');
+    expect(within(oldCard).getByText('已停用')).toBeTruthy();
+    await within(oldCard).findByText(/这个服务已不再支持，可以删除。/u);
+    fireEvent.click(within(oldCard).getByRole('button', { name: '展开 旧服务' }));
+    await within(oldCard).findByText('https://models.example/v1');
+    expect(oldCard.textContent).not.toContain('官方地址');
+    expect(within(oldCard).queryByRole('button', { name: '测试连接' })).toBeNull();
+    expect(within(oldCard).queryByRole('button', { name: '更换' })).toBeNull();
+    expect(within(oldCard).queryByRole('switch')).toBeNull();
+    expect(within(oldCard).queryByLabelText('服务名称')).toBeNull();
+    expect(within(oldCard).getByRole('button', { name: '删除 Key…' })).toBeTruthy();
+    expect(within(oldCard).getByRole('button', { name: '删除服务…' })).toBeTruthy();
   });
 });
 

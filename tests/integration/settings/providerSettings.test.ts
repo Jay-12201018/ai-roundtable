@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Database } from '../../../src/main/database/Database';
 import { KeyService, createMemoryKeyBackend, type KeyStorageBackend } from '../../../src/main/security/KeyService';
+import { ProviderRegistry } from '../../../src/main/providers/ProviderRegistry';
 import { ProviderSettingsService } from '../../../src/main/settings/ProviderSettingsService';
+import { testCatalog } from '../../fixtures/testCatalog';
 import { providerSettingsContracts } from '../../../src/shared/contracts/configuration';
 import type { ProviderConfiguration, ProviderInput } from '../../../src/shared/contracts/configuration';
 
@@ -23,7 +25,8 @@ afterEach(() => {
 function fixture(path = ':memory:', backend = secure) {
   const db = new Database(path); db.initialize(); databases.push(db);
   const keys = new KeyService(db, backend);
-  return { db, keys, service: new ProviderSettingsService(db, keys) };
+  const registry = new ProviderRegistry(db, keys, { catalog: testCatalog, transportFactory: () => async () => { throw new Error('no network in this test'); } });
+  return { db, keys, service: new ProviderSettingsService(db, keys, registry) };
 }
 function editable(provider: ProviderConfiguration, patch: Partial<ProviderInput> = {}): ProviderInput {
   const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...input } = provider;
@@ -46,14 +49,16 @@ describe('R08 Provider settings service', () => {
     await expect(service.getProviderConfiguration({ id: second.id })).rejects.toMatchObject({ code: 'not_found' });
   });
 
-  it('roundtrips Providers and custom/default models across database reopening', async () => {
+  it('roundtrips Providers, the default model and its limits across database reopening', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'roundtable-r08-settings-')); directories.push(dir);
     const path = join(dir, 'settings.sqlite'); const original = fixture(path);
     const created = await original.service.createProvider({ name: 'Custom', kind: 'compatible', baseUrl: 'https://example.test/v1',
       customModels: [{ id: 'model-a', name: 'A' }], defaultModelId: 'model-a' });
-    await original.service.updateProvider(editable(created, { defaultModelId: 'model-b', customModels: [{ id: 'model-b', name: 'B' }] }));
+    await original.service.updateProvider(editable(created, { defaultModelId: 'model-b', customModels: [{ id: 'model-b', name: 'B', contextWindowTokens: 2000, maxOutputTokens: 1000 }] }));
     original.db.close(); databases.splice(databases.indexOf(original.db), 1);
-    expect(await fixture(path).service.getProviderConfiguration({ id: created.id })).toMatchObject({ baseUrl: 'https://example.test/v1', defaultModelId: 'model-b', customModels: [{ id: 'model-b', name: 'B' }] });
+    const reopened = await fixture(path).service.getProviderConfiguration({ id: created.id });
+    expect(reopened).toMatchObject({ baseUrl: 'https://example.test/v1', defaultModelId: 'model-b' });
+    expect(reopened.customModels.find(model => model.id === 'model-b')).toMatchObject({ contextWindowTokens: 2000, maxOutputTokens: 1000 });
   });
 
   it('does not rewrite existing Agent or frozen Run model references on default changes', async () => {
@@ -120,20 +125,16 @@ describe('R08 Provider settings service', () => {
     expect(await restarted.getProviderKeyState({ providerId: p.id })).toMatchObject({ state: 'missing' });
   });
 
-  it('revokes Keys when kind or canonical endpoint changes, but preserves them on rename/equivalent URL', async () => {
+  it('revokes Keys when the endpoint changes, but preserves them on rename', async () => {
     const { service, keys } = fixture();
-    const p = await service.createProvider({ name: 'Endpoint', kind: 'compatible', baseUrl: 'https://EXAMPLE.test:443' });
+    const p = await service.createProvider({ name: 'Endpoint', kind: 'compatible', baseUrl: 'https://example.test/v1' });
     const state = await service.setKey({ providerId: p.id, apiKey: 'fixture-r08-target' });
-    const renamed = await service.updateProvider(editable(p, { name: 'Renamed', baseUrl: 'https://example.test/' }));
+    const renamed = await service.updateProvider(editable(p, { name: 'Renamed' }));
     expect(await keys.resolveKey(p.id, state.keyReference!)).toBe('fixture-r08-target');
-    const changed = await service.updateProvider(editable(renamed, { baseUrl: 'http://localhost:9090/v1' }));
+    const changed = await service.updateProvider(editable(renamed, { baseUrl: 'https://service.example/v1' }));
     expect(changed.keyReference).toBeNull(); expect(await keys.resolveKey(p.id, state.keyReference!)).toBeUndefined();
     await service.setKey({ providerId: p.id, apiKey: 'fixture-r08-next' });
     expect(await service.getProviderKeyState({ providerId: p.id })).toMatchObject({ state: 'configured' });
-  });
-
-  it.each(['https://example.test/v1', 'http://localhost:8080/v1', 'http://127.0.0.1:11434/v1', 'http://[::1]:9090/v1'])('accepts the shared safe endpoint %s', async baseUrl => {
-    expect(await fixture().service.createProvider({ name: 'Safe', kind: 'compatible', baseUrl })).toHaveProperty('baseUrl');
   });
   it.each(['file:///etc/passwd', 'javascript:alert(1)', 'http://localhost.evil.test/v1', 'http://127.1/v1', 'http://2130706433/v1', 'http://0x7f000001/v1', 'http://[0:0:0:0:0:0:0:1]/v1', 'https://user:pass@example.test', 'https://example.test?key=secret', 'https://example.test/#secret', 'https://example.test\\@localhost/v1', 'https://example.test/\npath'])('rejects unsafe endpoint without echoing it: %s', async baseUrl => {
     await expect(fixture().service.createProvider({ name: 'Unsafe', kind: 'compatible', baseUrl })).rejects.toMatchObject({ code: 'invalid_input', message: 'Invalid request parameters' });
@@ -159,39 +160,28 @@ describe('R08 Provider settings service', () => {
   });
 });
 
-describe('R08 local capabilities and honest test levels', () => {
-  it('lists only explicit Mock models locally; real model discovery stays unsupported', async () => {
-    const { service } = fixture(); const mock = await service.createProvider({ name: 'Mock', kind: 'mock' });
-    expect(await service.listModels({ providerId: mock.id })).toEqual({ providerId: mock.id, models: [{ id: 'mock', name: 'Mock' }] });
-    const real = await service.createProvider({ name: 'Real', kind: 'compatible', baseUrl: 'https://service.example/v1', customModels: [{ id: 'custom', name: 'Custom' }] });
-    await expect(service.listModels({ providerId: real.id })).rejects.toMatchObject({ code: 'unsupported' });
-    expect((await service.getProviderConfiguration({ id: real.id })).customModels).toEqual([{ id: 'custom', name: 'Custom' }]);
+describe('honest test levels', () => {
+  it('checks configuration locally without reading a Key; a generation test has to be asked for', async () => {
+    const { service, keys } = fixture(); const resolve = vi.spyOn(keys, 'resolveKey');
+    const p = await service.createProvider({ name: 'Real', kind: 'compatible', baseUrl: 'https://example.test/v1' });
+    expect(await service.testConnection({ providerId: p.id, level: 'configuration' })).toMatchObject({ providerId: p.id, result: { ok: true, level: 'configuration' } });
+    expect(await service.testConnection({ providerId: p.id, level: 'generation', modelId: 'custom' })).toMatchObject({ result: { ok: false, level: 'generation', error: { code: 'forbidden' } } });
+    expect(resolve).not.toHaveBeenCalled();
   });
-  it.each(['compatible'] as const)('checks %s configuration locally without claiming authentication or generation', async kind => {
-    const { service } = fixture();
-    const p = await service.createProvider({ name: kind, kind, baseUrl: 'https://example.test/v1' });
-    const config = await service.testConnection({ providerId: p.id, level: 'configuration' });
-    expect(config).toMatchObject({ providerId: p.id, result: { ok: true, level: 'configuration' } });
-    for (const level of ['authentication', 'generation'] as const) {
-      const result = await service.testConnection({ providerId: p.id, level, ...(level === 'generation' ? { modelId: 'custom' } : {}) });
-      expect(result).toMatchObject({ result: { ok: false, level, error: { code: 'unsupported' } } });
-      expect(result.result.requestId).not.toBe(config.result.requestId);
-    }
-  });
-  it('returns explicit local Mock results for all three levels and rejects invalid model selection', async () => {
+  it('returns explicit local Mock results for both levels and rejects invalid model selection', async () => {
     const { service } = fixture(); const p = await service.createProvider({ name: 'Mock', kind: 'mock' });
-    for (const level of ['configuration', 'authentication', 'generation'] as const) {
+    for (const level of ['configuration', 'generation'] as const) {
       expect(await service.testConnection({ providerId: p.id, level, modelId: 'mock' })).toMatchObject({ result: { ok: true, level } });
     }
     expect(await service.testConnection({ providerId: p.id, level: 'generation', modelId: 'other' })).toMatchObject({ result: { ok: false, error: { code: 'invalid_input' } } });
     await expect(service.testConnection({ providerId: p.id, level: 'generation' })).rejects.toMatchObject({ code: 'invalid_input' });
   });
   it('exposes unconfigured endpoint, disabled and missing Providers accurately', async () => {
-    const { service } = fixture();
-    // D143: a service in use needs an address; only a stopped one can be without.
+    const { service, db } = fixture();
     await expect(service.createProvider({ name: 'Incomplete', kind: 'compatible' })).rejects.toMatchObject({ code: 'invalid_input' });
-    const stopped = await service.createProvider({ name: 'Stopped', kind: 'compatible', enabled: false });
-    expect(await service.testConnection({ providerId: stopped.id, level: 'configuration' })).toMatchObject({ result: { ok: false, error: { code: 'invalid_state' } } });
+    await expect(service.createProvider({ name: 'Stopped', kind: 'compatible', enabled: false })).rejects.toMatchObject({ code: 'service_unsupported' });
+    db.createProvider({ id: 'stopped', name: 'Stopped', kind: 'compatible', enabled: false });
+    expect(await service.testConnection({ providerId: 'stopped', level: 'configuration' })).toMatchObject({ result: { ok: false, error: { code: 'invalid_state' } } });
     const disabled = await service.createProvider({ name: 'Disabled', kind: 'mock', enabled: false });
     expect(await service.testConnection({ providerId: disabled.id, level: 'configuration' })).toMatchObject({ result: { ok: false, error: { code: 'invalid_state' } } });
     expect(await service.testConnection({ providerId: 'missing', level: 'configuration' })).toMatchObject({ result: { ok: false, error: { code: 'not_found' } } });

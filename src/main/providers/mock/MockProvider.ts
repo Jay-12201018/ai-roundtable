@@ -1,7 +1,7 @@
 import { ContractError } from '../../../shared/contracts/errors';
-import { listModelsInputSchema, testConnectionInputSchema, streamChatInputSchema } from '../../../shared/schemas/provider';
+import { testConnectionInputSchema, streamChatInputSchema } from '../../../shared/schemas/provider';
 import { publicError } from '../../../shared/schemas/error';
-import type { NormalizedChunk, ProviderAdapter, StreamChatInput, ListModelsInput, TestConnectionInput, ConnectionTestResult } from '../types';
+import type { NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput, ConnectionTestResult } from '../types';
 import { mockTextTokens,countMockInputTokens } from './tokenBudget';
 import { mockArtifactText } from './artifactFixtures';
 
@@ -12,13 +12,6 @@ export class MockProvider implements ProviderAdapter {
     errorAfterDeltas?: number;
     stallAfterDeltas?: number;
   } = {}) {}
-
-  async listModels(input: ListModelsInput) {
-    const { signal, ...parameters } = input;
-    listModelsInputSchema.parse(parameters);
-    if (signal?.aborted) throw new ContractError('cancelled');
-    return [{ id: 'mock', name: 'Mock' }];
-  }
 
   async testConnection(input: TestConnectionInput): Promise<ConnectionTestResult> {
     const { signal, ...parameters } = input;

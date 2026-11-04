@@ -14,16 +14,14 @@ describe('Provider contract Mock', () => {
     expect(events.length).toBeGreaterThan(2);
     for (const event of events) expect(event).toMatchObject({ requestId: 'request-1' });
   });
-  it('lists deterministic models and tests each connection level without network', async () => {
+  it('tests each connection level without network', async () => {
     const provider = new MockProvider();
-    expect(await provider.listModels({ requestId: 'list-1' })).toEqual([{ id: 'mock', name: 'Mock' }]);
-    for (const level of ['configuration', 'authentication', 'generation'] as const) {
+    for (const level of ['configuration', 'generation'] as const) {
       expect(await provider.testConnection({ requestId: 'test-1', level, modelId: 'mock' })).toMatchObject({ level, ok: true });
     }
   });
   it.each(['mock', 'compatible'])('accepts a %s fixture with all six event types', async (modelId) => {
     const fixture: ProviderAdapter = {
-      async listModels() { return [{ id: modelId, name: modelId }]; },
       async testConnection(input) { return { requestId: input.requestId, level: input.level, ok: true }; },
       async *streamChat({ requestId }) {
         yield { type: 'start', requestId, providerRequestId: 'vendor-id' };
@@ -66,7 +64,6 @@ describe('Provider contract Mock', () => {
     expect(chunks.at(-2)).toMatchObject({ type: 'usage', outputTokens: 1 });
     expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: 'length' });
     const controller = new AbortController(); controller.abort();
-    await expect(provider.listModels({ requestId: 'q', signal: controller.signal })).rejects.toMatchObject({ code: 'cancelled' });
     expect(await provider.testConnection({ requestId: 'q', level: 'configuration', signal: controller.signal })).toMatchObject({ ok: false, error: { code: 'cancelled' } });
     const cancelled = [];
     for await (const chunk of provider.streamChat({ requestId: 'q', modelId: 'mock', messages: [], signal: controller.signal })) cancelled.push(chunk);

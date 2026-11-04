@@ -1,65 +1,42 @@
 import type { ProviderKind } from '../../../shared/contracts/configuration';
+import { catalogServiceAt, serviceCatalog, type CatalogModel } from '../../../shared/serviceCatalog';
 
-export type PresetId = 'deepseek' | 'kimi' | 'qwen' | 'glm' | 'doubao' | 'minimax' | 'custom' | 'mock';
+/** How the wizard shows a service. The services, addresses and models themselves come from the built-in catalog. */
 export type ServicePreset = {
-  id: PresetId; name: string; logo: string; kind: ProviderKind;
-  /** The fixed address the Key goes to; null when the user types it (自定义服务) or there is none (Mock). */
-  baseUrl: string | null;
-  models: Array<{ id: string; name: string; hint?: string }>;
-  description: string; keyHelp: string; recommended?: boolean;
+  id: string; name: string; logo: string; kind: ProviderKind; baseUrl: string | null;
+  models: readonly CatalogModel[]; description: string; keyHelp: string; recommended?: boolean;
 };
 
-/**
- * The connect wizard's shortcuts (D143): a name, an address and suggested model names for the one adapter,
- * nothing else. Any model name can be typed instead. Addresses and suggestions were read from each service's official
- * documentation on 2026-11-03:
- * - DeepSeek: https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
- * - Kimi: https://platform.kimi.com/docs/guide/start-using-kimi-api
- * - 通义千问: https://help.aliyun.com/zh/model-studio/models
- * - 智谱 GLM: https://docs.bigmodel.cn/cn/guide/start/model-overview
- * - 豆包: https://docs.volcengine.com/docs/82379/1330626 , https://docs.volcengine.com/docs/82379/1330310
- * - MiniMax: https://platform.minimax.cn/docs/guides/models-intro
- */
+const faces: Record<string, Pick<ServicePreset, 'logo' | 'description' | 'keyHelp' | 'recommended'>> = {
+  deepseek: { logo: 'DS', recommended: true, description: '在 DeepSeek 开放平台创建 Key。', keyHelp: '在 DeepSeek 开放平台的「API Keys」页面创建并复制。' },
+  doubao: { logo: '豆', description: '在火山方舟创建 Key。', keyHelp: '在火山方舟控制台的「API Key 管理」页面创建并复制，地域选华北 2（北京）。' },
+  qwen: { logo: '通', description: '在阿里云百炼创建 Key。', keyHelp: '在阿里云百炼的「API Key」页面创建并复制，地域选华北 2（北京）。' },
+  kimi: { logo: 'Ki', description: '在月之暗面开放平台创建 Key。', keyHelp: '在 Kimi 开放平台的「API Key」页面创建并复制。' },
+  glm: { logo: 'GL', description: '在智谱开放平台创建 Key。', keyHelp: '在智谱开放平台的「API Keys」页面创建并复制。' },
+  ernie: { logo: '文', description: '在百度智能云千帆创建 Key。', keyHelp: '在百度智能云千帆的「API Key」页面创建并复制。' },
+  hunyuan: { logo: '混', description: '在腾讯云 TokenHub 创建 Key。', keyHelp: '在腾讯云 TokenHub 控制台创建并复制 API Key。' },
+  minimax: { logo: 'MM', description: '在 MiniMax 开放平台创建 Key。', keyHelp: '在 MiniMax 开放平台的「接口密钥」页面创建并复制。' },
+};
+
 export const presets: ServicePreset[] = [
-  { id: 'deepseek', name: 'DeepSeek', logo: 'DS', kind: 'compatible', baseUrl: 'https://api.deepseek.com', recommended: true,
-    models: [{ id: 'deepseek-flash', name: 'DeepSeek Flash', hint: '快，适合多数讨论' }, { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' }],
-    description: '在 DeepSeek 开放平台创建 Key。', keyHelp: '在 DeepSeek 开放平台的「API Keys」页面创建并复制。' },
-  { id: 'kimi', name: 'Kimi', logo: 'Ki', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1',
-    models: [{ id: 'kimi-k3.1-pro', name: 'Kimi K3.1 Pro' }, { id: 'kimi-k3.1-pro-highspeed', name: 'Kimi K3.1 Pro 高速版' }],
-    description: '在月之暗面开放平台创建 Key。', keyHelp: '在 Kimi 开放平台的「API Key」页面创建并复制。' },
-  { id: 'qwen', name: '通义千问', logo: '通', kind: 'compatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    models: [{ id: 'qwen3.7-plus', name: 'Qwen3.7 Plus', hint: '性能和速度均衡' }, { id: 'qwen3.8-max', name: 'Qwen3.8 Max', hint: '复杂推理' }, { id: 'qwen3.8-flash', name: 'Qwen3.8 Flash', hint: '快' }],
-    description: '在阿里云百炼创建 Key。', keyHelp: '在阿里云百炼的「API Key」页面创建并复制，地域选“华北 2（北京）”。' },
-  { id: 'glm', name: '智谱 GLM', logo: 'GL', kind: 'compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    models: [{ id: 'glm-5.3', name: 'GLM-5.3' }, { id: 'glm-5.2', name: 'GLM-5.2' }, { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash' }],
-    description: '在智谱开放平台创建 Key。', keyHelp: '在智谱开放平台的「API Keys」页面创建并复制。' },
-  { id: 'doubao', name: '豆包', logo: '豆', kind: 'compatible', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    models: [{ id: 'doubao-seed-2-1-pro-260915', name: 'Doubao Seed 2.1 Pro' }, { id: 'doubao-seed-2-1-lite-260915', name: 'Doubao Seed 2.1 Lite' }, { id: 'doubao-seed-2-1-turbo-260628', name: 'Doubao Seed 2.1 Turbo' }],
-    description: '在火山方舟创建 Key。', keyHelp: '在火山方舟控制台的「API Key 管理」页面创建并复制。' },
-  { id: 'minimax', name: 'MiniMax', logo: 'MM', kind: 'compatible', baseUrl: 'https://api.minimax.cn/v1',
-    models: [{ id: 'MiniMax-M3', name: 'MiniMax M3' }, { id: 'MiniMax-M3.1-Flash', name: 'MiniMax M3.1 Flash' }],
-    description: '在 MiniMax 开放平台创建 Key。', keyHelp: '在 MiniMax 开放平台的「接口密钥」页面创建并复制。' },
-  { id: 'custom', name: '自定义服务', logo: '⋯', kind: 'compatible', baseUrl: null, models: [],
-    description: '预设之外的国内服务或本机模型，填写地址、Key 和模型名。', keyHelp: '在这个服务的控制台创建并复制 API Key。' },
+  ...serviceCatalog.map(service => ({ id: service.id, name: service.name, kind: 'compatible' as const, baseUrl: service.baseUrl, models: service.models, ...faces[service.id]! })),
   { id: 'mock', name: '演示（Mock）', logo: '', kind: 'mock', baseUrl: null, models: [{ id: 'mock', name: '演示' }],
     description: '不联网，回复是预先写好的示例，不代表真实模型的水平。', keyHelp: '' },
 ];
 
 /** The sentence on the welcome page, from the same list the wizard offers. */
 export function availabilityText(): string {
-  return `支持 ${presets.filter(preset => preset.baseUrl).map(preset => preset.name).join('、')}，也可以添加其他通用接口的服务。几位成员可以各用一家。`;
+  return `支持国内主流大模型：${serviceCatalog.map(service => service.name).join('、')}。几位成员可以各用一家。`;
 }
 
-const normalize = (url: string | null | undefined) => url ? url.replace(/\/+$/u, '') : url;
-/** The built-in service a saved Provider matches, by kind and address; anything else is a user-entered service. */
+/** The built-in service a saved Provider matches, by its exact address; undefined when it is outside the catalog. */
 export function presetOf(provider: { kind: ProviderKind | null; baseUrl?: string | null }): ServicePreset | undefined {
   if (provider.kind === 'mock') return presets.find(preset => preset.id === 'mock');
-  return provider.kind === 'compatible' ? presets.find(preset => preset.baseUrl && normalize(provider.baseUrl) === preset.baseUrl) : undefined;
+  const service = catalogServiceAt(serviceCatalog, provider.baseUrl);
+  return service && presets.find(preset => preset.id === service.id);
 }
-/** Where Main sends this Provider's Key: its saved address. */
+/** Where Main sends this Provider's Key. */
 export function targetOf(provider: { kind: ProviderKind | null; baseUrl?: string | null }): string | null {
   if (provider.kind === 'mock' || provider.kind === null) return null;
-  return normalize(provider.baseUrl) ?? null;
+  return provider.baseUrl?.replace(/\/+$/u, '') ?? null;
 }
-/** A user-typed address (not a built-in service): the discussion says once where its content goes. */
-export const isUserAddress = (provider: { kind: ProviderKind | null; baseUrl?: string | null }) => provider.kind !== 'mock' && provider.kind !== null && !presetOf(provider);

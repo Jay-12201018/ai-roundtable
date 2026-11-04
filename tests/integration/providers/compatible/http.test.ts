@@ -79,7 +79,6 @@ function provider(value: Fixture) {
   return new CompatibleProvider({
     configuration, confirmedBaseUrl: value.baseUrl, resolveKey: async () => fixtureKey,
     timeoutMs: 2000, fetch: value.fetch,
-    capabilities: { streamUsage: false, listModels: false, authentication: 'unsupported' },
   });
 }
 
@@ -121,7 +120,7 @@ describe('Compatible adapter over loopback HTTP', () => {
       expect(JSON.stringify(events)).not.toContain(fixtureKey);
       expect(value.requests).toEqual([{
         path, method: 'POST', authorization: `Bearer ${fixtureKey}`,
-        body: { model: 'fixture-model', messages: input.messages, stream: true, max_tokens: 17 },
+        body: { model: 'fixture-model', messages: input.messages, stream: true, max_tokens: 17, stream_options: { include_usage: true } },
       }]);
     });
   });

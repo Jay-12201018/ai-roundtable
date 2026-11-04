@@ -83,7 +83,10 @@ const guarded = app.whenReady().then(() => {
 });
 save(); console.log('R78_PRODUCTION_ISOLATION ' + JSON.stringify({ directory, paths, resultPath, manifestPath, phase: result.phase, safeStorage: 'fake-only, no OS calls' }));
 async function main() {
-  await import(pathToFileURL(entry).href); await guarded;
+  const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
+  // The built-in addresses are real services: this probe must not reach them, not even a name lookup.
+  Registry.prototype.createTransport = () => async () => { throw new TypeError('Network disabled in R78 smoke'); };
+  await guarded;
   const window = await loaded; const contents = window.webContents;
   // A hidden or covered window throttles the Renderer's timers (seconds per step, then minutes) while Main's Mock keeps
   // streaming: clicks land after the Run has finished and steps crawl into the overall timeout. The probe checks the UI,
@@ -115,7 +118,7 @@ async function main() {
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview','generate','confirm','revoke']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport','exportCsv']), 'Unexpected summary/usage surface');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host surface');
     const rooms = ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'];
-    const settings = ['createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModelReadiness','listModels','listProviderSummaries','setKey','testConnection','updateProvider'];
+    const settings = ['createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModelReadiness','listProviderSummaries','setKey','testConnection','updateProvider'];
     check(JSON.stringify(Object.keys(api.rooms).sort()) === JSON.stringify(rooms), 'Unexpected rooms surface');
     check(JSON.stringify(Object.keys(api.settings).sort()) === JSON.stringify(settings), 'Unexpected settings surface');
     check(!('invoke' in api) && !('send' in api) && !('resolveKey' in api.settings) && !('invoke' in api.host) && !('send' in api.host)
@@ -250,8 +253,8 @@ async function main() {
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '模型设置') {
           await press('模型服务');
-          const card = await until('Smoke Real A card', () => document.querySelector('section[aria-label="Smoke Real A"]'), 'Unreachable control: Smoke Real A');
-          if (!card.querySelector('.svc-body')) named('展开 Smoke Real A', card) || [...card.querySelectorAll('button')].find(element => element.getAttribute('aria-label') === '展开 Smoke Real A').click();
+          const card = await until('DeepSeek card', () => document.querySelector('section[aria-label="DeepSeek"]'), 'Unreachable control: DeepSeek');
+          if (!card.querySelector('.svc-body')) named('展开 DeepSeek', card) || [...card.querySelectorAll('button')].find(element => element.getAttribute('aria-label') === '展开 DeepSeek').click();
           const replace = await until('Key replacement', () => [...card.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === '更换'), 'Unreachable control: 更换'); await reach(replace, 'Key replacement');
           const details = card.querySelector('details.adv'); if (!details.open) details.querySelector('summary').click();
           await reach(await until('Key deletion', () => named('删除 Key…', card), 'Unreachable control: 删除 Key…'), 'Key deletion');

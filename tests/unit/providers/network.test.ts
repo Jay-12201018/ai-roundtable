@@ -6,11 +6,14 @@ import { PassThrough } from 'node:stream';
 import type { lookup as dnsLookup } from 'node:dns/promises';
 import type { RequestOptions } from 'node:https';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSafeFetch } from '../../../src/main/providers/network';
+import { createSafeFetch as catalogFetch } from '../../../src/main/providers/network';
+import { catalogServiceAt, serviceCatalog } from '../../../src/shared/serviceCatalog';
 
 vi.mock('node:https', async importOriginal => ({ ...await importOriginal<typeof import('node:https')>(), request: vi.fn() }));
 
 const fixtureKey = 'fixture-network-key';
+// These cases are about what happens after the host check; the catalog has its own block below.
+const createSafeFetch = (guard?: () => void, resolver?: typeof dnsLookup) => catalogFetch(guard, resolver, undefined, { has: () => true });
 const lookup = (records: Array<{ address: string; family: number }>) =>
   vi.fn(async () => records) as unknown as typeof dnsLookup;
 
@@ -92,21 +95,59 @@ describe('Main safe Provider transport', () => {
     expect(fixture.outbound).not.toHaveBeenCalled();
   });
 
-  describe('D138: 198.18.0.0/15', () => {
-    it.each(['198.18.0.1', '198.19.255.254'])('connects when a name resolves to %s', async address => {
+  describe('D143: only catalog hosts', () => {
+    const answer = lookup([{ address: '8.8.8.8', family: 4 }]);
+    it.each([
+      'https://provider.example/v1/chat/completions', 'https://api.deepseek.com.example.com/chat/completions', 'https://evil-api.deepseek.com/chat/completions',
+      'https://sub.api.deepseek.com/chat/completions', 'https://api.deepseek.com./chat/completions', 'https://api.deepseek.com:8443/chat/completions',
+      'https://user:password@api.deepseek.com/chat/completions', 'https://api.deepseek.com@provider.example/chat/completions', 'http://api.deepseek.com/chat/completions',
+      'https://1.2.3.4/chat/completions', 'https://16909060/chat/completions', 'https://0x1020304/chat/completions', 'https://1.2.3/chat/completions', 'https://[2606:4700:4700::1111]/chat/completions',
+      'http://127.0.0.1:1234/chat/completions', 'http://localhost:1234/chat/completions', 'http://[::1]:1234/chat/completions',
+    ])('refuses %s before resolving it', async target => {
+      const fixture = httpsFixture(); const resolver = vi.fn(answer) as unknown as typeof dnsLookup;
+      await expect(catalogFetch(undefined, resolver)(target, { headers: { authorization: `Bearer ${fixtureKey}` } })).rejects.toBeDefined();
+      expect(resolver).not.toHaveBeenCalled();
+      expect(fixture.outbound).not.toHaveBeenCalled();
+    });
+    it.each(serviceCatalog.map(service => service.baseUrl))('connects to %s', async baseUrl => {
       const fixture = httpsFixture();
-      await expect(createSafeFetch(undefined, lookup([{ address, family: 4 }]))('https://provider.example/v1/models')).resolves.toMatchObject({ status: 200 });
+      await expect(catalogFetch(undefined, answer)(`${baseUrl}/chat/completions`, { method: 'POST', body: '{}' })).resolves.toMatchObject({ status: 200 });
       expect(fixture.outbound).toHaveBeenCalledTimes(1);
+    });
+    it('compares addresses exactly when a saved service is matched to the catalog', () => {
+      expect(catalogServiceAt(serviceCatalog, 'https://api.deepseek.com')?.id).toBe('deepseek');
+      expect(catalogServiceAt(serviceCatalog, 'https://api.deepseek.com/')?.id).toBe('deepseek');
+      for (const address of ['https://API.deepseek.com', 'https://api.deepseek.com.', 'https://api.deepseek.com/v1', 'http://api.deepseek.com', 'https://user@api.deepseek.com', ' https://api.deepseek.com', null, undefined, ''])
+        expect(catalogServiceAt(serviceCatalog, address)).toBeUndefined();
+    });
+  });
+
+  describe('D138: 198.18.0.0/15', () => {
+    const catalogTarget = 'https://api.deepseek.com/chat/completions';
+    it.each(['198.18.0.1', '198.19.255.254'])('connects when a catalog name resolves to %s', async address => {
+      const fixture = httpsFixture();
+      await expect(catalogFetch(undefined, lookup([{ address, family: 4 }]))(catalogTarget)).resolves.toMatchObject({ status: 200 });
+      expect(fixture.outbound).toHaveBeenCalledTimes(1);
+    });
+    it.each(['198.18.0.1', '198.19.255.254'])('refuses a name outside the catalog that resolves to %s', async address => {
+      const fixture = httpsFixture();
+      await expect(catalogFetch(undefined, lookup([{ address, family: 4 }]))('https://provider.example/v1/chat/completions')).rejects.toMatchObject({ code: 'target_rejected' });
+      expect(fixture.outbound).not.toHaveBeenCalled();
     });
     it.each(['198.18.0.1', '198.19.255.254'])('refuses the literal address %s', async address => {
       const fixture = httpsFixture();
       await expect(createSafeFetch(undefined, lookup([]))(`https://${address}/v1/models`)).rejects.toMatchObject({ code: 'target_rejected' });
       expect(fixture.outbound).not.toHaveBeenCalled();
     });
-    it.each(['10.0.0.1', '127.0.0.1', '169.254.169.254', '192.168.1.2', '198.51.100.1', 'fc00::1'])('refuses a name that also resolves to %s', async other => {
+    it.each(['10.0.0.1', '127.0.0.1', '169.254.169.254', '192.168.1.2', '198.51.100.1', 'fc00::1'])('refuses a catalog name that also resolves to %s', async other => {
       const fixture = httpsFixture();
-      await expect(createSafeFetch(undefined, lookup([{ address: '198.18.0.1', family: 4 }, { address: other, family: other.includes(':') ? 6 : 4 }]))('https://provider.example/v1/models'))
+      await expect(catalogFetch(undefined, lookup([{ address: '198.18.0.1', family: 4 }, { address: other, family: other.includes(':') ? 6 : 4 }]))(catalogTarget))
         .rejects.toMatchObject({ code: 'target_rejected' });
+      expect(fixture.outbound).not.toHaveBeenCalled();
+    });
+    it.each(['10.0.0.1', '127.0.0.1', '169.254.169.254', '192.168.1.2'])('refuses a catalog name that resolves to %s', async address => {
+      const fixture = httpsFixture();
+      await expect(catalogFetch(undefined, lookup([{ address, family: 4 }]))(catalogTarget)).rejects.toMatchObject({ code: 'target_rejected' });
       expect(fixture.outbound).not.toHaveBeenCalled();
     });
   });

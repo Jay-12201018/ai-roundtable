@@ -4,12 +4,12 @@
 
 工程规则见 [AGENTS](AGENTS.md)，现状见 [V0 审查](docs/V0_AUDIT.md)，任务见 [任务清单](tasks/README.md)，界面设计见 [设计规范](docs/DESIGN_GUIDELINES.md)。所有后续工作以本仓库文件为入口。
 
-定位：Windows/macOS/Linux 本地优先的 Electron 多模型协作群聊桌面应用，单用户 BYOK，不使用云端账号。多个 Agent 使用国内主流大模型，也可以使用其他通用接口的服务，按用户可配置的工作流围绕共享公共历史协作。用户是主持人，可以点名、插话、暂停/停止/单步、设置持续指令，最终输出 PRD、会议纪要、行动清单和经确认后写盘的代码候选文件。
+定位：Windows/macOS/Linux 本地优先的 Electron 多模型协作群聊桌面应用，单用户 BYOK，不使用云端账号。多个 Agent 使用国内主流大模型，按用户可配置的工作流围绕共享公共历史协作。用户是主持人，可以点名、插话、暂停/停止/单步、设置持续指令，最终输出 PRD、会议纪要、行动清单和经确认后写盘的代码候选文件。
 
 ## V1 不可缩水的能力
 
 1. Electron + React + TypeScript strict + electron-vite + Tailwind + Zustand（只用于 Renderer）+ SQLite（主进程）+ Zod + 受限 typed IPC。
-2. ProviderAdapter 流式统一事件：start/text_delta/reasoning_summary_delta/usage/finish/error；支持真实模型和确定性 Mock Provider；仅显示供应商真正返回的公开推理信息；模型列表允许自定义输入。
+2. ProviderAdapter 流式统一事件：start/text_delta/reasoning_summary_delta/usage/finish/error；支持真实模型和确定性 Mock Provider；仅显示供应商真正返回的公开推理信息；模型来自内置目录（D143）。
 3. 共享公共消息历史与角色标记、房间/成员 CRUD；自由群聊、两模型对话、起草-审查-修订-复审-定稿、深度辩论的声明式模板；有限轮数和超时控制。
 4. Main 为 Run/Turn 状态权威：Pause 软暂停（当前回合完成后停）、Stop Abort（保留部分输出）、Step 恰好一回合、Resume 续调度；主持人 @Override 排到下一位，普通模型文本不具备主持人权限。
 5. 主持人持续指令、指定消息修改/重生、可追踪的消息版本/分支；持久化和意外退出后将未完成请求标记 interrupted，不自动重试可能重复收费的请求。
@@ -42,10 +42,10 @@ PolyForm Noncommercial 1.0.0 为优先考虑的许可证，禁止未经授权的
 
 ## 多服务商与 Provider Preset Catalog（2026-10-20 用户追加）
 
-向导内置 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax（D143），也可以添加其他通用接口的服务；未列出的渠道由用户自行填写，不代表已核验可用。Coding 套餐/订阅账号不自动具有 API 权益。
+支持国内主流大模型，只能使用内置目录里的服务和模型（D143）：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。Coding 套餐/订阅账号不自动具有 API 权益。
 
-区分服务商/渠道的 Provider 配置实例、具体 Model 和协议 Adapter。沿用 providerId 与 (providerId, modelId) 身份；所有服务共用一个通用 Adapter。规划数据驱动的 Provider Preset Catalog，记录稳定标识/名称、经核实协议与默认 Base URL、鉴权形式、可选模型/自定义 ID、能力及官方来源/核验时间/有效期；预设无凭据、不是执行代码或发送许可，同一预设可创建多个独立实例。
+区分服务商/渠道的 Provider 配置实例、具体 Model 和协议 Adapter。沿用 providerId 与 (providerId, modelId) 身份；所有服务共用一个通用 Adapter。内置目录（`src/shared/serviceCatalog.ts`）是服务、地址和模型的唯一来源，Main 在保存配置和发请求时强制；目录不含凭据，同一服务可创建多个独立实例。
 
-能力、上下文、stream、推理和 usage 支持/不支持/未知须如实标注，不按模型名猜能力，不以连通或列出模型代替生成验收。继续保持 Keychain/Main-only Key、地址校验/TLS/网络防护和显式触发（D136、D137）。多个 Provider/模型应能作为独立成员加入同一房间，保留公共上下文和历史冻结身份。
+能力、上下文、stream、推理和 usage 支持/不支持/未知须如实标注，不按模型名猜能力，不以连通或列出模型代替生成验收。继续保持 Keychain/Main-only Key、地址校验/TLS/网络防护和显式触发（D136、D143）。多个 Provider/模型应能作为独立成员加入同一房间，保留公共上下文和历史冻结身份。
 
-原“至少四类 Provider”为阶段最低接入目标，不是四个品牌上限；最终须按 Adapter 协议、Provider 实例、目录和自定义配置分别验收。具体数据要求、依赖、V1 验收与实施时机见[目录增强规划](docs/PROVIDER_CATALOG_PLAN.md)，关联 R08/R09、R07、R13、R16、R17。R00–R18 编号/既定依赖不变，R10A/R10B/R11 继续各自已批准任务书；本轮只记录规划，不在这三个 Worktree 实施目录或预设 UI。
+原“至少四类 Provider”为阶段最低接入目标，不是四个品牌上限；最终须按 Adapter 协议、Provider 实例和目录分别验收。具体数据要求、依赖、V1 验收与实施时机见[目录增强规划](docs/PROVIDER_CATALOG_PLAN.md)，关联 R08/R09、R07、R13、R16、R17。R00–R18 编号/既定依赖不变，R10A/R10B/R11 继续各自已批准任务书；本轮只记录规划，不在这三个 Worktree 实施目录或预设 UI。

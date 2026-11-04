@@ -8,6 +8,7 @@ import { apiErrorSchema, type ErrorCode } from '../../shared/schemas/error';
 
 // Start refusals the host can act on get their own reason; anything else keeps the generic message.
 const startFailures: Partial<Record<string, string>> = {
+  service_unsupported: '有成员用的服务已不再支持，请在房间里给 TA 换一个模型。', model_unsupported: '有成员用的模型已不再支持，请在房间里给 TA 换一个模型。',
   forbidden: '启动失败：服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
   unsupported: '启动失败：有成员的模型现在不能发送请求，请到房间里检查成员的模型。',
 };
@@ -16,8 +17,9 @@ const startFailures: Partial<Record<string, string>> = {
 const turnFailureMessages: Partial<Record<ErrorCode, string>> = {
   invalid_response: '模型未完整完成响应，部分输出已保留。', timeout: '请求已超时，部分输出已保留。', cancelled: '请求已停止，部分输出已保留。',
   authentication_failed: '服务商拒绝了这把 Key：可能无效或已过期，请到“设置 › 模型服务”检查。', forbidden: '服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
-  rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，请检查成员用的模型名。', network_error: '连接不上，请检查网络和地址。',
-  target_rejected: '这个地址解析到了内网或保留地址，不会直接连接。请检查地址。',
+  rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，请检查成员用的模型名。', network_error: '连接不上，请检查网络。',
+  target_rejected: '这个服务的地址解析到了内网或保留地址，请求没有发出。请检查网络后再试。',
+  service_unsupported: '这位成员用的服务已不再支持，请在房间里给 TA 换一个模型。', model_unsupported: '这位成员用的模型已不再支持，请在房间里给 TA 换一个模型。',
   invalid_input: '服务商拒绝了这次请求：可能是讨论太长放不进模型的上下文（可以生成讨论摘要后重试）、模型名或上限不对，或账户余额不足。',
 };
 

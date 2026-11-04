@@ -2,10 +2,10 @@ import { z } from 'zod';
 import { ContractError, toPublicError } from '../../../shared/contracts/errors';
 import type { KeyReference, ProviderConfiguration } from '../../../shared/contracts/configuration';
 import { providerBaseUrlSchema, providerConfigurationSchema } from '../../../shared/schemas/configuration';
-import { connectionLevelSchema, listModelsInputSchema, providerModelSchema, streamChatInputSchema, testConnectionInputSchema } from '../../../shared/schemas/provider';
+import { connectionLevelSchema, streamChatInputSchema, testConnectionInputSchema } from '../../../shared/schemas/provider';
 import { idSchema } from '../../../shared/schemas/common';
 import type { ErrorCode } from '../../../shared/schemas/error';
-import type { ConnectionTestResult, ListModelsInput, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../types';
+import type { ConnectionTestResult, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../types';
 import { readSse } from './sse';
 import type { DiagnosticObserver } from '../diagnostics';
 
@@ -15,22 +15,11 @@ export interface CompatibleOptions {
   confirmedBaseUrl: string;
   resolveKey: (providerId: string, reference: KeyReference | null) => Promise<string | undefined>;
   timeoutMs?: number;
-  /** D135: the total for a generation stream; list and authentication calls keep `timeoutMs`. */
+  /** D135: the total for a generation stream. */
   streamTimeoutMs?: number;
   fetch?: typeof fetch;
   diagnostics?: DiagnosticObserver;
-  capabilities?: CompatibleCapabilities;
 }
-export interface CompatibleCapabilities {
-  streamUsage: boolean;
-  listModels: boolean;
-  authentication: 'models' | 'unsupported';
-}
-/** D143: what every address gets; there is no per-service branch. */
-export const compatibleCapabilities: CompatibleCapabilities = { streamUsage: true, listModels: true, authentication: 'models' };
-const capabilitySchema = z.object({
-  streamUsage: z.boolean(), listModels: z.boolean(), authentication: z.enum(['models', 'unsupported']),
-}).strict();
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const completionChunk = z.object({
   choices: z.array(z.object({ index: z.literal(0), delta: z.object({
@@ -42,7 +31,6 @@ const completionChunk = z.object({
   usage: z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
     prompt_cache_hit_tokens: tokenCount.optional(), prompt_cache_miss_tokens: tokenCount.optional() }).nullable().optional(),
 });
-const modelList = z.object({ data: z.array(z.object({ id: providerModelSchema.shape.id })).max(10000), has_more: z.boolean().optional() });
 const thinkOpen = '<think>';
 const thinkClose = '</think>';
 
@@ -83,11 +71,10 @@ class LeadingThink {
 }
 const normalizeBase = (url: string) => providerBaseUrlSchema.parse(url).replace(/\/+$/u, '');
 
-/** D143: the one adapter: `/chat/completions` and `/models` over the safe transport Main gives it; no registration or scheduling. */
+/** D143: the one adapter: `/chat/completions` over the safe transport Main gives it; no registration or scheduling. */
 export class CompatibleProvider implements ProviderAdapter {
   private readonly configuration: ProviderConfiguration;
   private readonly baseUrl: string;
-  private readonly capabilities: CompatibleCapabilities;
   private readonly timeoutMs: number;
   private readonly streamTimeoutMs: number;
   private readonly resolveKey: CompatibleOptions['resolveKey'];
@@ -101,7 +88,6 @@ export class CompatibleProvider implements ProviderAdapter {
       if (this.configuration.baseUrl === null) throw new ContractError('invalid_input');
       this.baseUrl = normalizeBase(this.configuration.baseUrl);
       if (normalizeBase(options.confirmedBaseUrl) !== this.baseUrl) throw new ContractError('invalid_input');
-      this.capabilities = capabilitySchema.parse(options.capabilities ?? compatibleCapabilities);
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
       this.streamTimeoutMs = z.number().int().min(1).max(2147483647).parse(options.streamTimeoutMs ?? this.timeoutMs);
       this.resolveKey = options.resolveKey;
@@ -110,26 +96,12 @@ export class CompatibleProvider implements ProviderAdapter {
     } catch (error) { throw new ContractError(error instanceof ContractError ? error.code : 'invalid_input'); }
   }
 
-  async listModels(input: ListModelsInput) {
-    parse(idSchema, input?.requestId);
-    const scope = new RequestScope(input.signal, this.timeoutMs);
-    try {
-      parse(listModelsInputSchema, withoutSignal(input)); scope.check();
-      if (!this.capabilities.listModels) throw new ContractError('unsupported');
-      return await this.models(scope);
-    } catch (error) { throw this.failure(error, scope); }
-    finally { scope.close(); }
-  }
-
   async testConnection(input: TestConnectionInput): Promise<ConnectionTestResult> {
     parse(idSchema, input?.requestId); parse(connectionLevelSchema, input?.level);
     const scope = new RequestScope(input.signal, this.timeoutMs);
     try {
       const parsed = parse(testConnectionInputSchema, withoutSignal(input)); scope.check();
-      if (parsed.level === 'authentication') {
-        if (this.capabilities.authentication !== 'models') throw new ContractError('unsupported');
-        await this.models(scope);
-      } else if (parsed.level === 'generation') {
+      if (parsed.level === 'generation') {
         // D135: a model that thinks first can spend all eight tokens on it; a clean end is what shows the connection works.
         let complete = false;
         for await (const event of this.streamChat({ requestId: parsed.requestId, modelId: parsed.modelId!,
@@ -155,9 +127,9 @@ export class CompatibleProvider implements ProviderAdapter {
       if (parsed.outputTokenLimit === undefined) throw new ContractError('invalid_input');
       const body = {
         model: parsed.modelId, messages: parsed.messages, stream: true, max_tokens: parsed.outputTokenLimit,
-        ...(this.capabilities.streamUsage ? { stream_options: { include_usage: true } } : {}),
+        stream_options: { include_usage: true },
       };
-      const response = await this.send(scope, '/chat/completions', { method: 'POST', body: JSON.stringify(body) }, 'text/event-stream');
+      const response = await this.send(scope, { method: 'POST', body: JSON.stringify(body) });
       scope.check();
       parsingStream = true;
       this.diagnostics?.({ stage: 'stream' });
@@ -218,7 +190,7 @@ export class CompatibleProvider implements ProviderAdapter {
   }
 
   /** One request, never repeated. The Key goes in one header; an error's body and headers are dropped unread. */
-  private async send(scope: RequestScope, path: '/models' | '/chat/completions', init: { method: 'GET' | 'POST'; body?: string }, accept: string, listing = false): Promise<Response> {
+  private async send(scope: RequestScope, init: { method: 'POST'; body: string }): Promise<Response> {
     this.diagnostics?.({ stage: 'credential' });
     let key: string | undefined;
     try { key = await scope.wait(() => this.resolveKey(this.configuration.id, this.configuration.keyReference)); scope.check(); }
@@ -230,8 +202,8 @@ export class CompatibleProvider implements ProviderAdapter {
       this.diagnostics?.({ stage: 'credential', category: 'credential_unavailable' }); throw new ContractError('authentication_failed');
     }
     this.diagnostics?.({ stage: 'network_client', evidence: 'client_invoked' });
-    const headers = { authorization: `Bearer ${key}`, accept, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) };
-    const pending = this.fetcher(`${this.baseUrl}${path}`, { ...init, headers, redirect: 'error', signal: scope.signal });
+    const headers = { authorization: `Bearer ${key}`, accept: 'text/event-stream', 'content-type': 'application/json' };
+    const pending = this.fetcher(`${this.baseUrl}/chat/completions`, { ...init, headers, redirect: 'error', signal: scope.signal });
     // A transport that ignored the signal may still answer after the deadline; nothing reads that body.
     void pending.then(late => { if (scope.signal.aborted) void late.body?.cancel().catch(() => {}); }, () => {});
     const response = await scope.wait(() => pending);
@@ -242,35 +214,7 @@ export class CompatibleProvider implements ProviderAdapter {
     this.diagnostics?.({ stage: 'response', category: 'http_error' });
     // Discard untrusted error bodies and headers: they may echo a Key.
     void response.body?.cancel().catch(() => {});
-    throw new ContractError(response.status >= 300 && response.status < 400 ? 'invalid_response' : statusCode(response.status, listing));
-  }
-
-  private async models(scope: RequestScope) {
-    const response = await this.send(scope, '/models', { method: 'GET' }, 'application/json', true);
-    if (!/^application\/json(?:\s*;|$)/iu.test(response.headers.get('content-type') ?? '') || !response.body) {
-      void response.body?.cancel().catch(() => {}); throw new ContractError('invalid_response');
-    }
-    const reader = response.body.getReader(); const decoder = new TextDecoder('utf-8', { fatal: true });
-    let text = ''; let bytes = 0;
-    try {
-      while (true) {
-        const next = await scope.wait(() => reader.read());
-        if (next.done) break;
-        bytes += next.value.byteLength;
-        if (bytes > 2 * 1024 * 1024) throw new ContractError('invalid_response');
-        text += decoder.decode(next.value, { stream: true });
-      }
-      text += decoder.decode();
-      let data: unknown;
-      try { data = JSON.parse(text); } catch { throw new ContractError('invalid_response'); }
-      const result = parse(modelList, data, 'invalid_response');
-      if (result.has_more) throw new ContractError('unsupported');
-      if (new Set(result.data.map(m => m.id)).size !== result.data.length) throw new ContractError('invalid_response');
-      return result.data.map(m => ({ id: m.id, name: m.id }));
-    } catch (error) {
-      if (error instanceof TypeError) throw new ContractError('invalid_response');
-      throw error;
-    } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
+    throw new ContractError(response.status >= 300 && response.status < 400 ? 'invalid_response' : statusCode(response.status));
   }
 
   private failure(error: unknown, scope: RequestScope): ContractError {
@@ -282,8 +226,7 @@ export class CompatibleProvider implements ProviderAdapter {
   }
 }
 
-function statusCode(status: number, listing: boolean): ErrorCode {
-  if (listing && (status === 404 || status === 405)) return 'unsupported';
+function statusCode(status: number): ErrorCode {
   return status === 401 ? 'authentication_failed' : status === 403 ? 'forbidden' : status === 429 ? 'rate_limited' : status === 404 ? 'not_found'
     : status >= 500 ? 'internal_error' : status >= 400 ? 'invalid_input' : 'network_error';
 }

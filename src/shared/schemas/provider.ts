@@ -23,8 +23,7 @@ export function modelLimits(model?: { contextWindowTokens?: number; maxOutputTok
   const contextWindowTokens = model?.contextWindowTokens ?? DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS;
   return { contextWindowTokens, maxOutputTokens: Math.min(model?.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS, contextWindowTokens) };
 }
-export const listModelsInputSchema = z.object({ requestId: idSchema }).strict();
-export const connectionLevelSchema = z.enum(['configuration', 'authentication', 'generation']);
+export const connectionLevelSchema = z.enum(['configuration', 'generation']);
 export const testConnectionInputSchema = z.object({
   requestId: idSchema, level: connectionLevelSchema, modelId: idSchema.optional(),
 }).strict().refine((input) => input.level !== 'generation' || input.modelId !== undefined, 'Generation test requires a model');

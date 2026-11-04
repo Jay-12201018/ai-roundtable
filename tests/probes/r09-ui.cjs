@@ -54,7 +54,7 @@ async function page(stage, saved, endpoint) {
     for(const [name,kind,url,key] of [['R09 fixture Compatible','compatible',endpoint,'r09-fake-key-compatible'],['R09 fixture Official','second','https://second.example/v1','r09-fake-key-official']]){
       // The connect wizard for one user-added service; the second comes from the API.
       if(kind==='second'){const made=await api.settings.createProvider({name,kind:'compatible',baseUrl:url,enabled:true,isDefault:false,defaultModelId:'fixture',customModels:[{id:'fixture',name:'fixture'}]});await api.settings.setKey({providerId:made.id,apiKey:key});await click('添加服务');await clickIn('dialog[open] .modal-foot','取消');}
-      else{await click('添加服务');await clickPrefix('自定义服务',dialog());await fill('服务名称',name);await fill('地址',url);await fill('模型名','fixture');check(dialog().querySelector('.target').textContent==='Key 只会发往 '+url,'Typed target not shown');await fill('API Key',key);await click('保存');}
+      else{await click('添加服务');await clickPrefix('DeepSeek',dialog());check(dialog().querySelector('.target').textContent==='Key 只会发往 https://api.deepseek.com','Target not shown');await fill('API Key',key);await click('保存');const ps=await wait(()=>api.settings.listProviderSummaries(),v=>v.some(p=>p.name==='DeepSeek'),'Provider not created');await wait(dialog,d=>!d,'Wizard did not close');const {keyReference:_k,createdAt:_c,updatedAt:_u,...input}=await api.settings.getProviderConfiguration({id:ps.find(p=>p.name==='DeepSeek').id});await api.settings.updateProvider({...input,name,defaultModelId:'fixture'});await click('设置');await click('用量');await click('设置');}
       // A refusal is reported with what the wizard said, never with a secret (the Key field is cleared on submit).
       const values=await wait(()=>api.settings.listProviderSummaries(),ps=>ps.some(p=>p.name===name),'Provider not created').catch(error=>{throw new Error(error.message+' '+name+': '+(dialog()?.innerText??'no dialog').slice(0,600));});const p=values.find(p=>p.name===name);saved[kind]=p.id;
       await wait(()=>api.settings.getProviderKeyState({providerId:p.id}),s=>s.state==='configured','Fake encrypted Key missing');
@@ -65,9 +65,8 @@ async function page(stage, saved, endpoint) {
       await wait(()=>card(name),Boolean,'Card absent: '+name);
       // The free check, then an explicit generation; both go to the owned fixture only.
       if(!card(name).querySelector('.svc-body'))await inCard(name,'展开 '+name);
-      await inCard(name,'测试连接');await wait(()=>card(name).textContent,t=>t.includes('Key 有效，连接正常'),'Authentication check failed');
+      await inCard(name,'测试连接');await wait(()=>card(name).textContent,t=>t.includes('已收到回复，连接正常'),'Connection test failed');
       check((await api.settings.testConnection({providerId:p.id,level:'generation',modelId:'fixture',allowGeneration:true})).result.ok,'Explicit fixture generation failed');
-      await inCard(name,'从服务商获取列表');await wait(()=>card(name).textContent,t=>t.includes('服务商返回的模型'),'Models not fetched');
       noKey(await api.settings.getProviderConfiguration({id:p.id}));
     }
     // D6-A: the first real service got a room; it becomes the fixture room with three explicitly configured members.

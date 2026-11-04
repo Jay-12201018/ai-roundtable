@@ -19,8 +19,7 @@ describe('R02 protocol consumption with isolated HTTP fixtures', () => {
         bodies.push(JSON.parse(init!.body as string));
         return sse(chunk('fixture你好'), chunk(null, 'stop'), { choices: [], usage: { prompt_tokens: 8, completion_tokens: 2 } }, '[DONE]');
       }) as typeof fetch };
-    const provider = new CompatibleProvider({ ...options,
-      capabilities: { streamUsage: false, listModels: false, authentication: 'unsupported' } });
+    const provider = new CompatibleProvider(options);
     // Demo's model=mock is a declared HTTP fixture model; production real-provider gates stay enabled.
     const service = new RunService(database, provider, run => [{ role: 'system', content: 'trusted member prompt' }, { role: 'user', content: run.task! }]);
     try {
@@ -31,7 +30,7 @@ describe('R02 protocol consumption with isolated HTTP fixtures', () => {
       expect(stored.messages.map(m => [m.content, m.status])).toEqual([['fixture你好', 'completed']]);
       expect(stored.attempts).toHaveLength(1); expect(stored.attempts[0].status).toBe('completed');
       expect(bodies).toEqual([{ model: 'mock', stream: true, messages: [{ role: 'system', content: 'trusted member prompt' }, { role: 'user', content: 'public task' }],
-        max_tokens: 25 }]);
+        max_tokens: 25, stream_options: { include_usage: true } }]);
       const subscription = service.subscribe(run.runId, 0);
       expect(subscription.resyncRequired).toBe(false);
       const events = subscription.events;

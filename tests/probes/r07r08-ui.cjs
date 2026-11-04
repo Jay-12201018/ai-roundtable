@@ -115,11 +115,10 @@ async function page(stage, saved) {
     await closeWizard();
     const keyState = id => api.settings.getProviderKeyState({ providerId: id });
     const secretsGone = () => check(!/r78-fake-key-/u.test(document.body.innerHTML) && [...document.querySelectorAll('input')].every(input => !input.value.startsWith('r78-fake-key-')), 'Secret left in the page');
-    // A custom service: name, typed address, model and the Key in one step (D136).
-    async function realProvider(name, key) {
-      await click('添加服务'); await clickPrefix('自定义服务', dialog());
-      await fill('服务名称', name); await fill('地址', 'https://fixture.invalid/v1'); await fill('模型名', 'fixture-model');
-      check(dialog().querySelector('.target').textContent === 'Key 只会发往 https://fixture.invalid/v1', 'Target not written above the Key');
+    // A catalog service: pick it, the Key, save (D136, D143).
+    async function realProvider(name, key, address) {
+      await click('添加服务'); await clickPrefix(name, dialog());
+      check(dialog().querySelector('.target').textContent === 'Key 只会发往 ' + address, 'Target not written above the Key');
       await fill('API Key', key); await click('保存');
       const providers = await wait(providerList, values => values.some(value => value.name === name), 'Provider not saved: ' + name);
       const provider = providers.find(value => value.name === name);
@@ -129,7 +128,7 @@ async function page(stage, saved) {
       await sleep(); if (!card(name)) await click('设置');
       return provider.id;
     }
-    saved.realProviderId = await realProvider('Smoke Real A', 'r78-fake-key-one');
+    saved.realProviderId = await realProvider('DeepSeek', 'r78-fake-key-one', 'https://api.deepseek.com');
     const firstKey = noKey(await keyState(saved.realProviderId));
     async function rekey(cardName, label, value) {
       await wait(() => card(cardName), Boolean, 'Card absent: ' + cardName);
@@ -137,22 +136,20 @@ async function page(stage, saved) {
       await wait(() => [...card(cardName).querySelectorAll('button')].some(element => element.textContent.trim() === label), Boolean, 'Key button absent: ' + label);
       await clickInCard(cardName, label); await fill('API Key', value); await click('保存');
     }
-    await rekey('Smoke Real A', '更换', 'r78-fake-key-two');
+    await rekey('DeepSeek', '更换', 'r78-fake-key-two');
     const replacement = await wait(() => keyState(saved.realProviderId), state => state.state === 'configured' && state.keyReference.id !== firstKey.keyReference.id, 'Replacement did not revoke old reference');
     await closeWizard(); secretsGone();
-    await openAdvanced('Smoke Real A'); await clickInCard('Smoke Real A', '删除 Key…'); await clickInCard('Smoke Real A', '确认删除 Key');
+    await openAdvanced('DeepSeek'); await clickInCard('DeepSeek', '删除 Key…'); await clickInCard('DeepSeek', '确认删除 Key');
     await wait(() => keyState(saved.realProviderId), state => state.state === 'missing', 'Key deletion not saved');
-    await rekey('Smoke Real A', '填写 Key', 'r78-fake-key-three');
+    await rekey('DeepSeek', '填写 Key', 'r78-fake-key-three');
     await wait(() => keyState(saved.realProviderId), state => state.state === 'configured', 'Third Key not saved'); await closeWizard();
-    await openAdvanced('Smoke Real A'); await fill('请求地址', 'https://fixture.invalid/v2'); await clickInCard('Smoke Real A', '保存（会删除已保存的 Key）');
-    await wait(() => keyState(saved.realProviderId), state => state.state === 'missing', 'Endpoint change did not revoke the old Key');
-    await rekey('Smoke Real A', '填写 Key', 'r78-fake-key-final');
+    await rekey('DeepSeek', '更换', 'r78-fake-key-final');
     const finalKey = noKey(await wait(() => keyState(saved.realProviderId), state => state.state === 'configured', 'Final Key not saved')); await closeWizard(); secretsGone();
     saved.keyReference = finalKey.keyReference;
-    saved.otherProviderId = await realProvider('Smoke Real B', 'r78-fake-key-b');
-    if (!card('Smoke Real B').querySelector('.svc-body')) await clickInCard('Smoke Real B', '展开 Smoke Real B');
-    await openAdvanced('Smoke Real B'); await clickInCard('Smoke Real B', '删除 Key…'); await clickInCard('Smoke Real B', '确认删除 Key');
-    await wait(() => keyState(saved.otherProviderId), state => state.state === 'missing', 'Smoke Real B Key not deleted');
+    saved.otherProviderId = await realProvider('Kimi', 'r78-fake-key-b', 'https://api.moonshot.cn/v1');
+    if (!card('Kimi').querySelector('.svc-body')) await clickInCard('Kimi', '展开 Kimi');
+    await openAdvanced('Kimi'); await clickInCard('Kimi', '删除 Key…'); await clickInCard('Kimi', '确认删除 Key');
+    await wait(() => keyState(saved.otherProviderId), state => state.state === 'missing', 'Kimi Key not deleted');
     const target = await api.settings.getProviderConfiguration({ id: saved.otherProviderId });
     const { keyReference: _key, createdAt: _created, updatedAt: _updated, ...otherInput } = target;
     let rejected = false; let rejectionEvidence;
@@ -160,11 +157,11 @@ async function page(stage, saved) {
     catch (error) { rejectionEvidence = { name: error.name, message: error.message, code: error.code, detail: error.detail, keys: Object.getOwnPropertyNames(error) }; rejected = error.code === 'invalid_input' || error.detail?.code === 'invalid_input'; }
     check(rejected, 'Cross-provider Key reference injection rejection shape: ' + JSON.stringify(rejectionEvidence));
     check((await api.settings.getProviderKeyState({ providerId: saved.otherProviderId })).state === 'missing', 'Other Provider acquired Key');
-    // 测试连接 tells what it found; this address answers nothing here, and nothing pretends it succeeded.
-    if (!card('Smoke Real A').querySelector('.svc-body')) await clickInCard('Smoke Real A', '展开 Smoke Real A');
-    await clickInCard('Smoke Real A', '测试连接');
-    await wait(() => card('Smoke Real A').querySelector('.svc-checks .status-text')?.textContent, value => Boolean(value) && !value.includes('连接正常'), 'Real Provider reported false network success');
-    check(card('Smoke Real A').textContent.includes('上下文 128,000 · 最大输出 8,192'), 'Model limits not stated');
+    // 测试连接 tells what it found; the network is off here, and nothing pretends it succeeded.
+    if (!card('DeepSeek').querySelector('.svc-body')) await clickInCard('DeepSeek', '展开 DeepSeek');
+    await clickInCard('DeepSeek', '测试连接');
+    await wait(() => card('DeepSeek').querySelector('.svc-checks .status-text')?.textContent, value => Boolean(value) && !value.includes('连接正常'), 'Real Provider reported false network success');
+    check(card('DeepSeek').textContent.includes('上下文 128,000 · 最大输出 8,192'), 'Model limits not stated');
     noKey(await api.settings.listProviderSummaries()); noKey(await api.settings.getProviderConfiguration({ id: saved.realProviderId }));
     noKey(await keyState(saved.realProviderId)); noKey(replacement);
     // D6-A: the first real service got 我的第一场讨论; it never had a discussion, so it can be deleted.

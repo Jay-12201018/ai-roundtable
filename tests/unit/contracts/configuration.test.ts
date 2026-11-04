@@ -146,13 +146,10 @@ describe('protected key and provider operations', () => {
     expect(schema('providerKeyStateSchema').safeParse({ providerId: 'p', keyReference: null, state: 'missing', storage: memoryStorage, apiKey: 'fixture-secret' }).success).toBe(false);
   });
   it('uses Main request IDs only in results and preserves controlled adapter errors', () => {
-    expect(schema('providerModelsInputSchema').parse({ providerId: 'p' })).toEqual({ providerId: 'p' });
-    expect(schema('providerModelsInputSchema').safeParse({ providerId: 'p', requestId: 'renderer-id' }).success).toBe(false);
-    expect(schema('providerModelsResultSchema').safeParse({ providerId: 'p', models: [{ id: 'mock', name: 'Mock' }] }).success).toBe(true);
     expect(schema('providerConnectionTestInputSchema').safeParse({ providerId: 'p', level: 'generation' }).success).toBe(false);
     expect(schema('providerConnectionTestInputSchema').safeParse({ providerId: 'p', level: 'generation', modelId: 'mock' }).success).toBe(true);
     expect(schema('providerConnectionTestInputSchema').safeParse({ providerId: 'p', level: 'configuration', requestId: 'renderer-id' }).success).toBe(false);
-    const result = { providerId: 'p', result: { requestId: 'main-request', level: 'authentication', ok: false, error: publicError('authentication_failed') } };
+    const result = { providerId: 'p', result: { requestId: 'main-request', level: 'generation', ok: false, error: publicError('authentication_failed') } };
     expect(schema('providerConnectionTestResultSchema').safeParse(result).success).toBe(true);
     expect(schema('providerConnectionTestResultSchema').safeParse({ ...result, result: { ...result.result, error: { ...result.result.error, message: 'fixture-secret' } } }).success).toBe(false);
   });
@@ -231,7 +228,6 @@ it('maps every candidate room and provider operation to executable input and out
     ['deleteKey', { providerId: 'provider-1' }, undefined],
     ['getProviderKeyState', { providerId: 'provider-1' }, { providerId: 'provider-1', keyReference: null, state: 'missing', storage: memoryStorage }],
     ['getKeyStorageStatus', undefined, memoryStorage],
-    ['listModels', { providerId: 'provider-1' }, { providerId: 'provider-1', models: [{ id: 'mock', name: 'Mock' }] }],
     ['testConnection', { providerId: 'provider-1', level: 'configuration' }, { providerId: 'provider-1', result: { requestId: 'main-request', level: 'configuration', ok: true } }],
   ] as const) {
     expect(settings[method].input.safeParse(input).success, `${method} input`).toBe(true);

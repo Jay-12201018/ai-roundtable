@@ -120,6 +120,8 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
   async function start({ screens, width = 1440, height = 900, keepScreens = false, firstShot = 0 }) {
     await new Promise(done => server.listen(0, '127.0.0.1', done)); fixture.port = server.address().port;
     const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
+    const hosts = Registry.prototype.transportHosts;
+    Registry.prototype.transportHosts = function () { const allowed = hosts.call(this); return { has: host => host === `127.0.0.1:${fixture.port}` || allowed.has(host) }; };
     const transport = Registry.prototype.createTransport;
     Registry.prototype.createTransport = function (guard, diagnostics) {
       const send = transport.call(this, guard, diagnostics);

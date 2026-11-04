@@ -8,9 +8,10 @@ import { ContractError, toPublicError } from '../../shared/contracts/errors';
 import { providerSettingsContracts, type ProviderSettingsApiContract } from '../../shared/contracts/configuration';
 import * as schemas from '../../shared/schemas/configuration';
 import { modelLimits } from '../../shared/schemas/provider';
+import { catalogHas, catalogServiceAt, serviceCatalog, type CatalogService } from '../../shared/serviceCatalog';
 import type {
   ConfigurationIdInput, CreateProviderInput, ProviderInput, ProviderIdInput,
-  ProviderModelsInput, ProviderConnectionTestInput, SetProviderKeyInput, ProviderConfiguration,
+  ProviderConnectionTestInput, SetProviderKeyInput, ProviderConfiguration,
 } from '../../shared/contracts/configuration';
 
 function parseInput<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -30,9 +31,33 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
     catch (error) { throw new ContractError(toPublicError(error).code); }
   }
 
+  private catalog(): readonly CatalogService[] { return this.runtime?.catalog() ?? serviceCatalog; }
+
+  /** D143: a service is saved only as the catalog has it. A stopped one outside it may keep its name, and nothing else. */
+  private assertInCatalog(next: { kind: string; baseUrl: string | null; enabled: boolean; defaultModelId: string | null; customModels: Array<{ id: string }> }, previous?: ProviderConfiguration) {
+    if (next.kind === 'mock') return;
+    const service = catalogServiceAt(this.catalog(), next.baseUrl);
+    if (!service) {
+      const unchanged = previous && !next.enabled && previous.baseUrl === next.baseUrl && previous.defaultModelId === next.defaultModelId
+        && previous.customModels.length === next.customModels.length && previous.customModels.every((model, index) => model.id === next.customModels[index]?.id);
+      if (!unchanged) throw new ContractError('service_unsupported');
+      return;
+    }
+    for (const id of [next.defaultModelId, ...next.customModels.map(model => model.id)]) if (id !== null && !catalogHas(service, id)) throw new ContractError('model_unsupported');
+  }
+
+  /** D143: what the page sees of a catalog service: the catalog's models now, with the limits the host set. */
+  private withCatalog<T extends { kind: ProviderConfiguration['kind'] | null; defaultModelId: string | null; customModels: ProviderConfiguration['customModels'] }>(provider: T, baseUrl: string | null | undefined): T {
+    const service = provider.kind === 'mock' ? undefined : catalogServiceAt(this.catalog(), baseUrl);
+    if (!service) return provider;
+    return { ...provider, defaultModelId: provider.defaultModelId && catalogHas(service, provider.defaultModelId) ? provider.defaultModelId : null,
+      customModels: service.models.map(model => ({ ...provider.customModels.find(item => item.id === model.id), id: model.id, name: model.name })) };
+  }
+
   async createProvider(input: CreateProviderInput) {
     return this.perform(() => {
       const parsed = parseInput(schemas.createProviderInputSchema, input);
+      this.assertInCatalog(parsed);
       return providerSettingsContracts.createProvider.output.parse(this.database.createProvider({ ...parsed, id: randomUUID() }));
     });
   }
@@ -40,6 +65,7 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
   async updateProvider(input: ProviderInput) {
     return this.perform(() => {
       const parsed = parseInput(schemas.providerInputSchema, input);
+      this.assertInCatalog(parsed, this.database.getProviderConfiguration(parsed.id));
       return providerSettingsContracts.updateProvider.output.parse(this.database.updateProvider(parsed));
     });
   }
@@ -49,12 +75,13 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
       const { id } = parseInput(schemas.configurationIdInputSchema, input);
       const provider = this.database.getProviderConfiguration(id);
       if (!provider) throw new ContractError('not_found');
-      return providerSettingsContracts.getProviderConfiguration.output.parse(provider);
+      return providerSettingsContracts.getProviderConfiguration.output.parse(this.withCatalog(provider, provider.baseUrl));
     });
   }
 
   async listProviderSummaries() {
-    return this.perform(() => providerSettingsContracts.listProviderSummaries.output.parse(this.database.listProviderSummaries()));
+    return this.perform(() => providerSettingsContracts.listProviderSummaries.output.parse(this.database.listProviderSummaries()
+      .map(summary => summary.configurationValid ? this.withCatalog(summary, this.database.getProviderConfiguration(summary.id)?.baseUrl) : summary)));
   }
 
   async deleteProvider(input: ConfigurationIdInput): Promise<void> {
@@ -64,6 +91,8 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
   async setKey(input: SetProviderKeyInput) {
     return this.perform(async () => {
       const { providerId, apiKey } = parseInput(schemas.setProviderKeyInputSchema, input);
+      const provider = this.database.getProviderConfiguration(providerId);
+      if (provider && provider.kind !== 'mock' && !catalogServiceAt(this.catalog(), provider.baseUrl)) throw new ContractError('service_unsupported');
       await this.keys.storeKey(providerId, apiKey);
       return providerSettingsContracts.setKey.output.parse(await this.keys.getProviderKeyState(providerId));
     });
@@ -96,28 +125,18 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
         let configuration: ProviderConfiguration | undefined;
         try { configuration = this.database.getProviderConfiguration(summary.id); } catch { configuration = undefined; }
         const mock = configuration?.kind === 'mock';
-        const ids = mock ? ['mock'] : [...new Set([configuration?.defaultModelId, ...(configuration?.customModels ?? []).map(model => model.id)].filter((id): id is string => Boolean(id)))];
+        const service = mock ? undefined : catalogServiceAt(this.catalog(), configuration?.baseUrl);
+        const ids = mock ? ['mock'] : [...new Set([...(service?.models ?? []).map(model => model.id), configuration?.defaultModelId, ...(configuration?.customModels ?? []).map(model => model.id)].filter((id): id is string => Boolean(id)))];
         const key = mock || !configuration ? undefined : await this.keys.getProviderKeyState(summary.id);
         const keyUsable = key?.state === 'configured' || key?.state === 'session';
-        result.push({ providerId: summary.id, keyState: key?.state ?? 'none', baseUrl: (configuration && registry.targetOf(configuration)) ?? null,
+        result.push({ providerId: summary.id, keyState: key?.state ?? 'none', supported: mock || Boolean(service), baseUrl: (configuration && registry.targetOf(configuration)) ?? null,
           models: ids.map(modelId => {
             const blockedBy = !configuration ? 'invalid' as const : !summary.enabled ? 'disabled' as const : mock ? null
-              : !keyUsable ? 'key' as const : null;
+              : !service || !catalogHas(service, modelId) ? 'unsupported' as const : !keyUsable ? 'key' as const : null;
             return { modelId, ...(configuration ? registry.limits(configuration, modelId) : modelLimits()), usable: blockedBy === null, blockedBy };
           }) });
       }
       return schemas.providerReadinessListSchema.parse(result);
-    });
-  }
-
-  async listModels(input: ProviderModelsInput) {
-    return this.perform(async () => {
-      const { providerId } = parseInput(schemas.providerModelsInputSchema, input);
-      const provider = await this.getProviderConfiguration({ id: providerId });
-      if (!provider.enabled) throw new ContractError('invalid_state');
-      if (provider.kind !== 'mock' && !this.runtime) throw new ContractError('unsupported');
-      const adapter = provider.kind === 'mock' ? this.mock : this.runtime!.getAdapter(providerId);
-      return providerSettingsContracts.listModels.output.parse({ providerId, models: await adapter.listModels({ requestId: randomUUID() }) });
     });
   }
 

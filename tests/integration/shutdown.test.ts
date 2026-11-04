@@ -12,7 +12,6 @@ describe('normal shutdown', () => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const provider: ProviderAdapter = {
-      listModels: (input) => new MockProvider().listModels(input),
       testConnection: (input) => new MockProvider().testConnection(input),
       async *streamChat(input) {
         yield { type: 'start', requestId: input.requestId };

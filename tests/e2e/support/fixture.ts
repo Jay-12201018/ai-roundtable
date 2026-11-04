@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server, type ServerRespons
 import type { AddressInfo } from 'node:net';
 
 export type FixtureMode = 'ok' | 'hang';
-export type FixtureService = 'deepseek' | 'kimi' | 'glm' | 'custom';
+export type FixtureService = 'deepseek' | 'kimi' | 'glm' | 'doubao';
 type Message = { role: string; content: string };
 export type FixtureRequest = { path?: string; service: FixtureService; model: string; maxTokens: number; mode: FixtureMode; messages: Message[]; headers: IncomingHttpHeaders; raw: Record<string, any> };
 type ReplyBody = { model: string; max_tokens: number; service: FixtureService; messages: Message[] };
@@ -30,13 +30,6 @@ export class DeepSeekFixture {
       const parts: Buffer[] = [];
       for await (const part of req) parts.push(part as Buffer);
       const service = /^\/([a-z]+)\//u.exec(req.url ?? '')?.[1] as FixtureService;
-      const models = { deepseek: ['deepseek-flash', 'deepseek-v4-pro'], kimi: ['kimi-k3.1-pro'], glm: ['glm-5.3'], custom: ['company-model'] }[service] ?? [];
-      if (req.method === 'GET') {
-        this.requests.push({ path: req.url, service, model: '', maxTokens: 0, mode: 'ok', messages: [], headers: req.headers, raw: {} });
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ data: models.map(id => ({ id })) }));
-        return;
-      }
       const raw = JSON.parse(Buffer.concat(parts).toString()) as Record<string, any>;
       const body: ReplyBody = { model: raw.model, max_tokens: raw.max_tokens, messages: raw.messages, service };
       const mode = typeof this.mode === 'function' ? this.mode(body) : this.mode;

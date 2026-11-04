@@ -122,6 +122,8 @@ async function main() {
     console.info = (...values) => { result.mainLog.push(values.join(' ')); info(...values); };
   }
   const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
+  const hosts = Registry.prototype.transportHosts;
+  Registry.prototype.transportHosts = function () { const allowed = hosts.call(this); return { has: host => host === `127.0.0.1:${port}` || allowed.has(host) }; };
   const transport = Registry.prototype.createTransport;
   Registry.prototype.createTransport = function (guard, diagnostics) {
     const send = transport.call(this, guard, diagnostics);
@@ -227,13 +229,13 @@ async function main() {
     check(Boolean(option), 'deepseek-flash is still offered for the member');
     await choose('模型', option); await click('保存', { scope: 'dialog[open]' });
     await until(`!document.querySelector('dialog[open]') && !document.body.innerText.includes('还没选模型')`, 'reviewer model chosen again');
-    await capture('purged-member-fixed', '在成员菜单里点“编辑…”，给审查者重新选 DeepSeek 直连 · DeepSeek Flash 并保存：提示消失，成员恢复可用。', '.room-page');
+    await capture('purged-member-fixed', '在成员菜单里点“编辑…”，给审查者重新选 DeepSeek · DeepSeek Flash 并保存：提示消失，成员恢复可用。', '.room-page');
     await click('设置');
     await until(`document.querySelector('.svc-card') && document.body.innerText.includes('deepseek-flash')`, 'service card');
     const purged = await js(`window.roundtable.settings.listProviderSummaries().then(list => window.roundtable.settings.getProviderConfiguration({ id: list[0].id }))`);
     check(purged.defaultModelId === null && JSON.stringify(purged.customModels) === JSON.stringify([{ id: 'deepseek-flash', name: 'DeepSeek Flash' }]), 'The default model is empty and only deepseek-flash remains after the purge');
     check(!(await text()).includes(pastedKey) && !(await text()).includes('已经隐藏'), 'Nothing key-like is left to hide');
-    await capture('purged-provider', '设置 › 模型服务：DeepSeek 直连的默认模型已被清空，自定义模型里那条疑似 Key 的条目已删除，只剩 deepseek-flash；页面上没有任何密钥文本。', '.svc-card');
+    await capture('purged-provider', '设置 › 模型服务：DeepSeek的默认模型已被清空，自定义模型里那条疑似 Key 的条目已删除，只剩 deepseek-flash；页面上没有任何密钥文本。', '.svc-card');
     // Step R2: the earlier Run's members are named by their Provider, never by its UUID.
     await click('校园跑腿讨论', { selector: '.sb-item' });
     const runAt = await until(`(() => { const e = [...document.querySelectorAll('.sb-runs .sb-item')].find(e => e.textContent.startsWith(${JSON.stringify(earlier)})); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`, 'earlier run listed');
@@ -242,31 +244,18 @@ async function main() {
     await until(`document.querySelectorAll('.thread-item [aria-label=请求详情]').length > 0`, 'earlier run shown');
     await js(`document.querySelectorAll('.thread-item [aria-label=请求详情]').forEach(button => button.click()); true`);
     const lines = await until(`(() => { const lines = [...document.querySelectorAll('.msg-details')].map(node => node.textContent); return lines.length ? lines : null; })()`, 'request details');
-    check(lines.every(line => line.includes('服务DeepSeek 直连') && !uuidPattern.test(line)), 'Request details name the Provider, not its UUID');
+    check(lines.every(line => line.includes('服务DeepSeek') && !uuidPattern.test(line)), 'Request details name the Provider, not its UUID');
     check(!uuidPattern.test(await text()), 'No UUID anywhere on the discussion page');
-    await capture('provider-name', '重启后打开上一次运行（成员快照冻结的是 Provider ID）：每条消息的身份行显示"Drafter · Provider：DeepSeek 直连 · Model：deepseek-flash"，不再显示 UUID。Provider 找不到时显示"Provider 已删除"（单元测试覆盖）。', 0);
+    await capture('provider-name', '重启后打开上一次运行（成员快照冻结的是 Provider ID）：每条消息的身份行显示"Drafter · Provider：DeepSeek · Model：deepseek-flash"，不再显示 UUID。Provider 找不到时显示"Provider 已删除"（单元测试覆盖）。', 0);
   } else {
-  // Step 1 (D096, R16 batch 2): in the connect wizard, a pasted API Key in the model name is flagged at once and cannot be saved.
+  // Step 1 (D143): the wizard takes a service, a Key and a model from its list; there is nowhere to type a model name or an address.
   await click('设置'); await click('添加服务');
-  await click('自定义服务', { selector: '.choice', prefix: true });
-  await field('服务名称'); await selectAll(); await ime('deepseek', 'DeepSeek 直连');
-  await field('地址'); await type('https://api.deepseek.com');
-  check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The typed address is written above the Key');
-  await field('模型名'); await type(pastedKey);
-  check((await text()).includes('这看起来是 API Key，不是模型名。Key 请填在「API Key」一栏；这里只填模型名，例如 deepseek-flash。'), 'A pasted key is flagged at once in Chinese');
-  check(await js(`[...document.querySelectorAll('input')].find(e => e.labels?.[0]?.textContent === '模型名').getAttribute('aria-invalid')`) === 'true', 'The field is marked invalid');
-  await field('API Key'); await type(fakeKey);
-  await click('保存', { scope: 'dialog[open] .modal-foot' });
-  check((await js('window.roundtable.settings.listProviderSummaries()')).length === 0, 'Saving is refused: no Provider was created');
-  check(await js(`[...document.querySelectorAll('input')].every(e => e.value !== ${JSON.stringify(fakeKey)})`), 'The refused attempt cleared the Key field');
-  await capture('model-id-key-blocked', '连接向导 › 自定义服务：在“模型名”里误填了一串 sk- 开头的内容（合成的假值）：输入框立即标红，提示“这看起来是 API Key，不是模型名。Key 请填在「API Key」一栏……”；点“保存并连接”被拒绝，没有创建服务，Key 输入框也已清空。上方写明“Key 只会发往 https://api.deepseek.com”。', 'dialog[open]');
+  await click('DeepSeek', { selector: '.choice', prefix: true });
+  check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The address is written above the Key');
+  check(await js(`[...document.querySelectorAll('dialog[open] input')].every(e => e.type === 'password') && document.querySelector('dialog[open] select') !== null`), 'The only input is the Key; the model is a list');
+  await capture('key-blocked-reason', 'Key 只有一个入口：“Key 只会发往 https://api.deepseek.com”写在 API Key 上方；模型从列表里选。', 'dialog[open]');
 
-  // Step 2: the right model name; the address the Key goes to stays written right above the Key.
-  await field('模型名'); await selectAll(); await type('deepseek-flash');
-  check(!(await text()).includes('这看起来是 API Key'), 'The warning clears once a model name is typed');
-  await capture('key-blocked-reason', '改成 deepseek-flash 后提示消失。Key 只有一个入口：“Key 只会发往 https://api.deepseek.com”写在 API Key 上方。', 'dialog[open]');
-
-  // Step 3: the Key is typed and saved with Enter; that is the last step, and the first discussion is right there (D136).
+  // Step 2: the Key is typed and saved with Enter; that is the last step, and the first discussion is right there (D136).
   await field('API Key'); await type(fakeKey); await key('Enter');
   await until(`document.body.innerText.includes('这场讨论要解决什么？')`, 'key saved');
   check(!(await text()).includes(fakeKey), 'The Key is never echoed in the page');
@@ -276,14 +265,14 @@ async function main() {
   await click('设置');
   await until(`document.body.innerText.includes('可以使用')`, 'service ready');
   check((await text()).includes('已保存（不显示）'), 'The card says the Key is saved and does not show it');
-  await capture('session-confirmed', '设置 › 模型服务：“DeepSeek 直连 · 可以使用”，API Key“已保存（不显示）”。');
+  await capture('session-confirmed', '设置 › 模型服务：“DeepSeek · 可以使用”，API Key“已保存（不显示）”。');
 
   // Step 5: the room made for the first service (D6-A), renamed; three DeepSeek members.
   await click('我的第一场讨论', { selector: '.sb-item' });
   await until(`document.querySelector('.room-page')`, 'room page');
   await click('编辑'); await field('房间名称'); await selectAll(); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存');
   await until(`document.querySelector('.room-page h1')?.textContent === '校园跑腿讨论'`, 'room renamed');
-  check((await text()).split('deepseek-flash · 可以使用').length === 4, 'Three members on deepseek-flash, each usable');
+  check((await text()).split('DeepSeek Flash · 可以使用').length === 4, 'Three members on deepseek-flash, each usable');
   await capture('members', '连接后自动建好的房间改名为“校园跑腿讨论”（输入法组合输入）：起草者、审查者、综合者三位成员都写着“DeepSeek Flash · 可以使用”。', '.room-page');
 
   // Step 6: start, then pause without moving the pointer: 开始讨论 turns into 暂停 at the same spot.
@@ -407,7 +396,7 @@ async function main() {
 
   await js(`document.querySelectorAll('.thread-item [aria-label=请求详情]').forEach(button => button.click()); true`);
   const identityLines = await until(`(() => { const lines = [...document.querySelectorAll('.msg-details')].map(node => node.textContent); return lines.length ? lines : null; })()`, 'request details');
-  check(identityLines.every(line => line.includes('服务DeepSeek 直连') && !uuidPattern.test(line)), 'Request details name the Provider, not its UUID');
+  check(identityLines.every(line => line.includes('服务DeepSeek') && !uuidPattern.test(line)), 'Request details name the Provider, not its UUID');
   fs.writeFileSync(manifestPath, JSON.stringify({ status: 'PASS' }) + '\n', { mode: 0o600 });
   }
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);

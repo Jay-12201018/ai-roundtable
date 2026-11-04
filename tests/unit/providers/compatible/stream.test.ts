@@ -143,27 +143,17 @@ describe('compatible adapter over a stream', () => {
     expect(reads).toBe(0); expect(cancelled).toBe(true);
   });
 
-  it.each([
-    { data: [{ id: 'duplicate' }, { id: 'duplicate' }] }, { data: [{ id: 'bad id' }] }, { data: [] , has_more: true }, { invalid: 'fixture-secret-only' },
-  ])('rejects malformed or unsupported model lists safely (%j)', async body => {
-    const { provider } = setup(async () => Response.json(body));
-    await expect(provider.listModels({ requestId: 'list' })).rejects.toMatchObject({ code: body.has_more ? 'unsupported' : 'invalid_response' });
-  });
-
-  it('configuration does not resolve credentials; auth and models never POST; generation is explicit and bounded', async () => {
+  it('configuration does not resolve credentials or send; generation is explicit and bounded', async () => {
     const methods: string[] = [];
     const { provider, resolveKey } = setup(async (_url, init) => {
       methods.push(init?.method ?? 'GET');
-      return init?.method === 'POST' ? sse(chunk('ok'), chunk(null, 'length'), '[DONE]')
-        : Response.json({ data: [{ id: 'listed-model', secret: fakeKey }] });
+      return sse(chunk('ok'), chunk(null, 'length'), '[DONE]');
     });
     expect(await provider.testConnection({ requestId: 'config', level: 'configuration' })).toEqual({ requestId: 'config', level: 'configuration', ok: true });
     expect(resolveKey).not.toHaveBeenCalled(); expect(methods).toEqual([]);
-    expect(await provider.listModels({ requestId: 'list' })).toEqual([{ id: 'listed-model', name: 'listed-model' }]);
-    expect(await provider.testConnection({ requestId: 'auth', level: 'authentication' })).toMatchObject({ ok: true, level: 'authentication' });
     const result = await provider.testConnection({ requestId: 'gen', level: 'generation', modelId: 'manual-unlisted' });
     expect(result).toEqual({ requestId: 'gen', level: 'generation', ok: true });
-    expect(connectionTestResultSchema.safeParse(result).success).toBe(true); expect(methods).toEqual(['GET', 'GET', 'POST']);
+    expect(connectionTestResultSchema.safeParse(result).success).toBe(true); expect(methods).toEqual(['POST']);
   });
 
   it('rejects missing limits/credentials and unconfirmed endpoints without Mock or network', async () => {
@@ -177,10 +167,4 @@ describe('compatible adapter over a stream', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('rejects a missing list input as a safe contract error', async () => {
-    const fetcher = vi.fn(async () => Response.json({ data: [] }));
-    const { provider } = setup(fetcher);
-    await expect(provider.listModels(null as never)).rejects.toMatchObject({ code: 'invalid_input' });
-    expect(fetcher).not.toHaveBeenCalled();
-  });
 });

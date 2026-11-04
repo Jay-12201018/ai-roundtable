@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { Database } from '../../../src/main/database/Database';
 import { buildPublicContext } from '../../../src/main/context/buildPublicContext';
 import type { ContextInput, ModelTokenCounter } from '../../../src/main/context/types';
-import type { ConnectionTestResult, ListModelsInput, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../../../src/main/providers/types';
+import type { ConnectionTestResult, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../../../src/main/providers/types';
 import { providerMessageSchema, streamChatInputSchema } from '../../../src/shared/schemas/provider';
 import { contextInput, fixtureCounter } from '../../unit/context/fixtures';
 
@@ -12,7 +12,6 @@ class CapturingProvider implements ProviderAdapter {
 
   constructor(private readonly outputs = ['alpha', 'beta', 'gamma']) {}
 
-  async listModels(_input: ListModelsInput) { return [{ id: 'fixture', name: 'Fixture' }]; }
   async testConnection(input: TestConnectionInput): Promise<ConnectionTestResult> {
     return { requestId: input.requestId, level: input.level, ok: true };
   }

@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Check, CircleAlert, FlaskConical, Info, Lock } from 'lucide-react';
 import type { KeyStorageStatus, ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
-import { providerBaseUrlSchema } from '../../../shared/schemas/configuration';
 import { Button, Choice, Field, Modal } from '../../components/ui';
 import { presets, presetOf, targetOf, type ServicePreset } from './presets';
-import { errorMessage, modelIdProblem, testService, type ServiceTest } from './model';
+import { errorMessage, testService, type ServiceTest } from './model';
 
 /** What the app did after a connection: the room it created for the first real service, if any. */
 export type ConnectedRoom = { roomId: string; roomName: string; memberNames: string[]; modelName: string | null };
@@ -24,14 +23,12 @@ const storageText = (storage: KeyStorageStatus | null) => storage?.mode === 'mem
   : '保存后存进系统钥匙串；';
 
 /**
- * Connect a service (D136): pick one, paste the Key, pick or type a model, save. Saving is all it takes; the address the Key goes to
- * is written above it. 测试连接 is there for whoever wants it, and nothing waits for it.
+ * Connect a service (D143): pick one from the catalog, paste the Key, pick one of its models, save. Saving is all it takes;
+ * the address the Key goes to is written above it. 测试连接 is there for whoever wants it, and nothing waits for it.
  */
 export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onStart }: ConnectWizardProps) {
   const [picking, setPicking] = useState(!rekey);
-  const [preset, setPreset] = useState<ServicePreset>(() => rekey ? presetOf(rekey) ?? presets.find(item => item.id === 'custom')! : presets[0]!);
-  const [name, setName] = useState(() => rekey?.name ?? presets[0]!.name);
-  const [address, setAddress] = useState('');
+  const [preset, setPreset] = useState<ServicePreset>(() => (rekey && presetOf(rekey)) || presets[0]!);
   const [modelId, setModelId] = useState(() => presets[0]!.models[0]?.id ?? '');
   const [hasKey, setHasKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
@@ -44,16 +41,12 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   const clearSecret = () => { if (secret.current) secret.current.value = ''; setHasKey(false); };
   useEffect(() => { alive.current = true; void api.getKeyStorageStatus().then(value => { if (alive.current) setStorage(value); }, () => {}); return () => { alive.current = false; clearSecret(); }; }, [api]);
 
-  const custom = rekey ? !presetOf(rekey) : preset.id === 'custom';
   const mock = !rekey && preset.id === 'mock';
-  const typed = custom && !rekey && address.trim() ? providerBaseUrlSchema.safeParse(address) : undefined;
-  const target = rekey ? targetOf(rekey) : custom ? (typed?.success ? typed.data.replace(/\/+$/u, '') : null) : preset.baseUrl;
-  const chosenModel = modelId.trim();
-  const modelProblem = modelIdProblem(chosenModel);
-  const displayName = rekey?.name ?? (name.trim() || preset.name);
+  const target = rekey ? targetOf(rekey) : preset.baseUrl;
+  const displayName = rekey?.name ?? preset.name;
 
   function choose(next: ServicePreset) {
-    setPreset(next); setName(next.id === 'custom' ? '' : next.name); setModelId(next.models[0]?.id ?? ''); setAddress(''); setError(''); setTest(undefined);
+    setPreset(next); setModelId(next.models[0]?.id ?? ''); setError(''); setTest(undefined); clearSecret();
     setPicking(false);
   }
   function close() { clearSecret(); onClose(); }
@@ -68,24 +61,18 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
 
   /** Create (or, after a first attempt, update) the service; mock needs nothing else. */
   async function saveConfiguration(): Promise<ProviderConfiguration> {
-    const models = mock ? [] : [...new Map([{ id: chosenModel, name: chosenModel }, ...preset.models.map(model => ({ id: model.id, name: model.name }))].map(model => [model.id, model])).values()];
+    const models = mock ? [] : preset.models.map(model => ({ id: model.id, name: model.name }));
     const hasDefault = providers.some(provider => provider.isDefault && provider.enabled && provider.kind !== 'mock');
-    const input = { name: displayName, kind: preset.kind, baseUrl: mock ? null : custom ? (address.trim() || null) : preset.baseUrl,
-      enabled: true, isDefault: !mock && !hasDefault, defaultModelId: mock ? 'mock' : chosenModel || null, customModels: models };
+    const input = { name: displayName, kind: preset.kind, baseUrl: preset.baseUrl, enabled: true, isDefault: !mock && !hasDefault, defaultModelId: mock ? 'mock' : modelId, customModels: models };
     const value = saved ? await api.updateProvider({ ...input, id: saved.id, isDefault: saved.isDefault }) : await api.createProvider(input);
     if (alive.current) setSaved(value);
     return value;
   }
 
-  /** What 保存 and 测试连接 share: everything filled in is valid, and the Key typed so far is stored. */
+  /** What 保存 and 测试连接 share: the Key typed so far is stored. */
   async function store(): Promise<ProviderConfiguration | undefined> {
     const apiKey = secret.current?.value ?? '';
-    if (!mock && custom && !rekey && !name.trim()) { setError('请填写服务名称。'); return; }
-    if (!mock && custom && !rekey && !target) { setError('先填写这个服务的地址，例如 https://api.example.com/v1。'); return; }
     if (!mock && !keySaved && apiKey.trim() === '') { setError('请粘贴 API Key。'); return; }
-    if (!rekey && !mock && !chosenModel) { setError('请填写模型名，例如服务商文档里的模型 ID。'); return; }
-    // What looks like a Key in the model field means the two may be mixed up: nothing typed stays on the page.
-    if (modelProblem) { clearSecret(); setError(modelProblem); return; }
     clearSecret();
     const provider = rekey ?? await saveConfiguration();
     if (!mock && apiKey.trim()) { await api.setKey({ providerId: provider.id, apiKey }); if (alive.current) setKeySaved(true); }
@@ -115,18 +102,18 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     void guarded(async () => {
       const provider = await store();
       if (!provider) return;
-      const result = await testService(api, provider, chosenModel || provider.defaultModelId || provider.customModels[0]?.id);
+      const result = await testService(api, provider, modelId || provider.defaultModelId || provider.customModels[0]?.id);
       if (alive.current) setTest(result);
     });
   }
 
-  const title = picking ? '连接模型服务' : mock ? '添加演示服务' : rekey ? `更换 ${displayName} 的 API Key` : custom ? '添加自定义服务' : `连接 ${displayName}`;
+  const title = picking ? '连接模型服务' : mock ? '添加演示服务' : rekey ? `更换 ${displayName} 的 API Key` : `连接 ${displayName}`;
   const description = picking ? '选一个你有账号的服务。之后可以在「设置 › 模型服务」里添加更多。'
-    : mock ? '演示成员不联网，适合先熟悉怎么主持一场讨论。' : `费用由${custom ? '这个服务' : ` ${displayName} `}直接从你的账户收取；AI 圆桌不收费，也不估算费用。`;
+    : mock ? '演示成员不联网，适合先熟悉怎么主持一场讨论。' : `费用由 ${displayName} 直接从你的账户收取；AI 圆桌不收费，也不估算费用。`;
   const footer = picking ? <><span className="is-left small muted">可以连接多个服务，让每位成员各用一家的模型，互相交叉审计。</span><Button onClick={close}>取消</Button></>
     : <>{!mock && <span className="is-left wizard-test"><Button size="sm" disabled={busy || (!hasKey && !keySaved)} onClick={runTest}>测试连接</Button>
       {test ? <span role="status" className={test.tone === 'ok' ? 'status-text ok-text' : 'status-text warn-text'}>{test.tone === 'ok' ? <Check aria-hidden /> : <CircleAlert aria-hidden />}{test.text}</span>
-        : <span className="small muted">可能产生极少的费用</span>}</span>}
+        : <span className="small muted">会发一条很短的消息，可能产生极少的费用</span>}</span>}
       {!rekey && !saved && <Button disabled={busy} onClick={back}>上一步</Button>}
       <Button variant="primary" type="submit" form="connect-form" disabled={busy || (!mock && !hasKey && !keySaved)}>{busy ? '正在保存…' : mock ? '添加演示服务' : '保存'}</Button></>;
 
@@ -136,25 +123,14 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
         icon={<span className="svc-logo is-sm" aria-hidden>{item.id === 'mock' ? <FlaskConical /> : item.logo}</span>} badge={item.recommended ? '推荐' : undefined}>{item.description}</Choice>)}
     </div>
     : <form id="connect-form" className="form-stack" onSubmit={submit} onChange={() => { setError(''); setTest(undefined); }} noValidate>
-      {custom && !rekey && <>
-        <Field label="服务名称">{props => <input {...props} className="input" value={name} disabled={busy} autoFocus onChange={event => setName(event.target.value)} placeholder="例如：公司内部模型" />}</Field>
-        <Field label="地址" error={typed && !typed.success ? '地址必须以 https:// 开头（本机服务可以用 http://localhost），不能带账号、问号参数或 # 片段。' : undefined}
-          help="照服务商文档填写，通常以 /v1 结尾。">
-          {props => <input {...props} className="input mono" value={address} disabled={busy} onChange={event => setAddress(event.target.value)} placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false}
-            aria-invalid={Boolean(typed && !typed.success) || undefined} />}</Field>
-      </>}
       {!mock && target && <div className="target" role="note"><Lock aria-hidden /><span className="grow">Key 只会发往 <code>{target}</code></span></div>}
       {!mock && <Field label="API Key" help={`${rekey ? '' : preset.keyHelp}${storageText(storage)}不会出现在讨论记录、日志和导出文件里，也不会再显示出来。`}>
-        {props => <input {...props} ref={secret} className="input mono" type="password" autoComplete="off" spellCheck={false} disabled={busy} autoFocus={!custom || Boolean(rekey)} placeholder={keySaved ? '已保存；要更换就重新粘贴' : undefined}
+        {props => <input {...props} ref={secret} className="input mono" type="password" autoComplete="off" spellCheck={false} disabled={busy} autoFocus placeholder={keySaved ? '已保存；要更换就重新粘贴' : undefined}
           onChange={event => setHasKey(event.target.value.length > 0)} />}</Field>}
-      {mock && <div className="callout"><Info aria-hidden /><span className="grow">演示服务没有地址，也不需要 Key。演示成员的回复是预先写好的示例，不代表真实模型的水平，也不会出现在用量里。</span></div>}
-      {!rekey && !mock && <Field label="模型名" help={custom ? '照服务商文档填写。' : '可以选建议的模型，也可以照服务商文档手填。每位成员可以单独换模型。'}>
-        {props => <><input {...props} className="input mono" list={custom ? undefined : 'wizard-models'} value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)} placeholder="服务商文档里的模型 ID" autoComplete="off" spellCheck={false} aria-invalid={Boolean(modelProblem) || undefined} />
-          {!custom && <datalist id="wizard-models">{preset.models.map(model => <option key={model.id} value={model.id}>{model.name}{model.hint ? ` · ${model.hint}` : ''}</option>)}</datalist>}</>}</Field>}
-      {!rekey && !mock && !custom && <details className="adv"><summary>更多：服务名称</summary><div className="form-stack">
-        <Field label="服务名称">{props => <input {...props} className="input" value={name} disabled={busy} onChange={event => setName(event.target.value)} />}</Field>
-      </div></details>}
-      {modelProblem && <p className="field-error" role="alert">{modelProblem}</p>}
+      {mock && <div className="callout"><Info aria-hidden /><span className="grow">演示服务没有地址，也不需要 Key。演示成员的回复是预先写好的示例，不代表真实模型的水平，也不会出现在用量统计里。</span></div>}
+      {!rekey && !mock && <Field label="模型" help="每位成员可以单独换模型。">
+        {props => <select {...props} className="select input" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)}>
+          {preset.models.map(model => <option key={model.id} value={model.id}>{model.name}（{model.id}）{model.note ? ` · ${model.note}` : ''}</option>)}</select>}</Field>}
       {error && <p className="field-error" role="alert">{error}</p>}
     </form>}
   </Modal>;

@@ -98,6 +98,12 @@ async function main() {
   await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve)); port = fixture.address().port;
   const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
   assert.equal(typeof Registry, 'function');
+  // This probe's own two services, in place of the built-in catalog; only this entry can do that.
+  const model = { id: 'fixture', name: 'Owned fixture' };
+  const catalog = [{ id: 'first', name: 'First', baseUrl: 'https://first.example/v1', models: [model] }, { id: 'second', name: 'Second', baseUrl: 'https://second.example/v1', models: [model] }];
+  Registry.prototype.catalog = function () { return catalog; };
+  const hosts = Registry.prototype.transportHosts;
+  Registry.prototype.transportHosts = function () { const allowed = hosts.call(this); return { has: host => host === `127.0.0.1:${port}` || allowed.has(host) }; };
   const transport = Registry.prototype.createTransport;
   Registry.prototype.createTransport = function (guard, diagnostics) {
     const send = transport.call(this, guard, diagnostics);

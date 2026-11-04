@@ -35,10 +35,7 @@ async function page(stage, saved = {}) {
     await api.settings.setKey({ providerId: provider.id, apiKey: 'r10r11-fake-' + kind });
     const configuration = await api.settings.testConnection({ providerId: provider.id, level: 'configuration' });
     check(configuration.result.ok && configuration.result.level === 'configuration', 'Local configuration false');
-    const models = await api.settings.listModels({ providerId: provider.id });
-    check(models.models.some(model => model.id === 'fixture'), 'Model list not connected');
-    const auth = await api.settings.testConnection({ providerId: provider.id, level: 'authentication' });
-    check(auth.result.ok && auth.result.level === 'authentication', 'Authentication fixture false');
+    check((await api.settings.getProviderConfiguration({ id: provider.id })).customModels.some(model => model.id === 'fixture'), 'Model list not connected');
     check(!JSON.stringify(await api.settings.getProviderConfiguration({ id: provider.id })).includes('r10r11-fake'), 'Key in public config');
   }
   // R16 batch 2: opening 设置 re-reads the services; each service is a card with its own status.

@@ -90,7 +90,6 @@ const api: RoundtableApiContract = {
     deleteKey: (input) => invoke('settings.deleteKey', input),
     getProviderKeyState: (input) => invoke('settings.getProviderKeyState', input),
     getKeyStorageStatus: () => invoke('settings.getKeyStorageStatus', undefined),
-    listModels: (input) => invoke('settings.listModels', input),
     testConnection: (input) => invoke('settings.testConnection', input),
     listModelReadiness: () => invoke('settings.listModelReadiness', undefined),
   },

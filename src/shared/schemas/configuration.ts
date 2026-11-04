@@ -89,8 +89,6 @@ export const providerKeyStateSchema = z.object({
   && (input.state !== 'session' || input.storage.mode === 'memory'), 'Inconsistent key state');
 export const providerIdInputSchema = z.object({ providerId: idSchema }).strict();
 export const setProviderKeyInputSchema = providerIdInputSchema.extend({ apiKey: z.string().min(1) });
-export const providerModelsInputSchema = providerIdInputSchema;
-export const providerModelsResultSchema = providerIdInputSchema.extend({ models: z.array(providerModelSchema) });
 export const providerConnectionTestInputSchema = providerIdInputSchema.extend({ level: connectionLevelSchema, modelId: modelIdSchema.optional(), allowGeneration: z.literal(true).optional() })
   .refine((input) => input.level !== 'generation' || input.modelId !== undefined, 'Generation test requires a model');
 export const providerConnectionTestResultSchema = providerIdInputSchema.extend({ result: connectionTestResultSchema });
@@ -101,10 +99,12 @@ export const providerConnectionTestResultSchema = providerIdInputSchema.extend({
  */
 export const modelReadinessSchema = z.object({
   modelId: idSchema, contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive(),
-  usable: z.boolean(), blockedBy: z.enum(['disabled', 'invalid', 'key']).nullable(),
+  usable: z.boolean(), blockedBy: z.enum(['disabled', 'invalid', 'unsupported', 'key']).nullable(),
 }).strict().refine(value => value.usable === (value.blockedBy === null), 'A model is usable exactly when nothing blocks it');
 export const providerReadinessSchema = z.object({
   providerId: idSchema, keyState: z.enum(['missing', 'configured', 'session', 'unavailable', 'none']),
+  /** D143: false when the service is not in the built-in catalog: it stays only for its history. */
+  supported: z.boolean(),
   /** Where this service's Key and content go. */
   baseUrl: z.string().max(2048).nullable(), models: z.array(modelReadinessSchema).max(512),
 }).strict();

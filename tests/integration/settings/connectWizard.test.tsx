@@ -30,12 +30,14 @@ const usable = (registry: ProviderRegistry, providerId: string, modelId: string)
 };
 const pick = (name: RegExp) => fireEvent.click(screen.getByRole('button', { name }));
 
-it('D143 offers the domestic services, a custom service and the demo, and no other name', () => {
+it('D143 offers the eight catalog services in order, DeepSeek first and recommended, then the demo', () => {
   const { api } = fixture();
   open(api);
   const offered = within(screen.getByRole('group', { name: '服务' })).getAllByRole('button').map(button => button.textContent ?? '');
-  for (const [index, name] of ['DeepSeek', 'Kimi', '通义千问', '智谱 GLM', '豆包', 'MiniMax', '自定义服务', '演示（Mock）'].entries()) expect(offered[index]).toContain(name);
-  expect(offered).toHaveLength(8);
+  for (const [index, name] of ['DeepSeek', '豆包', '通义千问', 'Kimi', '智谱 GLM', '百度文心', '腾讯混元', 'MiniMax', '演示（Mock）'].entries()) expect(offered[index]).toContain(name);
+  expect(offered).toHaveLength(9);
+  expect(offered[0]).toContain('推荐');
+  expect(offered.slice(1).join('')).not.toContain('推荐');
   // Every built-in address is the service's own https endpoint, and each has at least one model to pick.
   for (const preset of presets.filter(item => item.baseUrl)) {
     expect(preset.baseUrl!.startsWith('https://')).toBe(true);
@@ -86,62 +88,45 @@ it('D134 a second service works right after its Key is saved, and does not take 
   expect(database.listProviderSummaries().find(item => item.name === 'Kimi')).toMatchObject({ isDefault: false, defaultModelId: 'kimi-k3.1-pro' });
 });
 
-it('D143 a built-in service is only a shortcut: any model name can be typed, and the suggestions stay', async () => {
+it('D143 the only things to fill in are the Key and a model from the list; nothing takes an address or a typed model name', async () => {
   const { database, registry, api } = fixture();
   const { onClose } = open(api);
   pick(/^Kimi/u);
-  const model = screen.getByLabelText('模型名') as HTMLInputElement;
+  // Text boxes have the role textbox; the Key is a password field, which does not.
+  expect(screen.queryAllByRole('textbox')).toEqual([]);
+  const model = screen.getByLabelText('模型') as HTMLSelectElement;
+  expect(model.tagName).toBe('SELECT');
   expect(model.value).toBe('kimi-k3.1-pro');
-  fireEvent.change(model, { target: { value: 'typed-by-hand' } });
-  fireEvent.change(keyInput(), { target: { value: 'owned-fake-typed-key' } });
+  expect([...model.options].map(option => option.value)).toEqual(['kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed', 'kimi-k3']);
+  fireEvent.change(model, { target: { value: 'kimi-k3' } });
+  fireEvent.change(keyInput(), { target: { value: 'owned-fake-picked-key' } });
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(onClose).toHaveBeenCalled());
   const provider = database.listProviderSummaries()[0];
-  expect(provider).toMatchObject({ kind: 'compatible', defaultModelId: 'typed-by-hand' });
-  expect(database.getProviderConfiguration(provider.id)!.customModels.map(item => item.id)).toEqual(['typed-by-hand', 'kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed']);
-  expect(usable(registry, provider.id, 'typed-by-hand')).toBe(true);
+  expect(provider).toMatchObject({ kind: 'compatible', defaultModelId: 'kimi-k3' });
+  expect(database.getProviderConfiguration(provider.id)!.customModels.map(item => item.id)).toEqual(['kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed', 'kimi-k3']);
+  expect(usable(registry, provider.id, 'kimi-k3')).toBe(true);
 });
 
-it('D143 a custom service takes a name, a safe address, a Key and any model name', async () => {
-  const { database, registry, api } = fixture();
-  const { onClose } = open(api);
-  pick(/^自定义服务/u);
-  fireEvent.change(screen.getByLabelText('服务名称'), { target: { value: '公司模型' } });
-  for (const bad of ['http://models.example/v1', 'https://user:secret@models.example/v1', 'https://models.example/v1?x=1']) {
-    fireEvent.change(screen.getByLabelText(/^地址/u), { target: { value: bad } });
-    expect(screen.queryByRole('note')).toBeNull();
-    expect(document.body.textContent).toContain('地址必须以 https:// 开头');
-  }
-  fireEvent.change(screen.getByLabelText(/^地址/u), { target: { value: 'https://models.example/v1' } });
-  expect(screen.getByRole('note').textContent).toBe('Key 只会发往 https://models.example/v1');
-  // D096: a Key pasted into the model field is refused before anything is saved.
-  fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'sk-abcdefghijklmnopqrstuvwxyz0123456789' } });
-  fireEvent.change(keyInput(), { target: { value: 'owned-fake-custom-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-  expect((await screen.findAllByRole('alert')).some(item => item.textContent?.includes('这看起来是 API Key'))).toBe(true);
-  expect(database.listProviderSummaries()).toHaveLength(0);
-  expect(keyInput().value).toBe('');
-  fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'any-model-v9' } });
-  fireEvent.change(keyInput(), { target: { value: 'owned-fake-custom-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-  await waitFor(() => expect(onClose).toHaveBeenCalled());
-  const provider = database.listProviderSummaries()[0];
-  expect(database.getProviderConfiguration(provider.id)).toMatchObject({ name: '公司模型', kind: 'compatible', baseUrl: 'https://models.example/v1', defaultModelId: 'any-model-v9' });
-  expect(usable(registry, provider.id, 'any-model-v9')).toBe(true);
+it.each([[/^通义千问/u, '华北 2（北京）'], [/^豆包/u, '华北 2（北京）']])('D143 %s says which region the Key has to come from', (name, region) => {
+  const { api } = fixture();
+  open(api);
+  pick(name);
+  expect(document.body.textContent).toContain(region);
 });
 
 it('测试连接 saves what is filled in and says what it found; it stays beside its cost note and nothing waits for it', async () => {
   const { database, api } = fixture();
-  const test = vi.spyOn(api, 'testConnection').mockResolvedValue({ providerId: 'p', result: { requestId: 'r', level: 'authentication', ok: true } });
+  const test = vi.spyOn(api, 'testConnection').mockResolvedValue({ providerId: 'p', result: { requestId: 'r', level: 'generation', ok: true } });
   const { onClose } = open(api);
   pick(/^DeepSeek/u);
-  expect(screen.getByText('可能产生极少的费用')).toBeTruthy();
+  expect(screen.getByText('会发一条很短的消息，可能产生极少的费用')).toBeTruthy();
   const button = screen.getByRole('button', { name: '测试连接' }) as HTMLButtonElement;
   expect(button.disabled).toBe(true);
   fireEvent.change(keyInput(), { target: { value: 'owned-fake-test-key' } });
   fireEvent.click(button);
-  await screen.findByText('Key 有效，连接正常');
-  expect(test).toHaveBeenCalledWith({ providerId: database.listProviderSummaries()[0].id, level: 'authentication' });
+  await screen.findByText('已收到回复，连接正常');
+  expect(test).toHaveBeenCalledWith({ providerId: database.listProviderSummaries()[0].id, level: 'generation', modelId: 'deepseek-flash', allowGeneration: true });
   expect(onClose).not.toHaveBeenCalled();
   expect(keyInput().value).toBe('');
   // The service exists now: 上一步 could only send that saved Key elsewhere, so it is gone.

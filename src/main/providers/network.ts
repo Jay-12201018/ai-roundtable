@@ -4,6 +4,7 @@ import { request as httpsRequest } from 'node:https';
 import { isIP, type LookupFunction } from 'node:net';
 import type { DiagnosticEvent, DiagnosticObserver } from './diagnostics';
 import { ContractError } from '../../shared/contracts/errors';
+import { catalogHosts, serviceCatalog } from '../../shared/serviceCatalog';
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {
@@ -23,24 +24,27 @@ function publicAddress(address: string): boolean {
     && !(prefix === 0x3fff && next <= 0xfff);
 }
 
-/**
- * D138: 198.18.0.0/15 is not a real private network, and some network tools answer names from it. A name the user entered
- * may resolve there; a literal address in this range is still refused, and so is a name that also resolves anywhere else reserved.
- */
+/** D138: 198.18.0.0/15 is not a real private network, and some network tools answer names from it. Only catalog names get here. */
 const nameMappedAddress = (address: string) => isIP(address) === 4 && /^198\.1[89]\./u.test(address);
 
 function loopback(address: string): boolean {
   return isIP(address) === 4 && address.startsWith('127.') || address === '::1';
 }
 
-/** Main-only transport: pin public DNS, verify TLS, follow nothing. */
-export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver): typeof fetch {
+/** D143: which hosts a request may go to. */
+export type AllowedHosts = { has(host: string): boolean };
+const productionHosts: AllowedHosts = catalogHosts(serviceCatalog);
+
+/** Main-only transport: catalog hosts only, public DNS pinned, TLS verified, nothing followed. */
+export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver, hosts: AllowedHosts = productionHosts): typeof fetch {
   return async (input, init = {}) => {
     if (typeof input !== 'string' && !(input instanceof URL)) throw new TypeError('Unsupported request');
     const raw = String(input);
     if (/\s|\\|\p{Cc}/u.test(raw)) throw new TypeError('Invalid network target');
     const url = new URL(raw); const hostname = url.hostname.replace(/^\[|\]$/gu, '');
     if (url.username || url.password || url.hash || url.protocol !== 'https:' && url.protocol !== 'http:') throw new TypeError('Invalid network target');
+    // D143: exact match on the host and port, before anything is resolved or sent. A literal address is never in the catalog.
+    if (!hosts.has(url.host)) { observe?.({ stage: 'dns', category: 'target_rejected' }); throw new ContractError('target_rejected'); }
     const local = url.protocol === 'http:';
     if (local && !/^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:\/|\?|$)/iu.test(raw)) throw new TypeError('Invalid network target');
     const method = init.method ?? 'GET';
@@ -70,7 +74,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
       throw error;
     } finally { signal?.removeEventListener('abort', stopDns); }
     signal?.throwIfAborted();
-    if (addresses.length === 0 || addresses.some(value => value.family !== isIP(value.address) || !(local ? loopback(value.address) : publicAddress(value.address) || !isIP(hostname) && nameMappedAddress(value.address)))) {
+    if (addresses.length === 0 || addresses.some(value => value.family !== isIP(value.address) || !(local ? loopback(value.address) : !isIP(hostname) && (publicAddress(value.address) || nameMappedAddress(value.address))))) {
       observe?.({ stage: 'dns', category: 'target_rejected' }); throw new ContractError('target_rejected');
     }
     const selected = addresses[0];

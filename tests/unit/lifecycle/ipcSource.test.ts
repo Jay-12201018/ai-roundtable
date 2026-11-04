@@ -180,7 +180,7 @@ describe('registered IPC source boundary', () => {
   it.each(['room.createDemo', 'room.getMessages', 'run.getSnapshot', 'run.subscribe', 'run.start', 'run.pause', 'run.stop', 'run.step', 'run.resumeRun', 'run.retryTurn', 'run.continueMessage', 'run.recoverInterruptedRun',
     'rooms.createRoom', 'rooms.updateRoom', 'rooms.getRoomConfiguration', 'rooms.listRooms', 'rooms.archiveRoom', 'rooms.deleteRoom',
     'rooms.createAgent', 'rooms.updateAgent', 'rooms.getAgentConfiguration', 'rooms.listAgentConfigurations', 'rooms.reorderAgents', 'rooms.archiveAgent', 'rooms.deleteAgent', 'rooms.listRoomMessages', 'rooms.listRoomRuns',
-    'settings.createProvider', 'settings.updateProvider', 'settings.getProviderConfiguration', 'settings.listProviderSummaries', 'settings.deleteProvider', 'settings.setKey', 'settings.deleteKey', 'settings.getProviderKeyState', 'settings.getKeyStorageStatus', 'settings.listModels', 'settings.testConnection',
+    'settings.createProvider', 'settings.updateProvider', 'settings.getProviderConfiguration', 'settings.listProviderSummaries', 'settings.deleteProvider', 'settings.setKey', 'settings.deleteKey', 'settings.getProviderKeyState', 'settings.getKeyStorageStatus', 'settings.testConnection',
   ])('guards the source before handling %s', async (channel) => {
     const bound = bind();
     Object.assign(bound.event, { senderFrame: null });

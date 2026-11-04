@@ -23,9 +23,6 @@ const input: StreamChatInput = {
     { role: 'assistant', content: '先前成员回复' },
   ],
 };
-const capabilities = {
-  streamUsage: false, listModels: true, authentication: 'models',
-} as const;
 type Options = ConstructorParameters<typeof CompatibleProvider>[0];
 type Outbound = { url: string; method: string; headers: Headers; body: Record<string, unknown> | null; redirect: RequestRedirect };
 
@@ -65,7 +62,7 @@ function networkFixture(response: (request: Request) => Response | Promise<Respo
 function provider(fetcher: typeof fetch, overrides: Partial<Options> = {}) {
   return new CompatibleProvider({
     configuration, confirmedBaseUrl: baseUrl, resolveKey: async () => fixtureKey,
-    capabilities, fetch: fetcher, ...overrides,
+    fetch: fetcher, ...overrides,
   });
 }
 
@@ -154,15 +151,6 @@ describe('Compatible endpoint and capability boundaries', () => {
     expectSanitized(failure);
   });
 
-  it.each([
-    { streamUsage: false, listModels: true },
-    { streamUsage: false, listModels: true, authentication: 'guessed' },
-  ])('requires a complete explicit compatible capability profile (%j)', async profile => {
-    const { fetcher } = networkFixture();
-    expect(() => provider(fetcher, { capabilities: profile as Options['capabilities'] })).toThrow(ContractError);
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
   it('treats a trailing slash confirmation as the same effective endpoint', async () => {
     const { fetcher, requests } = networkFixture();
     const events = await collect(provider(fetcher, { confirmedBaseUrl: 'https://compatible.example/v1' }).streamChat(input));
@@ -203,7 +191,7 @@ describe('Compatible request mapping and stream normalization', () => {
     const { fetcher, requests } = networkFixture();
     const resolveKey = vi.fn(async () => fixtureKey);
     const events = await collect(provider(fetcher, {
-      resolveKey, capabilities,
+      resolveKey,
     }).streamChat(input));
     expect(resolveKey).toHaveBeenCalledWith('compatible-one', { id: 'key-reference-one' });
     expect(requests).toHaveLength(1);
@@ -217,7 +205,7 @@ describe('Compatible request mapping and stream normalization', () => {
       },
     });
     expect(requests[0].body?.max_tokens).toBe(31);
-    expect(requests[0].body).not.toHaveProperty('stream_options');
+    expect(requests[0].body?.stream_options).toEqual({ include_usage: true });
     expect(requests[0].headers.get('authorization')).toBe('Bearer fixture-compatible-secret');
     expect(events.every(event => event.requestId === 'main-request')).toBe(true);
     expect(events.at(-1)).toEqual({ type: 'finish', requestId: 'main-request', reason: 'stop' });
@@ -250,7 +238,7 @@ describe('Compatible request mapping and stream normalization', () => {
       chunk({ content: '你好🙂' }), chunk({ content: '完成' }), chunk({}, 'stop'),
       { id: 'vendor-request', object: 'chat.completion.chunk', created: 1, model: 'manual-chat-model', choices: [], usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 } },
     ], true));
-    const events = await collect(provider(fetcher, { capabilities: { ...capabilities, streamUsage: true } }).streamChat(input));
+    const events = await collect(provider(fetcher).streamChat(input));
     expect(events.filter(event => event.type === 'start')).toHaveLength(1);
     expect(events.filter(event => event.type === 'text_delta').map(event => event.text).join('')).toBe('你好🙂完成');
     expect(events.filter(event => event.type === 'reasoning_summary_delta')).toEqual([]);
@@ -287,61 +275,7 @@ describe('Compatible request mapping and stream normalization', () => {
   });
 });
 
-describe('Compatible model discovery and explicit connection levels', () => {
-  it('maps model ids to safe model DTOs with one GET to the confirmed endpoint', async () => {
-    const { fetcher, requests } = networkFixture(() => Response.json({
-      object: 'list', data: [
-        { id: 'chat-a', object: 'model', created: 1, owned_by: 'fixture', name: 'raw-vendor-secret' },
-        { id: 'chat-b', object: 'model', created: 1, owned_by: 'fixture' },
-      ],
-    }));
-    expect(await provider(fetcher).listModels({ requestId: 'list-request' })).toEqual([
-      { id: 'chat-a', name: 'chat-a' }, { id: 'chat-b', name: 'chat-b' },
-    ]);
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ url: 'https://compatible.example/v1/models', method: 'GET', body: null, redirect: 'error' });
-  });
-
-  it('keeps manual model generation available when discovery is unsupported', async () => {
-    const { fetcher, requests } = networkFixture();
-    const adapter = provider(fetcher, { capabilities: { ...capabilities, listModels: false, authentication: 'unsupported' } });
-    await expect(adapter.listModels({ requestId: 'list-request' })).rejects.toMatchObject({ code: 'unsupported' });
-    expect(fetcher).not.toHaveBeenCalled();
-    const events = await collect(adapter.streamChat(input));
-    expect(events.at(-1)).toEqual({ type: 'finish', requestId: 'main-request', reason: 'stop' });
-    expect(requests).toHaveLength(1);
-    expect(requests[0].body?.model).toBe('manual-chat-model');
-  });
-
-  it.each([404, 405])('reports a missing list endpoint (%s) as unsupported without retry', async status => {
-    const { fetcher } = networkFixture(() => Response.json({ error: { message: 'raw-vendor-secret' } }, { status }));
-    let failure: unknown;
-    try { await provider(fetcher).listModels({ requestId: 'list-request' }); } catch (error) { failure = error; }
-    expect(failure).toBeInstanceOf(ContractError);
-    expect(failure).toMatchObject({ code: 'unsupported' });
-    expectSanitized(failure);
-    expect(fetcher).toHaveBeenCalledTimes(1);
-  });
-
-  it('checks authentication with GET models and never escalates to generation', async () => {
-    const { fetcher, requests } = networkFixture(() => Response.json({ object: 'list', data: [] }));
-    expect(await provider(fetcher).testConnection({ requestId: 'auth-request', level: 'authentication' })).toEqual({
-      requestId: 'auth-request', level: 'authentication', ok: true,
-    });
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ url: 'https://compatible.example/v1/models', method: 'GET', body: null });
-  });
-
-  it('reports unsupported authentication without key access or network', async () => {
-    const { fetcher } = networkFixture();
-    const resolveKey = vi.fn(async () => fixtureKey);
-    const result = await provider(fetcher, {
-      resolveKey, capabilities: { ...capabilities, authentication: 'unsupported' },
-    }).testConnection({ requestId: 'auth-request', level: 'authentication' });
-    expect(result).toMatchObject({ requestId: 'auth-request', level: 'authentication', ok: false, error: { code: 'unsupported' } });
-    expect(resolveKey).not.toHaveBeenCalled();
-    expect(fetcher).not.toHaveBeenCalled();
-  });
+describe('Compatible connection levels', () => {
 
   it.each(['stop', 'length'])('uses only the explicitly selected model with an eight token generation probe (%s)', async reason => {
     const { fetcher, requests } = networkFixture(() => sse([chunk({ content: 'OK' }), chunk({}, reason)]));
@@ -431,8 +365,7 @@ describe('Compatible failures, cancellation and deadlines', () => {
 
 describe('D135 compatible services differ in when they report usage', () => {
   const stop = { id: 'x', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
-  const provider = (events: unknown[], capabilities = {}) => new CompatibleProvider({ configuration, confirmedBaseUrl: baseUrl, resolveKey: async () => 'owned-fake-key',
-    capabilities: { streamUsage: true, listModels: true, authentication: 'models', ...capabilities },
+  const provider = (events: unknown[]) => new CompatibleProvider({ configuration, confirmedBaseUrl: baseUrl, resolveKey: async () => 'owned-fake-key',
     fetch: async () => sse(events) });
   const all = async (stream: AsyncIterable<NormalizedChunk>) => { const events: NormalizedChunk[] = []; for await (const event of stream) events.push(event); return events; };
   const request = { requestId: 'main-request', modelId: 'manual-chat-model', outputTokenLimit: 8, messages: [{ role: 'user' as const, content: 'hi' }] };

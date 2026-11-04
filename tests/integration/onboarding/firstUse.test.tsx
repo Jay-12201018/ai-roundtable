@@ -26,7 +26,7 @@ it('D6-A 开始试玩 adds the demo service and a 演示房间 with three demo m
   const f = fixture(); render(<App />);
   await screen.findByRole('heading', { name: '让几位 AI 围坐一桌，替你把问题讨论透' });
   expect(document.body.textContent).toContain('回复是预先写好的示例，不代表真实模型的水平');
-  expect(document.body.textContent).toContain('支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他通用接口的服务。');
+  expect(document.body.textContent).toContain('支持国内主流大模型：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。');
   fireEvent.click(screen.getByRole('button', { name: '开始试玩' }));
   await screen.findByRole('heading', { name: '这场讨论要解决什么？' });
   const [provider] = f.db.listProviderSummaries();

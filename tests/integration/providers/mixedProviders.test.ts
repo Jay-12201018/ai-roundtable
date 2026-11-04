@@ -22,7 +22,7 @@ const services = [
   { id: 'ds', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro', name: 'DeepSeek', reply: 'DeepSeek 的审计意见', usage: { prompt_tokens: 30, completion_tokens: 3, prompt_cache_hit_tokens: 10, prompt_cache_miss_tokens: 20 } },
   { id: 'qw', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', name: '通义千问', reply: '通义千问的审计意见', usage: { prompt_tokens: 20, completion_tokens: 2 } },
   { id: 'gl', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5.3', name: '智谱 GLM', reply: '智谱的审计意见', usage: { prompt_tokens: 40, completion_tokens: 12 } },
-  { id: 'cu', baseUrl: 'https://models.example/v1', model: 'company-model', name: '公司模型', reply: '公司模型的审计意见', usage: { prompt_tokens: 50, completion_tokens: 5 } },
+  { id: 'cu', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k3', name: 'Kimi', reply: 'Kimi 的审计意见', usage: { prompt_tokens: 50, completion_tokens: 5 } },
 ] as const;
 
 /** Real registry, adapters, RunService, context builder and usage records; only the wire is an owned fixture. */
@@ -55,7 +55,7 @@ const textOf = (seen: Seen) => JSON.stringify(seen.body.messages);
 describe('one discussion across several services through the one adapter (D134, D143)', () => {
   it('a limit left at the default follows the model setting; one the host set stays the lower of the two', async () => {
     const f = await fixture(['cu']);
-    const update = (model: Record<string, unknown>) => f.db.updateProvider({ id: 'cu', name: '公司模型', kind: 'compatible', baseUrl: 'https://models.example/v1', customModels: [{ id: 'company-model', name: 'company-model', ...model }] });
+    const update = (model: Record<string, unknown>) => f.db.updateProvider({ id: 'cu', name: 'Kimi', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1', customModels: [{ id: 'kimi-k3', name: 'kimi-k3', ...model }] });
     update({ maxOutputTokens: 16000 });
     for (const outputTokenLimit of [undefined, 2000]) {
       const started = await f.run.start({ roomId: 'room', task: '看上限', workflowSnapshot: {}, maxTurns: 1, ...(outputTokenLimit ? { outputTokenLimit } : {}) });
@@ -101,7 +101,7 @@ describe('one discussion across several services through the one adapter (D134, 
     expect(row('deepseek-v4-pro')).toMatchObject({ providerName: 'DeepSeek', inputTokens: 30, outputTokens: 3, cacheHitTokens: 10, reportedRequests: 1 });
     expect(row('qwen3.7-plus')).toMatchObject({ providerName: '通义千问', inputTokens: 20, outputTokens: 2 });
     expect(row('glm-5.3')).toMatchObject({ providerName: '智谱 GLM', inputTokens: 40, outputTokens: 12 });
-    expect(row('company-model')).toMatchObject({ providerName: '公司模型', reportedRequests: 1 });
+    expect(row('kimi-k3')).toMatchObject({ providerName: 'Kimi', reportedRequests: 1 });
     expect(report.totals.requests).toBe(4);
     const csv = new UsageService(f.db, 'UTC').csv().text;
     expect(csv).not.toMatch(/金额|单价|¥|元/u);
@@ -111,7 +111,7 @@ describe('one discussion across several services through the one adapter (D134, 
 
   it('a member whose model takes less output is clamped, without stopping the others (D134)', async () => {
     const f = await fixture(['ds', 'cu']);
-    f.db.updateProvider({ id: 'cu', name: '公司模型', kind: 'compatible', baseUrl: 'https://models.example/v1', customModels: [{ id: 'company-model', name: 'company-model', maxOutputTokens: 2000 }] });
+    f.db.updateProvider({ id: 'cu', name: 'Kimi', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1', customModels: [{ id: 'kimi-k3', name: 'kimi-k3', maxOutputTokens: 2000 }] });
     await f.keys.storeKey('cu', 'owned-fake-cu-key');
     const started = await f.run.start({ roomId: 'room', task: '夹紧', workflowSnapshot: {}, maxTurns: 2, outputTokenLimit: 16000 });
     await f.run.waitForIdle(started.runId);

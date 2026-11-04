@@ -363,10 +363,9 @@ export class Database {
       // Only untouched pre-configuration Demo rows retain the legacy null-to-Mock path.
       if (row.configuration_version === 0 && row.provider_id === null && row.model_id === null) continue;
       if (row.provider_id === null || row.model_id === null) throw new ContractError('invalid_state');
-      if (this.validateModelSelection(row.provider_id,row.model_id).kind !== 'mock') {
-        if (!validateRealSelection) throw new ContractError('unsupported');
-        validateRealSelection(row.provider_id, row.model_id);
-      }
+      // D143: the registry speaks first, so a member outside the catalog hears that rather than that its service is stopped.
+      if (validateRealSelection && this.getProviderConfiguration(row.provider_id)?.kind !== 'mock') validateRealSelection(row.provider_id, row.model_id);
+      if (this.validateModelSelection(row.provider_id,row.model_id).kind !== 'mock' && !validateRealSelection) throw new ContractError('unsupported');
     }
     return rows.map((row) => ({ id: row.id, roomId: row.room_id, displayName: row.display_name, roleTemplateId: row.role_template_id, displayOrder: row.display_order, systemPrompt: row.system_prompt, providerId: row.provider_id, modelId: row.model_id }));
   }

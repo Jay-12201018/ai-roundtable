@@ -48,7 +48,7 @@ async function main() {
     await has('让几位 AI 围坐一桌，替你把问题讨论透');
     const welcome = await text();
     for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '写下目标，开始讨论', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型',
-      '支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他通用接口的服务。'])
+      '支持国内主流大模型：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。'])
       check(welcome.includes(piece), 'Welcome says: ' + piece);
     check(!/价格|审核/u.test(welcome), 'The welcome page says nothing about prices');
     check(await js(`!document.querySelector('[aria-label="讨论目标"]')`), 'No goal box before anything exists');
@@ -78,19 +78,20 @@ async function main() {
     // ── E · connect wizard (D136, D142) ─────────────────────────────────────────
     await click('设置', { selector: '.sb-item' }); await click('添加服务');
     const step1 = await js(`document.querySelector('dialog[open]').innerText`);
-    for (const service of ['DeepSeek', 'Kimi', '通义千问', '智谱 GLM', '豆包', 'MiniMax', '自定义服务']) check(step1.includes(service), `${service} is offered`);
+    for (const service of ['DeepSeek', '豆包', '通义千问', 'Kimi', '智谱 GLM', '百度文心', '腾讯混元', 'MiniMax']) check(step1.includes(service), `${service} is offered`);
+    check(!step1.includes('自定义'), 'There is no custom service');
     check(!/价格|审核/u.test(step1), 'No service is held back by a price');
-    await capture('wizard-1-services', '设置 › 模型服务 › 添加服务：六家国内服务、自定义服务和演示，只写在哪里创建 Key。');
+    await capture('wizard-1-services', '设置 › 模型服务 › 添加服务：八家国内服务和演示，只写在哪里创建 Key。');
     await click('DeepSeek', { selector: '.choice', prefix: true });
     check(await js(`document.querySelector('dialog[open] .target').textContent`) === 'Key 只会发往 https://api.deepseek.com', 'The address is written right above the Key');
     check(!(await js(`document.querySelector('dialog[open]').innerText`)).includes('确认'), 'Nothing asks to confirm the address');
     await field('API Key'); await type(fakeKey);
     await capture('wizard-2-key', '贴 Key：地址“Key 只会发往 https://api.deepseek.com”写在 API Key 正上方；Key 输入框是密码框，说明写明存进系统钥匙串、不进日志和导出；保存就能用，测试连接是可选的。');
     await click('测试连接');
-    await until(`document.querySelector('dialog[open]')?.innerText.includes('Key 有效，连接正常')`, 'tested');
+    await until(`document.querySelector('dialog[open]')?.innerText.includes('已收到回复，连接正常')`, 'tested');
     await keyLeak();
-    check(fixture.requests.every(request => request.method === 'GET'), 'Testing used the model list and sent no generation request');
-    await capture('wizard-3-connected', '测试连接：用模型列表接口核对 Key，结果写在按钮旁边；没有生成内容。');
+    check(fixture.requests.length === 1 && fixture.requests[0].maxTokens === 8, 'Testing sent one very short message');
+    await capture('wizard-3-connected', '测试连接：发一条很短的消息，结果写在按钮旁边。');
     await click('保存', { scope: 'dialog[open] .modal-foot' });
     await has('这场讨论要解决什么？');
     const ds = await deepseek();
@@ -143,7 +144,7 @@ async function main() {
     const run = await runSnapshot();
     check(run.workflow.templateId === 'review-revision' && run.turns.length === 5, 'Five plan turns in the review chain');
     // Apart from the model-list check 测试连接 made earlier.
-    const generated = fixture.requests.filter(request => request.method !== 'GET');
+    const generated = fixture.requests.filter(request => request.maxTokens !== 8);
     check(generated.length === 5 && generated.every(request => request.model === 'deepseek-flash'), 'Five DeepSeek requests, nothing else');
     const tags = await js(`[...document.querySelectorAll('.thread-item .msg-head .tag')].map(e => e.textContent)`);
     check(JSON.stringify(tags) === JSON.stringify(['起草', '审查', '修订', '复审', '定稿']), 'Each message carries its stage: ' + JSON.stringify(tags));

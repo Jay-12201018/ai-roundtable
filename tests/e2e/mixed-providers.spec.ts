@@ -4,13 +4,13 @@ import type { Page } from '@playwright/test';
 import { artifactOf, memberOf } from './support/fixture';
 import { FAKE_KEY, expect, generateArtifact, memberTexts, newDiscussion, openArtifacts, root, seedDeepSeekRoom, statusHas, test, threadItems, type RunningApp } from './support/app';
 
-// D134/D143: one discussion across several services, connected through the real wizard: three built-in services and a
-// user-added one, each member on its own model. With ROUNDTABLE_E2E_SCREENS set it also keeps the screenshots named in
+// D134/D143: one discussion across several catalog services, connected through the real wizard, each member on its own
+// model. With ROUNDTABLE_E2E_SCREENS set it also keeps the screenshots named in
 // `kept`, in the light and dark themes.
 const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUNDTABLE_E2E_SCREENS) : undefined;
-const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'custom-service', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
-  'settings-sections', 'stopped-service', 'services-dark', 'wizard-custom-dark', 'discussion-dark', 'usage-dark',
-  'thinking-wait', 'quota-used-up', 'quota-regenerated']);
+const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
+  'settings-sections', 'services-dark', 'wizard-choose-dark', 'wizard-key-dark', 'discussion-dark', 'usage-dark',
+  'stopped-service', 'stopped-member', 'stopped-service-dark', 'stopped-member-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
 
@@ -48,33 +48,22 @@ async function size(running: RunningApp, width: number, height = 800) {
 // The attribute the 外观 setting writes; choosing it in the settings page is covered by the R16 acceptance.
 const theme = (running: RunningApp, value: 'light' | 'dark') => running.page.evaluate(value => { document.documentElement.dataset.theme = value; }, value);
 
-/** Paste a Key, keep the suggested model, save. That is the whole path for a built-in service (D136). */
+/** Pick a service, paste a Key, keep or pick a model from its list, save. That is the whole path (D136, D143). */
 async function connect(running: RunningApp, service: RegExp, shots?: { form?: string; test?: string }) {
   const { page } = running;
   await page.getByRole('button', { name: service }).click();
-  await page.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
-  if (shots?.form) await capture(running, shots.form, '贴 Key：写明 Key 只会发往哪里、费用由谁收取；模型已选好一个。保存就能用，没有确认地址这一步。');
+  const dialog = page.locator('dialog[open]');
+  await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
+  // The Key is the only thing to type: no address, no model name, and the model is a list.
+  await expect(dialog.getByRole('textbox')).toHaveCount(1);
+  await expect(dialog.getByRole('combobox', { name: '模型' })).toBeVisible();
+  if (shots?.form) await capture(running, shots.form, '贴 Key：写明 Key 只会发往哪里、费用由谁收取；模型从列表里选。保存就能用，没有填地址或模型名的地方。');
   if (shots?.test) {
     await page.getByRole('button', { name: '测试连接' }).click();
-    await expect(page.getByText('Key 有效，连接正常')).toBeVisible();
-    await capture(running, shots.test, '测试连接是可选的：有模型列表接口就只读列表，结果写在按钮旁边。');
+    await expect(page.getByText('已收到回复，连接正常')).toBeVisible();
+    await capture(running, shots.test, '测试连接是可选的：发一条很短的消息，结果写在按钮旁边。');
   }
-  await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
-  await expect(page.locator('dialog[open]')).toHaveCount(0);
-}
-
-/** A user-added service: a name, an address, a Key and a model name. */
-async function connectCustom(running: RunningApp, name: string, address: string, model: string, shot?: string) {
-  const { page } = running;
-  await page.getByRole('button', { name: '添加服务' }).click();
-  await page.getByRole('button', { name: /^自定义服务/u }).click();
-  const dialog = page.locator('dialog[open]');
-  await dialog.getByLabel('服务名称').fill(name);
-  await dialog.getByLabel(/^地址/u).fill(address);
-  await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
-  await dialog.getByLabel('模型名').fill(model);
-  if (shot) await capture(running, shot, '自定义服务：名称、地址、Key、模型名，保存就能用。');
-  await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
+  await dialog.getByRole('button', { name: '保存' }).click();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
 
@@ -98,6 +87,9 @@ async function addMember(running: RunningApp, role: RegExp, name: string, option
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
 
+/** What a discussion sent: the eight-token connection test is not part of one. */
+const discussionRequests = <T extends { maxTokens: number }>(fixture: { requests: T[] }) => fixture.requests.filter(request => request.maxTokens !== 8);
+
 const noSideScroll = (running: RunningApp) => running.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 
 test('paste a Key, start a discussion, then mix several services: name, pause, summarize, revoke, write an artifact, read the usage', async ({ harness }) => {
@@ -115,23 +107,25 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
 
   // The shortest path: paste a Key and the discussion is right there.
   await capture(running, 'welcome', '首次启动：欢迎页写明支持哪些服务、几位成员可以各用一家、费用由服务商收取。');
-  await expect(page.getByText('支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他通用接口的服务。', { exact: false })).toBeVisible();
+  await expect(page.getByText('支持国内主流大模型：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: '连接…' }).click();
-  await capture(running, 'wizard-choose', '选服务：内置服务只是预填地址和建议模型名；也可以选自定义服务。');
+  const offered = await page.locator('dialog[open] .choice-grid button').allTextContents();
+  ['DeepSeek', '豆包', '通义千问', 'Kimi', '智谱 GLM', '百度文心', '腾讯混元', 'MiniMax', '演示'].forEach((name, index) => expect(offered[index]).toContain(name));
+  expect(offered).toHaveLength(9);
+  await capture(running, 'wizard-choose', '选服务：八家国内服务，DeepSeek 排第一并标推荐；另有不联网的演示。没有自定义。');
   await connect(running, /^DeepSeek/u, { form: 'wizard-key', test: 'wizard-tested' });
   await expect(page.getByRole('heading', { name: '这场讨论要解决什么？' })).toBeVisible();
   await expect(page.getByText('3 位成员', { exact: false }).first()).toBeVisible();
   await capture(running, 'first-discussion', '保存后直接到第一场讨论：房间和三位成员已经建好，写下目标就能开始。');
 
-  // Two more built-in services and a user-added one: an address, a Key and a model name.
+  // Three more services, the same way.
   await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
-  for (const service of [/^Kimi/u, /^智谱 GLM/u]) {
+  for (const service of [/^Kimi/u, /^智谱 GLM/u, /^豆包/u]) {
     await page.getByRole('button', { name: '添加服务' }).click();
     await connect(running, service);
   }
-  await connectCustom(running, '公司模型', 'https://models.e2e.invalid/v1', 'company-model', 'custom-service');
-  for (const name of ['Kimi', '智谱 GLM', '公司模型']) await expect(page.getByRole('region', { name, exact: true })).toContainText('可以使用');
-  expect(fixture.requests.filter(request => request.model !== ''), 'Saving sends nothing').toEqual([]);
+  for (const name of ['Kimi', '智谱 GLM', '豆包']) await expect(page.getByRole('region', { name, exact: true })).toContainText('可以使用');
+  expect(discussionRequests(fixture), 'Saving sends nothing').toEqual([]);
   await capture(running, 'services', '设置 › 模型服务：四个服务都可以使用，保存时没有发任何请求。');
   // Settings is services, appearance and privacy.
   for (const name of ['模型服务', '外观', '数据与隐私']) await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
@@ -141,6 +135,13 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   // A model's limits are the host's to change.
   await page.getByRole('button', { name: '展开 DeepSeek' }).click().catch(() => undefined);
   const card = page.getByRole('region', { name: 'DeepSeek' });
+  // Nothing here takes an address or a model name either.
+  await expect(card.getByRole('textbox')).toHaveCount(0);
+  for (const name of ['手动添加模型', '从服务商获取列表']) await expect(card.getByRole('button', { name })).toHaveCount(0);
+  await card.getByText('高级与删除').click();
+  await expect(card.getByRole('textbox')).toHaveCount(1);
+  await expect(card.getByLabel('服务名称')).toBeVisible();
+  await card.getByText('高级与删除').click();
   await card.getByRole('button', { name: 'DeepSeek Flash 的上限' }).click();
   await card.getByLabel('上下文长度（token）').fill('200000');
   await card.getByLabel('最大输出（token）').fill('999999999');
@@ -155,8 +156,8 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
   await changeMember(running, '审查者', 'Kimi · Kimi K3.1 Pro（kimi-k3.1-pro）');
   await changeMember(running, '综合者', '智谱 GLM · GLM-5.3（glm-5.3）');
-  await addMember(running, /^反方/u, '反方', '公司模型 · company-model（company-model）');
-  await capture(running, 'room', '房间：四位成员各用一个服务，三家内置服务加一个自定义服务，都写着“可以使用”。');
+  await addMember(running, /^反方/u, '反方', '豆包 · Doubao Seed 2.1 Pro（doubao-seed-2-1-pro-260915）');
+  await capture(running, 'room', '房间：四位成员各用一家服务，都写着“可以使用”。');
 
   // The first reply is held so 暂停 and 点名 happen as a person would do them.
   await newDiscussion(running, roomName, '交叉审计校园跑腿的试点方案。');
@@ -184,11 +185,11 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   await statusHas(page, '已完成', 90_000);
   await capture(running, 'finished', '讨论结束：四个服务依次发言，都显示 token 用量，没有金额。');
 
-  // A built-in service and a typed address get the same request: one adapter, no per-service branch (D135).
-  const sent = fixture.requests.filter(request => request.model !== '');
-  expect([...new Set(sent.map(request => request.service))].sort()).toEqual(['custom', 'deepseek', 'glm', 'kimi']);
+  // Every service gets the same request: one adapter, no per-service branch (D135).
+  const sent = discussionRequests(fixture);
+  expect([...new Set(sent.map(request => request.service))].sort()).toEqual(['deepseek', 'doubao', 'glm', 'kimi']);
   const by = (service: string) => sent.find(request => request.service === service)!;
-  for (const [service, model] of [['deepseek', 'deepseek-flash'], ['kimi', 'kimi-k3.1-pro'], ['glm', 'glm-5.3'], ['custom', 'company-model']] as const) {
+  for (const [service, model] of [['deepseek', 'deepseek-flash'], ['kimi', 'kimi-k3.1-pro'], ['glm', 'glm-5.3'], ['doubao', 'doubao-seed-2-1-pro-260915']] as const) {
     expect(Object.keys(by(service).raw).sort()).toEqual(['max_tokens', 'messages', 'model', 'stream', 'stream_options']);
     expect(by(service).raw).toMatchObject({ model, max_tokens: 8192, stream_options: { include_usage: true } });
     expect(by(service).headers.authorization).toBe(`Bearer ${FAKE_KEY}`);
@@ -210,7 +211,7 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   await page.getByRole('button', { name: '生成讨论摘要' }).click();
   const summary = page.locator('.summary-card');
   await expect(summary).toContainText('之后的发言用它代替原文', { timeout: 30_000 });
-  expect(fixture.requests.filter(request => request.model !== '').length, 'One click, one request').toBe(before + 1);
+  expect(discussionRequests(fixture).length, 'One click, one request').toBe(before + 1);
   await page.getByRole('button', { name: /回到最新/u }).click();
   await expect(summary).toBeInViewport();
   await capture(running, 'summary', '一键摘要：点了就生成，默认综合者来写，写完直接生效；旁边可以撤销、修改、换人。');
@@ -235,7 +236,7 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   await expect(page.getByText(/费用由服务商收取，请到服务商控制台查看账单；这里不估算/u)).toBeVisible();
   await capture(running, 'usage-run', '用量页 · 按讨论：只有请求数和 token；写明费用由服务商收取。');
   await page.getByRole('tab', { name: '按模型' }).click();
-  for (const model of ['deepseek-flash', 'kimi-k3.1-pro', 'glm-5.3', 'company-model']) await expect(page.getByRole('table')).toContainText(model);
+  for (const model of ['deepseek-flash', 'kimi-k3.1-pro', 'glm-5.3', 'doubao-seed-2-1-pro-260915']) await expect(page.getByRole('table')).toContainText(model);
   await capture(running, 'usage-model', '用量页 · 按模型：四个服务分别汇总。');
   await page.getByRole('tab', { name: '按用途' }).click();
   await expect(page.getByRole('table')).toContainText('讨论摘要');
@@ -249,29 +250,14 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   expect(exported).toContain('输入tokens');
   expect(exported).not.toMatch(/金额|单价|预留|核销|¥/u);
 
-  // A stopped service left from an older version: name kept, says it is stopped, can be removed with its Key.
-  await running.api('settings.createProvider', { name: '旧版本的服务', kind: 'compatible', enabled: false, customModels: [{ id: 'old-model', name: 'old-model' }] });
-  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
-  await page.locator('.sidebar .sb-item', { hasText: '用量' }).click();
-  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
-  const stopped = page.getByRole('region', { name: '旧版本的服务' });
-  await expect(stopped).toContainText('已停用');
-  await page.getByRole('button', { name: '展开 旧版本的服务' }).click();
-  await stopped.getByText('高级与删除').click();
-  await expect(stopped.getByRole('switch', { name: '启用这个服务' })).toBeDisabled();
-  await expect(stopped).toContainText('填写请求地址后才能启用');
-  await capture(running, 'stopped-service', '旧版本留下的服务：保留原名，显示已停用；可以删除（连同 Key），或填写地址后重新启用。');
-  await stopped.getByRole('button', { name: '删除服务…' }).click();
-  await stopped.getByRole('button', { name: '确认删除服务' }).click();
-  await expect(stopped).toHaveCount(0);
-
   // Dark theme and the narrow window, on the pages a person keeps open.
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
   await theme(running, 'dark');
   await capture(running, 'services-dark', '深色主题：模型服务。');
   await page.getByRole('button', { name: '添加服务' }).click();
   await capture(running, 'wizard-choose-dark', '深色主题：选服务。');
-  await page.getByRole('button', { name: /^自定义服务/u }).click();
-  await capture(running, 'wizard-custom-dark', '深色主题：自定义服务表单。');
+  await page.getByRole('button', { name: /^通义千问/u }).click();
+  await capture(running, 'wizard-key-dark', '深色主题：贴 Key；通义千问写明地域要选北京。');
   await page.locator('dialog[open]').getByRole('button', { name: '关闭' }).first().click();
   await size(running, 800);
   await capture(running, 'services-800-dark', '800 宽、深色：模型服务没有横向滚动。');
@@ -299,6 +285,68 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   await theme(running, 'light');
 
   if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
+  await running.quit();
+});
+
+test('D143 what an older version left behind: a service outside the catalog stays with its name and sends nothing; its member is told to change model', async ({ harness }) => {
+  test.setTimeout(120_000);
+  const { fixture } = harness;
+  fixture.reply = body => `${memberOf(body) ?? '成员'}的发言。`;
+  let running = await harness.launch();
+  await seedDeepSeekRoom(running);
+  await running.quit();
+  // As migration 14 leaves it: stopped, with its name; a second member on a model its service no longer has.
+  harness.write(
+    `INSERT INTO providers(id,name,type,base_url,enabled,is_default,custom_models_json,key_revision,created_at,updated_at) VALUES('old','旧版本的服务','compatible','https://gateway.e2e.invalid/v1',0,0,'[{"id":"old-model","name":"old-model"}]',0,'2026-10-23T02:00:00.000Z','2026-10-23T02:00:00.000Z')`,
+    "UPDATE agents SET provider_id='old', model_id='old-model' WHERE display_name='审查者'",
+    "UPDATE agents SET model_id='gone-model' WHERE display_name='综合者'");
+  running = await harness.launch();
+  const { page } = running;
+  await theme(running, 'light');
+
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  const stopped = page.getByRole('region', { name: '旧版本的服务' });
+  await expect(stopped).toContainText('已停用');
+  await expect(stopped).toContainText('这个服务已不再支持，可以删除。');
+  await page.getByRole('button', { name: '展开 旧版本的服务' }).click();
+  await expect(stopped).toContainText('https://gateway.e2e.invalid/v1');
+  await expect(stopped.getByRole('switch')).toHaveCount(0);
+  await expect(stopped.getByRole('textbox')).toHaveCount(0);
+  await expect(stopped.getByRole('button', { name: '测试连接' })).toHaveCount(0);
+  await expect(stopped.getByRole('button', { name: '删除服务…' })).toBeVisible();
+  await capture(running, 'stopped-service', '旧版本留下的服务：保留原名，显示已停用，写明不再支持；只能删除，连同 Key。');
+  await theme(running, 'dark');
+  await capture(running, 'stopped-service-dark', '深色主题：旧版本留下的服务。');
+  await theme(running, 'light');
+
+  await page.locator('.sidebar .sb-item', { hasText: 'E2E 讨论' }).first().click();
+  await expect(page.getByText('这个服务已不再支持，请换一个模型')).toBeVisible();
+  await expect(page.getByText('这个模型已不再支持，请换一个')).toBeVisible();
+  await capture(running, 'stopped-member', '房间：成员还写着原来的选择，并说明不再支持、请换一个。');
+  await theme(running, 'dark');
+  await capture(running, 'stopped-member-dark', '深色主题：房间里的成员。');
+  await theme(running, 'light');
+
+  await newDiscussion(running, 'E2E 讨论', '试点方案。');
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: '已不再支持，请在房间里给 TA 换一个模型' })).toBeVisible();
+  expect(fixture.requests, 'Nothing is sent for a discussion that cannot start').toEqual([]);
+
+  await page.locator('.sidebar .sb-item', { hasText: 'E2E 讨论' }).first().click();
+  await changeMember(running, '审查者', 'DeepSeek 直连 · DeepSeek Flash（deepseek-flash）');
+  await changeMember(running, '综合者', 'DeepSeek 直连 · DeepSeek V4 Pro（deepseek-v4-pro）');
+  await newDiscussion(running, 'E2E 讨论', '试点方案。');
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await statusHas(page, '已完成');
+  expect(fixture.requests.map(request => request.model)).toEqual(['deepseek-flash', 'deepseek-flash', 'deepseek-v4-pro']);
+
+  // Nobody uses it any more and no discussion did: it can go.
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  await page.getByRole('button', { name: /^(展开|收起) 旧版本的服务$/u }).first().waitFor();
+  if (await page.getByRole('button', { name: '展开 旧版本的服务' }).count()) await page.getByRole('button', { name: '展开 旧版本的服务' }).click();
+  await stopped.getByRole('button', { name: '删除服务…' }).click();
+  await stopped.getByRole('button', { name: '确认删除服务' }).click();
+  await expect(stopped).toHaveCount(0);
   await running.quit();
 });
 

@@ -24,8 +24,11 @@ export function memberLine(agent: AgentConfiguration, providers: readonly Provid
   if (!provider) return { text: '所选服务已删除，暂时不会参与讨论', warn: true };
   if (provider.kind === 'mock') return { text: '演示（Mock）· 回复是预先写好的示例', warn: false };
   const name = provider.customModels.find(model => model.id === agent.modelId)?.name ?? agent.modelId;
-  const state = readiness?.find(item => item.providerId === provider.id)?.models.find(model => model.modelId === agent.modelId);
+  const row = readiness?.find(item => item.providerId === provider.id);
+  const state = row?.models.find(model => model.modelId === agent.modelId);
+  if (row?.supported === false) return { text: `${name} · 这个服务已不再支持，请换一个模型`, warn: true };
   if (!provider.enabled) return { text: `${name} · 服务已停用`, warn: true };
+  if (row && !state || state?.blockedBy === 'unsupported') return { text: `${name} · 这个模型已不再支持，请换一个`, warn: true };
   if (!state) return { text: name, warn: false };
   return state.usable ? { text: `${name} · 可以使用`, warn: false } : { text: `${name} · ${modelBlockText(state)}`, warn: true };
 }

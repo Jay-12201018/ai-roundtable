@@ -110,10 +110,14 @@ async function main(){
  // Substitute only the trusted Main transport for this owned fixture; no product env backdoor.
  const entryModule=await import(pathToFileURL(entry).href);
  const Registry=entryModule.ProviderRegistry;assert.equal(typeof Registry,'function','Actual production Registry export missing');
- const originalCapabilities=Registry.prototype.resolveCapabilities;
- Registry.prototype.resolveCapabilities=function(config){return config.name==='R09 fixture Compatible'?{outputTokenParameter:'max_tokens',streamUsage:true,listModels:true,authentication:'models'}:originalCapabilities.call(this,config);};
+ // This probe's own catalog, in place of the built-in one; only this entry can do that.
+ const fixtureModel={id:'fixture',name:'fixture'};
+ const catalog=[{id:'first',name:'DeepSeek',baseUrl:'https://api.deepseek.com',models:[{id:'deepseek-flash',name:'DeepSeek Flash'},{id:'deepseek-v4-pro',name:'DeepSeek V4 Pro'},fixtureModel]},{id:'second',name:'Second',baseUrl:'https://second.example/v1',models:[fixtureModel]}];
+ Registry.prototype.catalog=function(){return catalog;};
+ const originalHosts=Registry.prototype.transportHosts;
+ Registry.prototype.transportHosts=function(){const allowed=originalHosts.call(this);return{has:host=>host==='127.0.0.1:'+fixturePort||allowed.has(host)};};
  const originalTransport=Registry.prototype.createTransport;
- Registry.prototype.createTransport=function(guard){const transport=originalTransport.call(this,guard);return (url,init)=>{const target=String(url);return transport(target.startsWith('https://second.example/v1/')?fixtureBase+'/official/v1/'+target.slice('https://second.example/v1/'.length):url,init);};};
+ Registry.prototype.createTransport=function(guard){const transport=originalTransport.call(this,guard);return (url,init)=>{const target=String(url);return transport(target.startsWith('https://second.example/v1/')?fixtureBase+'/official/v1/'+target.slice('https://second.example/v1/'.length):target.startsWith('https://api.deepseek.com/')?fixtureBase+'/compatible/v1/'+target.slice('https://api.deepseek.com/'.length):url,init);};};
  result.fixture={officialTransportMappedToLoopback:true,realCompatibleSafeTransport:true,liveApi:false};
  await guarded;const window=await loaded;const contents=window.webContents;
  assert.equal(contents.getURL(),pathToFileURL(renderer).href);

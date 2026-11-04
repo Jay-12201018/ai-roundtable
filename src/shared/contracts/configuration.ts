@@ -26,8 +26,6 @@ export type ProviderSummaries = z.infer<typeof schemas.providerSummariesSchema>;
 export type ProviderKeyState = z.infer<typeof schemas.providerKeyStateSchema>;
 export type ProviderIdInput = z.input<typeof schemas.providerIdInputSchema>;
 export type SetProviderKeyInput = z.input<typeof schemas.setProviderKeyInputSchema>;
-export type ProviderModelsInput = z.input<typeof schemas.providerModelsInputSchema>;
-export type ProviderModelsResult = z.infer<typeof schemas.providerModelsResultSchema>;
 export type ProviderConnectionTestInput = z.input<typeof schemas.providerConnectionTestInputSchema>;
 export type ProviderConnectionTestResult = z.infer<typeof schemas.providerConnectionTestResultSchema>;
 export type ModelReadiness = z.infer<typeof schemas.modelReadinessSchema>;
@@ -70,7 +68,6 @@ export interface ProviderSettingsApiContract {
   deleteKey(input: ProviderIdInput): Promise<void>;
   getProviderKeyState(input: ProviderIdInput): Promise<ProviderKeyState>;
   getKeyStorageStatus(): Promise<KeyStorageStatus>;
-  listModels(input: ProviderModelsInput): Promise<ProviderModelsResult>;
   testConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult>;
   /** D114: what a send would decide for each configured model now. Optional: a page without it shows no readiness. */
   listModelReadiness?(): Promise<ProviderReadiness[]>;
@@ -121,7 +118,6 @@ export const providerSettingsContracts = {
   deleteKey: { input: schemas.providerIdInputSchema, output: z.undefined() },
   getProviderKeyState: { input: schemas.providerIdInputSchema, output: schemas.providerKeyStateSchema },
   getKeyStorageStatus: { input: z.undefined(), output: schemas.keyStorageStatusSchema },
-  listModels: { input: schemas.providerModelsInputSchema, output: schemas.providerModelsResultSchema },
   testConnection: { input: schemas.providerConnectionTestInputSchema, output: schemas.providerConnectionTestResultSchema },
   listModelReadiness: { input: z.undefined(), output: schemas.providerReadinessListSchema },
 } as const;

@@ -8,13 +8,15 @@ import type { ModelTokenCounter } from '../context/types';
 import { countModelTokens } from '../context/buildPublicContext';
 import { MockProvider } from './mock/MockProvider';
 import { mockModelBudget } from './mock/tokenBudget';
-import { CompatibleProvider, compatibleCapabilities, type CompatibleCapabilities } from './compatible/CompatibleProvider';
+import { CompatibleProvider } from './compatible/CompatibleProvider';
+import { catalogHas, catalogHosts, catalogServiceAt, serviceCatalog, type CatalogService } from '../../shared/serviceCatalog';
 import type { ProviderMessage } from './types';
-import { createSafeFetch } from './network';
+import { createSafeFetch, type AllowedHosts } from './network';
 import type { DiagnosticObserver } from './diagnostics';
 
 type Options = {
-  capabilitiesResolver?: (configuration: ProviderConfiguration) => CompatibleCapabilities;
+  /** Tests pass their own; the application never does. */
+  catalog?: readonly CatalogService[];
   transportFactory?: (guard: () => void, diagnostics?: DiagnosticObserver) => typeof fetch;
 };
 /** What a request for a model may use: the host's per-model limits or the defaults (D134), with an input counter. */
@@ -34,14 +36,22 @@ export class ProviderRegistry {
     if (!configuration.enabled) throw new ContractError('invalid_state');
     return configuration;
   }
+  catalog(): readonly CatalogService[] { return this.options.catalog ?? serviceCatalog; }
+  /** What the transport may reach: the catalog's hosts. */
+  transportHosts(): AllowedHosts { return catalogHosts(this.catalog()); }
+  /** D143: the catalog's service at this address, or a refusal, before any Key is read. */
+  private catalogService(configuration: ProviderConfiguration): CatalogService {
+    const service = catalogServiceAt(this.catalog(), configuration.baseUrl);
+    if (!service) throw new ContractError('service_unsupported');
+    return service;
+  }
   private target(configuration: ProviderConfiguration): string {
-    if (!configuration.baseUrl) throw new ContractError('invalid_input');
-    return new URL(configuration.baseUrl).toString().replace(/\/+$/u, '');
+    return this.catalogService(configuration).baseUrl;
   }
   /** Where this service's Key and content go; undefined when its configuration is unusable. */
   targetOf(configuration: ProviderConfiguration): string | undefined {
     if (configuration.kind === 'mock') return undefined;
-    try { return this.target(configuration); } catch { return undefined; }
+    return configuration.baseUrl?.replace(/\/+$/u, '') ?? undefined;
   }
   validateConfiguration(providerId: string): void {
     const configuration = this.configuration(providerId);
@@ -51,16 +61,14 @@ export class ProviderRegistry {
     const configuration = this.configuration(id);
     return { kind: configuration.kind, baseUrl: this.target(configuration), revision: this.database.getProviderKeyRevision(id) };
   }
-  resolveCapabilities(configuration: ProviderConfiguration): CompatibleCapabilities {
-    return this.options.capabilitiesResolver?.(configuration) ?? compatibleCapabilities;
-  }
   createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch {
-    return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics);
+    return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics, this.transportHosts());
   }
   assertSelection(providerId: string, modelId: string): void {
-    const configuration = this.database.validateModelSelection(providerId, modelId);
-    if (configuration.kind === 'mock') return;
-    this.target(configuration);
+    // D143: what is outside the catalog says so, even if it is also stopped.
+    const stored = this.database.getProviderConfiguration(providerId);
+    if (stored && stored.kind !== 'mock' && !catalogHas(this.catalogService(stored), modelId)) throw new ContractError('model_unsupported');
+    this.database.validateModelSelection(providerId, modelId);
   }
   /** D134: the limits a model's requests use now; they never depend on the model's name. */
   limits(configuration: ProviderConfiguration, modelId: string): { contextWindowTokens: number; maxOutputTokens: number } {
@@ -100,7 +108,7 @@ export class ProviderRegistry {
       // The single path to the network: a request that never reached it provably was not sent.
       fetch: (async (url, init) => { guard(); onDispatch?.(); return safeTransport(url, init); }) as typeof fetch,
     };
-    return new CompatibleProvider({ ...options, capabilities: this.resolveCapabilities(configuration) });
+    return new CompatibleProvider(options);
   }
 
   getAdapter(providerId: string, modelId?: string, onDispatch?: () => void): ProviderAdapter {
@@ -126,8 +134,6 @@ export class ProviderRegistry {
         for await (const chunk of stream(input)) { guard(); yield chunk; }
       } catch (error) { yield { type: 'error', requestId: input.requestId, error: toPublicError(error) }; }
     };
-    const list = adapter.listModels.bind(adapter);
-    adapter.listModels = async input => { guard(); const models = await list(input); guard(); return models; };
     const test = adapter.testConnection.bind(adapter);
     adapter.testConnection = async input => {
       try {

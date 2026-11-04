@@ -45,7 +45,7 @@ Run 状态：idle/running/pausing/paused/cancelling/cancelled/completed/error/in
 1. Schema 与 TypeScript 类型共用定义；Preload API 明确满足契约；输入、输出、事件和错误验证一致。
 2. Run 保存任务身份、执行配置/成员快照、调度进度、请求尝试和限制；Main 统一状态变更。快照与事件游标一致，重连不重新生成。
 3. 事件按 type 判别 payload；统一 runId/turnId/requestId/sequence。单回合事务提交后通知准确事件，不依赖读取全部事件找最后一条。
-4. Provider 支持 listModels、分级 testConnection、streamChat；输入含模型、Main requestId、上下文、输出上限、AbortSignal；标准流事件覆盖 start/text_delta/reasoning_summary_delta/usage/finish/error。
+4. Provider 支持分级 testConnection、streamChat；输入含模型、Main requestId、上下文、输出上限、AbortSignal；标准流事件覆盖 start/text_delta/reasoning_summary_delta/usage/finish/error。
 5. room/agent/provider/message/artifact 使用受限 DTO 与显式命令；系统 prompt、历史角色和配置语义统一。密钥仅传引用与配置状态，不在普通 DTO 返回明文。
 6. 主持人 Override、插话、持续指令和消息重生显式授权；模型文本不触发调度。重试新增尝试，不覆盖旧部分输出。
 7. Artifact 包含类型、来源消息、版本及 validationStatus；导出预览、确认和文件写入分为可信命令。
@@ -115,7 +115,7 @@ Zod 解释执行（jitless）保证 Preload 的校验不触发动态代码/CSP �
 
 ### Provider v1
 
-ProviderAdapter 的 listModels、testConnection、streamChat 共用 requestId 与可选 AbortSignal；stream 输入必需 modelId/messages，可选 outputTokenLimit，agentRole/turnIndex 仅现有 Mock 提示。没有 SDK 原始类型、Key 或通用网络能力进入契约。分级测试：configuration 仅本地配置；authentication 可做明确触发的只读认证；generation 必须明确模型，未来真实实现可能收费，仍需用户触发；本轮各级只用确定性 Mock。
+ProviderAdapter 的 testConnection、streamChat 共用 requestId 与可选 AbortSignal；stream 输入必需 modelId/messages，可选 outputTokenLimit，agentRole/turnIndex 仅现有 Mock 提示。没有 SDK 原始类型、Key 或通用网络能力进入契约。分级测试：configuration 仅本地配置；authentication 可做明确触发的只读认证；generation 必须明确模型，未来真实实现可能收费，仍需用户触发；本轮各级只用确定性 Mock。
 
 NormalizedChunk 覆盖 start、text_delta、reasoning_summary_delta、usage、finish、error，每条带相同 Main requestId。正常流 start 恰好一次，finish 恰好一次且为终态；error 可在 start 前终结，也可在部分输出后终结，不得跟 finish 共存或继续输出。finish.reason 为 stop/length/content_filter。Main 校验格式、ID、顺序及终结，标准 error 转回合失败/取消并保留已有部分输出，不自动重试。公开 reasoning_summary_delta 仅转发 Provider 真正给出的内容，不生成隐藏推理。
 
@@ -483,15 +483,15 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 
 安全影响：Key 仍只在 Main，不进日志和 Renderer；地址格式校验、`redirect: 'error'`、TLS 校验、直连的保留地址防护、写文件的路径和符号链接防护及写入前重查都未放宽；中断的请求不自动重发；模型输出没有主持人权限，不执行生成的代码；停止按钮的确认保留。去掉的是地址确认和“采用”这两步人工确认，理由见 D136、D139。
 
-## 只有一个通用接口（2026-11-04，子会话候选，未合 main）
+## 只用内置目录（2026-11-04，子会话候选，未合 main）
 
 决策见 DECISIONS D143，并取代上一节里 `schemas/network.ts`、连接方式和其他服务类型的内容。
 
 | 层 | 变化 | 兼容性 |
 | --- | --- | --- |
-| Shared | `providerKindSchema` 只剩 `mock`、`compatible`；启用的 `compatible` 必须有地址；删除 `schemas/network.ts`、错误码 `proxy_unsupported` | 破坏性，只有 Renderer 使用 |
-| IPC / Preload | 删除整个 `network` 分组 | 破坏性，只有 Renderer 使用 |
-| Database / migration 14 | 改名和停用见 D143；migration 1–13 未改 | 已发布的 v11 文本里仍有旧类型名，表在 v14 删除 |
-| Main | `providers/compatible/CompatibleProvider.ts`、`sse.ts`；诊断去掉一个阶段和两个类别 | 内部 |
-| Renderer | `ConnectWizard` 去掉接口类型；设置去掉一个分类；没有地址的已停用服务不能启用 | 内部 |
+| Shared | 新增 `serviceCatalog.ts`；`providerKindSchema` 只剩 `mock`、`compatible`；错误码增加 `service_unsupported`、`model_unsupported`，删除 `proxy_unsupported`；连接测试级别只剩 `configuration`、`generation`；readiness 行增加 `supported`，`blockedBy` 增加 `unsupported`；删除 `schemas/network.ts`、模型列表的 Schema | 破坏性，只有 Renderer 使用 |
+| IPC / Preload | 删除 `settings.listModels` 和整个 `network` 分组 | 破坏性，只有 Renderer 使用 |
+| Database / migration 14 | 改名和停用见 D143，判断用地址快照；migration 1–13 未改 | 已发布的 v11 文本里仍有旧类型名，表在 v14 删除 |
+| Main | `ProviderRegistry` 的 `catalog()`、`transportHosts()`，构造参数 `catalog` 只供测试；`createSafeFetch` 增加允许的主机；`ProviderSettingsService` 保存和读取都按目录；适配器删除 `listModels` 和能力配置；诊断去掉一个阶段和两个类别 | 内部 |
+| Renderer | `ConnectWizard` 只有选服务、Key 和模型列表；服务卡片没有地址和手填模型；房间页说明不再支持的成员 | 内部 |
 | 依赖 | 删除三个 SDK | package.json 和 lock 已更新 |

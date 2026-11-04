@@ -96,9 +96,15 @@ app.whenReady().then(() => {
   });
 });
 
-const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.moonshot.cn': 'kimi', 'https://open.bigmodel.cn': 'glm', 'https://models.e2e.invalid': 'custom' };
+const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.moonshot.cn': 'kimi', 'https://open.bigmodel.cn': 'glm', 'https://ark.cn-beijing.volces.com': 'doubao' };
 const build = process.env.ROUNDTABLE_E2E_BUILD ? resolve(process.env.ROUNDTABLE_E2E_BUILD) : resolve(__dirname, '../../../out');
 import(pathToFileURL(join(build, 'main/index.js')).href).then(({ ProviderRegistry }) => {
+  // This entry alone adds the loopback fixture to what the transport may reach; the app's own entry has no way to.
+  const hosts = ProviderRegistry.prototype.transportHosts;
+  ProviderRegistry.prototype.transportHosts = function () {
+    const allowed = hosts.call(this);
+    return { has: host => host === `127.0.0.1:${fixturePort}` || allowed.has(host) };
+  };
   const transport = ProviderRegistry.prototype.createTransport;
   ProviderRegistry.prototype.createTransport = function (guard, diagnostics) {
     const send = transport.call(this, guard, diagnostics);

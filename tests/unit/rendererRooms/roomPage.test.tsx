@@ -9,9 +9,9 @@ const deepseek: ProviderSummary = { id: 'ds', name: 'DeepSeek', kind: 'compatibl
 const kimi: ProviderSummary = { id: 'oa', name: 'Kimi', kind: 'compatible', enabled: true, isDefault: false, defaultModelId: 'kimi-k3.1-pro', customModels: [], configurationValid: true, hasStoredKey: true };
 const mock: ProviderSummary = { id: 'mk', name: '演示（Mock）', kind: 'mock', enabled: true, isDefault: false, defaultModelId: 'mock', customModels: [], configurationValid: true, hasStoredKey: false };
 const readiness: ProviderReadiness[] = [
-  { providerId: 'ds', keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
-  { providerId: 'oa', keyState: 'configured', baseUrl: 'https://service.example/v1', models: [{ modelId: 'kimi-k3.1-pro', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] },
-  { providerId: 'mk', keyState: 'none', baseUrl: null, models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
+  { providerId: 'ds', keyState: 'configured', supported: true, baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
+  { providerId: 'oa', keyState: 'configured', supported: true, baseUrl: 'https://service.example/v1', models: [{ modelId: 'kimi-k3.1-pro', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] },
+  { providerId: 'mk', keyState: 'none', supported: true, baseUrl: null, models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
 ];
 const member = (id: string, displayName: string, role: string, extra: Partial<AgentConfiguration> = {}): AgentConfiguration =>
   ({ ...agent(id, displayName), roleTemplateId: role, providerId: 'ds', modelId: 'deepseek-flash', ...extra });

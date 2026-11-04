@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { lookup as dnsLookup } from 'node:dns/promises';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createSafeFetch } from '../../../src/main/providers/network';
+import { createSafeFetch as catalogFetch } from '../../../src/main/providers/network';
 import { CompatibleProvider } from '../../../src/main/providers/compatible/CompatibleProvider';
 import { ContractError } from '../../../src/shared/contracts/errors';
 import { configuration, input, collect, sse, chunk } from './compatible/fixtures';
@@ -18,6 +18,7 @@ import type { DiagnosticEvent } from '../../../src/main/providers/diagnostics';
 vi.mock('node:https', async original => ({ ...await original<typeof import('node:https')>(), request: vi.fn() }));
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const clean of cleanups.splice(0).reverse()) await clean(); vi.mocked(https.request).mockReset(); vi.restoreAllMocks(); });
+const createSafeFetch = (guard?: () => void, resolver?: typeof dnsLookup, observer?: (event: DiagnosticEvent) => void) => catalogFetch(guard, resolver, observer, { has: () => true });
 const lookup = (records: Array<{ address: string; family: number }>) => (async () => records) as unknown as typeof dnsLookup;
 const publicLookup = lookup([{ address: '8.8.8.8', family: 4 }]);
 const observe = () => { const events: DiagnosticEvent[] = []; return { events, observer: (event: DiagnosticEvent) => { events.push(event); } }; };
@@ -32,7 +33,7 @@ function fakeRequest(code: string, connected = false) {
 }
 function provider(observer: (event: DiagnosticEvent) => void, options: Partial<ConstructorParameters<typeof CompatibleProvider>[0]> = {}) {
   return new CompatibleProvider({ configuration: { ...configuration, kind: 'compatible', baseUrl: 'https://fixture.example' },
-    confirmedBaseUrl: 'https://fixture.example', capabilities: { streamUsage: true, listModels: false, authentication: 'unsupported' },
+    confirmedBaseUrl: 'https://fixture.example',
     resolveKey: async () => 'fake-secret', diagnostics: observer, fetch: async () => sse(chunk('OK'), chunk(null, 'stop'), '[DONE]'), ...options });
 }
 

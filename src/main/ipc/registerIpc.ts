@@ -110,7 +110,6 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'settings.deleteKey': (input) => settings.deleteKey(input),
     'settings.getProviderKeyState': (input) => settings.getProviderKeyState(input),
     'settings.getKeyStorageStatus': () => settings.getKeyStorageStatus(),
-    'settings.listModels': (input) => settings.listModels(input),
     'settings.testConnection': (input) => settings.testConnection(input),
     'settings.listModelReadiness': () => settings.listModelReadiness ? settings.listModelReadiness() : unsupported(),
   };

@@ -87,8 +87,8 @@ describe('production configuration IPC and Preload with actual services', () => 
 
   it('revokes fake session Keys across replacement, target change and deletion without leaking ordinary outputs', async () => {
     const api = fixture.api!;
-    const provider = await api.settings.createProvider({ name: 'Target', kind: 'compatible', baseUrl: 'https://one.example/v1' });
-    const other = await api.settings.createProvider({ name: 'Other', kind: 'compatible', baseUrl: 'https://service.example/v1' });
+    const provider = await api.settings.createProvider({ name: 'Target', kind: 'compatible', baseUrl: 'https://api.deepseek.com' });
+    const other = await api.settings.createProvider({ name: 'Other', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1' });
     const first = await api.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-first' });
     const second = await api.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-second' });
     expect(first.state).toBe('session'); expect(second.state).toBe('session');
@@ -98,7 +98,7 @@ describe('production configuration IPC and Preload with actual services', () => 
     expect(configuration.keyReference).toBeNull();
     expect(database.rawKeyRecord(second.keyReference!.id)).toBeUndefined();
     expect(JSON.stringify([first, second, configuration, await api.settings.listProviderSummaries(), await api.settings.getKeyStorageStatus()])).not.toContain('fixture-r78-');
-    await api.settings.updateProvider({ ...editable(configuration), baseUrl: 'https://two.example/v1' });
+    await api.settings.updateProvider({ ...editable(configuration), baseUrl: 'https://open.bigmodel.cn/api/paas/v4', customModels: [], defaultModelId: null });
     expect(await api.settings.getProviderKeyState({ providerId: provider.id })).toMatchObject({ state: 'missing', keyReference: null });
     expect(await keys.resolveKey(provider.id, second.keyReference!)).toBeUndefined();
     await api.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-third' });
@@ -107,22 +107,26 @@ describe('production configuration IPC and Preload with actual services', () => 
     expect(await new KeyService(database, createMemoryKeyBackend()).getProviderKeyState(provider.id)).toMatchObject({ state: 'missing' });
   });
 
-  it('keeps explicit Mock testing separate from unsupported real authentication and generation', async () => {
+  it('keeps explicit Mock testing separate from a real generation test', async () => {
     const api = fixture.api!;
     const mock = await api.settings.createProvider({ name: 'Mock', kind: 'mock' });
-    expect(await api.settings.listModels({ providerId: mock.id })).toEqual({ providerId: mock.id, models: [{ id: 'mock', name: 'Mock' }] });
     expect(await api.settings.testConnection({ providerId: mock.id, level: 'generation', modelId: 'mock' })).toMatchObject({ providerId: mock.id, result: { ok: true, level: 'generation' } });
-    const real = await api.settings.createProvider({ name: 'Real', kind: 'compatible', baseUrl: 'https://service.example/v1' });
-    await expect(api.settings.listModels({ providerId: real.id })).rejects.toMatchObject({ code: 'unsupported' });
-    for (const level of ['authentication', 'generation'] as const) {
-      expect(await api.settings.testConnection({ providerId: real.id, level, ...(level === 'generation' ? { modelId: 'custom' } : {}) })).toMatchObject({ providerId: real.id, result: { level, ok: false, error: { code: 'unsupported' } } });
-    }
+    const real = await api.settings.createProvider({ name: 'Real', kind: 'compatible', baseUrl: 'https://api.deepseek.com' });
+    expect(await api.settings.testConnection({ providerId: real.id, level: 'generation', modelId: 'deepseek-flash' })).toMatchObject({ providerId: real.id, result: { level: 'generation', ok: false, error: { code: 'unsupported' } } });
+  });
+
+  it('D143: the bridge cannot save a service or model outside the catalog', async () => {
+    const api = fixture.api!;
+    await expect(api.settings.createProvider({ name: 'Other', kind: 'compatible', baseUrl: 'https://service.example/v1' })).rejects.toMatchObject({ code: 'service_unsupported' });
+    await expect(api.settings.createProvider({ name: 'Model', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'other-model' })).rejects.toMatchObject({ code: 'model_unsupported' });
+    expect(await api.settings.listProviderSummaries()).toEqual([]);
+    expect(api.settings).not.toHaveProperty('listModels');
   });
 
   it('rejects unsafe inputs before mutation and keeps secrets out of errors and logs', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const secret = 'fixture-r78-do-not-echo';
-    expect(await invoke('settings.createProvider', { name: 'Bad', kind: 'compatible', baseUrl: 'https://service.example/v1', apiKey: secret })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(await invoke('settings.createProvider', { name: 'Bad', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1', apiKey: secret })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(await invoke('settings.listProviderSummaries')).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(await invoke('settings.listProviderSummaries', undefined, secret)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     const error = await invoke('settings.setKey', { providerId: 'missing', apiKey: secret });
@@ -146,7 +150,7 @@ describe('production configuration IPC and Preload with actual services', () => 
     dispose = registerIpc({ webContents: { send: () => {} } } as unknown as BrowserWindow, {
       ...withHost(new RunService(database, new MockProvider())), rooms: new RoomService(database), settings,
     });
-    const provider = await settings.createProvider({ name: 'Delayed', kind: 'compatible', baseUrl: 'https://service.example/v1' });
+    const provider = await settings.createProvider({ name: 'Delayed', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1' });
     const pending = fixture.api!.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-drain-key' }).catch(error => error);
     await encrypting;
     dispose();
@@ -185,7 +189,7 @@ describe('production configuration IPC and Preload with actual services', () => 
     ['navigation', 'success'], ['disposal', 'success'], ['replacement', 'success'],
     ['navigation', 'failure'], ['disposal', 'failure'], ['replacement', 'failure'],
   ] as const)('withholds a delayed result after %s (%s)', async (change, outcome) => {
-    const provider = await settings.createProvider({ name: 'P', kind: 'compatible', baseUrl: 'https://service.example/v1' });
+    const provider = await settings.createProvider({ name: 'P', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1' });
     let resolve!: (value: typeof provider) => void;
     let reject!: (error: Error) => void;
     vi.spyOn(settings, 'getProviderConfiguration').mockImplementationOnce(() => new Promise((release, fail) => { resolve = release; reject = fail; }));

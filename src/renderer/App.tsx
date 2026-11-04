@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
-import { Check, Lock, Plus, TriangleAlert } from 'lucide-react';
+import { Check, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
 import { RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
 import { defaultModeLabel, WorkflowDialog, draftProblems, readRoomWorkflow, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
   writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft, type WorkflowMember } from './features/workflows';
 import { errorCodeSchema } from '../shared/schemas/error';
-import { ConnectWizard, SettingsPage, isUserAddress, useReadiness, type ConnectedRoom, type SettingsSection } from './features/settings';
+import { ConnectWizard, SettingsPage, useReadiness, type ConnectedRoom, type SettingsSection } from './features/settings';
 import { Welcome, startDemo } from './features/onboarding';
 import type { ProviderConfiguration, ProviderReadiness } from '../shared/contracts/configuration';
 import { timelineSlots, useHostCommands, useSummaryCommands } from './features/host';
@@ -39,7 +39,8 @@ const codeOf = (error: unknown) => { const value = error && typeof error === 'ob
 const workflowRefusal = (error: unknown) => {
   const code = codeOf(error);
   return code === 'invalid_input' ? '按现在的成员和限制排不出这个流程：检查每个阶段的成员和轮数，总回合数不能超过“最多回合”。'
-    : code === 'invalid_state' || code === 'unsupported' || code === 'forbidden' ? '流程里有成员现在不能发言（还没选模型，或服务地址未确认），到房间里看看成员。'
+    : code === 'service_unsupported' || code === 'model_unsupported' ? '有成员用的模型已不再支持，请在房间里给 TA 换一个模型。'
+    : code === 'invalid_state' || code === 'unsupported' || code === 'forbidden' ? '流程里有成员现在不能发言（可能还没选模型），到房间里看看成员。'
       : code === 'not_found' ? '这个房间已经不存在。' : '没能核对讨论方式，请稍后再试。';
 };
 const remembered = (key: string, fallback: boolean) => { try { const value = localStorage.getItem(key); return value === null ? fallback : value === 'true'; } catch { return fallback; } };
@@ -118,7 +119,6 @@ export function App() {
       listProviderSummaries: () => api.settings.listProviderSummaries(),
       getProviderKeyState: input => api.settings.getProviderKeyState(input),
       getKeyStorageStatus: () => api.settings.getKeyStorageStatus(),
-      listModels: input => api.settings.listModels(input),
       testConnection: input => api.settings.testConnection(input),
       ...(api.settings.listModelReadiness ? { listModelReadiness: () => api.settings.listModelReadiness!() } : {}),
     };
@@ -354,16 +354,10 @@ export function App() {
     step: { enabled: stepEnabled, run: () => void session.control('step') }, stop: { enabled: stopEnabled, run: () => void session.control('stop') },
   } : undefined;
   const syncNotices = <>{syncStatus === 'syncing' && !snapshot && <p role="status" className="muted">正在同步运行状态…</p>}</>;
-  // A service whose address the host typed says once, before the start, where this discussion goes.
-  const userTargets = [...new Set((enabledMembers ?? []).map(member => providers.find(provider => provider.id === member.providerId))
-    .filter((provider): provider is ProviderSummary => Boolean(provider) && isUserAddress({ kind: provider!.kind, baseUrl: readiness.rows?.find(row => row.providerId === provider!.id)?.baseUrl ?? '' }))
-    .map(provider => readiness.rows?.find(row => row.providerId === provider.id)?.baseUrl).filter((url): url is string => Boolean(url)))];
-  const targetNotice = !snapshot && userTargets.length > 0 ? <p className="composer-target" role="note"><Lock aria-hidden size={14} />这场讨论的目标和发言将发往 {userTargets.join('、')}（你在设置里填写的地址）。</p> : undefined;
   const modeNotice = workflowNotice?.roomId === roomId ? workflowNotice?.text
     : stored.damaged ? `这个房间保存的讨论方式读不出来，这次按「${defaultMode}」进行。`
       : lostWorkflow?.roomId === roomId && !stored.draft ? `这台电脑上没有找到这个房间的讨论方式（例如清理过浏览器数据），已退回「${defaultMode}」${lostWorkflow?.label ? `；上次用的是「${lostWorkflow.label}」` : ''}。` : undefined;
-  const taskNotices = (error && !snapshot && syncStatus !== 'error') || modeNotice || workflowMembersError || otherLive || targetNotice ? <div className="composer-alerts">
-    {targetNotice}
+  const taskNotices = (error && !snapshot && syncStatus !== 'error') || modeNotice || workflowMembersError || otherLive ? <div className="composer-alerts">
     {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始或继续别的讨论。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}
     {error && !snapshot && syncStatus !== 'error' && !otherLive && <p role="alert" className="field-error">{error}</p>}
     {modeNotice && <p role={workflowNotice ? 'alert' : 'note'} className={workflowNotice ? 'composer-blocked' : 'composer-target'}>{modeNotice}<button type="button" className="link-btn" onClick={() => setWorkflowOpen(true)}>更改讨论方式</button></p>}

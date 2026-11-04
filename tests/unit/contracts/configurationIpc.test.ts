@@ -26,7 +26,6 @@ describe('configuration IPC response identity', () => {
     ['settings.updateProvider', { id: 'p', name: 'Provider', kind: 'compatible', baseUrl: 'https://service.example/v1' }, provider, { ...provider, id: 'other' }],
     ['settings.getProviderKeyState', { providerId: 'p' }, key, { ...key, providerId: 'other' }],
     ['settings.setKey', { providerId: 'p', apiKey: 'fixture-secret' }, key, { ...key, providerId: 'other' }],
-    ['settings.listModels', { providerId: 'p' }, { providerId: 'p', models: [] }, { providerId: 'other', models: [] }],
     ['settings.testConnection', { providerId: 'p', level: 'configuration' }, { providerId: 'p', result: { requestId: 'request', level: 'configuration', ok: true } }, { providerId: 'other', result: { requestId: 'request', level: 'configuration', ok: true } }],
   ])('rejects %s output belonging to another requested entity', (channel, input, valid, wrong) => {
     expect(parse(channel as string, input, valid)).toEqual(valid);
@@ -34,7 +33,7 @@ describe('configuration IPC response identity', () => {
   });
 
   it('rejects a connection result from another test level', () => {
-    expect(() => parse('settings.testConnection', { providerId: 'p', level: 'authentication' }, { providerId: 'p', result: { requestId: 'request', level: 'configuration', ok: true } })).toThrow(expect.objectContaining({ code: 'invalid_response' }));
+    expect(() => parse('settings.testConnection', { providerId: 'p', level: 'generation', modelId: 'm' }, { providerId: 'p', result: { requestId: 'request', level: 'configuration', ok: true } })).toThrow(expect.objectContaining({ code: 'invalid_response' }));
   });
 
   it.each([

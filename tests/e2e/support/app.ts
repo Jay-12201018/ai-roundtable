@@ -115,8 +115,11 @@ export class Harness {
   }
 
   /** Read-only SQL against this test's database, in Electron's Node (works while the app runs or after it died). */
-  sql(...statements: string[]): any[][] {
-    const result = spawnSync(electronBinary, [join(here, 'db.cjs'), this.database, JSON.stringify(statements)], { cwd: root, encoding: 'utf8', env: { ...clean(process.env), ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000 });
+  sql(...statements: string[]): any[][] { return this.database_(statements); }
+  /** Puts in place what an older version left behind. Only while this test's app is closed. */
+  write(...statements: string[]) { this.database_(statements, ['write']); }
+  private database_(statements: string[], mode: string[] = []): any[][] {
+    const result = spawnSync(electronBinary, [join(here, 'db.cjs'), this.database, JSON.stringify(statements), ...mode], { cwd: root, encoding: 'utf8', env: { ...clean(process.env), ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000 });
     if (result.status !== 0) throw new Error(`SQL failed: ${result.stderr}`);
     return JSON.parse(result.stdout);
   }

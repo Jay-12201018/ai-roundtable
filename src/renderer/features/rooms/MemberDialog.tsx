@@ -13,11 +13,12 @@ export function modelOptions(providers: readonly ProviderSummary[], readiness: r
   return providers.filter(provider => provider.enabled && provider.configurationValid && provider.kind !== null).flatMap(provider => {
     const ids = provider.kind === 'mock' ? ['mock'] : [...new Set([provider.defaultModelId, ...provider.customModels.map(model => model.id)].filter((id): id is string => Boolean(id)))];
     const row = readiness?.find(item => item.providerId === provider.id);
-    return ids.map(modelId => {
+    return ids.flatMap(modelId => {
       const state = row?.models.find(model => model.modelId === modelId);
+      if (row && !state || state?.blockedBy === 'unsupported') return [];
       const name = provider.kind === 'mock' ? '演示' : provider.customModels.find(model => model.id === modelId)?.name ?? modelId;
-      return { value: `${provider.id}${SEPARATOR}${modelId}`, providerId: provider.id, modelId, mock: provider.kind === 'mock',
-        label: provider.kind === 'mock' ? `${provider.name}（不联网）` : `${provider.name} · ${name}（${modelId}）`, usable: state?.usable, reason: modelBlockText(state) };
+      return [{ value: `${provider.id}${SEPARATOR}${modelId}`, providerId: provider.id, modelId, mock: provider.kind === 'mock',
+        label: provider.kind === 'mock' ? `${provider.name}（不联网）` : `${provider.name} · ${name}（${modelId}）`, usable: state?.usable, reason: modelBlockText(state) }];
     });
   });
 }
@@ -66,7 +67,7 @@ export function MemberDialog({ agent, roomId, order, providers, readiness, onSav
       <Field label="设定" optional help="写给这位成员的长期要求，每次发言都会带上。">{props => <textarea {...props} className="textarea" rows={3} value={prompt} disabled={busy} onChange={event => setPrompt(event.target.value)} />}</Field>
       <Field label="模型">{props => <select {...props} className="select input" value={model} disabled={busy} onChange={event => { setModel(event.target.value); setError(''); }}>
         <option value="">暂不选择</option>
-        {stale && <option value={model}>原来的选择已不可用（服务已删除或停用）</option>}
+        {stale && <option value={model}>原来的选择已不可用，请换一个模型</option>}
         {options.map(option => <option key={option.value} value={option.value}>{option.label}{option.reason ? ` — ${option.reason}` : ''}</option>)}
       </select>}</Field>
       <p className="model-state" role="status">{selected?.mock ? <span className="status-text muted"><FlaskConical aria-hidden />演示成员不联网，回复是预先写好的示例，不代表真实模型的水平。</span>
