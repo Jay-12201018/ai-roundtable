@@ -58,6 +58,8 @@ export async function testService(api: Pick<ProviderSettingsApiContract, 'testCo
   return reply.ok ? { tone: 'ok', text: '已收到回复，连接正常' } : { tone: 'warn', text: errorMessage(reply.error) };
 }
 
+/** D143: such a model takes part with text; nothing on the page should suggest images can be sent. */
+export const multimodalText = '标“多模态”的模型能看图，目前在圆桌里只用文字讨论。';
 export const delistedText = '服务商列表里已经没有这个模型，可能已下线';
 
 /** D143: where the model list on the page comes from, in one plain sentence. */

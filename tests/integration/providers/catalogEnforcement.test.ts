@@ -7,7 +7,8 @@ import { KeyService, type KeyStorageBackend } from '../../../src/main/security/K
 import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { ProviderSettingsService } from '../../../src/main/settings/ProviderSettingsService';
-import { catalogServiceAt, serviceCatalog } from '../../../src/shared/serviceCatalog';
+import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
+import { catalogServiceAt, modelNote, serviceCatalog } from '../../../src/shared/serviceCatalog';
 import { sseReply } from '../../fixtures/testCatalog';
 
 const backend: KeyStorageBackend = { mode: 'secure', backend: 'fixture', persistent: true,
@@ -67,6 +68,28 @@ describe('D143 a service is saved only as the catalog has it', () => {
         expect(model.note).not.toMatch(/价格|便宜|免费|成本|元|¥/u);
       }
     }
+  });
+  it('says so in the note whenever a model is multimodal, and only then', () => {
+    for (const service of serviceCatalog) for (const model of service.models) expect(modelNote(model)?.startsWith('多模态'), model.id).toBe(Boolean(model.multimodal));
+    expect(serviceCatalog.flatMap(service => service.models).filter(model => model.multimodal).length).toBeGreaterThan(20);
+  });
+  it.each(serviceCatalog.flatMap(service => service.models.filter(model => model.multimodal).map(model => [service.id, model.id, service] as const)))('%s %s takes part in a discussion with plain text', async (_service, modelId, service) => {
+    const { db, settings, registry, sent } = fixture();
+    sent.mockImplementation(async () => sseReply('文字发言'));
+    const provider = await settings.createProvider({ name: service.name, kind: 'compatible', baseUrl: service.baseUrl, defaultModelId: modelId });
+    await settings.setKey({ providerId: provider.id, apiKey: 'owned-fake-key' });
+    db.createRoom({ id: 'r', name: 'R' });
+    db.createAgent({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'draft', providerId: provider.id, modelId });
+    const run = new RunService(db, new MockProvider(), createPublicMessagesBuilder((model, member) => member.providerId ? registry.budget(member.providerId, model!) : undefined), registry);
+    try {
+      const started = await run.start({ roomId: 'r', task: '讨论目标', workflowSnapshot: {}, maxTurns: 1, outputTokenLimit: 8 });
+      await run.waitForIdle(started.runId);
+      expect(run.getSnapshot(started.runId).status).toBe('completed');
+      const body = JSON.parse(String(sent.mock.calls[0]![1]!.body));
+      expect(body.model).toBe(modelId);
+      expect(body.messages.length).toBeGreaterThan(0);
+      for (const message of body.messages) expect(typeof message.content).toBe('string');
+    } finally { await run.shutdown(); }
   });
   it('a model the catalog knows is short keeps that limit, unless the host sets another', async () => {
     const { settings, registry } = fixture();

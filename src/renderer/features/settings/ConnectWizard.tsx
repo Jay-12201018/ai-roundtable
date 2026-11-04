@@ -3,7 +3,8 @@ import { Check, CircleAlert, FlaskConical, Info, Lock } from 'lucide-react';
 import type { KeyStorageStatus, ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
 import { Button, Choice, Field, Modal } from '../../components/ui';
 import { presets, presetOf, targetOf, type ServicePreset } from './presets';
-import { errorMessage, refreshStaleModels, testService, type ServiceTest } from './model';
+import { modelNote } from '../../../shared/serviceCatalog';
+import { errorMessage, multimodalText, refreshStaleModels, testService, type ServiceTest } from './model';
 
 /** What the app did after a connection: the room it created for the first real service, if any. */
 export type ConnectedRoom = { roomId: string; roomName: string; memberNames: string[]; modelName: string | null };
@@ -140,9 +141,9 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
         {props => <input {...props} ref={secret} className="input mono" type="password" autoComplete="off" spellCheck={false} disabled={busy} autoFocus placeholder={keySaved ? '已保存；要更换就重新粘贴' : undefined}
           onChange={event => setHasKey(event.target.value.length > 0)} />}</Field>}
       {mock && <div className="callout"><Info aria-hidden /><span className="grow">演示服务没有地址，也不需要 Key。演示成员的回复是预先写好的示例，不代表真实模型的水平，也不会出现在用量统计里。</span></div>}
-      {!rekey && !mock && <Field label="模型" help="这家服务的默认模型。第一次连接时，建好的三位成员都用它；每位成员可以单独换。">
+      {!rekey && !mock && <Field label="模型" help={`这家服务的默认模型。第一次连接时，建好的三位成员都用它；每位成员可以单独换。${preset.models.some(model => model.multimodal) ? multimodalText : ''}`}>
         {props => <select {...props} className="select input" value={modelId} disabled={busy} onChange={event => setModelId(event.target.value)}>
-          {preset.models.map(model => <option key={model.id} value={model.id}>{model.name}（{model.id}）{model.note ? ` · ${model.note}` : ''}</option>)}
+          {preset.models.map(model => <option key={model.id} value={model.id}>{model.name}（{model.id}）{modelNote(model) ? ` · ${modelNote(model)}` : ''}</option>)}
           {listed.map(id => <option key={id} value={id}>{id}</option>)}</select>}</Field>}
       {error && <p className="field-error" role="alert">{error}</p>}
     </form>}

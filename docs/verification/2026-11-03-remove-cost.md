@@ -30,6 +30,8 @@
 
 未提交前的同一份代码上执行：typecheck、全量 `pnpm test`、build、`pnpm e2e`（28 条）、词表扫描（命中 0 处）都通过；探针 r01、r07r08、r09、r10-r11（含重启）、r16-batch2、premerge（含重启）通过。升级演练（新 v11 文本重建的 v13 副本）通过，`provider_model_discovery` 新建，输入文件没有变化。`pnpm e2e:packaged` 和其他探针没有在这一轮跑，由总控重跑。
 
+多模态这一项之后，只跑了 typecheck、受影响的测试、`tests/e2e/mixed-providers.spec.ts`（6 条）、build 和扫描。
+
 ## 第 2 层：实操
 
 真实构建，隔离 profile，假 Key，本地 fixture，不联网。由 `tests/e2e/mixed-providers.spec.ts` 操作，截图在 [remove-cost-screens](remove-cost-screens/)，每张的说明在 `captions.json`。
@@ -42,8 +44,9 @@
 | 13–17 | 深色：模型服务、选服务、贴 Key（写明北京地域）、讨论、用量 |
 | 18–21 | 旧库：目录外的服务保留原名，显示已停用，只能删除；成员写明不再支持、请换一个（浅色、深色） |
 | 22–28 | 选子模型：连接通义千问时改成 Qwen3.8 Flash → 讨论页和成员都显示它 → 一位成员单独换成 Qwen3.7 Max → 改默认模型不影响成员 → 服务收到的 model 和所选一致 |
-| 29–33 | 自动发现：列表多了本品牌新模型，只有它进下拉框 → 成员用它开讨论 → 卡片写明来源、可以刷新 → 从列表消失后不替换，写明可能已下线（浅色、深色） |
-| 34–36 | 思考期间的提示、额度用完的提示、调高上限后重新生成 |
+| 29–30 | 多模态：选 GLM-5V Turbo，向导和成员对话框都写明目前只用文字讨论；服务收到的内容是字符串 |
+| 31–35 | 自动发现：列表多了本品牌新模型，只有它进下拉框 → 成员用它开讨论 → 卡片写明来源、可以刷新 → 从列表消失后不替换，写明可能已下线（浅色、深色） |
+| 36–38 | 思考期间的提示、额度用完的提示、调高上限后重新生成 |
 
 spec 里断言：向导里唯一的文本框是 API Key，模型是下拉列表；服务卡片没有文本框，“高级与删除”里只有服务名称；没有“手动添加模型”“从服务商获取列表”；设置里没有“网络”。旧库路径：开始讨论被拒且没有发请求，换模型后讨论正常完成，服务可以删除。
 
@@ -72,6 +75,8 @@ spec 里断言：向导里唯一的文本框是 API Key，模型是下拉列表�
 
 重点看这几处，出问题先记下错误提示，不要预先按厂商处理：
 
+- 多模态模型只发文字时能否正常回复：`hy-vision-2.0-instruct`、`hunyuan-t1-vision-20250916`、`qwen3-vl-plus`、`qwen3.8-omni-flash`。
+
 - Kimi、MiniMax 文档主推 `max_completion_tokens`，这里发 `max_tokens`，看是否被接受。
 - 智谱的请求结构里没有 `stream_options`，看是否被忽略；不返回 usage 时用量应显示“没拿到”。
 - 不再替用户关思考：DeepSeek、豆包、Kimi 默认思考，看 8192 的默认上限够不够。
@@ -88,14 +93,18 @@ spec 里断言：向导里唯一的文本框是 API Key，模型是下拉列表�
 |---|---|---|
 | DeepSeek | `deepseek-flash`、`deepseek-v4-pro` | 旧名 `deepseek-v4-flash`（已下线，转到 Flash） |
 | 豆包 | `doubao-seed-2-1-pro-260915`、`-2-1-lite-260915`、`doubao-seed-evolving`、`-2-1-turbo-260628`、`-2-1-pro-260628`、`-2-0-lite-260428`、`-2-0-mini-260428` | `-2-0-*-260215`（即将下线）；`character`、`translation`（专项）；页面上其他品牌的模型 |
-| 通义千问 | `qwen3.7-plus`（官方默认）、`qwen3.8-max`、`qwen3.8-flash`、`qwen3.7-max`、`qwen3.7-flash`、`qwen3.6-plus`、`qwen3.6-flash`、`qwen3.5-plus`、`qwen3.5-flash`、`qwen-plus`、`qwen-max`、`qwen-flash` | MT、Long、Character、Doc、Deep-Research、OCR、VL、omni、Coder（专项）；带 `-35b-a3b` 等后缀的开放权重规格 |
+| 通义千问 | `qwen3.7-plus`（官方默认）、`qwen3.8-max`、`qwen3.8-flash`、`qwen3.8-omni-flash`、`qwen3.7-max`、`qwen3.7-flash`、`qwen3.6-plus`、`qwen3.6-flash`、`qwen3.5-plus`、`qwen3.5-flash`、`qwen3-vl-plus`、`qwen-plus`、`qwen-max`、`qwen-flash` | MT、Long、Character、Doc、Deep-Research、OCR、Coder（专项）；`qwen3.5-omni-*`、`qwen3-omni-flash`（官方定位是语音输出和较旧的全模态）；`-realtime`（走实时接口）；带 `-35b-a3b` 等后缀的开放权重规格 |
 | Kimi | `kimi-k3.1-pro`、`kimi-k3.1-pro-highspeed`、`kimi-k3` | K2 系列（2026-10-31 起停止向新用户开放，12 月底下线）；`moonshot-v1` 等（已下线） |
-| 智谱 GLM | `glm-5.3`、`glm-5.3-flash`、`glm-5.3-flashx`、`glm-5.2`、`glm-5.1`、`glm-5-turbo`、`glm-5`、`glm-4.7`、`glm-4.7-flashx`、`glm-4.7-flash`、`glm-4.6`、`glm-4.5-air`、`glm-4.5-airx`、`glm-4-flashx-250414`、`glm-4-flash-250414` | `glm-4.5-flash`（模型页写明已下线，对话接口的枚举还留着）；`glm-4.5`、`glm-4.5-x`（即将下线）；`-legal`、`glm-4-long`（专项）；`glm-4-plus` 等（不在对话接口枚举里）；视觉和语音模型 |
+| 智谱 GLM | `glm-5.3`、`glm-5.3-flash`、`glm-5.3-flashx`、`glm-5.2`、`glm-5.1`、`glm-5-turbo`、`glm-5`、`glm-4.7`、`glm-4.7-flashx`、`glm-4.7-flash`、`glm-4.6`、`glm-5v-turbo`、`glm-4.6v`、`glm-4.6v-flashx`、`glm-4.6v-flash`、`glm-4.5-air`、`glm-4.5-airx`、`glm-4-flashx-250414`、`glm-4-flash-250414`、`glm-4.1v-thinking-flashx`、`glm-4.1v-thinking-flash` | `glm-4.5-flash`（模型页写明已下线，对话接口的枚举还留着）；`glm-4.5`、`glm-4.5-x`（即将下线）；`-legal`、`glm-4-long`、`autoglm-phone`（专项）；`glm-4v-flash`（页面没写上下文）；`glm-4-plus` 等（不在对话接口枚举里）；语音模型 |
 | 百度文心 | `ernie-5.1` | 模型列表里 ERNIE 只有这一个。“可用于对话接口”是按页面规则推断，没有原文逐字写明 |
-| 腾讯混元 | `hy4`、`hy4-preview`、`hy3` | `hy-mt2-*`（翻译）、`hunyuan-role-latest`（角色扮演）、视觉模型 |
+| 腾讯混元 | `hy4`、`hy4-preview`、`hy3`、`hy-vision-2.0-instruct`、`hunyuan-t1-vision-20250916` | `hy-mt2-*`（翻译）、`hunyuan-role-latest`（角色扮演）、`hunyuan-turbos-vision-video-*`（只做视频理解）、`youtu-vita`（其他品牌） |
 | MiniMax | `MiniMax-M3.1-Flash`、`MiniMax-M3` | 语音、图片、视频、音乐模型 |
 
-本品牌规则按总控的方案，有两处按官方命名收紧：MiniMax 用 `^minimax-m`（`MiniMax-H3` 是视频模型，ID 里没有可排除的词）；混元用 `^(hy[0-9-]|hunyuan-)`（避免匹配其他以 hy 开头的名字）。排除词除总控列出的，还加了 `voice`、`speech`、`music`、`realtime`、`vl`、`omni`、`3d`、`long`、`doc`、`legal`、`research`，以及 `4.6v` 这种视觉版本号和 `-2026-01-25` 这种带日期的快照（不然一个模型会占很多行）。
+标 `multimodal` 的按官方原文：DeepSeek Flash（`deepseek-v4-pro` 官方写不支持图像）；豆包全部 7 个；通义除 `qwen3.7-max`、`qwen-plus`、`qwen-max`、`qwen-flash` 外（这几个官方没列进视觉理解）；Kimi 全部 3 个；智谱 `glm-5.3-flash`、`glm-5.3-flashx` 和带 V 的；混元 `hy4` 和两个 vision（`hy4-preview`、`hy3` 官方没写图片理解）；MiniMax 全部 2 个。`ernie-5.1` 官方没写多模态，不标。智谱对话接口写明视觉模型支持纯文本；混元两个 vision 模型的页面只有带图示例，没写能否只发文字，按“没写必须带图”放进目录，第 3 层要看。
+
+上下文按官方最大输入收紧：`hy-vision-2.0-instruct`（最大输入 24k）写 32000，`hunyuan-t1-vision-20250916`（最大输入 16k）写 24000，`glm-4.1v-thinking-*` 写 64000。
+
+本品牌规则按总控的方案，有两处按官方命名收紧：MiniMax 用 `^minimax-m`（`MiniMax-H3` 是视频模型，ID 里没有可排除的词）；混元用 `^(hy[0-9-]|hunyuan-)`（避免匹配其他以 hy 开头的名字）。排除词除总控列出的，还加了 `voice`、`speech`、`music`、`realtime`、`vl`、`omni`、`3d`、`long`、`doc`、`legal`、`research`，以及 `-2026-01-25` 这种带日期的快照（不然一个模型会占很多行）。多模态对话模型不排除：`vision`、`vl`、`omni` 和 `4.6v` 这类版本号都留下；`qwen3.8-omni-flash-realtime` 靠 `realtime`、`qwen3-vl-embedding` 靠 `embedding`、`hunyuan-turbos-vision-video-*` 靠 `video` 排除。发现列表可能带进 `qwen3.5-omni-*`、`glm-4v-flash` 这类目录没放的模型，只显示 ID，上限用默认值。
 
 ## 因设计改变而删改的断言
 

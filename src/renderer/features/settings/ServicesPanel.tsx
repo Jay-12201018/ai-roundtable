@@ -4,7 +4,8 @@ import type { ProviderConfiguration, ProviderKeyState, ProviderReadiness, Provid
 import { DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS, DEFAULT_MODEL_MAX_OUTPUT_TOKENS, MAX_MODEL_LIMIT_TOKENS, MIN_MODEL_CONTEXT_WINDOW_TOKENS } from '../../../shared/schemas/provider';
 import { Button, Field, IconButton, Pill, Switch, Tag, cx } from '../../components/ui';
 import { presetOf, targetOf } from './presets';
-import { delistedText, discoveryText, errorMessage, modelBlockText, refreshStaleModels, serviceStatus, testService, type ServiceTest } from './model';
+import { modelNote } from '../../../shared/serviceCatalog';
+import { delistedText, discoveryText, errorMessage, modelBlockText, multimodalText, refreshStaleModels, serviceStatus, testService, type ServiceTest } from './model';
 
 /** D134: why these limits cannot be saved; Main's schema refuses the same values. */
 function limitsError({ context, output }: { context: string; output: string }): string | undefined {
@@ -85,6 +86,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
   const target = config ? targetOf(config) : null;
   // D143: a service outside the catalog stays only for its history: it can be renamed or removed, with its Key.
   const outside = readiness?.supported === false;
+  const listedNote = (id: string) => { const model = preset?.models.find(item => item.id === id); return model && modelNote(model); };
   const keyNow = readiness?.keyState ?? keyState?.state;
   const keySaved = keyNow === 'configured' || keyNow === 'session';
   const models = config ? [...new Map([...(config.defaultModelId ? [{ id: config.defaultModelId, name: config.customModels.find(model => model.id === config.defaultModelId)?.name ?? config.defaultModelId }] : []), ...config.customModels].map(model => [model.id, model])).values()] : [];
@@ -148,12 +150,12 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
             : <>还没填写 <Button size="sm" variant="primary" onClick={() => onRekey(config)}>填写 Key</Button></>}</dd>
       </dl>}
       {config && !mock && !outside && <div className="svc-models">
-        <p className="small muted svc-pad">默认模型只影响之后新建的成员，已有成员的选择不变。每位成员的模型在房间里单独选。</p>
+        <p className="small muted svc-pad">默认模型只影响之后新建的成员，已有成员的选择不变。每位成员的模型在房间里单独选。{preset?.models.some(model => model.multimodal) ? multimodalText : ''}</p>
         <div className="model-row svc-discovery"><Button size="sm" disabled={busy || !keySaved || !config.enabled} title={keySaved ? '向服务商查一次模型列表，不生成内容' : '先填写 Key'} onClick={refreshList}>刷新模型列表</Button>
           <span className="small muted" role="status">{discoveryText(readiness?.discovery)}</span></div>
         {models.map(model => {
           const state = readiness?.models.find(item => item.modelId === model.id);
-          return <div className="model-row" key={model.id}><span className="model-name"><b>{model.name}{config.defaultModelId === model.id && <Tag tone="accent">默认</Tag>}</b><span><code>{model.id}</code>{preset?.models.find(item => item.id === model.id)?.note && <small> · {preset.models.find(item => item.id === model.id)!.note}</small>}</span>
+          return <div className="model-row" key={model.id}><span className="model-name"><b>{model.name}{config.defaultModelId === model.id && <Tag tone="accent">默认</Tag>}</b><span><code>{model.id}</code>{listedNote(model.id) && <small> · {listedNote(model.id)}</small>}</span>
               {state?.delisted && <span className="small warn-text">{delistedText}</span>}</span>
             <span className="push small muted tabular">{state ? `上下文 ${state.contextWindowTokens.toLocaleString('zh-CN')} · 最大输出 ${state.maxOutputTokens.toLocaleString('zh-CN')}` : ''}</span>
             <IconButton size="sm" icon={SlidersHorizontal} label={`${model.name} 的上限`} aria-expanded={limitsOf === model.id} disabled={busy || !state} onClick={() => openLimits(model.id, state)} />

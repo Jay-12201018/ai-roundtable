@@ -11,7 +11,7 @@ const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUN
 const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
   'settings-sections', 'services-dark', 'wizard-choose-dark', 'wizard-key-dark', 'discussion-dark', 'usage-dark',
   'stopped-service', 'stopped-member', 'stopped-service-dark', 'stopped-member-dark',
-  'discover-wizard', 'discover-members', 'discover-services', 'discover-delisted', 'discover-delisted-dark', 'pick-model', 'picked-discussion', 'picked-members', 'picked-member-dialog', 'picked-default', 'picked-finished', 'picked-members-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
+  'multimodal-wizard', 'multimodal-member', 'discover-wizard', 'discover-members', 'discover-services', 'discover-delisted', 'discover-delisted-dark', 'pick-model', 'picked-discussion', 'picked-members', 'picked-member-dialog', 'picked-default', 'picked-finished', 'picked-members-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
 
@@ -372,7 +372,7 @@ test('D143 the host picks the model: every model of a service is offered, nothin
   const list = dialog.getByRole('combobox', { name: '模型' });
   await expect(list).toBeVisible();
   await expect(list).toHaveValue('qwen3.7-plus');
-  expect((await list.locator('option').allTextContents()).length, 'Every model of the service is offered').toBe(12);
+  expect((await list.locator('option').allTextContents()).length, 'Every model of the service is offered').toBe(14);
   await list.selectOption('qwen3.8-flash');
   await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
   await capture(running, 'pick-model', '连接通义千问：模型下拉框始终显示，默认项看得见，这里改成 Qwen3.8 Flash；每个模型都有一句说明。');
@@ -390,7 +390,7 @@ test('D143 the host picks the model: every model of a service is offered, nothin
   // One member takes another model of the same service, from the list grouped by service.
   await page.getByRole('button', { name: '「审查者」：编辑、排序、归档、删除' }).click();
   await page.getByRole('menuitem', { name: /编辑/u }).click();
-  await expect(page.locator('dialog[open] select optgroup[label="通义千问"] option')).toHaveCount(12);
+  await expect(page.locator('dialog[open] select optgroup[label="通义千问"] option')).toHaveCount(14);
   await pickModel(page, { service: '通义千问', id: 'qwen3.7-max' });
   await capture(running, 'picked-member-dialog', '编辑成员：模型按服务分组，这位成员单独换成 Qwen3.7 Max。');
   await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
@@ -417,6 +417,41 @@ test('D143 the host picks the model: every model of a service is offered, nothin
   await statusHas(page, '已完成');
   await capture(running, 'picked-finished', '讨论结束：服务收到的 model 就是所选的模型。');
   expect(discussionRequests(fixture).map(request => [request.service, request.raw.model])).toEqual([['qwen', 'qwen3.8-flash'], ['qwen', 'qwen3.7-max'], ['qwen', 'qwen3.8-flash']]);
+  if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
+  await running.quit();
+});
+
+test('D143 a model that can read images takes part with text, and the page says images are not sent yet', async ({ harness }) => {
+  test.setTimeout(120_000);
+  const { fixture } = harness;
+  fixture.reply = body => `${memberOf(body) ?? '成员'}（${body.model}）的发言。`;
+  const running = await harness.launch();
+  const { page } = running;
+  await theme(running, 'light');
+  await page.getByRole('button', { name: '连接…' }).click();
+  await page.getByRole('button', { name: /^智谱 GLM/u }).click();
+  const dialog = page.locator('dialog[open]');
+  const list = dialog.getByRole('combobox', { name: '模型' });
+  await list.selectOption('glm-5v-turbo');
+  expect(await list.locator('option[value="glm-5v-turbo"]').textContent()).toContain('多模态');
+  expect(await list.locator('option[value="glm-5.3"]').textContent()).not.toContain('多模态');
+  await expect(dialog).toContainText('标“多模态”的模型能看图，目前在圆桌里只用文字讨论。');
+  await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
+  await capture(running, 'multimodal-wizard', '多模态模型可以选，说明里写明多模态；下面写清目前只用文字讨论。');
+  await dialog.getByRole('button', { name: '保存' }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
+  await page.getByRole('button', { name: '「审查者」：编辑、排序、归档、删除' }).click();
+  await page.getByRole('menuitem', { name: /编辑/u }).click();
+  await expect(page.locator('dialog[open]')).toContainText('目前在圆桌里只用文字讨论');
+  await capture(running, 'multimodal-member', '编辑成员：选中多模态模型时同样写明只用文字。');
+  await page.locator('dialog[open]').getByRole('button', { name: '取消' }).click();
+  await newDiscussion(running, roomName, '试点方案。');
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await statusHas(page, '已完成');
+  expect(fixture.requests.map(request => request.raw.model)).toEqual(['glm-5v-turbo', 'glm-5v-turbo', 'glm-5v-turbo']);
+  for (const request of fixture.requests) for (const message of request.messages) expect(typeof message.content).toBe('string');
   if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
   await running.quit();
 });

@@ -39,9 +39,13 @@ describe('D143 which models a list may add', () => {
   ])('%s leaves out what is not its own: %s', (id, model) => expect(discoverable(service(id), model)).toBe(false));
   it.each([
     ['doubao', 'doubao-seed-translation-250915'], ['doubao', 'doubao-seed-character-260628'], ['doubao', 'doubao-seed-embedding-1'], ['qwen', 'qwen-mt-plus'], ['qwen', 'qwen-audio-3.1-tts-plus'], ['qwen', 'qwen-image-3.0-pro'], ['qwen', 'qwen3.7-text-embedding'],
-    ['qwen', 'qwen3.7-text-rerank'], ['qwen', 'qwen3-vl-plus'], ['qwen', 'qwen3.8-omni-flash'], ['qwen', 'qwen-long'], ['qwen', 'QWEN-OCR'], ['glm', 'glm-4.6v'], ['glm', 'glm-5v-turbo'], ['glm', 'glm-5.3-flashx-legal'], ['glm', 'glm-4-voice'], ['glm', 'glm-tts'], ['glm', 'glm-asr-2512'],
-    ['hunyuan', 'hy-mt2-pro'], ['hunyuan', 'hunyuan-role-latest'], ['hunyuan', 'hunyuan-t1-vision-20250916'],
+    ['qwen', 'qwen3.7-text-rerank'], ['qwen', 'qwen3-vl-embedding'], ['qwen', 'qwen-vl-ocr'], ['qwen', 'qwen3.8-omni-flash-realtime'], ['qwen', 'qwen-long'], ['qwen', 'QWEN-OCR'], ['glm', 'glm-image'], ['glm', 'glm-ocr'], ['glm', 'glm-5.3-flashx-legal'], ['glm', 'glm-4-voice'], ['glm', 'glm-tts'], ['glm', 'glm-asr-2512'],
+    ['hunyuan', 'hy-mt2-pro'], ['hunyuan', 'hunyuan-role-latest'], ['hunyuan', 'hunyuan-turbos-vision-video-20250728'],
   ])('%s leaves out the special-purpose %s', (id, model) => expect(discoverable(service(id), model)).toBe(false));
+  it.each([
+    ['qwen', 'qwen3-vl-plus'], ['qwen', 'qwen3.8-omni-flash'], ['qwen', 'qwen3.5-omni-plus'], ['qwen', 'qwen-vl-max'], ['glm', 'glm-5v-turbo'], ['glm', 'glm-4.6v'], ['glm', 'glm-4.6v-flash'], ['glm', 'glm-4v-flash'], ['glm', 'glm-4.1v-thinking-flash'],
+    ['hunyuan', 'hunyuan-t1-vision-20250916'], ['hunyuan', 'hy-vision-2.0-instruct'],
+  ])('%s keeps the multimodal %s', (id, model) => expect(discoverable(service(id), model)).toBe(true));
   it('matches whole words, so a word inside another does not count', () => {
     expect(discoverable(service('kimi'), 'kimi-smart')).toBe(true);
     expect(discoverable(service('qwen'), 'qwen-prole')).toBe(true);
