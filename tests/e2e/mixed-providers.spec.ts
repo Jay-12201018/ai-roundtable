@@ -364,7 +364,9 @@ test('a member that thinks: the block stays out of the discussion, the wait says
   // Raising the model's limit takes effect on the retry.
   await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
   const card = page.getByRole('region', { name: 'DeepSeek 直连' });
-  if (!(await card.getByRole('button', { name: 'DeepSeek Flash 的上限' }).isVisible())) await page.getByRole('button', { name: '展开 DeepSeek 直连' }).click();
+  // The only real service may already be open; the header says which it is once the list has loaded.
+  await expect(page.getByRole('button', { name: /^(展开|收起) DeepSeek 直连$/u })).toBeVisible();
+  if (await page.getByRole('button', { name: '展开 DeepSeek 直连' }).count()) await page.getByRole('button', { name: '展开 DeepSeek 直连' }).click();
   await card.getByRole('button', { name: 'DeepSeek Flash 的上限' }).click();
   await card.getByLabel('最大输出（token）').fill('16000');
   await card.getByRole('button', { name: '保存' }).click();

@@ -66,6 +66,12 @@ describe('one discussion across DeepSeek, OpenAI, Anthropic and Gemini (D134, D1
       await f.run.waitForIdle(started.runId);
     }
     expect(f.seen.map(seen => seen.body.max_tokens)).toEqual([16000, 2000]);
+    // A maximum as large as the whole context still leaves half of it for the discussion.
+    f.db.updateProvider({ id: 'km', name: 'Kimi', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1', customModels: [{ id: 'kimi-k2', name: 'kimi-k2', contextWindowTokens: 100000, maxOutputTokens: 100000 }] });
+    const started = await f.run.start({ roomId: 'room', task: '看上限', workflowSnapshot: {}, maxTurns: 1 });
+    await f.run.waitForIdle(started.runId);
+    expect(f.run.getSnapshot(started.runId).status).toBe('completed');
+    expect(f.seen.at(-1)!.body.max_tokens).toBe(50000);
   });
 
   it('each member reaches its own service with that service\'s Key, parameter and format, and reads the others as public text', async () => {
