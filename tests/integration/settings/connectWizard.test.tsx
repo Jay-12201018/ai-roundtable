@@ -153,6 +153,27 @@ it('adds the demo service without a Key, address or network, and never as the de
   expect(network).not.toHaveBeenCalled();
 });
 
+it('replacing a Key tests that service\'s own default model, not the first service\'s', async () => {
+  const { database, api } = fixture();
+  const provider = await api.createProvider({ name: 'Kimi', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1', defaultModelId: 'kimi-k3' });
+  const test = vi.spyOn(api, 'testConnection').mockResolvedValue({ providerId: provider.id, result: { requestId: 'r', level: 'generation', ok: true } });
+  open(api, { rekey: database.getProviderConfiguration(provider.id)! });
+  fireEvent.change(keyInput(), { target: { value: 'owned-new-kimi-key' } });
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  await waitFor(() => expect(test).toHaveBeenCalledWith({ providerId: provider.id, level: 'generation', modelId: 'kimi-k3', allowGeneration: true }));
+});
+
+it('replacing a Key when the service has no default tests its first model', async () => {
+  const { database, api } = fixture();
+  const provider = await api.createProvider({ name: 'Kimi', kind: 'compatible', baseUrl: 'https://api.moonshot.cn/v1' });
+  const test = vi.spyOn(api, 'testConnection').mockResolvedValue({ providerId: provider.id, result: { requestId: 'r', level: 'generation', ok: true } });
+  open(api, { rekey: await api.getProviderConfiguration({ id: provider.id }) });
+  expect(database.getProviderConfiguration(provider.id)?.defaultModelId).toBeNull();
+  fireEvent.change(keyInput(), { target: { value: 'owned-new-kimi-key' } });
+  fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+  await waitFor(() => expect(test).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'kimi-k3.1-pro' })));
+});
+
 it('replacing a Key goes straight to the Key; closing without saving changes nothing', async () => {
   const { database, keys, api } = fixture();
   const provider = await api.createProvider({ name: 'DeepSeek', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage, type SettingsSection } from '../../../src/renderer/features/settings';
 import type { ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../src/shared/contracts/configuration';
-import { discoveryText } from '../../../src/renderer/features/settings/model';
+import { discoveryText, errorMessage, forgetTest, serviceStatus } from '../../../src/renderer/features/settings/model';
 import { publicError } from '../../../src/shared/schemas/error';
 
 const at = '2026-10-16T00:00:00.000Z';
@@ -114,6 +114,63 @@ describe('设置 › 模型服务', () => {
     expect(within(oldCard).queryByLabelText('服务名称')).toBeNull();
     expect(within(oldCard).getByRole('button', { name: '删除 Key…' })).toBeTruthy();
     expect(within(oldCard).getByRole('button', { name: '删除服务…' })).toBeTruthy();
+  });
+});
+
+describe('服务卡片的状态', () => {
+  const summaryOf = deepseek;
+  const usable = ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] });
+  const asSummary = summary(summaryOf);
+  it('says what was last seen of the Key: a test that failed or a refused list is not green, and a test that passes settles it', () => {
+    expect(serviceStatus(asSummary, usable)).toMatchObject({ tone: 'ok', label: '可以使用' });
+    expect(serviceStatus(asSummary, usable, { tone: 'warn', text: '原因' })).toEqual({ tone: 'warn', label: '最近一次测试失败', detail: '原因' });
+    const refused = { ...usable, discovery: { outcome: 'authentication_failed' as const, checkedAt: at } };
+    expect(serviceStatus(asSummary, refused)).toMatchObject({ tone: 'warn', label: 'Key 可能有问题' });
+    expect(serviceStatus(asSummary, refused, { tone: 'ok', text: '已收到回复，连接正常' })).toMatchObject({ tone: 'ok', label: '可以使用' });
+    expect(serviceStatus(asSummary, { ...usable, discovery: { outcome: 'unsupported', checkedAt: at } })).toMatchObject({ tone: 'ok' });
+  });
+  it('the card turns from green to the failure and back as the test does, and shows what the service said', async () => {
+    forgetTest('ds');
+    const { api } = fixture([usable]);
+    vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: level === 'configuration' ? { requestId: 'r', level, ok: true } : { requestId: 'r', level, ok: false, error: publicError('not_found', undefined, { status: 404, code: 'InvalidEndpointOrModel.NotFound' }) } }));
+    show(api);
+    const card_ = card('DeepSeek');
+    await within(card_).findByText('可以使用');
+    fireEvent.click(await within(card_).findByRole('button', { name: '测试连接' }));
+    await within(card_).findByText('最近一次测试失败');
+    expect(within(card_).queryByText('可以使用')).toBeNull();
+    expect(card_.textContent).toContain('服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查。');
+    expect(card_.textContent).toContain('服务商返回：InvalidEndpointOrModel.NotFound（HTTP 404）');
+    expect(card_.textContent).not.toContain('这个服务已经不存在');
+    vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: { requestId: 'r', level, ok: true } }));
+    fireEvent.click(within(card_).getByRole('button', { name: '测试连接' }));
+    await within(card_).findByText('可以使用');
+    forgetTest('ds');
+  });
+  it('says a failure once: the open card leaves the reason to the line that already gives it', async () => {
+    forgetTest('ds');
+    const { api } = fixture([usable]);
+    vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: level === 'configuration' ? { requestId: 'r', level, ok: true } : { requestId: 'r', level, ok: false, error: publicError('authentication_failed', undefined, { status: 401 }) } }));
+    show(api);
+    const card_ = card('DeepSeek');
+    fireEvent.click(await within(card_).findByRole('button', { name: '测试连接' }));
+    await within(card_).findByText('最近一次测试失败');
+    expect(card_.textContent!.match(/Key 无效或已过期/gu)).toHaveLength(1);
+    forgetTest('ds');
+  });
+  it('a configuration check that fails counts as the last test', async () => {
+    forgetTest('ds');
+    const { api } = fixture([usable]);
+    vi.mocked(api.testConnection).mockImplementation(async ({ providerId, level }) => ({ providerId, result: { requestId: 'r', level, ok: false, error: publicError('invalid_input') } }));
+    show(api);
+    const card_ = card('DeepSeek');
+    fireEvent.click(await within(card_).findByRole('button', { name: '测试连接' }));
+    await within(card_).findByText('最近一次测试失败');
+    forgetTest('ds');
+  });
+  it('words a 404 from the service as being about its model; only a missing record of this app is about the service', () => {
+    expect(errorMessage(publicError('not_found', undefined, { status: 404 }))).toBe('服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查。服务商返回：HTTP 404，没有错误码。');
+    expect(errorMessage(publicError('not_found'))).toBe('这个服务已经不存在，请重新打开设置。');
   });
 });
 

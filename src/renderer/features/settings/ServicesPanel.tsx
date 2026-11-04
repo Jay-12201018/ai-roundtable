@@ -5,7 +5,7 @@ import { DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS, DEFAULT_MODEL_MAX_OUTPUT_TOKENS, M
 import { Button, Field, IconButton, Pill, Switch, Tag, cx } from '../../components/ui';
 import { presetOf, targetOf } from './presets';
 import { modelNote } from '../../../shared/serviceCatalog';
-import { delistedText, discoveryText, errorMessage, modelBlockText, multimodalText, refreshStaleModels, serviceStatus, testService, type ServiceTest } from './model';
+import { delistedText, discoveryText, errorMessage, forgetTest, rememberTest, lastTestOf, modelBlockText, multimodalText, refreshStaleModels, serviceStatus, testService, type ServiceTest } from './model';
 
 /** D134: why these limits cannot be saved; Main's schema refuses the same values. */
 function limitsError({ context, output }: { context: string; output: string }): string | undefined {
@@ -80,7 +80,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
     setConfig(value); setDraft({ name: value.name }); onChanged(); return done;
   });
 
-  const status = serviceStatus(summary, readiness);
+  const status = serviceStatus(summary, readiness, lastTestOf(summary.id));
   const preset = presetOf({ kind: summary.kind, baseUrl: config?.baseUrl ?? readiness?.baseUrl });
   const mock = summary.kind === 'mock';
   const target = config ? targetOf(config) : null;
@@ -91,8 +91,10 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
   const keySaved = keyNow === 'configured' || keyNow === 'session';
   const models = config ? [...new Map([...(config.defaultModelId ? [{ id: config.defaultModelId, name: config.customModels.find(model => model.id === config.defaultModelId)?.name ?? config.defaultModelId }] : []), ...config.customModels].map(model => [model.id, model])).values()] : [];
   const modelCount = readiness?.models.length ?? models.length;
+  // When the card is open, the test button and the model list already spell out their own failures.
+  const statusDetail = expanded && (check?.tone === 'warn' || status.label === 'Key 可能有问题') ? '' : status.detail;
   const subline = mock || outside ? status.detail : [modelCount ? `${modelCount} 个模型` : undefined,
-    keySaved ? keyNow === 'session' ? 'Key 只在这次运行有效' : 'Key 在钥匙串' : undefined, status.detail || undefined].filter(Boolean).join(' · ');
+    keySaved ? keyNow === 'session' ? 'Key 只在这次运行有效' : 'Key 在钥匙串' : undefined, statusDetail || undefined].filter(Boolean).join(' · ');
 
   function refreshList() {
     if (!config) return;
@@ -103,7 +105,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
     void act(async () => {
       const at = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
       const configuration = (await api.testConnection({ providerId: config.id, level: 'configuration' })).result;
-      if (!configuration.ok) { if (alive.current) setCheck({ tone: 'warn', text: `配置有问题：${errorMessage(configuration.error)}`, at }); return; }
+      if (!configuration.ok) { const failed: ServiceTest = { tone: 'warn', text: `配置有问题：${errorMessage(configuration.error)}` }; rememberTest(config.id, failed); if (alive.current) setCheck({ ...failed, at }); return; }
       const result = await testService(api, config, config.defaultModelId ?? config.customModels[0]?.id);
       if (alive.current) setCheck({ ...result, at });
     });
@@ -126,7 +128,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
     const which = confirming;
     if (!config && which !== 'service') return;
     void act(async () => {
-      if (which === 'key') { await api.deleteKey({ providerId: summary.id }); setConfirming(undefined); onChanged(); void load(); return 'Key 已删除。'; }
+      if (which === 'key') { await api.deleteKey({ providerId: summary.id }); forgetTest(summary.id); setCheck(undefined); setConfirming(undefined); onChanged(); void load(); return 'Key 已删除。'; }
       await api.deleteProvider({ id: summary.id }); onChanged();
     });
   }
@@ -175,7 +177,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
       {config && !outside && <div className="model-row svc-checks">
         <Button size="sm" disabled={busy || !config.enabled || !mock && !keySaved} onClick={runCheck}>测试连接</Button><span className="small muted">{mock ? '演示，不联网' : '可能产生极少的费用'}</span>
         <span className="push" role="status" aria-live="polite">
-          {check && <span className={cx('status-text', check.tone === 'ok' ? 'ok-text' : 'warn-text')}>{check.tone === 'ok' ? <Check aria-hidden /> : <CircleAlert aria-hidden />}{check.text} · {check.at}</span>}</span>
+          {check && <span className={cx('status-text', check.tone === 'ok' ? 'ok-text' : 'warn-text')}>{check.tone === 'ok' ? <Check aria-hidden /> : <CircleAlert aria-hidden />}{check.text.replace(/。$/u, '')} · {check.at}</span>}</span>
       </div>}
       {notice && <p role="status" className="ok-text small svc-pad">{notice}</p>}
       {error && <p role="alert" className="field-error svc-pad">{error}</p>}

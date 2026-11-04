@@ -78,4 +78,12 @@ export function usageDetail(usage: RequestUsage): string {
     : '请求没有发出。';
 }
 
-export const messageStatusText: Record<string, string> = { streaming: '正在发言', failed: '生成失败，已保留部分文字', aborted: '已中止 · 保留部分文字' };
+/** Says a part was kept only when one was. */
+export function messageStatusText(message: { status: string; content: string }): string {
+  switch (message.status) {
+    case 'streaming': return '正在发言';
+    case 'failed': return message.content ? '生成失败，已保留部分文字' : '生成失败';
+    case 'aborted': return message.content ? '已中止 · 保留部分文字' : '已中止';
+    default: return '';
+  }
+}

@@ -493,6 +493,7 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 | IPC / Preload | 删除 `settings.listModels` 和整个 `network` 分组；新增 `settings.refreshModels`（只收 `providerId`、`force`，不能写入模型） | 破坏性，只有 Renderer 使用 |
 | Database / migration 14 | 改名和停用见 D143，判断用地址快照；migration 11 的一条 CHECK 改为只校验非空文本（D143 的一次性例外），其余 1–13 未改；v14 新增 `provider_model_discovery`，只有 Main 写 | 这张表在 v14 删除，任何数据库的最终状态不变 |
 | Main | `ProviderRegistry` 的 `catalog()`、`transportHosts()`，构造参数 `catalog` 只供测试；`createSafeFetch` 增加允许的主机；`ProviderSettingsService` 保存和读取都按目录；适配器删除能力配置，`listModels` 只发 `GET /models` 到目录地址；`ProviderSettingsService.refreshModels` 负责节流和过滤；诊断去掉一个阶段和两个类别 | 内部 |
+| Shared | 错误增加可选的 `upstream`（状态和错误码，D145）；`RunSnapshot` 增加可选的 `lastFailure` | 追加，旧事件照常读取 |
 | Shared | `AgentConfiguration` 增加可选的 `builtInDemo`：从未配置过、由 Main 按内置演示运行的成员 | 只读，不进入保存的输入 |
 | Main | 不带流程的讨论，默认时长改为每人至少 1 分钟（至少 5 分钟） | 内部 |
 | Renderer | 新讨论页三步见 D144；`ConnectWizard` 只有选服务、Key 和模型列表；成员对话框按服务分组；服务卡片没有地址和手填模型，有“刷新模型列表”；房间页说明不再支持或可能已下线的模型，讨论页写明成员用的模型 | 内部 |

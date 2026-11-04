@@ -1,6 +1,6 @@
 import type { ModelReadiness, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
 import { ContractError } from '../../../shared/contracts/errors';
-import { apiErrorSchema, type ErrorCode } from '../../../shared/schemas/error';
+import { apiErrorSchema, upstreamText, type ErrorCode } from '../../../shared/schemas/error';
 
 const messages: Record<ErrorCode, string> = {
   invalid_input: '有一项填写不对，请检查后再试。', invalid_response: '返回结果无效，请重新打开设置。',
@@ -15,7 +15,11 @@ const messages: Record<ErrorCode, string> = {
 /** A fixed Chinese message per error code; never the error text itself, which could carry an echoed secret. */
 export function errorMessage(error: unknown): string {
   const parsed = apiErrorSchema.safeParse(error instanceof ContractError ? error.detail : error);
-  return messages[parsed.success ? parsed.data.code : 'internal_error'];
+  if (!parsed.success) return messages.internal_error;
+  const { code, upstream } = parsed.data;
+  // A 404 from the service is about its model; without one, it is this app's record of the service that is gone.
+  const message = code === 'not_found' && upstream ? '服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查。' : messages[code];
+  return `${message}${upstream ? `${upstreamText(upstream)}。` : ''}`;
 }
 export function errorCode(error: unknown): ErrorCode {
   const parsed = apiErrorSchema.safeParse(error instanceof ContractError ? error.detail : error);
@@ -24,7 +28,7 @@ export function errorCode(error: unknown): ErrorCode {
 
 export type ServiceStatus = { tone: 'ok' | 'warn' | 'neutral' | 'danger'; label: string; detail: string };
 /** One status per service card, the most useful next step first (README 功能对照「接入进度」). */
-export function serviceStatus(summary: ProviderSummary, readiness: ProviderReadiness | undefined): ServiceStatus {
+export function serviceStatus(summary: ProviderSummary, readiness: ProviderReadiness | undefined, lastTest?: ServiceTest): ServiceStatus {
   if (!summary.configurationValid || summary.kind === null) return { tone: 'danger', label: '配置有问题', detail: '这条配置读不出来，可以在“高级与删除”里删除后重新添加。' };
   if (readiness?.supported === false) return { tone: 'neutral', label: '已停用', detail: '这个服务已不再支持，可以删除。' };
   if (!summary.enabled) return { tone: 'neutral', label: '已停用', detail: '停用时不会发送任何请求，成员也不能用它。' };
@@ -32,7 +36,12 @@ export function serviceStatus(summary: ProviderSummary, readiness: ProviderReadi
   if (!readiness) return { tone: 'neutral', label: '正在读取', detail: '正在读取这个服务的状态…' };
   if (readiness.keyState === 'missing') return { tone: 'warn', label: '还没填写 Key', detail: '保存了配置，但还不能使用。' };
   if (readiness.keyState === 'unavailable') return { tone: 'warn', label: 'Key 读不出来', detail: '保存的 Key 现在读不出来，请重新填写。' };
-  if (readiness.models.some(model => model.usable)) return { tone: 'ok', label: '可以使用', detail: '' };
+  if (readiness.models.some(model => model.usable)) {
+    // A saved Key is not yet a working one: what was last seen of it decides, and a test that passes settles it.
+    if (lastTest?.tone === 'warn') return { tone: 'warn', label: '最近一次测试失败', detail: lastTest.text };
+    if (lastTest?.tone !== 'ok' && readiness.discovery?.outcome === 'authentication_failed') return { tone: 'warn', label: 'Key 可能有问题', detail: '模型列表接口没有接受这把 Key。点“测试连接”确认。' };
+    return { tone: 'ok', label: '可以使用', detail: '' };
+  }
   return { tone: 'warn', label: '暂时不能使用', detail: '检查这个服务是否已启用。' };
 }
 
@@ -50,12 +59,20 @@ export function modelBlockText(model: Pick<ModelReadiness, 'blockedBy'> | undefi
 }
 
 export type ServiceTest = { tone: 'ok' | 'warn'; text: string };
+// What the last 测试连接 found, for as long as this window is open; a new Key forgets it.
+const lastTests = new Map<string, ServiceTest>();
+export const lastTestOf = (providerId: string) => lastTests.get(providerId);
+export const rememberTest = (providerId: string, test: ServiceTest) => { lastTests.set(providerId, test); };
+export const forgetTest = (providerId: string) => { lastTests.delete(providerId); };
+
 /** 测试连接: one very short message to the chosen model, since that is the only way to know. The page says it may cost a little. */
 export async function testService(api: Pick<ProviderSettingsApiContract, 'testConnection'>, provider: { id: string; kind: ProviderSummary['kind'] }, modelId: string | null | undefined): Promise<ServiceTest> {
   if (provider.kind === 'mock') return { tone: 'ok', text: '演示服务可以使用' };
   if (!modelId) return { tone: 'warn', text: '请先选一个模型。' };
   const reply = (await api.testConnection({ providerId: provider.id, level: 'generation', modelId, allowGeneration: true })).result;
-  return reply.ok ? { tone: 'ok', text: '已收到回复，连接正常' } : { tone: 'warn', text: errorMessage(reply.error) };
+  const result: ServiceTest = reply.ok ? { tone: 'ok', text: '已收到回复，连接正常' } : { tone: 'warn', text: errorMessage(reply.error) };
+  rememberTest(provider.id, result);
+  return result;
 }
 
 /** D143: such a model takes part with text; nothing on the page should suggest images can be sent. */

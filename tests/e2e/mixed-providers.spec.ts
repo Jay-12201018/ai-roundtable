@@ -11,7 +11,7 @@ const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUN
 const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
   'settings-sections', 'services-dark', 'wizard-choose-dark', 'wizard-key-dark', 'discussion-dark', 'usage-dark',
   'stopped-service', 'stopped-member', 'stopped-service-dark', 'stopped-member-dark',
-  'setup-blocked', 'setup-first', 'setup-dialogue', 'setup-dialogue-dark', 'setup-dialogue-finished', 'setup-five', 'setup-three', 'setup-review', 'setup-custom', 'setup-narrow', 'setup-narrow-dark', 'setup-eight', 'setup-eight-dark',
+  'failure-card', 'failure-card-dark', 'failure-discussion', 'failure-details', 'failure-recovered', 'failure-list-refused', 'failure-rekey', 'setup-blocked', 'setup-first', 'setup-dialogue', 'setup-dialogue-dark', 'setup-dialogue-finished', 'setup-five', 'setup-three', 'setup-review', 'setup-custom', 'setup-narrow', 'setup-narrow-dark', 'setup-eight', 'setup-eight-dark',
   'multimodal-wizard', 'multimodal-member', 'discover-wizard', 'discover-members', 'discover-services', 'discover-delisted', 'discover-delisted-dark', 'pick-model', 'picked-discussion', 'picked-members', 'picked-member-dialog', 'picked-default', 'picked-finished', 'picked-members-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
@@ -590,6 +590,100 @@ test('new discussion: choose how it runs and how many, give each one a model, an
   await theme(running, 'dark');
   await capture(running, 'setup-eight-dark', '8 位成员、深色。');
   await theme(running, 'light');
+  if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
+  await running.quit();
+});
+
+test('when a service refuses: the page says what the service said in its own code, in plain words, and the green label follows what was last seen', async ({ harness }) => {
+  test.setTimeout(120_000);
+  const { fixture } = harness;
+  const words = 'The model does not exist or you do not have access to it';
+  fixture.reply = body => `${memberOf(body) ?? '成员'}的发言。`;
+  const running = await harness.launch();
+  const { page } = running;
+  await theme(running, 'light');
+  await page.getByRole('button', { name: '连接…' }).click();
+  await connect(running, /^DeepSeek/u);
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  const card = page.getByRole('region', { name: 'DeepSeek' });
+  await expect(card).toContainText('可以使用');
+
+  // A test that fails turns the green label, and shows the service's code but not its words.
+  fixture.chatError = () => ({ status: 404, body: { error: { code: 'InvalidEndpointOrModel.NotFound', message: words } } });
+  await card.getByRole('button', { name: '测试连接' }).click();
+  await expect(card).toContainText('最近一次测试失败');
+  await expect(card).not.toContainText('可以使用');
+  await expect(card).toContainText('服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查。');
+  await expect(card).toContainText('服务商返回：InvalidEndpointOrModel.NotFound（HTTP 404）');
+  await capture(running, 'failure-card', '测试失败：不再显示绿色“可以使用”；写明原因和服务商返回的错误码，不显示服务商的原话。');
+  await theme(running, 'dark');
+  await capture(running, 'failure-card-dark', '深色主题：测试失败。');
+  await theme(running, 'light');
+
+  // The same in a discussion, and in 运行详情.
+  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  await newDiscussion(running, roomName, '试点方案。');
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await expect(page.getByText('运行失败').first()).toBeVisible();
+  await expect(page.getByText('服务商返回：InvalidEndpointOrModel.NotFound（HTTP 404）').first()).toBeVisible();
+  await expect(page.getByText('生成失败', { exact: true })).toBeVisible();
+  await expect(page.getByText('已保留部分文字')).toHaveCount(0);
+  await capture(running, 'failure-discussion', '讨论失败：同样的中文说明和服务商错误码，没有英文原文。');
+  if (!(await page.locator('.run-panel').isVisible())) await page.getByRole('button', { name: '本场信息' }).click();
+  await page.locator('.dev-details summary').click();
+  await expect(page.locator('.dev-details')).toContainText('服务商返回：InvalidEndpointOrModel.NotFound（HTTP 404）');
+  await capture(running, 'failure-details', '运行详情：最近一次失败写着服务商返回的错误码。');
+  const text = await page.evaluate(() => document.body.innerText);
+  for (const english of ['Requested resource was not found', words, 'InvalidEndpointOrModel.NotFound: ']) expect(text).not.toContain(english);
+  const [stored] = harness.sql("SELECT payload_json AS payload FROM run_events WHERE type='turn_failed' LIMIT 1");
+  expect(JSON.stringify(stored)).toContain('InvalidEndpointOrModel.NotFound');
+  expect(JSON.stringify(stored)).not.toContain(words);
+  expect(running.output).not.toContain(words);
+
+  // Still there after a reload, read from Main.
+  await page.reload();
+  await page.waitForSelector('.sidebar');
+  await page.locator('.sb-runs .sb-item').first().click();
+  await expect(page.getByText('服务商返回：InvalidEndpointOrModel.NotFound（HTTP 404）').first()).toBeVisible();
+
+  // A test that passes brings the green label back.
+  fixture.chatError = undefined;
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  await card.getByRole('button', { name: '测试连接' }).click();
+  await expect(card).toContainText('已收到回复，连接正常');
+  await expect(card).toContainText('可以使用');
+  await expect(card).not.toContainText('最近一次测试失败');
+  await capture(running, 'failure-recovered', '测试成功后恢复绿色。');
+
+  // A refused model list says the Key may be at fault, until a test settles it.
+  fixture.modelListStatus = 401;
+  await card.getByRole('button', { name: '刷新模型列表' }).click();
+  await expect(card).toContainText('可能是 Key 的问题，也可能是这家的接口不接受这种访问');
+  await page.reload();
+  await page.waitForSelector('.sidebar');
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  await expect(card).toContainText('Key 可能有问题');
+  await expect(card).not.toContainText('可以使用');
+  await capture(running, 'failure-list-refused', '模型列表接口拒绝时不显示绿色，提示用“测试连接”确认。');
+  if (await page.getByRole('button', { name: '展开 DeepSeek' }).count()) await page.getByRole('button', { name: '展开 DeepSeek' }).click();
+  await card.getByRole('button', { name: '测试连接' }).click();
+  await expect(card).toContainText('可以使用');
+
+  // Replacing a Key tests that service's own model.
+  fixture.modelListStatus = undefined;
+  await page.getByRole('button', { name: '添加服务' }).click();
+  await connect(running, /^Kimi/u);
+  const kimi = page.getByRole('region', { name: 'Kimi', exact: true });
+  if (await page.getByRole('button', { name: '展开 Kimi' }).count()) await page.getByRole('button', { name: '展开 Kimi' }).click();
+  await kimi.getByRole('button', { name: '更换', exact: true }).click();
+  const dialog = page.locator('dialog[open]');
+  await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
+  const before = fixture.requests.length;
+  await dialog.getByRole('button', { name: '测试连接' }).click();
+  await expect(dialog.getByText('已收到回复，连接正常')).toBeVisible();
+  expect(fixture.requests.slice(before).map(request => [request.service, request.raw.model])).toEqual([['kimi', 'kimi-k3.1-pro']]);
+  await capture(running, 'failure-rekey', '更换 Key 窗口的测试连接，用的是这家服务自己的默认模型。');
+  await dialog.getByRole('button', { name: '关闭' }).first().click();
   if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
   await running.quit();
 });

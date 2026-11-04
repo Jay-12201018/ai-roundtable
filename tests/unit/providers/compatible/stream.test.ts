@@ -134,13 +134,16 @@ describe('compatible adapter over a stream', () => {
     await vi.waitFor(() => expect(cancelled).toBe(true), { timeout: 200 });
   });
 
-  it('cancels an unread sensitive error body before the SDK can buffer it', async () => {
-    let cancelled = false; let reads = 0;
-    const body = new ReadableStream({ pull() { reads++; }, cancel() { cancelled = true; } }, { highWaterMark: 0 });
+  it('gives up on an error body that does not end: the failure is reported soon, with no code and none of the words, and the body is cancelled', async () => {
+    let cancelled = false;
+    const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"error":{"code":"never_finished","message":"sensitive-words"')); }, cancel() { cancelled = true; } });
     const { provider } = setup(async () => new Response(body, { status: 401 }));
+    const started = Date.now();
     const events = await collect(provider.streamChat(input));
-    expect(events.at(-1)).toMatchObject({ type: 'error', error: { code: 'authentication_failed' } });
-    expect(reads).toBe(0); expect(cancelled).toBe(true);
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(events.at(-1)).toEqual({ type: 'error', requestId: input.requestId, error: expect.objectContaining({ code: 'authentication_failed', upstream: { status: 401 } }) });
+    expect(JSON.stringify(events)).not.toContain('sensitive-words');
+    expect(cancelled).toBe(true);
   });
 
   it('configuration does not resolve credentials or send; generation is explicit and bounded', async () => {

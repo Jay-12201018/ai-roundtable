@@ -25,6 +25,11 @@ export class DeepSeekFixture {
 
   get port() { return (this.server!.address() as AddressInfo).port; }
 
+  /** Answers a chat request with an error, as a service does. */
+  chatError?: (body: Record<string, any>) => { status: number; body: unknown } | undefined;
+  readonly failedRequests: Array<{ model: string; maxTokens: number }> = [];
+  /** The status `GET /models` answers with instead of a list. */
+  modelListStatus?: number;
   /** What `GET /models` lists for a service; without it the service has no such interface. Kept apart from `requests`: nothing is generated. */
   modelList?: (service: FixtureService) => string[] | undefined;
   readonly modelListRequests: Array<{ path: string; headers: IncomingHttpHeaders }> = [];
@@ -36,6 +41,7 @@ export class DeepSeekFixture {
       const service = /^\/([a-z]+)\//u.exec(req.url ?? '')?.[1] as FixtureService;
       if (req.method === 'GET') {
         this.modelListRequests.push({ path: req.url ?? '', headers: req.headers });
+        if (this.modelListStatus) { res.writeHead(this.modelListStatus); res.end(); return; }
         const ids = this.modelList?.(service);
         if (!ids) { res.writeHead(404); res.end(); return; }
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -43,6 +49,13 @@ export class DeepSeekFixture {
         return;
       }
       const raw = JSON.parse(Buffer.concat(parts).toString()) as Record<string, any>;
+      const failing = this.chatError?.(raw);
+      if (failing) {
+        this.failedRequests.push({ model: raw.model, maxTokens: raw.max_tokens });
+        res.writeHead(failing.status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(failing.body));
+        return;
+      }
       const body: ReplyBody = { model: raw.model, max_tokens: raw.max_tokens, messages: raw.messages, service };
       const mode = typeof this.mode === 'function' ? this.mode(body) : this.mode;
       this.requests.push({ path: req.url, service, model: body.model, maxTokens: body.max_tokens, mode, messages: body.messages, headers: req.headers, raw });

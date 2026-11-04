@@ -46,6 +46,8 @@ export const runSnapshotSchema = z.object({
   startedAt: timestampSchema.optional(), updatedAt: timestampSchema,
   workflow: workflowProgressSchema.optional(), execution: executionMetadataSchema.optional(), attempts: z.array(attemptSnapshotSchema).optional(),
   versions: z.array(messageVersionSchema).optional(), host: hostStateSchema.optional(),
+  /** The most recent turn failure, with what the service said, for the host to read after a restart too. */
+  lastFailure: apiErrorSchema.optional(),
   /** D133: token usage of this Run's real requests, one row per request. */
   usage: z.array(requestUsageSchema).optional(),
   // R13B (D107): conversation summaries and how full the next request's context is.

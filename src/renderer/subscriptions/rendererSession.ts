@@ -4,7 +4,7 @@ import { idSchema } from '../../shared/schemas/common';
 import { runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../shared/schemas/run';
 import type { RunEvent,InterruptedRunDecision } from '../../shared/types/run';
 import { createRendererStore,canRecover, type RendererCommand } from '../store/rendererStore';
-import { apiErrorSchema, type ErrorCode } from '../../shared/schemas/error';
+import { apiErrorSchema, upstreamText, type ApiError, type ErrorCode } from '../../shared/schemas/error';
 
 // Start refusals the host can act on get their own reason; anything else keeps the generic message.
 const startFailures: Partial<Record<string, string>> = {
@@ -17,11 +17,15 @@ const startFailures: Partial<Record<string, string>> = {
 const turnFailureMessages: Partial<Record<ErrorCode, string>> = {
   invalid_response: '模型未完整完成响应，部分输出已保留。', timeout: '请求已超时，部分输出已保留。', cancelled: '请求已停止，部分输出已保留。',
   authentication_failed: '服务商拒绝了这把 Key：可能无效或已过期，请到“设置 › 模型服务”检查。', forbidden: '服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
-  rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，请检查成员用的模型名。', network_error: '连接不上，请检查网络。',
+  rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查。', network_error: '连接不上，请检查网络。',
   target_rejected: '这个服务的地址解析到了内网或保留地址，请求没有发出。请检查网络后再试。',
   service_unsupported: '这位成员用的服务已不再支持，请在房间里给 TA 换一个模型。', model_unsupported: '这位成员用的模型已不再支持，请在房间里给 TA 换一个模型。',
   invalid_input: '服务商拒绝了这次请求：可能是讨论太长放不进模型的上下文（可以生成讨论摘要后重试）、模型名或上限不对，或账户余额不足。',
 };
+
+function turnFailureText(error: ApiError) {
+  return `${turnFailureMessages[error.code] ?? '模型请求失败，部分输出已保留。'}${error.upstream ? `${upstreamText(error.upstream)}。` : ''}`;
+}
 
 type RunControl = 'pause' | 'stop' | 'step' | 'resumeRun';
 type IdentityStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -43,8 +47,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       if(publicFailure&&publicFailure.sequence<=lastRunningSequence)publicFailure=undefined;
     }
     if((event.type==='turn_failed'||event.type==='turn_aborted')&&event.sequence>lastRunningSequence&&(!publicFailure||event.sequence>publicFailure.sequence)){
-      const code=event.payload.error.code;
-      publicFailure={sequence:event.sequence,message:turnFailureMessages[code]??'模型请求失败，部分输出已保留。'};
+      publicFailure={sequence:event.sequence,message:turnFailureText(event.payload.error)};
     }
   }
 
@@ -140,7 +143,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
             lastRunningSequence=Math.max(lastRunningSequence,parsed.data.snapshot.sequence);
             if(publicFailure&&publicFailure.sequence<=lastRunningSequence)publicFailure=undefined;
           }
-          if(parsed.data.snapshot.status==='error')store.getState().setError(publicFailure&&publicFailure.sequence<=parsed.data.snapshot.sequence?publicFailure.message:'运行失败，请检查讨论长度和单次输出上限、模型配置或响应限制。历史输出已保留。',generation);
+          if(parsed.data.snapshot.status==='error')store.getState().setError(publicFailure&&publicFailure.sequence<=parsed.data.snapshot.sequence?publicFailure.message:parsed.data.snapshot.lastFailure?turnFailureText(parsed.data.snapshot.lastFailure):'运行失败，请检查讨论长度和单次输出上限、模型配置或响应限制。历史输出已保留。',generation);
           // The subscription snapshot already includes its replay events.
           if (applyBuffered()) {
             store.getState().setSyncStatus('ready', generation);

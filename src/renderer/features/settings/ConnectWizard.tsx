@@ -4,7 +4,7 @@ import type { KeyStorageStatus, ProviderConfiguration, ProviderReadiness, Provid
 import { Button, Choice, Field, Modal } from '../../components/ui';
 import { presets, presetOf, targetOf, type ServicePreset } from './presets';
 import { modelNote } from '../../../shared/serviceCatalog';
-import { errorMessage, multimodalText, refreshStaleModels, testService, type ServiceTest } from './model';
+import { errorMessage, forgetTest, multimodalText, refreshStaleModels, testService, type ServiceTest } from './model';
 
 /** What the app did after a connection: the room it created for the first real service, if any. */
 export type ConnectedRoom = { roomId: string; roomName: string; memberNames: string[]; modelName: string | null };
@@ -30,7 +30,8 @@ const storageText = (storage: KeyStorageStatus | null) => storage?.mode === 'mem
 export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onStart }: ConnectWizardProps) {
   const [picking, setPicking] = useState(!rekey);
   const [preset, setPreset] = useState<ServicePreset>(() => (rekey && presetOf(rekey)) || presets[0]!);
-  const [modelId, setModelId] = useState(() => presets[0]!.models[0]?.id ?? '');
+  // Replacing a Key tests that service's own model.
+  const [modelId, setModelId] = useState(() => rekey ? rekey.defaultModelId ?? rekey.customModels[0]?.id ?? '' : presets[0]!.models[0]?.id ?? '');
   const [hasKey, setHasKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [storage, setStorage] = useState<KeyStorageStatus | null>(null);
@@ -79,7 +80,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     if (!mock && !keySaved && apiKey.trim() === '') { setError('请粘贴 API Key。'); return; }
     clearSecret();
     const provider = rekey ?? await saveConfiguration();
-    if (!mock && apiKey.trim()) { await api.setKey({ providerId: provider.id, apiKey }); if (alive.current) setKeySaved(true); }
+    if (!mock && apiKey.trim()) { await api.setKey({ providerId: provider.id, apiKey }); forgetTest(provider.id); if (alive.current) setKeySaved(true); }
     return provider;
   }
 

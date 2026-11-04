@@ -164,43 +164,71 @@
   "caption": "8 位成员、深色。"
  },
  {
-  "file": "42-multimodal-wizard.png",
+  "file": "42-failure-card.png",
+  "caption": "测试失败：不再显示绿色“可以使用”；写明原因和服务商返回的错误码，不显示服务商的原话。"
+ },
+ {
+  "file": "43-failure-card-dark.png",
+  "caption": "深色主题：测试失败。"
+ },
+ {
+  "file": "44-failure-discussion.png",
+  "caption": "讨论失败：同样的中文说明和服务商错误码，没有英文原文。"
+ },
+ {
+  "file": "45-failure-details.png",
+  "caption": "运行详情：最近一次失败写着服务商返回的错误码。"
+ },
+ {
+  "file": "46-failure-recovered.png",
+  "caption": "测试成功后恢复绿色。"
+ },
+ {
+  "file": "47-failure-list-refused.png",
+  "caption": "模型列表接口拒绝时不显示绿色，提示用“测试连接”确认。"
+ },
+ {
+  "file": "48-failure-rekey.png",
+  "caption": "更换 Key 窗口的测试连接，用的是这家服务自己的默认模型。"
+ },
+ {
+  "file": "49-multimodal-wizard.png",
   "caption": "多模态模型可以选，说明里写明多模态；下面写清目前只用文字讨论。"
  },
  {
-  "file": "43-multimodal-member.png",
+  "file": "50-multimodal-member.png",
   "caption": "编辑成员：选中多模态模型时同样写明只用文字。"
  },
  {
-  "file": "44-discover-wizard.png",
+  "file": "51-discover-wizard.png",
   "caption": "服务商列表多了一个本品牌新模型：排在内置模型后面，只显示模型 ID；其他品牌和翻译模型都没有进来。"
  },
  {
-  "file": "45-discover-members.png",
+  "file": "52-discover-members.png",
   "caption": "三位成员用的就是选中的新模型。"
  },
  {
-  "file": "46-discover-services.png",
+  "file": "53-discover-services.png",
   "caption": "服务卡片：写明模型列表来自服务商，旁边是“刷新模型列表”；上限和内置模型一样可以改。"
  },
  {
-  "file": "47-discover-delisted.png",
+  "file": "54-discover-delisted.png",
   "caption": "模型从服务商列表消失：成员的选择不变，写明可能已下线，由主持人决定。"
  },
  {
-  "file": "48-discover-delisted-dark.png",
+  "file": "55-discover-delisted-dark.png",
   "caption": "深色主题：模型可能已下线。"
  },
  {
-  "file": "49-thinking-wait.png",
+  "file": "56-thinking-wait.png",
   "caption": "思考期间：<think> 块和 reasoning_content 都不显示；第二位成员还没有正文，写明正在思考或生成，不像卡住。"
  },
  {
-  "file": "50-quota-used-up.png",
+  "file": "57-quota-used-up.png",
   "caption": "额度用完：第三位成员 8192 全用在思考上，没有正文。写明原因和解决办法，旁边就是“重新生成”。"
  },
  {
-  "file": "51-quota-regenerated.png",
+  "file": "58-quota-regenerated.png",
   "caption": "调高最大输出后重新生成：这次请求按 16000 发出，写出了正文。"
  }
 ]

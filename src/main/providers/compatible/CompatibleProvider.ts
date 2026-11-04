@@ -3,7 +3,7 @@ import { ContractError, toPublicError } from '../../../shared/contracts/errors';
 import type { KeyReference, ProviderConfiguration } from '../../../shared/contracts/configuration';
 import { providerBaseUrlSchema, providerConfigurationSchema } from '../../../shared/schemas/configuration';
 import { connectionLevelSchema, streamChatInputSchema, testConnectionInputSchema } from '../../../shared/schemas/provider';
-import { idSchema } from '../../../shared/schemas/common';
+import { idSchema, looksLikeApiKey } from '../../../shared/schemas/common';
 import type { ErrorCode } from '../../../shared/schemas/error';
 import type { ConnectionTestResult, NormalizedChunk, ProviderAdapter, StreamChatInput, TestConnectionInput } from '../types';
 import { readSse } from './sse';
@@ -108,7 +108,7 @@ export class CompatibleProvider implements ProviderAdapter {
         for await (const event of this.streamChat({ requestId: parsed.requestId, modelId: parsed.modelId!,
           messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8, signal: scope.signal })) {
           scope.check();
-          if (event.type === 'error') throw new ContractError(event.error.code);
+          if (event.type === 'error') throw new ContractError(event.error.code, undefined, event.error.upstream);
           if (event.type === 'finish') complete = event.reason === 'stop' || event.reason === 'length';
         }
         if (!complete) throw new ContractError('invalid_response');
@@ -244,18 +244,46 @@ export class CompatibleProvider implements ProviderAdapter {
     try { scope.check(); } catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
     if (response.ok) return response;
     this.diagnostics?.({ stage: 'response', category: 'http_error' });
-    // Discard untrusted error bodies and headers: they may echo a Key.
-    void response.body?.cancel().catch(() => {});
-    throw new ContractError(response.status >= 300 && response.status < 400 ? 'invalid_response' : statusCode(response.status));
+    // A redirect is no statement from the service: its body is not read, and it is not followed.
+    if (response.status >= 300 && response.status < 400) { void response.body?.cancel().catch(() => {}); throw new ContractError('invalid_response', undefined, { status: response.status }); }
+    // An error body is untrusted and may echo a Key: only a code-shaped value is taken from it, and its words are never kept.
+    throw new ContractError(statusCode(response.status), undefined, { status: response.status, ...await errorCodeOf(response, scope, key) });
   }
 
   private failure(error: unknown, scope: RequestScope): ContractError {
     if (scope.signal.aborted) return new ContractError(scope.signal.reason instanceof ContractError ? scope.signal.reason.code : 'cancelled');
-    if (error instanceof ContractError) return new ContractError(error.code);
+    if (error instanceof ContractError) return new ContractError(error.code, undefined, error.detail.upstream);
     // The transport's own connection timeout, told apart by its cause; the text goes no further.
     if (error instanceof TypeError && error.cause instanceof Error && /time(?:d)?\s*-?out/iu.test(error.cause.message)) return new ContractError('timeout');
     return new ContractError(toPublicError(error, 'network_error').code);
   }
+}
+
+const upstreamCode = /^[A-Za-z0-9_.-]{1,64}$/u;
+const errorBodyBytes = 64 * 1024;
+const errorBodyMs = 2_000;
+/** The service's own error code, from where these services put it. A body that is long or slow to end costs the code, not the failure. */
+async function errorCodeOf(response: Response, scope: RequestScope, key: string): Promise<{ code?: string }> {
+  if (!response.body) return {};
+  const reader = response.body.getReader(); const decoder = new TextDecoder('utf-8', { fatal: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('late')), errorBodyMs); });
+  try {
+    let text = ''; let bytes = 0;
+    while (true) {
+      const next = await Promise.race([scope.wait(() => reader.read()), late]);
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > errorBodyBytes) return {};
+      text += decoder.decode(next.value, { stream: true });
+    }
+    const body = JSON.parse(text + decoder.decode()) as { error?: { code?: unknown; type?: unknown }; code?: unknown } | null;
+    for (const value of [body?.error?.code, body?.error?.type, body?.code]) {
+      const code = typeof value === 'number' ? String(value) : value;
+      if (typeof code === 'string' && upstreamCode.test(code) && !code.includes(key) && !looksLikeApiKey(code)) return { code };
+    }
+    return {};
+  } catch { return {}; } finally { clearTimeout(timer); void reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
 function statusCode(status: number): ErrorCode {

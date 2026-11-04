@@ -86,7 +86,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
   const regenerate = () => void commands.send(`regenerate:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId }, '已发送重新生成请求。');
   const save = (content: string) => void commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content }, '已保存为新版本。')
     .then(ok => { if (ok) { setEditing(false); setViewing(undefined); } });
-  const status = messageStatusText[shown.message.status];
+  const status = messageStatusText(shown.message);
   return <article className={cx('msg', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · ${name}`}>
     <div className="msg-head">
       <Avatar name={name} /><span className="msg-name">{name}</span><span className="msg-meta">{modelLabel(member, providers)}</span>

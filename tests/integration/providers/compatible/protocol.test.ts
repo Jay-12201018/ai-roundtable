@@ -84,7 +84,7 @@ describe('R02 protocol consumption with isolated HTTP fixtures', () => {
       headers: { location: 'https://unconfirmed.invalid/fixture-secret' } }));
     const provider = new CompatibleProvider({ configuration, confirmedBaseUrl: 'https://service.example/v1', resolveKey: async () => 'fixture-only', fetch: fetcher });
     const events = await collect(provider.streamChat(input));
-    expect(events).toEqual([{ type: 'error', requestId: input.requestId, error: { code: 'invalid_response', message: 'Invalid response; refresh the run snapshot', retryable: false } }]);
+    expect(events).toEqual([{ type: 'error', requestId: input.requestId, error: { code: 'invalid_response', message: 'Invalid response; refresh the run snapshot', retryable: false, upstream: { status: 307 } } }]);
     expect(fetcher).toHaveBeenCalledTimes(1); expect(cancelled).toBe(true);
     expect(JSON.stringify(events)).not.toContain('unconfirmed');
   });

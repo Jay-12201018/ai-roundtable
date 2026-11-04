@@ -35,14 +35,19 @@ const errorFieldSchema = z.enum(['arguments', 'roomId', 'runId', 'turnId', 'mess
   'rootId', 'previewId', 'files']);
 export type ErrorField = z.infer<typeof errorFieldSchema>;
 
+/** What the service said went wrong: its HTTP status and its own error code, when that looks like one. Never its words. */
+export const upstreamErrorSchema = z.object({ status: z.number().int().min(100).max(599), code: z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/u).optional() }).strict();
+export type UpstreamError = z.infer<typeof upstreamErrorSchema>;
+export const upstreamText = (upstream: UpstreamError | undefined) => !upstream ? '' : upstream.code ? `服务商返回：${upstream.code}（HTTP ${upstream.status}）` : `服务商返回：HTTP ${upstream.status}，没有错误码`;
+
 export const apiErrorSchema = z.object({
-  code: errorCodeSchema, message: z.string(), retryable: z.boolean(), field: errorFieldSchema.optional(),
+  code: errorCodeSchema, message: z.string(), retryable: z.boolean(), field: errorFieldSchema.optional(), upstream: upstreamErrorSchema.optional(),
 }).strict().refine((error) => error.message === errorMessages[error.code] && error.retryable === retryableCodes.includes(error.code)
   && (error.field === undefined || error.code === 'invalid_input'), 'Invalid public error');
 export type ApiError = z.infer<typeof apiErrorSchema>;
 
-export function publicError(code: ErrorCode, field?: ErrorField): ApiError {
-  return { code, message: errorMessages[code], retryable: retryableCodes.includes(code), ...(field === undefined ? {} : { field }) };
+export function publicError(code: ErrorCode, field?: ErrorField, upstream?: UpstreamError): ApiError {
+  return { code, message: errorMessages[code], retryable: retryableCodes.includes(code), ...(field === undefined ? {} : { field }), ...(upstream === undefined ? {} : { upstream }) };
 }
 
 export function inputError(error: z.ZodError): ApiError {

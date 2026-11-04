@@ -210,7 +210,9 @@ export class RunService {
       const {run,turns,messages,attempts,sequence} = data;
       const {id,roomId,status,workflowSnapshot,lastError,...execution} = run;
       const versions = this.versionView(data);
+      const lastFailure = turns.some(turn => turn.status === 'failed') ? this.database.latestTurnFailure(run.id) : undefined;
       return runSnapshotSchema.parse({
+        ...(lastFailure ? { lastFailure } : {}),
         runId: run.id,
         roomId: run.roomId,
         status: run.status,
@@ -931,7 +933,7 @@ export class RunService {
           const parsed = normalizedChunkSchema.safeParse(next.value);
           if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
           const chunk = parsed.data;
-          if (chunk.type === 'error') throw new ContractError(chunk.error.code);
+          if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, chunk.error.upstream);
           if (chunk.type === 'start') { if (started) throw new ContractError('invalid_response'); started = true; continue; }
           if (!started) throw new ContractError('invalid_response');
           if (chunk.type === 'finish') { finishReason = chunk.reason; continue; }
@@ -1426,7 +1428,7 @@ export class RunService {
           const parsed = normalizedChunkSchema.safeParse(next.value);
           if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
           const chunk = parsed.data;
-          if (chunk.type === 'error') throw new ContractError(chunk.error.code);
+          if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, chunk.error.upstream);
           if (chunk.type === 'start') {
             if (started) throw new ContractError('invalid_response');
             started = true;

@@ -20,7 +20,7 @@ import { requestUsageSchema, type RequestUsage, type UsageKind } from '../../sha
 import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
 import { ContractError } from '../../shared/contracts/errors';
 import type { ArtifactIssue, ArtifactKind } from '../../shared/schemas/artifact';
-import { errorCodeSchema, type ErrorCode } from '../../shared/schemas/error';
+import { apiErrorSchema, errorCodeSchema, type ApiError, type ErrorCode } from '../../shared/schemas/error';
 import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions } from '../../shared/schemas/configuration';
 import type { RoomInput,RoomConfiguration,AgentInput,AgentConfiguration,ProviderInput,ProviderConfiguration,ProviderSummary,RoomMessagePageInput,RoomMessagePage,RoomRunPageInput,RoomRunPage } from '../../shared/contracts/configuration';
 import { migration2 } from './migrations/v2';
@@ -1324,6 +1324,14 @@ export class Database {
       this.db.prepare('DELETE FROM key_records WHERE provider_id=?').run(id);
       this.db.prepare('DELETE FROM providers WHERE id=?').run(id);
     });
+  }
+
+  /** The error of a Run's latest turn_failed event, if it reads as one; older events may not. */
+  latestTurnFailure(runId: string): ApiError | undefined {
+    this.assertInitialized();
+    const payload = this.db.prepare("SELECT payload_json FROM run_events WHERE run_id=? AND type='turn_failed' ORDER BY sequence DESC LIMIT 1").pluck().get(runId) as string | undefined;
+    if (!payload) return undefined;
+    try { const parsed = apiErrorSchema.safeParse((JSON.parse(payload) as { error?: unknown }).error); return parsed.success ? parsed.data : undefined; } catch { return undefined; }
   }
 
   /** D143: what the service's own model list said last, if it was ever asked. */
