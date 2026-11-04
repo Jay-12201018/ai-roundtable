@@ -20,10 +20,10 @@ test('the Key is used for requests but never appears in the database, logs, expo
   await expect(page.locator('.target')).toContainText('Key 只会发往 https://api.deepseek.com');
   const key = page.getByRole('textbox', { name: 'API Key' });
   await key.fill(FAKE_KEY);
-  // 测试连接 asks the model list first, so nothing is generated; it saves what is typed so far.
+  // 测试连接 sends one very short message; it saves what is typed so far.
   await page.getByRole('button', { name: '测试连接' }).click();
-  await expect(page.getByText('Key 有效，连接正常')).toBeVisible();
-  expect(fixture.requests.at(-1)!.path).toBe('/deepseek/models');
+  await expect(page.getByText('已收到回复，连接正常')).toBeVisible();
+  expect(fixture.requests.at(-1)).toMatchObject({ path: '/deepseek/chat/completions', maxTokens: 8 });
   await expect(key, 'The field is empty once the Key is saved').toHaveValue('');
   await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
   await expect(page.locator('dialog[open]')).toHaveCount(0);

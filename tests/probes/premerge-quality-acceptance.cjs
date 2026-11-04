@@ -233,9 +233,9 @@ async function main() {
     await click('设置');
     await until(`document.querySelector('.svc-card') && document.body.innerText.includes('deepseek-flash')`, 'service card');
     const purged = await js(`window.roundtable.settings.listProviderSummaries().then(list => window.roundtable.settings.getProviderConfiguration({ id: list[0].id }))`);
-    check(purged.defaultModelId === null && JSON.stringify(purged.customModels) === JSON.stringify([{ id: 'deepseek-flash', name: 'DeepSeek Flash' }]), 'The default model is empty and only deepseek-flash remains after the purge');
+    check(purged.defaultModelId === null && JSON.stringify(purged.customModels.map(model => model.id)) === JSON.stringify(['deepseek-flash', 'deepseek-v4-pro']), 'The default model is empty and only the catalog models remain after the purge');
     check(!(await text()).includes(pastedKey) && !(await text()).includes('已经隐藏'), 'Nothing key-like is left to hide');
-    await capture('purged-provider', '设置 › 模型服务：DeepSeek的默认模型已被清空，自定义模型里那条疑似 Key 的条目已删除，只剩 deepseek-flash；页面上没有任何密钥文本。', '.svc-card');
+    await capture('purged-provider', '设置 › 模型服务：DeepSeek 的默认模型已被清空，那条疑似 Key 的条目已删除，只剩目录里的模型；页面上没有任何密钥文本。', '.svc-card');
     // Step R2: the earlier Run's members are named by their Provider, never by its UUID.
     await click('校园跑腿讨论', { selector: '.sb-item' });
     const runAt = await until(`(() => { const e = [...document.querySelectorAll('.sb-runs .sb-item')].find(e => e.textContent.startsWith(${JSON.stringify(earlier)})); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`, 'earlier run listed');
