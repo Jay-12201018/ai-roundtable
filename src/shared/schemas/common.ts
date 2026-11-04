@@ -6,7 +6,7 @@ z.config({ jitless: true });
 export const PROTOCOL_VERSION = 1 as const;
 export const idSchema = z.string().min(1).max(256).regex(/^\S+$/u);
 // Common credential prefixes, wherever a Key may have been copied from.
-const keyPrefix = /^(?:sk[-_]|rk[-_]|AIza|gh[pousr]_|github_pat_|xox[abprs]-|hf_|gsk_|xai-|AKIA|ASIA)/u;
+const keyPrefix = /^(?:sk[-_]|rk[-_]|gh[pousr]_|github_pat_|xox[abprs]-|AKIA|ASIA)/u;
 /**
  * True for text that looks like an API key rather than a model ID (D096): a credential prefix, or a long run of
  * letters and digits with no separators. Model IDs such as `deepseek-flash` or `models/some-model-2.5` never match.

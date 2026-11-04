@@ -10,9 +10,9 @@ import { streamChatInputSchema } from '../../../src/shared/schemas/provider';
 
 // Synthetic look-alikes only; none of these is a real credential.
 const keyLike = [
-  'sk-0123456789abcdef0123456789abcdef', 'sk-ant-api03-AbCdEfGhIjKlMnOp', 'sk_live_AbCdEf123456',
-  'AIzaSyA1b2C3d4E5f6G7h8I9j0KlMnOpQrStUv', 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'xai-AbCdEfGhIjKlMnOpQrSt',
-  'gsk_AbCdEfGhIjKlMnOpQrSt', 'hf_AbCdEfGhIjKlMnOpQrSt', 'AKIAABCDEFGHIJKLMNOP', 'Zk3mQ9xT2vB7nL4pR8sW1yC6dF5gH0jK',
+  'sk-0123456789abcdef0123456789abcdef', 'sk-AbCdEfGhIjKlMnOp', 'sk_live_AbCdEf123456', 'rk-AbCdEfGhIjKlMnOp',
+  'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'github_pat_AbCdEfGhIjKl', 'xoxb-AbCdEfGhIjKl',
+  'AKIAABCDEFGHIJKLMNOP', 'ASIAABCDEFGHIJKLMNOP', 'Zk3mQ9xT2vB7nL4pR8sW1yC6dF5gH0jK',
   'a3f9c2e17b4d8a6f0e5c1b9d7a2f4e6c8b0d3a5f',
 ];
 const modelIds = [
