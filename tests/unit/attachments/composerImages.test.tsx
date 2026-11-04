@@ -67,6 +67,22 @@ describe('attaching images in the goal box (D147)', () => {
     expect(screen.getByRole('alert').textContent).toBe('每条消息最多 4 张，先移除一张再加。');
   });
 
+  it('says before sending when a message\'s images together would not fit one request, without stopping it', async () => {
+    const megabytes = (count: number) => ({ ...stored(), byteCount: count * 1024 * 1024 });
+    const api = { addImage: vi.fn<AttachmentApiContract['addImage']>() };
+    api.addImage.mockResolvedValueOnce(megabytes(10)).mockResolvedValueOnce(megabytes(10)).mockResolvedValueOnce(megabytes(1));
+    render(<Task api={api} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '讨论目标' }), { target: { value: '目标' } });
+    await pick([file('a.png'), file('b.png')]);
+    await waitFor(() => expect(within(tray()!).getAllByRole('img')).toHaveLength(2));
+    expect(screen.queryByRole('note')).toBeNull();
+    await pick([file('c.png')]);
+    await waitFor(() => expect(screen.getByRole('note').textContent).toContain('合计超过 20 MB，一次请求放不下'));
+    expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '移除第 3 张图片' }));
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
   it('the same image twice stays one, and says so', async () => {
     const same = stored();
     render(<Task api={{ addImage: async () => same }} />);

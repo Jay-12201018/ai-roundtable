@@ -94,5 +94,13 @@
   {
     "file": "24-unknown-refused-dark.png",
     "caption": "深色的失败提示。"
+  },
+  {
+    "file": "25-over-request-limit.png",
+    "caption": "三张 8 MB 合计超过单次请求 20 MB：发送前就地说明，不拦截。"
+  },
+  {
+    "file": "26-over-request-limit-dark.png",
+    "caption": "深色的同一提示。"
   }
 ]

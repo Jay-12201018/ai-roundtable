@@ -26,10 +26,10 @@ export const messageImagesOf = (content: string | readonly ProviderContentPart[]
  */
 export const IMAGE_INPUT_TOKENS = 4096;
 /**
- * D147: the most image bytes one request may carry. Each one is sent in full on every request that includes it, so a long
- * discussion with many images has to leave the oldest out rather than build a body no service would read.
+ * D147: the most image bytes one request may carry, about 27 MB once in base64. Each one is sent in full on every request that
+ * includes it, so a long discussion has to leave the oldest out: a body a service refuses whole would stop every turn after it.
  */
-export const MAX_REQUEST_IMAGE_BYTES = 64 * 1024 * 1024;
+export const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024;
 /**
  * D134: conservative defaults for a model with no limits of its own. No model name or vendor decides these. 128,000 is
  * the smallest context mainstream models share, and input is counted as an upper bound, so a request that passes fits

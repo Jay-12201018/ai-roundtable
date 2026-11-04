@@ -25,9 +25,14 @@ function fixture(runs: Array<{ id: string; task: string }> = []) {
   return { ...fake, rooms, previewWorkflow };
 }
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
-const ready = () => waitFor(() => expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(false));
 const chip = () => screen.getByRole('button', { name: '自定义流程' });
 const mode = () => document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent;
+// Without a remembered mode the start button is usable before the members are read; the setup above the box, which these tests read, waits for them.
+const ready = () => waitFor(() => {
+  expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(chip()).toBeTruthy();
+  expect(mode()).toBeTruthy();
+});
 
 describe('D116 the room remembers its discussion mode; Main checks it at every start', () => {
   it.each(['free-chat', 'two-model-dialogue', 'review-revision', 'deep-debate'] as const)('%s: checked in the dialog, remembered for the room, checked again at start', async template => {

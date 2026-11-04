@@ -373,3 +373,30 @@ test('when no member can see images it says so without stopping, and a discovere
   await capture(running, 'unknown-refused-dark', '深色的失败提示。');
   await running.quit();
 });
+
+test('images that together do not fit one request are flagged before sending, and the discussion still runs without them', async ({ harness }) => {
+  const { fixture } = harness;
+  fixture.reply = () => '只依据文字回答。';
+  const running = await harness.launch();
+  const { page } = running;
+  await seedDeepSeekRoom(running);
+  await newDiscussion(running, 'E2E 讨论', '三张大图');
+  const big = async (label: string) => Buffer.concat([await drawn(page, 'image/png', label, '#2d6a55'), Buffer.alloc(8 * 1024 * 1024)]);
+  await attachWithPaperclip(page, fileIn(harness, '一.png', await big('一')), fileIn(harness, '二.png', await big('二')));
+  await trayCount(page, 2);
+  await expect(page.getByRole('note').filter({ hasText: '合计超过' })).toHaveCount(0);
+  await attachWithPaperclip(page, fileIn(harness, '三.png', await big('三')));
+  await trayCount(page, 3);
+  await expect(page.getByRole('note').filter({ hasText: '这几张图片合计超过 20 MB，一次请求放不下' })).toBeVisible();
+  await capture(running, 'over-request-limit', '三张 8 MB 合计超过单次请求 20 MB：发送前就地说明，不拦截。');
+  await theme(running, 'dark');
+  await capture(running, 'over-request-limit-dark', '深色的同一提示。');
+  await theme(running, 'light');
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await statusHas(page, '已完成');
+  expect(imagesIn(fixture.requests[0].messages)).toEqual([]);
+  expect(textIn(fixture.requests[0].messages.at(-1))).toContain('主持人附了 3 张图片，这次请求放不下，没有附上');
+  await allDecoded(page, '.goal-card .message-image img', 3);
+  await running.quit();
+});
+

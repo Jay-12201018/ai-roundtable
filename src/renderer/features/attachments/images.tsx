@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ImageOff, LoaderCircle, Paperclip, X } from 'lucide-react';
 import { imageMediaTypeValues, imageUrl, MAX_IMAGES_PER_MESSAGE, type ImageAttachment } from '../../../shared/schemas/attachment';
+import { MAX_REQUEST_IMAGE_BYTES } from '../../../shared/schemas/provider';
 import { Button, IconButton, Modal, cx } from '../../components/ui';
 import type { ImageDraft } from './useImageDraft';
 import './images.css';
@@ -46,6 +47,8 @@ export function MessageImages({ images, className }: { images: readonly ImageAtt
 /** The waiting images, right above the words they go with, and what the host should know about them. */
 export function ImageTray({ draft, notes }: { draft: ImageDraft; notes?: ReactNode }) {
   if (!draft.items.length && !draft.error) return null;
+  // A request takes a message's images whole or not at all, so the host hears now that these would not go.
+  const tooMuch = draft.items.reduce((total, item) => total + (item.attachment?.byteCount ?? 0), 0) > MAX_REQUEST_IMAGE_BYTES;
   return <div className="image-tray">
     {draft.items.length > 0 && <ul className="image-tray-list" aria-label={`待发送的图片（${draft.items.length} / ${MAX_IMAGES_PER_MESSAGE}）`}>
       {draft.items.map((item, index) => <li key={item.key} className="image-tray-item">
@@ -55,6 +58,7 @@ export function ImageTray({ draft, notes }: { draft: ImageDraft; notes?: ReactNo
       </li>)}
     </ul>}
     {draft.error && <p className="field-error image-note" role="alert">{draft.error}</p>}
+    {tooMuch && <p className="image-note warn-text" role="note">这几张图片合计超过 {MAX_REQUEST_IMAGE_BYTES / 1024 / 1024} MB，一次请求放不下，不会发给模型，成员只会收到一句说明。移除几张，或换小一点的图。</p>}
     {draft.items.length > 0 && notes}
   </div>;
 }

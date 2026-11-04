@@ -237,6 +237,43 @@ describe('images count toward the context limit, and nothing is sent that does n
   });
 });
 
+describe('one request stays small enough for a service to read (D147)', () => {
+  const sized = (seed: string, megabytes: number) => { const bytes = new Uint8Array(megabytes * 1024 * 1024); bytes.set(png(seed)); return Buffer.from(bytes); };
+  const imageBytes = (body: Record<string, any>) => body.messages.flatMap((message: any) => Array.isArray(message.content) ? message.content : []).filter((part: any) => part.type === 'image_url')
+    .reduce((total: number, part: any) => total + Buffer.from(part.image_url.url.split(',')[1], 'base64').length, 0);
+
+  it('keeps the goal\'s images, then the newest, drops what is older and says so, and the body stays under 20 MB of images', async () => {
+    const f = await fixture({ members: [['看图', 'deepseek-flash']] });
+    const goal = await f.store.addImage({ bytes: sized('目标', 8) });
+    const started = await f.run.start({ roomId: 'room', task: '目标', attachmentIds: [goal.id], workflowSnapshot: {}, maxTurns: 2, mode: 'step' });
+    await f.run.waitForIdle(started.runId);
+    for (const [index, seed] of ['最旧', '较新', '最新'].entries()) {
+      const attachment = await f.store.addImage({ bytes: sized(seed, 5) });
+      await f.host.command({ runId: started.runId, clientRequestId: `big-${index}`, kind: 'interject', content: `插话${seed}`, attachmentIds: [attachment.id] });
+    }
+    await f.run.step(started.runId); await f.run.waitForIdle(started.runId);
+    const body = f.bodies.at(-1)!;
+    expect(imageBytes(body)).toBe(18 * 1024 * 1024);
+    expect(JSON.stringify(body).length).toBeLessThan(28 * 1024 * 1024);
+    const words = body.messages.map((message: any) => messageTextOf(message.content)).join('\n');
+    // The words of the oldest still go; only its image stays behind, and the model is told.
+    expect(words).toContain('插话最旧');
+    expect(words).toContain('主持人附了 1 张图片，这次请求放不下，没有附上');
+    expect(words.match(/这次请求放不下/gu)).toHaveLength(1);
+    expect(f.run.getSnapshot(started.runId).status).toBe('completed');
+  });
+
+  it('a single message over the limit goes without its images, and the discussion carries on', async () => {
+    const f = await fixture({ members: [['看图', 'deepseek-flash']] });
+    const attachments = await Promise.all(['一', '二', '三'].map(seed => f.store.addImage({ bytes: sized(seed, 8) })));
+    const runId = await start(f, attachments.map(item => item.id), 1);
+    expect(imageBytes(f.bodies[0])).toBe(0);
+    expect(wholeRequest(f.bodies[0])).toContain('主持人附了 3 张图片，这次请求放不下，没有附上');
+    expect(f.run.getSnapshot(runId).status).toBe('completed');
+    expect(f.run.getSnapshot(runId).taskAttachments).toEqual(attachments);
+  });
+});
+
 describe('a stored image is safe and stays where it belongs (D147)', () => {
   it('no bytes reach the input snapshot, events, the page\'s snapshot, logs or diagnostics', async () => {
     const logged = ['log', 'info', 'warn', 'error', 'debug'].map(method => vi.spyOn(console, method as 'log').mockImplementation(() => {}));

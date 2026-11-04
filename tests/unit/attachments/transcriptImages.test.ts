@@ -72,6 +72,20 @@ describe('the message format with images (D147)', () => {
     expect(decided.entries[0].imageNote).toBe(imageNotes.dropped(1));
   });
 
+  it('one request carries at most 20 MB of images; a message over that goes without them, and later ones still fit', () => {
+    expect(MAX_REQUEST_IMAGE_BYTES).toBe(20 * 1024 * 1024);
+    const eight = (seed: string) => image(seed, 8 * 1024 * 1024);
+    const decided = withImages([], [host('小的', [image('a', 1024)]), host('太多', [eight('b'), eight('c'), eight('d')]), host('最新', [eight('e')])], true);
+    expect(decided.entries[2].sentImages).toHaveLength(1);
+    expect(decided.entries[1].sentImages).toBeUndefined();
+    expect(decided.entries[1].imageNote).toBe(imageNotes.dropped(3));
+    expect(decided.entries[0].sentImages).toHaveLength(1);
+    const exact = withImages([], [host('', [image('a', MAX_REQUEST_IMAGE_BYTES)])], true);
+    expect(exact.entries[0].sentImages).toHaveLength(1);
+    const over = withImages([], [host('', [image('a', MAX_REQUEST_IMAGE_BYTES + 1)])], true);
+    expect(over.entries[0].sentImages).toBeUndefined();
+  });
+
   it('an image counts for one fixed amount in both counters, whatever its size', () => {
     const with2 = [{ role: 'user' as const, content: [{ type: 'text' as const, text: '字' }, { type: 'image' as const, attachmentId: 'a'.repeat(64), mediaType: 'image/png' as const }, { type: 'image' as const, attachmentId: 'b'.repeat(64), mediaType: 'image/webp' as const }] }];
     const plain = [{ role: 'user' as const, content: '字' }];
