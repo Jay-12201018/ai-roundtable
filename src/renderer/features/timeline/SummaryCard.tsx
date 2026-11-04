@@ -46,9 +46,11 @@ export function SummaryCard({ slot, snapshot, commands, summaries, onRegenerate,
     <div className="summary-head"><Layers aria-hidden size={16} /><b>讨论摘要</b><Tag>覆盖{range}</Tag>
       <Tag tone={used ? 'accent' : revoked ? 'warn' : 'neutral'}>{used && <Check aria-hidden />}{state}</Tag></div>
     {editing ? <div className="summary-body"><EditForm label="修改摘要内容" help="修改摘要（保存为新版本，并按修改后的内容确认使用；原版本保留）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} /></div>
-      : <div className="summary-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted">{request?.status === 'generating' ? '等待输出…' : '（没有生成内容）'}</p>}</div>}
+      : <div className="summary-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted">{request?.status === 'generating' ? '正在思考或生成，还没有输出文字…' : '（没有生成内容）'}</p>}</div>}
     {request && (request.status === 'failed' || request.status === 'aborted' || request.status === 'interrupted') && <Note icon={TriangleAlert}>
       {requestFailureText({ status: request.status, errorCode: request.errorCode, usage })}</Note>}
+    {request?.status === 'completed' && request.finishReason === 'length' && !shown.message.content.trim() && <Note icon={TriangleAlert}>
+      这位成员的输出额度在思考阶段就用完了，没有写出摘要。可以到“设置 › 模型服务”调高这个模型的最大输出，再重新生成。</Note>}
     {revoked && <Note tone="info" icon={Undo2} action={<Button size="sm" disabled={disabled} onClick={() => void summaries.confirm(shown.messageId)}>恢复使用</Button>}>
       之后的发言使用{range}原文，不用这份摘要。
     </Note>}

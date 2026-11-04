@@ -58,6 +58,16 @@ async function fixture(members: ReadonlyArray<typeof services[number]['id']>) {
 const textOf = (seen: Seen) => JSON.stringify(seen.body.messages ?? seen.body.contents);
 
 describe('one discussion across DeepSeek, OpenAI, Anthropic and Gemini (D134, D135)', () => {
+  it('a limit left at the default follows the model setting; one the host set stays the lower of the two', async () => {
+    const f = await fixture(['km']);
+    f.db.updateProvider({ id: 'km', name: 'Kimi', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1', customModels: [{ id: 'kimi-k2', name: 'kimi-k2', maxOutputTokens: 16000 }] });
+    for (const outputTokenLimit of [undefined, 2000]) {
+      const started = await f.run.start({ roomId: 'room', task: '看上限', workflowSnapshot: {}, maxTurns: 1, ...(outputTokenLimit ? { outputTokenLimit } : {}) });
+      await f.run.waitForIdle(started.runId);
+    }
+    expect(f.seen.map(seen => seen.body.max_tokens)).toEqual([16000, 2000]);
+  });
+
   it('each member reaches its own service with that service\'s Key, parameter and format, and reads the others as public text', async () => {
     const f = await fixture(['ds', 'oa', 'an', 'ge']);
     const started = await f.run.start({ roomId: 'room', task: '交叉审计这份方案', workflowSnapshot: {}, maxTurns: 4 });

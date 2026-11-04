@@ -19,6 +19,11 @@ function normalized(service: FixtureService, url: string, raw: Record<string, an
 export class DeepSeekFixture {
   mode: FixtureMode | ((body: ReplyBody) => FixtureMode) = 'ok';
   reply: (body: ReplyBody) => string = () => '好的。';
+  /** What a compatible service streams as reasoning_content before any text. */
+  reasoning: (body: ReplyBody) => string | undefined = () => undefined;
+  /** Holds the reply after its reasoning, until `release`. */
+  holdAfterReasoning: (body: ReplyBody) => boolean = () => false;
+  finishReason: (body: ReplyBody) => 'stop' | 'length' = () => 'stop';
   chunks = 6;
   chunkMs = 20;
   readonly requests: FixtureRequest[] = [];
@@ -51,6 +56,12 @@ export class DeepSeekFixture {
       res.on('close', () => this.open.delete(res));
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const emit = (value: unknown, event?: string) => { if (!res.destroyed) res.write(`${event ? `event: ${event}\n` : ''}data: ${JSON.stringify(value)}\n\n`); };
+      const reasoning = this.reasoning(body);
+      if (reasoning) {
+        emit({ id: 'e2e-fixture', choices: [{ index: 0, delta: { reasoning_content: reasoning }, finish_reason: null }] });
+        if (this.holdAfterReasoning(body)) await new Promise<void>(release => this.hung.push(release));
+        if (res.destroyed) return;
+      }
       const text = this.reply(body);
       const size = Math.max(1, Math.ceil(text.length / this.chunks));
       const pieces: string[] = [];
@@ -79,7 +90,7 @@ export class DeepSeekFixture {
         if (!res.destroyed) res.end();
         return;
       }
-      emit({ id: 'e2e-fixture', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+      emit({ id: 'e2e-fixture', choices: [{ index: 0, delta: {}, finish_reason: this.finishReason(body) }] });
       emit({ id: 'e2e-fixture', choices: [], usage: { prompt_tokens: 300, completion_tokens: 6, prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 200 } });
       if (!res.destroyed) res.end('data: [DONE]\n\n');
     });

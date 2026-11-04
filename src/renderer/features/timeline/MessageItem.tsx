@@ -99,8 +99,11 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       {slot.number !== undefined && <span className="msg-num" aria-hidden>#{slot.number}</span>}
     </div>
     {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留；之后的发言会标出受影响）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
-      : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? '等待输出…' : '（没有生成文字）'}</p>}</div>}
-    {can.truncated && <Note icon={Scissors}
+      : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? '正在思考或生成，还没有输出文字…' : '（没有生成文字）'}</p>}</div>}
+    {can.truncated && !shown.message.content.trim() && <Note icon={Scissors}
+      action={shown.active && can.regenerate ? <Button size="sm" disabled={disabled} onClick={regenerate}>重新生成</Button> : undefined}>
+      <b>这位成员的输出额度在思考阶段就用完了</b>，没有写出正文。可以到“设置 › 模型服务”调高这个模型的最大输出，再重新生成。</Note>}
+    {can.truncated && shown.message.content.trim() && <Note icon={Scissors}
       action={shown.active && slot.author === 'agent' ? <Button size="sm" disabled={disabled || !can.continue} title={can.continue ? undefined : '运行暂停或结束后可以续写'}
         onClick={() => void commands.send(`continue:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId, mode: 'continue' }, '已发送续写请求：会生成一个新版本，这是一次新请求。')}>续写</Button> : undefined}>
       <b>写到单次上限停下了</b>{usage?.outputTokens ? ` · ${usage.outputTokens.toLocaleString('zh-CN')} tokens` : ''}，内容可能不完整。续写会生成一个新版本，按新请求计费。{shown.active && !can.continue ? '运行暂停或结束后可以续写。' : ''}
@@ -110,7 +113,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       <b>受影响</b> · 写这条时依据的{upstream(snapshot, shown.affectedBy)}已被修改、重新生成或本身受影响，内容可能过时。{can.regenerate ? '' : '运行暂停或结束后可以重新生成。'}
     </Note>}
     {can.generating && <Note tone="info" icon={Sparkles} role="status">
-      <b>正在重新生成版本 {can.generating.versionNumber}</b>{can.generating.message.content ? '：' : ' · 等待输出…'}{can.generating.message.content && <span className="note-stream">{can.generating.message.content}</span>}
+      <b>正在重新生成版本 {can.generating.versionNumber}</b>{can.generating.message.content ? '：' : ' · 正在思考或生成，还没有输出文字…'}{can.generating.message.content && <span className="note-stream">{can.generating.message.content}</span>}
     </Note>}
     {status && !streaming && <Note tone={shown.message.status === 'failed' ? 'danger' : 'neutral'} icon={Info} role="note">{status}</Note>}
     <div className="msg-foot" role="group" aria-label={`${name} 的消息操作`}>

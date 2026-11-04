@@ -67,7 +67,7 @@ describe('Main safe Provider transport', () => {
   it.each([
     '0.0.0.0', '10.0.0.1', '100.64.0.1', '127.0.0.1', '169.254.169.254',
     '172.16.0.1', '192.0.0.1', '192.0.2.1', '192.88.99.1', '192.168.0.1',
-    '198.18.0.1', '198.51.100.1', '203.0.113.1', '224.0.0.1', '255.255.255.255',
+    '198.51.100.1', '203.0.113.1', '224.0.0.1', '255.255.255.255',
     '::', '::1', '::ffff:127.0.0.1', '::ffff:8.8.8.8', '64:ff9b::a00:1',
     '100::1', '2001::1', '2001:db8::1', '2002:7f00:1::1', '3fff::1', 'fc00::1', 'fe80::1', 'ff02::1',
   ])('rejects non-public HTTPS DNS target %s before transmitting credentials', async address => {
@@ -90,6 +90,25 @@ describe('Main safe Provider transport', () => {
     const fixture = httpsFixture();
     await expect(createSafeFetch(undefined, lookup([{ address: '8.8.8.8', family: 4 }]))(target)).rejects.toThrow();
     expect(fixture.outbound).not.toHaveBeenCalled();
+  });
+
+  describe('D138: 198.18.0.0/15', () => {
+    it.each(['198.18.0.1', '198.19.255.254'])('connects when a name resolves to %s', async address => {
+      const fixture = httpsFixture();
+      await expect(createSafeFetch(undefined, lookup([{ address, family: 4 }]))('https://provider.example/v1/models')).resolves.toMatchObject({ status: 200 });
+      expect(fixture.outbound).toHaveBeenCalledTimes(1);
+    });
+    it.each(['198.18.0.1', '198.19.255.254'])('refuses the literal address %s', async address => {
+      const fixture = httpsFixture();
+      await expect(createSafeFetch(undefined, lookup([]))(`https://${address}/v1/models`)).rejects.toMatchObject({ code: 'target_rejected' });
+      expect(fixture.outbound).not.toHaveBeenCalled();
+    });
+    it.each(['10.0.0.1', '127.0.0.1', '169.254.169.254', '192.168.1.2', '198.51.100.1', 'fc00::1'])('refuses a name that also resolves to %s', async other => {
+      const fixture = httpsFixture();
+      await expect(createSafeFetch(undefined, lookup([{ address: '198.18.0.1', family: 4 }, { address: other, family: other.includes(':') ? 6 : 4 }]))('https://provider.example/v1/models'))
+        .rejects.toMatchObject({ code: 'target_rejected' });
+      expect(fixture.outbound).not.toHaveBeenCalled();
+    });
   });
 
   it('rejects all DNS answers when one answer is private', async () => {

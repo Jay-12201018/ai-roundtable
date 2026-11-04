@@ -861,7 +861,7 @@ export class RunService {
         else if (result.nothing !== undefined) this.database.validateArtifactVersion(versionId, { empty: result.nothing });
         else {
           // A cut-off output says so first: the fix is a larger limit or a shorter document, not a field.
-          const cut = reason === 'length' ? [{ path: '', label: '整个 JSON', message: `输出达到 ${request.input.outputTokenLimit} tokens 的上限被截断，内容不完整` }] : [];
+          const cut = reason === 'length' ? [{ path: '', label: '整个 JSON', message: content.trim() ? `输出达到 ${request.input.outputTokenLimit} tokens 的上限被截断，内容不完整` : '这位成员的输出额度在思考阶段就用完了，没有写出内容。可以到“设置 › 模型服务”调高这个模型的最大输出，再重新生成' }] : [];
           this.database.validateArtifactVersion(versionId, { issues: [...cut, ...result.issues].slice(0, MAX_ARTIFACT_ISSUES) });
         }
         this.appendEvent(context.runId, 'artifact_updated', { artifactId, versionId, status: 'completed' });
@@ -1527,7 +1527,9 @@ export class RunService {
 
   /** D134: the output limit of one member's requests: the Run's, never above what that member's model takes. */
   private memberOutputLimit(limit: number, member: MemberSnapshot): number {
-    return Math.min(limit, this.modelBudget(member)?.maxOutputTokens ?? limit);
+    const modelMax = this.modelBudget(member)?.maxOutputTokens ?? limit;
+    // D135: a limit the host left at the default follows the model's setting, so raising it there works on the next retry.
+    return limit === DEFAULT_OUTPUT_TOKEN_LIMIT ? modelMax : Math.min(limit, modelMax);
   }
 
   /** The usage page counts what a service reported; a demo member's numbers are made up and stay out of it. */

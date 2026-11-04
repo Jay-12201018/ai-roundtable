@@ -303,7 +303,6 @@ describe('OpenAI Compatible request mapping and stream normalization', () => {
     ['tool call', { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'unsafe', arguments: 'raw-vendor-secret' } }] }, 'tool_calls'],
     ['legacy function call', { function_call: { name: 'unsafe', arguments: 'raw-vendor-secret' } }, 'function_call'],
     ['audio', { audio: { id: 'audio-1', data: 'raw-vendor-secret', transcript: 'hidden-thought', expires_at: 1 } }, 'stop'],
-    ['unknown finish', {}, 'vendor_private_reason'],
   ])('refuses %s without exposing its payload or declaring success', async (_label, delta, finishReason) => {
     const { fetcher } = networkFixture(() => sse([chunk({ content: 'partial' }), chunk(delta, finishReason)]));
     const events = await collect(provider(fetcher).streamChat(input));
@@ -380,7 +379,6 @@ describe('OpenAI Compatible model discovery and explicit connection levels', () 
   });
 
   it.each([
-    ['empty success', [chunk({}, 'stop')]],
     ['filtered text', [chunk({ content: 'partial' }), chunk({}, 'content_filter')]],
   ])('does not report generation success for %s', async (_label, values) => {
     const { fetcher } = networkFixture(() => sse(values));
@@ -474,5 +472,89 @@ describe('D135 compatible services differ in when they report usage', () => {
     const events = await all(provider([{ ...chunk({ content: '好' }, ''), usage: { prompt_tokens: 5, completion_tokens: 1 } }, stop]).streamChat(request));
     expect(events.filter(event => event.type === 'usage')).toEqual([expect.objectContaining({ inputTokens: 5, outputTokens: 1 })]);
     expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+  });
+});
+
+describe('D135 one adapter stays tolerant of what services do differently', () => {
+  const raw = (body: string) => new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(body)); controller.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
+  const stream = (response: () => Response) => { const { fetcher } = networkFixture(response); return collect(provider(fetcher).streamChat(input)); };
+  const textOf = (events: NormalizedChunk[]) => events.flatMap(event => event.type === 'text_delta' ? [event.text] : []).join('');
+  const pieces = (...texts: string[]) => () => sse([...texts.map(content => chunk({ content })), chunk({}, 'stop')]);
+
+  describe('a <think> block at the start of a reply', () => {
+    it.each([
+      ['in one chunk', ['<think>先想想</think>正文']],
+      ['with its tags cut across chunks', ['<th', 'ink>先', '想想</th', 'ink>正', '文']],
+      ['with white space before and after it', ['\n  ', '<think>先想想</think>', '\n\n', '正文']],
+    ])('is dropped %s, and nothing of it is kept', async (_name, texts) => {
+      const events = await stream(pieces(...texts));
+      expect(textOf(events)).toBe('正文');
+      expect(JSON.stringify(events)).not.toContain('先想想');
+      expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+    });
+    it('is left alone anywhere else, and text that only looks like its start stays text', async () => {
+      expect(textOf(await stream(pieces('正文 <think>引用</think> 继续')))).toBe('正文 <think>引用</think> 继续');
+      expect(textOf(await stream(pieces('  <thin', 'g>')))).toBe('  <thing>');
+      expect(textOf(await stream(pieces('<th')))).toBe('<th');
+      expect(textOf(await stream(pieces('<think>a</think>b<think>c</think>')))).toBe('b<think>c</think>');
+    });
+    it.each(['stop', 'length'] as const)('never closed: the reply is empty, and it ends with %s', async reason => {
+      const events = await stream(() => sse([chunk({ content: '<think>一直在想' }), chunk({}, reason)]));
+      expect(textOf(events)).toBe('');
+      expect(JSON.stringify(events)).not.toContain('一直在想');
+      expect(events.at(-1)).toMatchObject({ type: 'finish', reason });
+    });
+  });
+
+  it('ignores reasoning_content, and a reply spent on it alone ends with length and no text', async () => {
+    const events = await stream(() => sse([chunk({ reasoning_content: '思考' }), chunk({ reasoning_content: '继续' }, 'length')]));
+    expect(textOf(events)).toBe('');
+    expect(JSON.stringify(events)).not.toContain('思考');
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'length' });
+  });
+  it('ignores a choice after finish, and still takes the last usage', async () => {
+    const events = await stream(() => sse([chunk({ content: '正文' }, 'stop'), chunk({ content: '多余' }), { ...chunk({}, 'stop'), usage: { prompt_tokens: 3, completion_tokens: 2 } }]));
+    expect(textOf(events)).toBe('正文');
+    expect(events.filter(event => event.type === 'usage')).toEqual([expect.objectContaining({ inputTokens: 3, outputTokens: 2 })]);
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+  });
+  it('keeps the text and ends normally on a finish_reason it does not know', async () => {
+    const events = await stream(() => sse([chunk({ content: '正文' }), chunk({}, 'sensitive')]));
+    expect(textOf(events)).toBe('正文');
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+  });
+  it.each(['tool_calls', 'function_call'])('still refuses finish_reason %s', async reason => {
+    expectError(await stream(() => sse([chunk({ content: '正文' }), chunk({}, reason)])), 'unsupported');
+  });
+  it.each([
+    ['tool_calls', { tool_calls: [{ type: 'function' }] }], ['function_call', { function_call: { name: 'x' } }], ['audio', { audio: { data: 'x' } }],
+  ])('still refuses %s in a delta', async (_name, delta) => {
+    expectError(await stream(() => sse([chunk(delta)])), 'unsupported');
+  });
+  it('counts EOF after finish_reason as complete, without [DONE] and with a cut-off tail', async () => {
+    const whole = `${frame(chunk({ content: '正文' }))}${frame({ ...chunk({}, 'stop'), usage: { prompt_tokens: 3, completion_tokens: 2 } })}`;
+    for (const body of [whole, `${whole}data: {"cho`, `${whole}data: [DONE]`]) {
+      const events = await stream(() => raw(body));
+      expect(textOf(events)).toBe('正文');
+      expect(events.filter(event => event.type === 'usage')).toHaveLength(1);
+      expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+    }
+  });
+  it('still fails when neither finish_reason nor [DONE] arrived, and on [DONE] with no finish_reason', async () => {
+    expectError(await stream(() => raw(frame(chunk({ content: '半截' })))), 'invalid_response');
+    expectError(await stream(() => sse([chunk({ content: '半截' })])), 'invalid_response');
+  });
+  it('tolerates a choice with no delta', async () => {
+    const events = await stream(() => sse([{ choices: [{ index: 0, finish_reason: null }] }, chunk({ content: '正文' }), { choices: [{ index: 0, finish_reason: 'stop' }] }]));
+    expect(textOf(events)).toBe('正文');
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'stop' });
+  });
+  it.each(['stop', 'length'])('测试连接 passes on %s with no text: thinking may have spent all eight tokens', async reason => {
+    const { fetcher } = networkFixture(() => sse([chunk({ reasoning_content: '思考' }), chunk({}, reason)]));
+    expect(await provider(fetcher).testConnection({ requestId: 'probe', level: 'generation', modelId: 'manual-chat-model' })).toMatchObject({ ok: true });
+  });
+  it('测试连接 still fails when the stream has no end', async () => {
+    const { fetcher } = networkFixture(() => raw(frame(chunk({ content: '半截' }))));
+    expect(await provider(fetcher).testConnection({ requestId: 'probe', level: 'generation', modelId: 'manual-chat-model' })).toMatchObject({ ok: false, error: { code: 'invalid_response' } });
   });
 });

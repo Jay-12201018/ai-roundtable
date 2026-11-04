@@ -66,7 +66,7 @@ async function fixture(mode: 'ok' | 'wrong-host' | 'no-ca' | 'extra' | 'malforme
   // This test CA is injected only in this fixture, never into application configuration or system trust.
   vi.mocked(tls.connect).mockImplementation(((options: tls.ConnectionOptions) => real.connect({ ...options, ...(mode === 'no-ca' ? {} : { ca }) })) as typeof tls.connect);
   const proxyConfig = async () => ({ kind: 'http' as const, hostname: '127.0.0.1', port: (proxy.address() as { port: number }).port });
-  const resolver = vi.fn(async () => [{ address: '198.18.0.12', family: 4 }]);
+  const resolver = vi.fn(async () => [{ address: '10.0.0.12', family: 4 }]);
   // What the transport reported, merged the way a reader would: the first failure's stage and category stay.
   const seen: { stage?: string; category?: string | null; evidence?: string; httpStatus?: number } = {};
   const diagnostic = { snapshot: () => ({ ...seen }), observe: (event: DiagnosticEvent) => {

@@ -45,7 +45,7 @@ async function fixture() {
   // The owned CA is injected only into this fixture's TLS connections.
   vi.mocked(tls.connect).mockImplementation(((options: tls.ConnectionOptions) => real.connect({ ...options, ca })) as typeof tls.connect);
   const proxyConfig = async () => ({ kind: 'http' as const, hostname: '127.0.0.1', port: (proxy.address() as { port: number }).port });
-  const resolver = vi.fn(async () => [{ address: '198.18.0.12', family: 4 }]);
+  const resolver = vi.fn(async () => [{ address: '10.0.0.12', family: 4 }]);
   return { connects, calls, resolver, proxyConfig };
 }
 

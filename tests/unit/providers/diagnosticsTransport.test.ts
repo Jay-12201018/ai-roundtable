@@ -157,7 +157,7 @@ it('does not report a false interruption when a successful stream closes its sco
   expect(events.at(-1)).toMatchObject({ type: 'finish' }); expect(d.events.filter(e => e.category)).toEqual([]);
 });
 it.each([
-  { delta: {}, finish_reason: 'unknown-finish' },
+  { delta: {}, finish_reason: 'tool_calls' },
   { delta: { tool_calls: [{ type: 'function' }] }, finish_reason: null },
   { delta: { function_call: { name: 'fixture-only' } }, finish_reason: null },
   { delta: { audio: { data: 'fixture-only' } }, finish_reason: null },

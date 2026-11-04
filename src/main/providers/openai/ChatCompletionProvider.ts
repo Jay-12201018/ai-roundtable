@@ -37,13 +37,51 @@ const completionChunk = z.object({
     role: z.string().nullable().optional(), content: z.string().nullable().optional(),
     refusal: z.string().nullable().optional(), tool_calls: z.unknown().optional(),
     function_call: z.unknown().optional(), audio: z.unknown().optional(),
-  }), finish_reason: z.string().nullable().optional() })).max(1),
+  }).nullish(), finish_reason: z.string().nullable().optional() })).max(1),
   // DeepSeek also reports how much of the prompt hit its context cache (hit + miss = prompt_tokens).
   usage: z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
     prompt_cache_hit_tokens: tokenCount.optional(), prompt_cache_miss_tokens: tokenCount.optional() }).nullable().optional(),
 });
 const modelList = z.object({ data: z.array(z.object({ id: providerModelSchema.shape.id })).max(10000), has_more: z.boolean().optional() });
 const officialBaseUrl = 'https://api.openai.com/v1';
+const thinkOpen = '<think>';
+const thinkClose = '</think>';
+
+/**
+ * D135: some services write their thinking as a `<think>` block at the start of the reply. It is dropped as it streams and
+ * never stored, whichever chunks the tags fall into. Only the start of a reply counts; the same words later on are text.
+ */
+class LeadingThink {
+  private state: 'start' | 'inside' | 'after' | 'body' = 'start';
+  private held = '';
+  push(text: string): string {
+    if (this.state === 'body') return text;
+    this.held += text;
+    if (this.state === 'start') {
+      const trimmed = this.held.trimStart();
+      if (thinkOpen.startsWith(trimmed)) return '';
+      if (!trimmed.startsWith(thinkOpen)) { this.state = 'body'; return this.take(this.held); }
+      this.state = 'inside'; this.held = trimmed.slice(thinkOpen.length);
+    }
+    if (this.state === 'inside') {
+      const end = this.held.indexOf(thinkClose);
+      // Only what could be the first part of the closing tag is kept.
+      if (end < 0) { this.held = this.held.slice(-(thinkClose.length - 1)); return ''; }
+      this.state = 'after'; this.held = this.held.slice(end + thinkClose.length);
+    }
+    this.held = this.held.trimStart();
+    if (!this.held) return '';
+    this.state = 'body';
+    return this.take(this.held);
+  }
+  /** The reply ended: what looked like the start of a tag was text; an unclosed block leaves nothing. */
+  flush(): string {
+    if (this.state !== 'start') return '';
+    this.state = 'body';
+    return this.take(this.held);
+  }
+  private take(text: string): string { this.held = ''; return text; }
+}
 const normalizeBase = (url: string) => providerBaseUrlSchema.parse(url).replace(/\/+$/u, '');
 
 /** Shared transport for the two R09 text Chat Completions adapters; no registration or scheduling. */
@@ -93,15 +131,15 @@ export class ChatCompletionProvider implements ProviderAdapter {
         if (this.capabilities.authentication !== 'models') throw new ContractError('unsupported');
         await this.models(scope);
       } else if (parsed.level === 'generation') {
-        let text = false; let complete = false;
+        // D135: a model that thinks first can spend all eight tokens on it; a clean end is what shows the connection works.
+        let complete = false;
         for await (const event of this.streamChat({ requestId: parsed.requestId, modelId: parsed.modelId!,
           messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8, signal: scope.signal })) {
           scope.check();
           if (event.type === 'error') throw new ContractError(event.error.code);
-          if (event.type === 'text_delta' && event.text.length > 0) text = true;
           if (event.type === 'finish') complete = event.reason === 'stop' || event.reason === 'length';
         }
-        if (!text || !complete) throw new ContractError('invalid_response');
+        if (!complete) throw new ContractError('invalid_response');
       }
       return { requestId: parsed.requestId, level: parsed.level, ok: true };
     } catch (error) { return { requestId: input.requestId, level: input.level, ok: false, error: this.failure(error, scope, input.level === 'authentication').detail }; }
@@ -130,40 +168,49 @@ export class ChatCompletionProvider implements ProviderAdapter {
       this.diagnostics?.({ stage: 'stream' });
       yield { type: 'start', requestId };
       let finish: 'stop' | 'length' | 'content_filter' | undefined;
-      // D135: compatible services may repeat usage or send it before finish_reason; the last one before [DONE] counts.
+      // D135: compatible services may repeat usage or send it before finish_reason; the last one before the end counts.
       let usage: Extract<NormalizedChunk, { type: 'usage' }> | undefined;
-      for await (const data of readSse(response, scope.signal, () => scope.check())) {
-        scope.check();
-        if (data === '[DONE]') {
-          if (finish === undefined) throw new ContractError('invalid_response');
-          if (usage) { yield usage; scope.check(); }
-          yield { type: 'finish', requestId, reason: finish }; return;
-        }
-        let value: unknown;
-        try { value = JSON.parse(data); } catch { throw new ContractError('invalid_response'); }
-        const chunk = parse(completionChunk, value, 'invalid_response');
-        const choice = chunk.choices[0];
-        if (choice !== undefined) {
-          if (finish !== undefined) throw new ContractError('invalid_response');
-          if (choice.delta.tool_calls != null || choice.delta.function_call != null || choice.delta.audio != null) throw new ContractError('unsupported');
-          if (choice.finish_reason) {
-            const reason = choice.finish_reason;
-            if (reason !== 'stop' && reason !== 'length' && reason !== 'content_filter') throw new ContractError('unsupported');
-            finish = reason;
+      const think = new LeadingThink();
+      try {
+        for await (const data of readSse(response, scope.signal, () => scope.check())) {
+          scope.check();
+          if (data === '[DONE]') break;
+          let value: unknown;
+          try { value = JSON.parse(data); } catch { throw new ContractError('invalid_response'); }
+          const chunk = parse(completionChunk, value, 'invalid_response');
+          const choice = chunk.choices[0];
+          // D135: once finish_reason has arrived the reply is whole; only usage can still follow.
+          if (choice !== undefined && finish === undefined) {
+            const delta = choice.delta;
+            if (delta?.tool_calls != null || delta?.function_call != null || delta?.audio != null) throw new ContractError('unsupported');
+            if (choice.finish_reason) {
+              const reason = choice.finish_reason;
+              if (reason === 'tool_calls' || reason === 'function_call') throw new ContractError('unsupported');
+              // Any other reason a service names still ended the reply normally, and what arrived is kept.
+              finish = reason === 'length' || reason === 'content_filter' ? reason : 'stop';
+            }
+            const text = delta?.content ? think.push(delta.content) : '';
+            if (text) yield { type: 'text_delta', requestId, text };
+            scope.check();
+            if (delta?.refusal) yield { type: 'text_delta', requestId, text: delta.refusal };
+            scope.check();
           }
-          if (choice.delta.content) yield { type: 'text_delta', requestId, text: choice.delta.content };
-          scope.check();
-          if (choice.delta.refusal) yield { type: 'text_delta', requestId, text: choice.delta.refusal };
-          scope.check();
+          if (chunk.usage != null) {
+            const { prompt_tokens: inputTokens, prompt_cache_hit_tokens: hit, prompt_cache_miss_tokens: miss } = chunk.usage;
+            // A cache split is kept only when it is complete and adds up.
+            const cacheHitInputTokens = hit !== undefined && miss !== undefined && hit + miss === inputTokens ? hit : undefined;
+            usage = { type: 'usage', requestId, inputTokens, outputTokens: chunk.usage.completion_tokens, ...(cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens }) };
+          }
         }
-        if (chunk.usage != null) {
-          const { prompt_tokens: inputTokens, prompt_cache_hit_tokens: hit, prompt_cache_miss_tokens: miss } = chunk.usage;
-          // A cache split is kept only when it is complete and adds up.
-          const cacheHitInputTokens = hit !== undefined && miss !== undefined && hit + miss === inputTokens ? hit : undefined;
-          usage = { type: 'usage', requestId, inputTokens, outputTokens: chunk.usage.completion_tokens, ...(cacheHitInputTokens === undefined ? {} : { cacheHitInputTokens }) };
-        }
+      } catch (error) {
+        // A malformed tail after finish_reason does not undo a whole reply; before it, the stream has no end.
+        if (finish === undefined || !(error instanceof ContractError) || error.code !== 'invalid_response') throw error;
       }
-      throw new ContractError('invalid_response');
+      if (finish === undefined) throw new ContractError('invalid_response');
+      const rest = think.flush();
+      if (rest) { yield { type: 'text_delta', requestId, text: rest }; scope.check(); }
+      if (usage) { yield usage; scope.check(); }
+      yield { type: 'finish', requestId, reason: finish };
     } catch (error) {
       const failure = this.failure(error, scope);
       if (failure.code === 'cancelled' || failure.code === 'timeout') this.diagnostics?.({ category: failure.code === 'timeout' ? 'request_timeout' : 'cancelled' });

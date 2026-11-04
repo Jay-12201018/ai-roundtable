@@ -2,14 +2,15 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { artifactOf, memberOf } from './support/fixture';
-import { FAKE_KEY, expect, generateArtifact, memberTexts, newDiscussion, openArtifacts, root, statusHas, test, threadItems, type RunningApp } from './support/app';
+import { FAKE_KEY, expect, generateArtifact, memberTexts, newDiscussion, openArtifacts, root, seedDeepSeekRoom, statusHas, test, threadItems, type RunningApp } from './support/app';
 
 // D134/D142: one discussion across every interface type, connected through the real wizard: a built-in service and three
 // user-added ones, each member on its own model. With ROUNDTABLE_E2E_SCREENS set it also keeps the screenshots named in
 // `kept`, in the light and dark themes.
 const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUNDTABLE_E2E_SCREENS) : undefined;
 const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'custom-service', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
-  'network-off', 'network-system', 'network-socks', 'network-dark', 'services-dark', 'wizard-custom-dark', 'discussion-dark', 'usage-dark']);
+  'network-off', 'network-system', 'network-socks', 'network-dark', 'services-dark', 'wizard-custom-dark', 'discussion-dark', 'usage-dark',
+  'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
 
@@ -317,6 +318,63 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
   await capture(running, 'usage-dark', '1280 宽、深色：用量页。');
   await theme(running, 'light');
 
+  if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
+  await running.quit();
+});
+
+test('a member that thinks: the block stays out of the discussion, the wait says so, and a reply spent on thinking says how to fix it', async ({ harness }) => {
+  test.setTimeout(120_000);
+  const { fixture } = harness;
+  fixture.reply = body => {
+    const member = memberOf(body);
+    if (member === '起草者') return '<think>内部推演：先算成本</think>\n\n起草者的方案正文。';
+    if (member === '审查者') return '审查者的意见。';
+    return body.max_tokens > 8192 ? '综合者的结论。' : '';
+  };
+  fixture.reasoning = body => memberOf(body) === '起草者' ? undefined : '内部推演：思考内容';
+  fixture.holdAfterReasoning = body => memberOf(body) === '审查者';
+  fixture.finishReason = body => memberOf(body) === '综合者' && body.max_tokens <= 8192 ? 'length' : 'stop';
+  const running = await harness.launch();
+  const { page } = running;
+  await theme(running, 'light');
+  await seedDeepSeekRoom(running);
+  await newDiscussion(running, 'E2E 讨论', '试点方案。');
+  await page.getByRole('button', { name: '开始讨论' }).click();
+
+  await expect(memberTexts(page).first()).toHaveText('起草者的方案正文。');
+  await expect(page.getByText('正在思考或生成，还没有输出文字…')).toBeVisible();
+  await capture(running, 'thinking-wait', '思考期间：<think> 块和 reasoning_content 都不显示；第二位成员还没有正文，写明正在思考或生成，不像卡住。');
+  await expect.poll(() => fixture.release(), { message: 'The reviewer is held after its reasoning' }).toBeGreaterThan(0);
+  await statusHas(page, '已完成');
+
+  // The reply spent on thinking says what happened and how to fix it.
+  const note = page.locator('.note', { hasText: '这位成员的输出额度在思考阶段就用完了' });
+  await expect(note).toBeVisible();
+  await expect(note).toContainText('调高这个模型的最大输出');
+  await capture(running, 'quota-used-up', '额度用完：第三位成员 8192 全用在思考上，没有正文。写明原因和解决办法，旁边就是“重新生成”。');
+
+  // Thinking is nowhere: not on the page, not in the next member's request, not in the database.
+  expect(await page.locator('.thread').allTextContents().then(texts => texts.join(''))).not.toContain('内部推演');
+  const sent = fixture.requests.filter(request => request.model !== '');
+  expect(JSON.stringify(sent[1]!.messages)).toContain('起草者的方案正文。');
+  expect(JSON.stringify(sent.map(request => request.messages))).not.toContain('内部推演');
+  const [messages] = harness.sql('SELECT content FROM messages');
+  expect(JSON.stringify(messages)).not.toContain('内部推演');
+
+  // Raising the model's limit takes effect on the retry.
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  const card = page.getByRole('region', { name: 'DeepSeek 直连' });
+  if (!(await card.getByRole('button', { name: 'DeepSeek Flash 的上限' }).isVisible())) await page.getByRole('button', { name: '展开 DeepSeek 直连' }).click();
+  await card.getByRole('button', { name: 'DeepSeek Flash 的上限' }).click();
+  await card.getByLabel('最大输出（token）').fill('16000');
+  await card.getByRole('button', { name: '保存' }).click();
+  await expect(card).toContainText('最大输出 16,000');
+  await page.locator('.sb-runs .sb-item').first().click();
+  await note.getByRole('button', { name: '重新生成' }).click();
+  await expect(page.getByText('综合者的结论。')).toBeVisible();
+  expect(fixture.requests.at(-1)!.maxTokens).toBe(16000);
+  await expect(note).toHaveCount(0);
+  await capture(running, 'quota-regenerated', '调高最大输出后重新生成：这次请求按 16000 发出，写出了正文。');
   if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
   await running.quit();
 });

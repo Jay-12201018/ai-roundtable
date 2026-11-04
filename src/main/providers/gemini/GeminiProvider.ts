@@ -66,15 +66,14 @@ export class GeminiProvider implements ProviderAdapter {
       const parsed = parse(testConnectionInputSchema, withoutSignal(input)); scope.check();
       if (parsed.level === 'authentication') await this.models(scope);
       if (parsed.level === 'generation') {
-        let text = false; let complete = false;
+        let complete = false;
         for await (const event of this.streamChat({ requestId: parsed.requestId, modelId: parsed.modelId!,
           messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8, signal: scope.signal })) {
           scope.check();
           if (event.type === 'error') throw new ContractError(event.error.code);
-          if (event.type === 'text_delta' && event.text.length) text = true;
           if (event.type === 'finish') complete = event.reason === 'stop' || event.reason === 'length';
         }
-        if (!text || !complete) throw new ContractError('invalid_response');
+        if (!complete) throw new ContractError('invalid_response');
       }
       return { requestId: parsed.requestId, level: parsed.level, ok: true };
     } catch (error) { return { requestId: input.requestId, level: input.level, ok: false, error: failure(error, scope).detail }; }

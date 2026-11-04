@@ -1,7 +1,9 @@
-const assert=require('node:assert/strict');const Sqlite=require('better-sqlite3');
+const assert=require('node:assert/strict');
+// The one native build is for Electron's Node; from a plain Node this probe hands itself over to it.
+if(!process.versions.electron){const {status}=require('node:child_process').spawnSync(process.execPath,[require('node:path').join(__dirname,'../../scripts/electron-node.cjs'),__filename],{stdio:'inherit'});process.exit(status??1);}
+const Sqlite=require('better-sqlite3');
 assert.equal(process.platform,'darwin');assert.equal(process.arch,'arm64');
-assert.equal(process.versions.modules,process.versions.electron?'139':'137');assert.equal(process.versions.node,process.versions.electron?'22.22.0':'24.18.1');
-if(process.versions.electron)assert.equal(process.versions.electron,'38.8.6');
+assert.equal(process.versions.modules,'139');assert.equal(process.versions.node.split('.')[0],'22');assert.equal(process.versions.electron.split('.')[0],'38');
 let rows=0;
 for(let pass=0;pass<100;pass++){
  const db=new Sqlite(':memory:');

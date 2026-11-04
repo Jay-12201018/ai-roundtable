@@ -55,11 +55,9 @@ describe('OpenAI chat adapter', () => {
 
   it.each([
     () => sse(chunk('partial')),
-    () => sse(chunk('partial'), chunk(null, 'stop')),
     () => sse(chunk('partial'), '[DONE]'),
     () => sse(chunk('partial'), '{malformed'),
     () => sse(chunk('partial'), { choices: [], usage: { prompt_tokens: -1, completion_tokens: 1 } }, '[DONE]'),
-    () => sse(chunk('partial'), chunk(null, 'stop'), chunk('late'), '[DONE]'),
     () => new Response('{"secret":"fixture-secret-only"}', { headers: { 'content-type': 'application/json' } }),
   ])('rejects incomplete/malformed streams with no false finish or secret details', async response => {
     const { provider } = setup(async () => response());

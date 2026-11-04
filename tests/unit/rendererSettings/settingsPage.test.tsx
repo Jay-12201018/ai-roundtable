@@ -188,9 +188,9 @@ describe('设置 › 网络 (D137)', () => {
     await waitFor(() => expect(net.saveSettings).toHaveBeenLastCalledWith({ enabled: false, manual: null }));
   });
 
-  it('names no proxy software and no reason for using one', async () => {
+  it('says in neutral words what the page is for', async () => {
     await open(network(base));
-    expect(document.body.textContent).toContain('如果你的网络环境需要通过代理连接，在这里打开。');
-    expect(document.body.textContent).not.toMatch(/Clash|Surge|V2Ray|VPN|梯子|翻墙|海外|Fake-IP/iu);
+    expect(document.querySelector('.page-head p')!.textContent).toBe('如果你的网络环境需要通过代理连接，在这里打开。');
+    expect(document.querySelector('.net-card')!.textContent).toBe('使用系统代理未开启，直接连接。测试连接只做一次连接握手，不发送 Key 或内容。高级：手动填写地址系统代理读不到时使用。填写后，开关打开时优先用这个地址。:保存');
   });
 });

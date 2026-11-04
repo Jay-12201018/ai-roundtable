@@ -81,6 +81,12 @@ function publicAddress(address: string): boolean {
     && !(prefix === 0x3fff && next <= 0xfff);
 }
 
+/**
+ * D138: 198.18.0.0/15 is not a real private network, and some network tools answer names from it. A name the user entered
+ * may resolve there; a literal address in this range is still refused, and so is a name that also resolves anywhere else reserved.
+ */
+const nameMappedAddress = (address: string) => isIP(address) === 4 && /^198\.1[89]\./u.test(address);
+
 function loopback(address: string): boolean {
   return isIP(address) === 4 && address.startsWith('127.') || address === '::1';
 }
@@ -133,7 +139,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
       throw error;
     } finally { signal?.removeEventListener('abort', stopDns); }
     signal?.throwIfAborted();
-    if (addresses.length === 0 || addresses.some(value => value.family !== isIP(value.address) || !(local ? loopback(value.address) : publicAddress(value.address)))) {
+    if (addresses.length === 0 || addresses.some(value => value.family !== isIP(value.address) || !(local ? loopback(value.address) : publicAddress(value.address) || !isIP(hostname) && nameMappedAddress(value.address)))) {
       observe?.({ stage: 'dns', category: 'target_rejected' }); throw new ContractError('target_rejected');
     }
     selected = addresses[0];

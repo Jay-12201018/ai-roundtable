@@ -298,6 +298,19 @@ describe('D102 truncated replies in the timeline', () => {
   const slotOf = (content: string) => screen.getByText(content).closest('article')!;
   const truncatedNote = (slot: Element) => [...slot.querySelectorAll('.note[role=note]')].find(note => note.textContent!.includes('单次上限'));
 
+  it('a reply spent on thinking says so and offers 重新生成, not 续写', async () => {
+    const api = hostApi();
+    const snapshot = truncatedSnapshot();
+    snapshot.messages = snapshot.messages.map(message => message.id === 'm2' ? { ...message, content: '' } : message);
+    render(<Harness snapshot={snapshot} api={api} />);
+    const note = [...document.querySelectorAll('.note')].find(item => item.textContent!.includes('输出额度在思考阶段就用完了'))!;
+    expect(note.textContent).toContain('调高这个模型的最大输出');
+    const slot = note.closest('article')!;
+    expect(within(slot).queryByRole('button', { name: '续写' })).toBeNull();
+    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: '重新生成' }));
+    await waitFor(() => expect(api.command).toHaveBeenCalledWith(expect.objectContaining({ kind: 'regenerateMessage', messageId: 'm2' })));
+  });
+
   it('marks the reply and continues it as a new version while the Run is idle', async () => {
     const api = hostApi();
     render(<Harness snapshot={truncatedSnapshot()} api={api} />);
