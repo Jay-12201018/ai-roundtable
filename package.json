@@ -25,6 +25,7 @@
     "native:check": "node scripts/ensure-native.cjs",
     "trial": "pnpm build && node scripts/ensure-native.cjs && electron scripts/trial/main.cjs",
     "trial:reset": "node scripts/trial/reset.cjs",
+    "scan:terms": "node scripts/scan-public-terms.cjs",
     "rehearse:upgrade": "node scripts/electron-node.cjs scripts/rehearse-upgrade.cjs"
   },
   "dependencies": {

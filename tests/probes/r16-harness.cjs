@@ -26,7 +26,7 @@ function isolate(prefix, reuse) {
   assert.notEqual(resolve(paths.userData), resolve(realProfile), 'Probe must never open the real profile');
   assert.equal(fs.existsSync(join(paths.userData, 'ai-roundtable.db')), Boolean(reuse), reuse ? 'A restart reopens an existing profile' : 'A first phase starts empty');
   delete process.env.ELECTRON_RENDERER_URL;
-  for (const name of ['ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS', 'ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
+  for (const name of ['ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
   return { directory, paths };
 }
 
@@ -53,8 +53,7 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
   dialog.showErrorBox = (title, content) => { result.consoleErrors.push(`errorBox: ${title} ${content}`); };
 
   // DeepSeek-shaped SSE fixture. `fixture.mode` per request: ok | hang | length | no-usage; `fixture.reply(body)` picks text.
-  // proxyPort: one owned loopback CONNECT proxy a probe may start; only CONNECT requests to it pass the guard below.
-  const fixture = { mode: 'ok', requests: [], hung: [], port: 0, proxyPort: 0, chunkMs: 40, chunks: 6, reply: () => '好的。' };
+  const fixture = { mode: 'ok', requests: [], hung: [], port: 0, chunkMs: 40, chunks: 6, reply: () => '好的。' };
   const usage = { prompt_tokens: 300, completion_tokens: 6, prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 200 };
   let failNow;
   const server = http.createServer(async (req, res) => {
@@ -90,10 +89,6 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
   fixture.release = () => { const waiting = fixture.hung.splice(0); for (const release of waiting) release(); return waiting.length; };
   const originalRequest = http.request;
   http.request = function (url) {
-    if (url && typeof url === 'object' && !(url instanceof URL) && url.method === 'CONNECT') {
-      assert.ok(fixture.proxyPort > 0 && url.hostname === '127.0.0.1' && Number(url.port) === fixture.proxyPort, 'Only the owned loopback proxy may be reached');
-      return originalRequest.apply(this, arguments);
-    }
     const target = new URL(String(url)); assert.equal(target.hostname, '127.0.0.1'); assert.equal(Number(target.port), fixture.port); return originalRequest.apply(this, arguments);
   };
   http.get = () => { throw new Error('Unexpected HTTP get'); };
@@ -126,8 +121,8 @@ function createProbe({ prefix, name, timeoutMs = 600000, reuse, phase = 'first' 
     await new Promise(done => server.listen(0, '127.0.0.1', done)); fixture.port = server.address().port;
     const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
     const transport = Registry.prototype.createTransport;
-    Registry.prototype.createTransport = function (guard, diagnostics, proxyKind) {
-      const send = transport.call(this, guard, diagnostics, proxyKind);
+    Registry.prototype.createTransport = function (guard, diagnostics) {
+      const send = transport.call(this, guard, diagnostics);
       return (url, init) => { const target = new URL(String(url));
         assert.equal(target.origin, 'https://api.deepseek.com', 'Only the DeepSeek target may be redirected');
         return send(`http://127.0.0.1:${fixture.port}/deepseek${target.pathname}${target.search}`, init); };

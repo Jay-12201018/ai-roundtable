@@ -4,7 +4,7 @@
 
 工程规则见 [AGENTS](AGENTS.md)，现状见 [V0 审查](docs/V0_AUDIT.md)，任务见 [任务清单](tasks/README.md)，界面设计见 [设计规范](docs/DESIGN_GUIDELINES.md)。所有后续工作以本仓库文件为入口。
 
-定位：Windows/macOS/Linux 本地优先的 Electron 多模型协作群聊桌面应用，单用户 BYOK，不使用云端账号。多个 Agent 使用国内主流大模型，也可以使用其他 OpenAI 兼容或自定义接口，按用户可配置的工作流围绕共享公共历史协作。用户是主持人，可以点名、插话、暂停/停止/单步、设置持续指令，最终输出 PRD、会议纪要、行动清单和经确认后写盘的代码候选文件。
+定位：Windows/macOS/Linux 本地优先的 Electron 多模型协作群聊桌面应用，单用户 BYOK，不使用云端账号。多个 Agent 使用国内主流大模型，也可以使用其他通用接口的服务，按用户可配置的工作流围绕共享公共历史协作。用户是主持人，可以点名、插话、暂停/停止/单步、设置持续指令，最终输出 PRD、会议纪要、行动清单和经确认后写盘的代码候选文件。
 
 ## V1 不可缩水的能力
 
@@ -42,9 +42,9 @@ PolyForm Noncommercial 1.0.0 为优先考虑的许可证，禁止未经授权的
 
 ## 多服务商与 Provider Preset Catalog（2026-10-20 用户追加）
 
-向导内置 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax（D142），也可以添加其他 OpenAI 兼容或自定义接口；未列出的渠道由用户自行填写，不代表已核验可用。Coding 套餐/订阅账号不自动具有 API 权益。
+向导内置 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax（D143），也可以添加其他通用接口的服务；未列出的渠道由用户自行填写，不代表已核验可用。Coding 套餐/订阅账号不自动具有 API 权益。
 
-区分服务商/渠道的 Provider 配置实例、具体 Model 和协议 Adapter。沿用 providerId 与 (providerId, modelId) 身份；保留原生 OpenAI/Anthropic/Gemini，兼容服务最大化复用 R09 Adapter。规划数据驱动的 Provider Preset Catalog，记录稳定标识/名称、经核实协议与默认 Base URL、鉴权形式、可选模型/自定义 ID、能力及官方来源/核验时间/有效期；预设无凭据、不是执行代码或发送许可，同一预设可创建多个独立实例。
+区分服务商/渠道的 Provider 配置实例、具体 Model 和协议 Adapter。沿用 providerId 与 (providerId, modelId) 身份；所有服务共用一个通用 Adapter。规划数据驱动的 Provider Preset Catalog，记录稳定标识/名称、经核实协议与默认 Base URL、鉴权形式、可选模型/自定义 ID、能力及官方来源/核验时间/有效期；预设无凭据、不是执行代码或发送许可，同一预设可创建多个独立实例。
 
 能力、上下文、stream、推理和 usage 支持/不支持/未知须如实标注，不按模型名猜能力，不以连通或列出模型代替生成验收。继续保持 Keychain/Main-only Key、地址校验/TLS/网络防护和显式触发（D136、D137）。多个 Provider/模型应能作为独立成员加入同一房间，保留公共上下文和历史冻结身份。
 

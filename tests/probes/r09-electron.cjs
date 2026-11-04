@@ -70,7 +70,7 @@ const fixture = http.createServer(async(req,res)=>{
     if(req.method==='GET'&&req.url.endsWith('/models')){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({data:[{id:'fixture'}]}));return;}
     assert.equal(req.method,'POST');assert.ok(req.url.endsWith('/chat/completions'));
     assert.equal(call.body.model,'fixture');assert.equal(call.body.stream,true);
-    assert.ok(Number.isSafeInteger(call.body[official?'max_completion_tokens':'max_tokens']));
+    assert.ok(Number.isSafeInteger(call.body.max_tokens));
     res.writeHead(200,{'content-type':'text/event-stream'});
     const emit=v=>res.write('data: '+JSON.stringify(v)+'\n\n');
     emit({id:'fixture-'+requests.length,choices:[{index:0,delta:{content:'R09 public output '+requests.length},finish_reason:null}]});
@@ -113,7 +113,7 @@ async function main(){
  const originalCapabilities=Registry.prototype.resolveCapabilities;
  Registry.prototype.resolveCapabilities=function(config){return config.name==='R09 fixture Compatible'?{outputTokenParameter:'max_tokens',streamUsage:true,listModels:true,authentication:'models'}:originalCapabilities.call(this,config);};
  const originalTransport=Registry.prototype.createTransport;
- Registry.prototype.createTransport=function(guard){const transport=originalTransport.call(this,guard);return (url,init)=>{const target=String(url);return transport(target.startsWith('https://api.openai.com/v1/')?fixtureBase+'/official/v1/'+target.slice('https://api.openai.com/v1/'.length):url,init);};};
+ Registry.prototype.createTransport=function(guard){const transport=originalTransport.call(this,guard);return (url,init)=>{const target=String(url);return transport(target.startsWith('https://second.example/v1/')?fixtureBase+'/official/v1/'+target.slice('https://second.example/v1/'.length):url,init);};};
  result.fixture={officialTransportMappedToLoopback:true,realCompatibleSafeTransport:true,liveApi:false};
  await guarded;const window=await loaded;const contents=window.webContents;
  assert.equal(contents.getURL(),pathToFileURL(renderer).href);

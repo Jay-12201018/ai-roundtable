@@ -1,6 +1,6 @@
 // E2E entry: runs in Electron's Main before the built app and refuses to start it unless every data path is the test's
-// own temporary directory. Keys use a fake safeStorage, Node and Chromium network are blocked, and only the four official
-// service addresses and one fixture-owned typed address are redirected to the test's loopback fixture. Native dialogs answer from a queue the test
+// own temporary directory. Keys use a fake safeStorage, Node and Chromium network are blocked, and only the fixture's
+// service addresses are redirected to the test's loopback fixture. Native dialogs answer from a queue the test
 // fills. Same isolation as tests/probes/r16-harness.cjs, without its in-process driver: Playwright drives the page.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -36,7 +36,7 @@ for (const [name, path] of Object.entries(paths)) {
   if (app.getPath(name) !== path) refuse(`could not set ${name}`);
 }
 app.commandLine.appendSwitch('use-mock-keychain');
-for (const name of ['ELECTRON_RENDERER_URL', 'ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS']) delete process.env[name];
+for (const name of ['ELECTRON_RENDERER_URL']) delete process.env[name];
 
 const state = globalThis.__e2e = {
   profile, fakeSafeStorage: { encrypt: 0, decrypt: 0 }, nodeNetworkAttempts: [], chromiumNetworkAttempts: [], externalOpens: [],
@@ -64,8 +64,7 @@ shell.openExternal = async url => { state.externalOpens.push(url); };
 const fixturePort = Number(process.env.ROUNDTABLE_E2E_FIXTURE_PORT);
 const originalRequest = http.request;
 http.request = function (url) {
-  // The proxy check calls it with an options object; a request to anything but the fixture stops here either way.
-  const target = new URL(typeof url === 'object' && !(url instanceof URL) ? `http://${url.hostname}:${url.port}` : String(url));
+  const target = new URL(String(url));
   if (target.hostname !== '127.0.0.1' || Number(target.port) !== fixturePort) { state.nodeNetworkAttempts.push(target.origin); throw new Error('Remote HTTP blocked'); }
   return originalRequest.apply(this, arguments);
 };
@@ -97,12 +96,12 @@ app.whenReady().then(() => {
   });
 });
 
-const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://models.e2e.invalid': 'compatible', 'https://anthropic-gateway.e2e.invalid': 'anthropic', 'https://gemini-gateway.e2e.invalid': 'gemini' };
+const fixtureServices = { 'https://api.deepseek.com': 'deepseek', 'https://api.moonshot.cn': 'kimi', 'https://open.bigmodel.cn': 'glm', 'https://models.e2e.invalid': 'custom' };
 const build = process.env.ROUNDTABLE_E2E_BUILD ? resolve(process.env.ROUNDTABLE_E2E_BUILD) : resolve(__dirname, '../../../out');
 import(pathToFileURL(join(build, 'main/index.js')).href).then(({ ProviderRegistry }) => {
   const transport = ProviderRegistry.prototype.createTransport;
-  ProviderRegistry.prototype.createTransport = function (guard, diagnostics, proxyKind) {
-    const send = transport.call(this, guard, diagnostics, proxyKind);
+  ProviderRegistry.prototype.createTransport = function (guard, diagnostics) {
+    const send = transport.call(this, guard, diagnostics);
     return (url, init) => {
       const target = new URL(String(url));
       const service = fixtureServices[target.origin];

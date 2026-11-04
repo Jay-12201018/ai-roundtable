@@ -1,15 +1,14 @@
 // R16 batch 2 hands-on acceptance (E settings and connect wizard, F rooms, members and discussion modes, G first use and
 // usage) through the production build with real mouse, keyboard and IME input. Isolation, network blocking and the
-// DeepSeek loopback fixture come from r16-harness.cjs; a loopback CONNECT proxy owned by this probe answers 检测代理.
+// DeepSeek loopback fixture come from r16-harness.cjs.
 // Three launches of one profile:
-//   electron tests/probes/r16-batch2-acceptance.cjs                      first run (welcome → demo → connect → room → mode → discussion → proxy)
-//   electron tests/probes/r16-batch2-acceptance.cjs --restart <dir>      the saved switch is in effect; nothing asks to confirm anything (D136)
-//   electron tests/probes/r16-batch2-acceptance.cjs --restart2 <dir>     direct again: a discussion sends; a new Key works at once
+//   electron tests/probes/r16-batch2-acceptance.cjs                      first run (welcome → demo → connect → room → mode → discussion)
+//   electron tests/probes/r16-batch2-acceptance.cjs --restart <dir>      nothing asks to confirm anything (D136)
+//   electron tests/probes/r16-batch2-acceptance.cjs --restart2 <dir>     a discussion sends; a new Key works at once
 // Screenshots go to docs/verification/r16-batch2-screens/ (01–29, 40–49, 60–79).
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const { resolve } = require('node:path');
-const { session } = require('electron');
 const { createProbe } = require('./r16-harness.cjs');
 
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--inspect'));
@@ -29,17 +28,9 @@ const replies = {
 };
 fixture.reply = body => replies[/现在由你（成员「([^」]+)」/u.exec(body.messages.at(-1).content)?.[1]] ?? '好的，补充一点。';
 
-// The owned loopback CONNECT proxy: answers 200 and closes; nothing passes through it.
-const connects = [];
-const proxy = http.createServer();
-proxy.on('connect', (request, socket) => { connects.push({ url: request.url, headers: Object.keys(request.headers) }); socket.end('HTTP/1.1 200 Connection Established\r\n\r\n'); });
-
 async function main() {
-  await new Promise(done => proxy.listen(0, '127.0.0.1', done)); fixture.proxyPort = proxy.address().port;
   const ui = await probe.start({ screens, width: 1280, height: 800, keepScreens: phase !== 'first', firstShot: phase === 'first' ? 0 : phase === 'restart' ? 39 : 59 });
   const { js, until, click, field, key, selectAll, ime, type, capture, resize, api, text, runSnapshot, finish } = ui;
-  // What the system's proxy setting answers on this machine must not decide the result.
-  session.defaultSession.resolveProxy = async () => `PROXY 127.0.0.1:${fixture.proxyPort}`;
   const has = value => until(`document.body.innerText.includes(${JSON.stringify(value)})`, value);
   const statusHas = (value, timeout) => until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes(${JSON.stringify(value)})`, 'status ' + value, timeout);
   const noOverflow = async label => check(await js('document.documentElement.scrollWidth <= window.innerWidth'), `${label}: no horizontal page scroll`);
@@ -57,12 +48,12 @@ async function main() {
     await has('让几位 AI 围坐一桌，替你把问题讨论透');
     const welcome = await text();
     for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '写下目标，开始讨论', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型',
-      '支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他 OpenAI 兼容或自定义接口。'])
+      '支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他通用接口的服务。'])
       check(welcome.includes(piece), 'Welcome says: ' + piece);
     check(!/价格|审核/u.test(welcome), 'The welcome page says nothing about prices');
     check(await js(`!document.querySelector('[aria-label="讨论目标"]')`), 'No goal box before anything exists');
     await noOverflow('welcome 1280');
-    await capture('welcome-1280-light', '首次启动（1280，浅色）：没有服务也没有房间，主区域是欢迎页——“连接模型服务”（主推，墨绿描边）和“先试玩演示”（写明回复是预先写好的示例、不代表真实模型水平）；连接卡片按审核状态如实写“目前可以用于讨论的是 DeepSeek；OpenAI、Anthropic Claude、Google Gemini 和其他兼容服务可以先连接，价格审核后开放讨论”；下方三步说明与数据/Key 安全说明；侧栏写“还没有房间……会自动建好第一个房间”，设置旁提示“未连接模型”。');
+    await capture('welcome-1280-light', '首次启动（1280，浅色）：没有服务也没有房间，主区域是欢迎页：连接模型服务，或者先试玩演示。');
     await theme('dark'); await resize(800, 600); await openNav(); await click('AI 圆桌', { selector: '.brand-home' });
     await has('先试玩演示'); await noOverflow('welcome 800');
     await capture('welcome-800-dark', '800×600 深色：欢迎页两张卡片改为上下排列，无横向滚动，服务说明同浅色。点侧栏左上角“AI 圆桌”可以从设置回到首页（实操中发现首次使用时离开欢迎页后没有回来的入口，已补上）。');
@@ -183,19 +174,12 @@ async function main() {
     await until(`document.querySelector('.usage-page [aria-label="合计"]')`, 'usage dark'); await noOverflow('usage 800');
     await capture('usage-800-dark', '800×600 深色：统计卡片改为两列，表格在卡片内横向滚动，页面本身无横向滚动。');
 
-    // E · the proxy switch (D137) at 800 dark, then 1280 light. The system's answer is injected; a change takes effect at once.
-    await openNav(); await click('设置', { selector: '.sb-item' }); await click('网络');
-    await has('未开启，直接连接。');
-    await click('使用系统代理', { selector: '[role=switch]' });
-    await has(`已检测到系统代理 127.0.0.1:${fixture.proxyPort}`);
-    check(!(await text()).includes('重启'), 'Nothing waits for a restart');
-    await noOverflow('network 800');
-    await capture('network-800-dark', '设置 › 网络（800 深色，设置分类变成顶部横向标签）：打开开关马上读到系统代理，写在开关旁；不用重启。');
-    await resize(1280, 800); await theme('light'); await click('网络');
-    await click('测试连接');
-    await has('连接正常。');
-    check(connects.length === 1 && connects[0].url.endsWith(':443') && !connects[0].headers.includes('authorization') && !connects[0].headers.includes('proxy-authorization'), 'One keyless CONNECT');
-    await capture('network-saved', '“测试连接”只做一次不带 Key 的 CONNECT 握手，结果写在按钮旁。');
+    // E · settings at 800 dark, then 1280 light: services, appearance, privacy, and nothing else.
+    await openNav(); await click('设置', { selector: '.sb-item' });
+    check(!(await js(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === '网络')`)), 'Settings has no such section');
+    await noOverflow('settings 800');
+    await capture('settings-800-dark', '设置（800 深色，分类变成顶部横向标签）：模型服务、外观、数据与隐私。');
+    await resize(1280, 800); await theme('light');
     await keyLeak();
   }
 
@@ -207,20 +191,10 @@ async function main() {
     const card = await js(`document.querySelector('section[aria-label="DeepSeek"]').innerText`);
     check(card.includes('官方地址') && card.includes('已保存（不显示）') && !card.includes('确认'), 'After a restart DeepSeek is usable with nothing to confirm');
     await capture('restart-services', '重启后（同一个 profile）设置 › 模型服务：DeepSeek 仍是“可以使用”。');
-    await click('网络');
-    check((await api('network.getSettings')).saved.enabled === true, 'The switch was saved');
-    await has(`已检测到系统代理 127.0.0.1:${fixture.proxyPort}`);
-    check(await js(`document.querySelector('[role=switch]').getAttribute('aria-checked')`) === 'true', 'The saved switch is shown as on');
-    await capture('restart-network', '重启后 网络：开关仍开着，状态写在开关旁。');
-    await click('使用系统代理', { selector: '[role=switch]' });
-    await has('未开启，直接连接。');
-    await capture('restart-proxy-off', '关掉开关：立即生效，不用重启。');
   }
 
   if (phase === 'restart2') {
     await until(`document.querySelector('.sidebar')`, 'loaded');
-    await click('设置', { selector: '.sb-item' }); await click('网络');
-    await has('未开启，直接连接。');
     // D136: a discussion sends right away after the restart, with no confirmation step.
     await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
     await field('讨论目标'); await selectAll(); await ime('chongqi', '重启后直接开始');
@@ -228,7 +202,7 @@ async function main() {
     await click('开始讨论');
     await statusHas('已完成', 90000);
     check(fixture.requests.length === before + 5, 'Five requests sent after the restart');
-    await capture('restart-run', '再次重启（直连）后直接开始一场讨论：审查修订链的 5 次请求照常发出并完成；讨论方式仍是房间记住的“审查修订链”。');
+    await capture('restart-run', '再次重启后直接开始一场讨论：审查修订链的 5 次请求照常发出并完成；讨论方式仍是房间记住的“审查修订链”。');
     // A new Key works at once.
     const ds = await deepseek();
     await api('settings.setKey', { providerId: ds.id, apiKey: fakeKey + '-new' });
@@ -253,7 +227,6 @@ async function main() {
     await theme('light');
     await keyLeak();
   }
-  await new Promise(done => { proxy.closeAllConnections(); proxy.close(done); });
   await finish();
 }
 main().catch(probe.fail);

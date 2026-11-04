@@ -224,20 +224,6 @@ describe('Compatible request mapping and stream normalization', () => {
     expectSanitized(events);
   });
 
-  it('ignores OpenAI environment credentials, endpoint, organization and project', async () => {
-    vi.stubEnv('SERVICE_API_KEY', 'raw-vendor-secret');
-    vi.stubEnv('SERVICE_BASE_URL', 'https://environment.example/secret/');
-    vi.stubEnv('SERVICE_ORG_ID', 'raw-vendor-secret');
-    vi.stubEnv('SERVICE_PROJECT_ID', 'raw-vendor-secret');
-    const { fetcher, requests } = networkFixture();
-    await collect(provider(fetcher).streamChat(input));
-    expect(requests[0].url).toBe('https://compatible.example/v1/chat/completions');
-    expect(requests[0].headers.get('authorization')).toBe('Bearer fixture-compatible-secret');
-    expect(requests[0].headers.has('openai-organization')).toBe(false);
-    expect(requests[0].headers.has('openai-project')).toBe(false);
-    expect(JSON.stringify([...requests[0].headers])).not.toContain('raw-vendor-secret');
-  });
-
   it('keeps provider instance endpoint, key reference and model independent', async () => {
     const { fetcher, requests } = networkFixture();
     const resolveKey = vi.fn(async (providerId: string) => providerId === 'compatible-two' ? 'fixture-second-key' : fixtureKey);

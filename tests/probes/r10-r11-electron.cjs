@@ -57,34 +57,22 @@ const requests = []; let port;
 const fixture = http.createServer(async (req, res) => {
   try {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
-    const kind = req.url.startsWith('/anthropic/') ? 'anthropic' : 'gemini';
-    assert.equal(req.headers[kind === 'anthropic' ? 'x-api-key' : 'x-goog-api-key'], 'r10r11-fake-' + kind);
-    assert.equal(req.headers.authorization, undefined);
+    const kind = req.url.startsWith('/first/') ? 'first' : 'second';
+    assert.equal(req.headers.authorization, 'Bearer r10r11-fake-' + kind);
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
     requests.push({ kind, method: req.method, path: req.url, body });
     if (req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(kind === 'anthropic' ? { data: [{ id: 'fixture', display_name: 'Owned native fixture' }], has_more: false }
-        : { models: [{ name: 'models/fixture', displayName: 'Owned native fixture', supportedGenerationMethods: ['generateContent'] }] })); return;
+      res.end(JSON.stringify({ data: [{ id: 'fixture' }] })); return;
     }
     assert.equal(req.method, 'POST');
-    assert.equal(kind === 'anthropic' ? body.max_tokens : body.generationConfig.maxOutputTokens, 128);
-    assert.equal(body.max_completion_tokens, undefined);
-    const text = 'Native public output ' + requests.length;
+    assert.equal(body.max_tokens, 128);
+    assert.equal(body.model, 'fixture'); assert.equal(body.stream, true);
+    const text = 'Public output ' + requests.length;
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    if (kind === 'anthropic') {
-      assert.equal(body.model, 'fixture'); assert.equal(body.stream, true);
-      const emit = event => res.write('event: ' + event.type + '\ndata: ' + JSON.stringify(event) + '\n\n');
-      emit({ type: 'message_start', message: { id: 'owned-native-message', type: 'message', role: 'assistant', model: 'fixture', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 20, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } });
-      emit({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
-      emit({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
-      setTimeout(() => { if (res.destroyed) return; emit({ type: 'content_block_stop', index: 0 }); emit({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 4 } }); emit({ type: 'message_stop' }); res.end(); }, 100);
-    } else {
-      assert.equal(body.generationConfig.candidateCount, 1);
-      const emit = event => res.write('data: ' + JSON.stringify(event) + '\n\n');
-      emit({ candidates: [{ index: 0, content: { role: 'model', parts: [{ text }] } }] });
-      setTimeout(() => { if (res.destroyed) return; emit({ candidates: [{ index: 0, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 4, thoughtsTokenCount: 0, cachedContentTokenCount: 0, totalTokenCount: 24 } }); res.end(); }, 100);
-    }
+    const emit = event => res.write('data: ' + JSON.stringify(event) + '\n\n');
+    emit({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] });
+    setTimeout(() => { if (res.destroyed) return; emit({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 4 } }); res.end('data: [DONE]\n\n'); }, 40);
   } catch (error) { fail(error); }
 });
 const originalRequest = http.request;
@@ -92,7 +80,7 @@ http.request = function (url) { const target = new URL(String(url)); assert.equa
 http.get = () => { throw new Error('Unexpected HTTP get'); };
 const https = require('node:https'); https.request = https.get = () => { result.nodeNetworkAttempts.push('remote https blocked'); throw new Error('Remote TLS blocked'); };
 globalThis.fetch = async () => { result.nodeNetworkAttempts.push('global fetch blocked'); throw new Error('Remote fetch blocked'); };
-for (const name of ['ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS', 'ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
+for (const name of ['ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
 syncBuiltinESMExports();
 const fail = error => { result.status = 'FAIL'; result.error = error instanceof Error ? error.stack : typeof error === 'object' && error !== null ? JSON.stringify(error) : String(error); save(); console.error('R10_R11_FAIL ' + JSON.stringify({ resultPath, error: result.error })); app.exit(1); };
 const timer = setTimeout(() => fail(new Error('Bounded production probe timed out')), 240000);
@@ -113,8 +101,8 @@ async function main() {
   const transport = Registry.prototype.createTransport;
   Registry.prototype.createTransport = function (guard, diagnostics) {
     const send = transport.call(this, guard, diagnostics);
-    return (url, init) => { const target = new URL(String(url)); const kind = target.origin === 'https://api.anthropic.com' ? 'anthropic' : target.origin === 'https://generativelanguage.googleapis.com' ? 'gemini' : null;
-      assert.ok(kind, 'No non-native fixture target allowed'); return send(`http://127.0.0.1:${port}/${kind}${target.pathname}${target.search}`, init); };
+    return (url, init) => { const target = new URL(String(url)); const kind = target.origin === 'https://first.example' ? 'first' : target.origin === 'https://second.example' ? 'second' : null;
+      assert.ok(kind, 'Only the fixture targets are allowed'); return send(`http://127.0.0.1:${port}/${kind}${target.pathname}${target.search}`, init); };
   };
   await guarded; const window = await loaded; const contents = window.webContents;
   const preferences = contents.getLastWebPreferences();
@@ -125,7 +113,7 @@ async function main() {
   assert.deepEqual(result.nodeNetworkAttempts, []); assert.deepEqual(result.chromiumNetworkAttempts, []); assert.deepEqual(result.consoleErrors, []); assert.deepEqual(result.preloadErrors, []);
   assert.ok(!JSON.stringify(result.ui).includes('r10r11-fake-'), 'Key leaked to public result');
   if (restarting) assert.equal(requests.length, 0, 'Restart automatically sent a request');
-  else { assert.ok(requests.some(r => r.kind === 'anthropic' && r.method === 'POST')); assert.ok(requests.some(r => r.kind === 'gemini' && r.method === 'POST'));
+  else { assert.ok(requests.some(r => r.kind === 'first' && r.method === 'POST')); assert.ok(requests.some(r => r.kind === 'second' && r.method === 'POST'));
     for (const run of result.ui.runs) {
       assert.equal(run.workflow.completedTurns, run.workflow.totalTurns);
       assert.deepEqual(run.turns.map(t => t.agentId), run.workflowSnapshot.steps.map(s => s.agentId));

@@ -4,12 +4,12 @@ import type { Page } from '@playwright/test';
 import { artifactOf, memberOf } from './support/fixture';
 import { FAKE_KEY, expect, generateArtifact, memberTexts, newDiscussion, openArtifacts, root, seedDeepSeekRoom, statusHas, test, threadItems, type RunningApp } from './support/app';
 
-// D134/D142: one discussion across every interface type, connected through the real wizard: a built-in service and three
-// user-added ones, each member on its own model. With ROUNDTABLE_E2E_SCREENS set it also keeps the screenshots named in
+// D134/D143: one discussion across several services, connected through the real wizard: three built-in services and a
+// user-added one, each member on its own model. With ROUNDTABLE_E2E_SCREENS set it also keeps the screenshots named in
 // `kept`, in the light and dark themes.
 const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUNDTABLE_E2E_SCREENS) : undefined;
 const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'custom-service', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
-  'network-off', 'network-system', 'network-socks', 'network-dark', 'services-dark', 'wizard-custom-dark', 'discussion-dark', 'usage-dark',
+  'settings-sections', 'stopped-service', 'services-dark', 'wizard-custom-dark', 'discussion-dark', 'usage-dark',
   'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
@@ -63,18 +63,17 @@ async function connect(running: RunningApp, service: RegExp, shots?: { form?: st
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
 
-/** A user-added service: a name, an interface type, an address, a Key and a model name. */
-async function connectCustom(running: RunningApp, name: string, type: string, address: string, model: string, shot?: string) {
+/** A user-added service: a name, an address, a Key and a model name. */
+async function connectCustom(running: RunningApp, name: string, address: string, model: string, shot?: string) {
   const { page } = running;
   await page.getByRole('button', { name: '添加服务' }).click();
   await page.getByRole('button', { name: /^自定义服务/u }).click();
   const dialog = page.locator('dialog[open]');
   await dialog.getByLabel('服务名称').fill(name);
-  await dialog.getByLabel('接口类型').selectOption({ label: type });
   await dialog.getByLabel(/^地址/u).fill(address);
   await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);
   await dialog.getByLabel('模型名').fill(model);
-  if (shot) await capture(running, shot, '自定义服务：名称、接口类型、地址、Key、模型名，保存就能用。');
+  if (shot) await capture(running, shot, '自定义服务：名称、地址、Key、模型名，保存就能用。');
   await page.locator('dialog[open]').getByRole('button', { name: '保存' }).click();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
@@ -101,7 +100,7 @@ async function addMember(running: RunningApp, role: RegExp, name: string, option
 
 const noSideScroll = (running: RunningApp) => running.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 
-test('paste a Key, start a discussion, then mix every interface type: name, pause, summarize, revoke, write an artifact, read the usage', async ({ harness }) => {
+test('paste a Key, start a discussion, then mix several services: name, pause, summarize, revoke, write an artifact, read the usage', async ({ harness }) => {
   test.setTimeout(240_000);
   const { fixture } = harness;
   fixture.reply = body => {
@@ -116,7 +115,7 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
 
   // The shortest path: paste a Key and the discussion is right there.
   await capture(running, 'welcome', '首次启动：欢迎页写明支持哪些服务、几位成员可以各用一家、费用由服务商收取。');
-  await expect(page.getByText('支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他 OpenAI 兼容或自定义接口。', { exact: false })).toBeVisible();
+  await expect(page.getByText('支持 DeepSeek、Kimi、通义千问、智谱 GLM、豆包、MiniMax，也可以添加其他通用接口的服务。', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: '连接…' }).click();
   await capture(running, 'wizard-choose', '选服务：内置服务只是预填地址和建议模型名；也可以选自定义服务。');
   await connect(running, /^DeepSeek/u, { form: 'wizard-key', test: 'wizard-tested' });
@@ -124,14 +123,20 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
   await expect(page.getByText('3 位成员', { exact: false }).first()).toBeVisible();
   await capture(running, 'first-discussion', '保存后直接到第一场讨论：房间和三位成员已经建好，写下目标就能开始。');
 
-  // User-added services of every interface type: an address, a Key and a model name.
+  // Two more built-in services and a user-added one: an address, a Key and a model name.
   await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
-  await connectCustom(running, '公司模型', 'OpenAI 兼容', 'https://models.e2e.invalid/v1', 'company-model', 'custom-service');
-  await connectCustom(running, '公司网关甲', 'Anthropic', 'https://anthropic-gateway.e2e.invalid', 'gateway-a');
-  await connectCustom(running, '公司网关乙', 'Gemini', 'https://gemini-gateway.e2e.invalid/v1beta', 'gateway-b');
-  for (const name of ['公司模型', '公司网关甲', '公司网关乙']) await expect(page.getByRole('region', { name, exact: true })).toContainText('可以使用');
+  for (const service of [/^Kimi/u, /^智谱 GLM/u]) {
+    await page.getByRole('button', { name: '添加服务' }).click();
+    await connect(running, service);
+  }
+  await connectCustom(running, '公司模型', 'https://models.e2e.invalid/v1', 'company-model', 'custom-service');
+  for (const name of ['Kimi', '智谱 GLM', '公司模型']) await expect(page.getByRole('region', { name, exact: true })).toContainText('可以使用');
   expect(fixture.requests.filter(request => request.model !== ''), 'Saving sends nothing').toEqual([]);
   await capture(running, 'services', '设置 › 模型服务：四个服务都可以使用，保存时没有发任何请求。');
+  // Settings is services, appearance and privacy.
+  for (const name of ['模型服务', '外观', '数据与隐私']) await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '网络', exact: true })).toHaveCount(0);
+  await capture(running, 'settings-sections', '设置只有模型服务、外观、数据与隐私。');
 
   // A model's limits are the host's to change.
   await page.getByRole('button', { name: '展开 DeepSeek' }).click().catch(() => undefined);
@@ -148,10 +153,10 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
   const rooms = await running.api<{ name: string }[]>('rooms.listRooms');
   const roomName = rooms[0]!.name;
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
-  await changeMember(running, '审查者', '公司模型 · company-model（company-model）');
-  await changeMember(running, '综合者', '公司网关甲 · gateway-a（gateway-a）');
-  await addMember(running, /^反方/u, '反方', '公司网关乙 · gateway-b（gateway-b）');
-  await capture(running, 'room', '房间：四位成员各用一个服务，三种接口类型混在一起，都写着“可以使用”。');
+  await changeMember(running, '审查者', 'Kimi · Kimi K3.1 Pro（kimi-k3.1-pro）');
+  await changeMember(running, '综合者', '智谱 GLM · GLM-5.3（glm-5.3）');
+  await addMember(running, /^反方/u, '反方', '公司模型 · company-model（company-model）');
+  await capture(running, 'room', '房间：四位成员各用一个服务，三家内置服务加一个自定义服务，都写着“可以使用”。');
 
   // The first reply is held so 暂停 and 点名 happen as a person would do them.
   await newDiscussion(running, roomName, '交叉审计校园跑腿的试点方案。');
@@ -181,20 +186,16 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
 
   // A built-in service and a typed address get the same request: one adapter, no per-service branch (D135).
   const sent = fixture.requests.filter(request => request.model !== '');
-  expect([...new Set(sent.map(request => request.service))].sort()).toEqual(['anthropic', 'compatible', 'deepseek', 'gemini']);
+  expect([...new Set(sent.map(request => request.service))].sort()).toEqual(['custom', 'deepseek', 'glm', 'kimi']);
   const by = (service: string) => sent.find(request => request.service === service)!;
-  for (const [service, model] of [['deepseek', 'deepseek-flash'], ['compatible', 'company-model']] as const) {
+  for (const [service, model] of [['deepseek', 'deepseek-flash'], ['kimi', 'kimi-k3.1-pro'], ['glm', 'glm-5.3'], ['custom', 'company-model']] as const) {
     expect(Object.keys(by(service).raw).sort()).toEqual(['max_tokens', 'messages', 'model', 'stream', 'stream_options']);
     expect(by(service).raw).toMatchObject({ model, max_tokens: 8192, stream_options: { include_usage: true } });
     expect(by(service).headers.authorization).toBe(`Bearer ${FAKE_KEY}`);
   }
-  expect(by('anthropic').raw).toMatchObject({ model: 'gateway-a', max_tokens: 8192 });
-  expect(by('anthropic').headers['x-api-key']).toBe(FAKE_KEY);
-  expect(by('gemini').raw.generationConfig).toMatchObject({ maxOutputTokens: 8192 });
-  expect(by('gemini').headers['x-goog-api-key']).toBe(FAKE_KEY);
   // The last speaker read everyone else's words as public text.
   const last = sent.at(-1)!;
-  for (const words of ['deepseek · deepseek-flash', 'compatible · company-model', 'anthropic · gateway-a']) expect(JSON.stringify(last.messages)).toContain(words);
+  for (const words of ['deepseek · deepseek-flash', 'kimi · kimi-k3.1-pro', 'glm · glm-5.3']) expect(JSON.stringify(last.messages)).toContain(words);
 
   await page.locator('.usage-tag').first().click();
   await expect(page.getByRole('region', { name: '请求详情' }).first()).toContainText('输入 300（缓存命中 100） / 输出 6 tokens');
@@ -234,7 +235,7 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
   await expect(page.getByText(/费用由服务商收取，请到服务商控制台查看账单；这里不估算/u)).toBeVisible();
   await capture(running, 'usage-run', '用量页 · 按讨论：只有请求数和 token；写明费用由服务商收取。');
   await page.getByRole('tab', { name: '按模型' }).click();
-  for (const model of ['deepseek-flash', 'company-model', 'gateway-a', 'gateway-b']) await expect(page.getByRole('table')).toContainText(model);
+  for (const model of ['deepseek-flash', 'kimi-k3.1-pro', 'glm-5.3', 'company-model']) await expect(page.getByRole('table')).toContainText(model);
   await capture(running, 'usage-model', '用量页 · 按模型：四个服务分别汇总。');
   await page.getByRole('tab', { name: '按用途' }).click();
   await expect(page.getByRole('table')).toContainText('讨论摘要');
@@ -248,42 +249,24 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
   expect(exported).toContain('输入tokens');
   expect(exported).not.toMatch(/金额|单价|预留|核销|¥/u);
 
-  // The proxy switch, in each state it can find (the system's answer is injected; no request is sent through it).
-  const systemProxy = (answer: string) => running.app.evaluate(({ session }, answer) => { session.defaultSession.resolveProxy = async () => answer; }, answer);
+  // A stopped service left from an older version: name kept, says it is stopped, can be removed with its Key.
+  await running.api('settings.createProvider', { name: '旧版本的服务', kind: 'compatible', enabled: false, customModels: [{ id: 'old-model', name: 'old-model' }] });
   await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
-  await page.getByRole('button', { name: '网络', exact: true }).click();
-  const toggle = page.getByRole('switch', { name: '使用系统代理' });
-  await expect(toggle).not.toBeChecked();
-  await expect(page.getByText('未开启，直接连接。')).toBeVisible();
-  await capture(running, 'network-off', '设置 › 网络：默认关闭，直接连接。文案不提任何软件和用途。');
-  await systemProxy(`PROXY 127.0.0.1:${fixture.port}`);
-  await toggle.click();
-  await expect(page.getByText(`已检测到系统代理 127.0.0.1:${fixture.port}`)).toBeVisible();
-  await page.getByRole('button', { name: '测试连接' }).click();
-  await expect(page.getByText('连接正常。')).toBeVisible();
-  expect(fixture.connects, 'The check asked the proxy for a tunnel and sent nothing else').toBe(1);
-  await capture(running, 'network-system', '打开开关：马上读到系统代理并写在开关旁，不用重启；测试连接只做一次握手。');
-  await toggle.click();
-  await systemProxy('DIRECT');
-  await toggle.click();
-  await expect(page.getByText('系统没有设置代理，将直接连接。')).toBeVisible();
-  await capture(running, 'network-direct', '系统没有设置代理：如实说明将直接连接。');
-  await toggle.click();
-  await systemProxy('SOCKS5 127.0.0.1:1080');
-  await toggle.click();
-  await expect(page.getByText(/系统代理是 SOCKS，这个应用现在不支持，请求不会发出/u)).toBeVisible();
-  await capture(running, 'network-socks', '系统代理是 SOCKS：说明不支持、请求不会发出，并指向手动填写；不会悄悄直连。');
-  await page.getByText('高级：手动填写地址').click();
-  await page.getByLabel('代理地址').fill('127.0.0.1');
-  await page.getByLabel('端口').fill(String(fixture.port));
-  await page.locator('.net-card').getByRole('button', { name: '保存' }).click();
-  await expect(page.getByText(`使用手动填写的代理 127.0.0.1:${fixture.port}`)).toBeVisible();
-  await capture(running, 'network-manual', '高级选项：手动地址优先于系统设置，能读不到系统代理时用。');
+  await page.locator('.sidebar .sb-item', { hasText: '用量' }).click();
+  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
+  const stopped = page.getByRole('region', { name: '旧版本的服务' });
+  await expect(stopped).toContainText('已停用');
+  await page.getByRole('button', { name: '展开 旧版本的服务' }).click();
+  await stopped.getByText('高级与删除').click();
+  await expect(stopped.getByRole('switch', { name: '启用这个服务' })).toBeDisabled();
+  await expect(stopped).toContainText('填写请求地址后才能启用');
+  await capture(running, 'stopped-service', '旧版本留下的服务：保留原名，显示已停用；可以删除（连同 Key），或填写地址后重新启用。');
+  await stopped.getByRole('button', { name: '删除服务…' }).click();
+  await stopped.getByRole('button', { name: '确认删除服务' }).click();
+  await expect(stopped).toHaveCount(0);
 
   // Dark theme and the narrow window, on the pages a person keeps open.
   await theme(running, 'dark');
-  await capture(running, 'network-dark', '深色主题：网络。');
-  await page.getByRole('button', { name: '模型服务' }).click();
   await capture(running, 'services-dark', '深色主题：模型服务。');
   await page.getByRole('button', { name: '添加服务' }).click();
   await capture(running, 'wizard-choose-dark', '深色主题：选服务。');
@@ -299,9 +282,6 @@ test('paste a Key, start a discussion, then mix every interface type: name, paus
   await page.locator('dialog[open]').getByRole('button', { name: /^DeepSeek/u }).click();
   await capture(running, 'wizard-key-800', '800 宽、浅色：贴 Key 表单。');
   await page.locator('dialog[open]').getByRole('button', { name: '关闭' }).first().click();
-  await page.getByRole('button', { name: '网络', exact: true }).click();
-  await capture(running, 'network-800', '800 宽、浅色：网络。');
-  expect(await noSideScroll(running), 'No horizontal scroll at 800').toBe(true);
   await page.getByRole('button', { name: '打开导航' }).click();
   await page.locator('.sb-item', { hasText: '用量' }).click();
   await capture(running, 'usage-800', '800 宽、浅色：用量页。');

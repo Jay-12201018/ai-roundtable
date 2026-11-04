@@ -17,7 +17,7 @@ function legacy(version: number) {
   raw.exec('CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL)'); raw.prepare('INSERT INTO schema_migrations VALUES(1,?)').run(time);
   raw.prepare('INSERT INTO rooms VALUES(?,?,?,?,?)').run('r','Legacy','not the original task',time,time);
   raw.prepare('INSERT INTO agents(id,room_id,display_name,role_template_id,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('a','r','Original','draft',time,time);
-  raw.prepare('INSERT INTO providers(id,name,type,api_key_reference,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('p','Existing','openai','key-ref',time,time);
+  raw.prepare('INSERT INTO providers(id,name,type,api_key_reference,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('p','Existing','compatible','key-ref',time,time);
   raw.prepare('INSERT INTO key_records VALUES(?,?,?,?,?,?)').run('key-ref','p','opaque-ciphertext','fixture',time,time);
   raw.prepare('INSERT INTO workflow_runs(id,room_id,status,workflow_snapshot,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('run','r','paused','{}',time,time);
   raw.prepare('INSERT INTO messages(id,room_id,run_id,sender_type,sender_name,content,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run('m','r','run','agent','Original','partial','streaming',time,time);

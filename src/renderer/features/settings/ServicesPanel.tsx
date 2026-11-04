@@ -153,7 +153,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
       {loadFailed && <p role="alert" className="field-error svc-pad">这个服务的配置读不出来。<button type="button" className="link-btn" onClick={() => void load()}>重试</button></p>}
       {config?.withheldModelIds && <div className="callout is-danger svc-pad-callout"><CircleAlert aria-hidden /><span className="grow">之前保存的模型名里有看起来像 API Key 的内容，已经隐藏，不会显示也不会使用。请重新添加正确的模型名。这把 Key 曾以明文存在本机数据库里，建议到服务商控制台更换。</span></div>}
       {config && !mock && <dl className="kv">
-        <dt>请求地址</dt><dd><code className="mono-inline">{target ?? '未填写'}</code><span className="small muted"> · {userAddress ? '你填写的地址' : '官方地址'}</span></dd>
+        <dt>请求地址</dt><dd><code className="mono-inline">{target ?? '未填写'}</code>{target && <span className="small muted"> · {userAddress ? '你填写的地址' : '官方地址'}</span>}</dd>
         <dt>API Key</dt><dd>{keySaved ? <>已保存（不显示）{keyNow === 'session' && <span className="small muted"> · 只在这次运行有效</span>} <button type="button" className="link-btn" onClick={() => onRekey(config)}>更换</button></>
           : keyNow === 'unavailable' ? <>读不出来 <button type="button" className="link-btn" onClick={() => onRekey(config)}>重新填写</button></>
             : <>还没填写 <Button size="sm" variant="primary" onClick={() => onRekey(config)}>填写 Key</Button></>}</dd>
@@ -210,8 +210,8 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
           </div>
           <div className="inline-fields"><Button size="sm" disabled={busy || !draft.name.trim() || (draft.name === config.name && !pendingAddress) || typedAddress && !typedAddress.success}
             onClick={() => void save({ name: draft.name.trim(), ...(userAddress && pendingAddress ? { baseUrl: draft.baseUrl.trim() } : {}) }, pendingAddress ? '地址已更改；原来的 Key 已删除，请重新填写。' : '已保存。')}>{pendingAddress ? '保存（会删除已保存的 Key）' : '保存名称'}</Button></div>
-          <div className="card-row svc-switch"><span className="grow"><b>启用这个服务</b><small>停用后不会发送任何请求，成员也不能选用它。</small></span>
-            <Switch label="启用这个服务" checked={config.enabled} disabled={busy} onChange={value => void save({ enabled: value, ...(value ? {} : { isDefault: false }) }, value ? '已启用。' : '已停用。')} /></div>
+          <div className="card-row svc-switch"><span className="grow"><b>启用这个服务</b><small>{!mock && !config.baseUrl ? '填写请求地址后才能启用。' : '停用后不会发送任何请求，成员也不能选用它。'}</small></span>
+            <Switch label="启用这个服务" checked={config.enabled} disabled={busy || !mock && !config.baseUrl} onChange={value => void save({ enabled: value, ...(value ? {} : { isDefault: false }) }, value ? '已启用。' : '已停用。')} /></div>
           {!mock && <div className="card-row svc-switch"><span className="grow"><b>设为默认服务</b><small>新房间的成员默认用它的默认模型；已有成员的选择不变。</small></span>
             <Switch label="设为默认服务" checked={config.isDefault} disabled={busy || !config.enabled} onChange={value => void save({ isDefault: value }, value ? '已设为默认服务。' : '已取消默认。')} /></div>}
         </>}

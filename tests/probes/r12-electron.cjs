@@ -58,7 +58,7 @@ const { syncBuiltinESMExports } = require('node:module');
 http.request = http.get = () => { result.nodeNetworkAttempts.push('http blocked'); throw new Error('HTTP blocked'); };
 https.request = https.get = () => { result.nodeNetworkAttempts.push('https blocked'); throw new Error('HTTPS blocked'); };
 globalThis.fetch = async () => { result.nodeNetworkAttempts.push('global fetch blocked'); throw new Error('Remote fetch blocked'); };
-for (const name of ['ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS', 'ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
+for (const name of ['ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
 syncBuiltinESMExports();
 const fail = error => { result.status = 'FAIL'; result.error = error instanceof Error ? error.stack : typeof error === 'object' && error !== null ? JSON.stringify(error) : String(error); save(); console.error('R12_FAIL ' + JSON.stringify({ resultPath, error: result.error })); app.exit(1); };
 const timer = setTimeout(() => fail(new Error('Bounded production probe timed out')), 240000);

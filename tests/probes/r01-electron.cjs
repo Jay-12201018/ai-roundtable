@@ -167,14 +167,11 @@ async function probe() {
     const api = window.roundtable;
     // R12 added the host group: exactly one typed method, no generic invoke/send.
     // R13B added the summary and usage groups: typed methods only, still no generic invoke/send.
-    // D137: network holds saved proxy settings and a keyless connection check, typed methods only.
     // R14 added artifact: typed methods only; a file export asks Main's save dialog, the page never passes a path.
-    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['artifact', 'codeExport', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
+    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['artifact', 'codeExport', 'host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
     check(JSON.stringify(Object.keys(api.codeExport)) === JSON.stringify(['chooseRoot', 'preview', 'write']), 'Unexpected code export surface');
     check(JSON.stringify(Object.keys(api.artifact)) === JSON.stringify(['preview', 'generate', 'list', 'getVersion', 'edit', 'export', 'listCodeCandidates'])
       && Object.values(api.artifact).every(value => typeof value === 'function') && !('invoke' in api.artifact) && !('send' in api.artifact), 'Unexpected artifact API');
-    check(JSON.stringify(Object.keys(api.network)) === JSON.stringify(['getSettings', 'saveSettings', 'testProxy'])
-      && Object.values(api.network).every(value => typeof value === 'function'), 'Unexpected network API');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host API');
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview', 'generate', 'confirm', 'revoke']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport', 'exportCsv'])
       && [...Object.values(api.summary), ...Object.values(api.usage)].every(value => typeof value === 'function'), 'Unexpected summary/usage API');

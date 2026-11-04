@@ -6,7 +6,7 @@ AI 圆桌是一个本地桌面应用（Electron、React、TypeScript、SQLite）
 
 ## 能做什么
 
-- **交叉审计：** 支持国内主流大模型，也可以添加其他 OpenAI 兼容或自定义接口。几位成员可以各用一家的模型，在同一场讨论里互相审查。
+- **交叉审计：** 支持国内主流大模型，也可以添加其他通用接口的服务。几位成员可以各用一家的模型，在同一场讨论里互相审查。
 - **多成员讨论：** 一个房间里多位成员依次发言，实时显示。可选自由讨论、双人对话、审查修订链、深度辩论等讨论方式，每种都有上限，不会无限运行。
 - **主持人控制：** 暂停、单步、继续、停止，插话，用 `@` 点名下一位，修改某条发言后重新生成受影响的回复。停止时已生成的内容保留。
 - **用量：** 用量页按讨论、模型、日期和用途显示 token，可以导出 CSV。
@@ -63,7 +63,7 @@ pnpm dev
 pnpm trial
 ```
 
-它会先构建，再用独立目录启动：macOS 为 `~/Library/Application Support/ai-roundtable-trial`（Windows 为 `%APPDATA%\ai-roundtable-trial`，Linux 为 `~/.config/ai-roundtable-trial`）。正式数据目录不会被打开；试用目录如果是指向它的链接，启动会被拒绝。如需经本机代理访问，启动前设置 `ROUNDTABLE_CONNECT_PROXY=http://127.0.0.1:端口` 和 `ROUNDTABLE_TRUST_PROXY_DNS=1`。
+它会先构建，再用独立目录启动：macOS 为 `~/Library/Application Support/ai-roundtable-trial`（Windows 为 `%APPDATA%\ai-roundtable-trial`，Linux 为 `~/.config/ai-roundtable-trial`）。正式数据目录不会被打开；试用目录如果是指向它的链接，启动会被拒绝。启动前设置 `ROUNDTABLE_CONNECT_PROXY=http://127.0.0.1:端口` 和 `ROUNDTABLE_TRUST_PROXY_DNS=1`。
 
 ```bash
 pnpm trial:reset

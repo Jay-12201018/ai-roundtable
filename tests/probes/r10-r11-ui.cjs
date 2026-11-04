@@ -29,24 +29,24 @@ async function page(stage, saved = {}) {
     return { saved, assertions };
   }
   saved.providers = {}; saved.runIds = [];
-  for (const [kind, baseUrl] of [['anthropic', 'https://api.anthropic.com'], ['gemini', 'https://generativelanguage.googleapis.com/v1beta']]) {
-    const provider = await api.settings.createProvider({ name: 'R10R11 fixture ' + kind, kind, defaultModelId: 'fixture', customModels: [{ id: 'fixture', name: 'Owned fixture' }] });
+  for (const [kind, baseUrl] of [['first', 'https://first.example/v1'], ['second', 'https://second.example/v1']]) {
+    const provider = await api.settings.createProvider({ name: 'R10R11 fixture ' + kind, kind: 'compatible', baseUrl, defaultModelId: 'fixture', customModels: [{ id: 'fixture', name: 'Owned fixture' }] });
     saved.providers[kind] = provider.id;
     await api.settings.setKey({ providerId: provider.id, apiKey: 'r10r11-fake-' + kind });
     const configuration = await api.settings.testConnection({ providerId: provider.id, level: 'configuration' });
-    check(configuration.result.ok && configuration.result.level === 'configuration', 'Native local configuration false');
+    check(configuration.result.ok && configuration.result.level === 'configuration', 'Local configuration false');
     const models = await api.settings.listModels({ providerId: provider.id });
-    check(models.models.some(model => model.id === 'fixture'), 'Native model list not connected');
+    check(models.models.some(model => model.id === 'fixture'), 'Model list not connected');
     const auth = await api.settings.testConnection({ providerId: provider.id, level: 'authentication' });
-    check(auth.result.ok && auth.result.level === 'authentication', 'Native authentication fixture false');
+    check(auth.result.ok && auth.result.level === 'authentication', 'Authentication fixture false');
     check(!JSON.stringify(await api.settings.getProviderConfiguration({ id: provider.id })).includes('r10r11-fake'), 'Key in public config');
   }
-  // R16 batch 2: opening 设置 re-reads the services; each native service is a card with its own status.
+  // R16 batch 2: opening 设置 re-reads the services; each service is a card with its own status.
   await click('设置');
-  await wait(() => document.body.innerText, text => text.includes('R10R11 fixture anthropic') && text.includes('R10R11 fixture gemini'), 'Settings page did not identify native providers');
+  await wait(() => document.body.innerText, text => text.includes('R10R11 fixture first') && text.includes('R10R11 fixture second'), 'Settings page did not identify the services');
   const room = await api.rooms.createRoom({ name: 'R10R11 fixture workflows', objective: 'Finite fixture collaboration' }); saved.roomId = room.id;
   const members = [];
-  for (const [index, kind] of ['anthropic', 'gemini', 'anthropic'].entries()) members.push(await api.rooms.createAgent({ roomId: room.id, displayName: 'Native member ' + index, roleTemplateId: 'Role ' + index, systemPrompt: 'Owned system ' + index, providerId: saved.providers[kind], modelId: 'fixture', enabled: true, displayOrder: index }));
+  for (const [index, kind] of ['first', 'second', 'first'].entries()) members.push(await api.rooms.createAgent({ roomId: room.id, displayName: 'Member ' + index, roleTemplateId: 'Role ' + index, systemPrompt: 'Owned system ' + index, providerId: saved.providers[kind], modelId: 'fixture', enabled: true, displayOrder: index }));
   // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.
   await click('用量'); await clickIn('.sidebar', 'R10R11 fixture workflows'); await clickIn('.room-page', '新讨论');
   const labels = { 'free-chat': '自由讨论', 'two-model-dialogue': '双人对话', 'review-revision': '审查修订链', 'deep-debate': '深度辩论' };

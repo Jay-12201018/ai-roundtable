@@ -87,7 +87,7 @@ http.request = function (url) { const target = new URL(String(url)); assert.equa
 http.get = () => { throw new Error('Unexpected HTTP get'); };
 const https = require('node:https'); https.request = https.get = () => { result.nodeNetworkAttempts.push('remote https blocked'); throw new Error('Remote TLS blocked'); };
 globalThis.fetch = async () => { result.nodeNetworkAttempts.push('global fetch blocked'); throw new Error('Remote fetch blocked'); };
-for (const name of ['ROUNDTABLE_CONNECT_PROXY', 'ROUNDTABLE_TRUST_PROXY_DNS', 'ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
+for (const name of ['ROUNDTABLE_TRIAL_ALLOW_ONCE', 'ROUNDTABLE_TRIAL_PROVIDER_ID']) delete process.env[name];
 syncBuiltinESMExports();
 let failureShot;
 const fail = async error => { try { await failureShot?.(); } catch { /* best effort */ } result.status = 'FAIL'; result.error = error instanceof Error ? error.stack : typeof error === 'object' && error !== null ? JSON.stringify(error) : String(error); save(); console.error('PREMERGE_ACCEPTANCE_FAIL ' + JSON.stringify({ resultPath, error: result.error })); app.exit(1); };
@@ -123,8 +123,8 @@ async function main() {
   }
   const { ProviderRegistry: Registry } = await import(pathToFileURL(entry).href);
   const transport = Registry.prototype.createTransport;
-  Registry.prototype.createTransport = function (guard, diagnostics, proxyKind) {
-    const send = transport.call(this, guard, diagnostics, proxyKind);
+  Registry.prototype.createTransport = function (guard, diagnostics) {
+    const send = transport.call(this, guard, diagnostics);
     return (url, init) => { const target = new URL(String(url));
       assert.equal(target.origin, 'https://api.deepseek.com', 'Only the DeepSeek target may be redirected');
       return send(`http://127.0.0.1:${port}/deepseek${target.pathname}${target.search}`, init); };
