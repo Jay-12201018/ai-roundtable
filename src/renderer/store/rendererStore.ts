@@ -44,12 +44,14 @@ export function canCommand(state: RendererState, command: RendererCommand): bool
   }
   if (command === 'pause') return status === 'running';
   if (command === 'stop') return status === 'running' || status === 'pausing' || status === 'paused';
+  // D146: a discussion stopped at its duration limit carries on with the same command.
+  if (command === 'resumeRun' && state.snapshot.durationStop) return true;
   return status === 'paused';
 }
 
 function hasExecution(snapshot:RunSnapshot):boolean{
   const e=snapshot.execution;
-  return !!e&&e.task!==null&&e.membersSnapshot!==null&&e.membersSnapshot.length>0&&e.nextTurnIndex!==null&&e.elapsedExecutionMs!==null&&e.elapsedExecutionMs<e.maxDurationMs;
+  return !!e&&e.task!==null&&e.membersSnapshot!==null&&e.membersSnapshot.length>0&&e.nextTurnIndex!==null&&e.elapsedExecutionMs!==null;
 }
 export function canRecover(state:RendererState,decision:InterruptedRunDecision):boolean{
   if(!canCommand(state,'recoverInterruptedRun'))return false;

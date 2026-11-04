@@ -18,6 +18,16 @@ export type SlotProps = {
 };
 
 /** Version stepping shared by members, the host and summaries; looking at an older version holds the scroll. */
+/** D146: a model can think for minutes before its first word; the host sees it is still waiting, for how long, and how to leave. */
+export function WaitingText({ since }: { since: string | null | undefined }) {
+  const [mounted] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const waited = Math.max(0, now - (since ? Date.parse(since) : mounted));
+  const seconds = Math.floor(waited / 1000);
+  return <>正在思考或生成，还没有输出文字… 已等待 {seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`}{seconds >= 60 ? '。有的模型会先思考几分钟；不想等可以点“停止”。' : ''}</>;
+}
+
 export function useVersions(slot: TimelineSlot) {
   const [viewing, setViewing] = useState<string>();
   const index = Math.max(0, slot.versions.findIndex(version => version.messageId === (viewing ?? slot.active.messageId)));
@@ -99,7 +109,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       {slot.number !== undefined && <span className="msg-num" aria-hidden>#{slot.number}</span>}
     </div>
     {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留；之后的发言会标出受影响）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
-      : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? '正在思考或生成，还没有输出文字…' : '（没有生成文字）'}</p>}</div>}
+      : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? <WaitingText since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /> : '（没有生成文字）'}</p>}</div>}
     {can.truncated && !shown.message.content.trim() && <Note icon={Scissors}
       action={shown.active && can.regenerate ? <Button size="sm" disabled={disabled} onClick={regenerate}>重新生成</Button> : undefined}>
       <b>这位成员的输出额度在思考阶段就用完了</b>，没有写出正文。可以到“设置 › 模型服务”调高这个模型的最大输出，再重新生成。</Note>}

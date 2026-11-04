@@ -9,7 +9,7 @@ import { publicError, type ErrorCode } from '../../shared/schemas/error';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT, interruptedRunDecisionSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
 import { compileWorkflow, nextWorkflowStep, readWorkflowSnapshot } from '../workflow';
 import type { WorkflowConfig, WorkflowSnapshot, WorkflowStep } from '../workflow';
-import { workflowPreviewInputSchema } from '../../shared/schemas/workflow';
+import { DEFAULT_RUN_DURATION_MS, workflowPreviewInputSchema } from '../../shared/schemas/workflow';
 import { roomMessagesSchema } from '../../shared/schemas/app';
 import { PROTOCOL_VERSION } from '../../shared/schemas/common';
 import { normalizedChunkSchema, streamChatInputSchema } from '../../shared/schemas/provider';
@@ -185,7 +185,7 @@ export class RunService {
     const context: RunContext = { runId, roomId: input.roomId, members,
       mode: input.mode ?? 'automatic', // With no stated limit every member speaks once: a fourth member must not be left out in silence.
       maxTurns: Math.min(input.maxTurns ?? workflow?.config.limits.maxTurns ?? Math.max(3, members.length), workflow?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
-      maxDurationMs: Math.min(input.maxDurationMs ?? workflow?.config.limits.maxDurationMs ?? Math.max(300000, members.length * 60000), workflow?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
+      maxDurationMs: Math.min(input.maxDurationMs ?? workflow?.config.limits.maxDurationMs ?? DEFAULT_RUN_DURATION_MS, workflow?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
       outputTokenLimit: Math.min(input.outputTokenLimit ?? workflow?.config.limits.outputTokenLimit ?? DEFAULT_OUTPUT_TOKEN_LIMIT, workflow?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
     this.schedule(context, () => {
@@ -211,8 +211,10 @@ export class RunService {
       const {id,roomId,status,workflowSnapshot,lastError,...execution} = run;
       const versions = this.versionView(data);
       const lastFailure = turns.some(turn => turn.status === 'failed') ? this.database.latestTurnFailure(run.id) : undefined;
+      const durationStop = this.durationStop(data);
       return runSnapshotSchema.parse({
         ...(lastFailure ? { lastFailure } : {}),
+        ...(durationStop ? { durationStop } : {}),
         runId: run.id,
         roomId: run.roomId,
         status: run.status,
@@ -336,7 +338,7 @@ export class RunService {
     const context = this.contexts.get(run.id);
     const elapsedMs = context?.executing ? this.elapsed(context) : run.elapsedExecutionMs ?? 0;
     // D110: only plan Turns count toward the turn limit; D111: a continued Run's duration counts from its continuation.
-    const limitReason = completedTurns < plan.steps.length ? (elapsedMs >= this.durationLimit(data, plan) ? 'max_duration'
+    const limitReason = completedTurns < plan.steps.length ? (elapsedMs >= this.durationLimit(data) ? 'max_duration'
       : planTurns.length >= Math.min(run.maxTurns, plan.config.limits.maxTurns) ? 'max_turns' : undefined) : undefined;
     const nextStep = !limitReason && settled && completedTurns === planTurns.length ? plan.steps[completedTurns] : undefined;
     const currentStage = (planTurns.length > completedTurns ? plan.steps[planTurns.length - 1] : nextStep ?? plan.steps.at(-1))?.stageId;
@@ -432,7 +434,24 @@ export class RunService {
   }
 
   async resumeRun(runId: string): Promise<void> {
+    const run = this.requireRun(runId);
+    if (this.durationStop({ run, continuations: this.database.listContinuations(runId) })) { await this.continueAfterLimit(run); return; }
     await this.resumePaused(runId, 'automatic');
+  }
+
+  /**
+   * D146: a discussion stopped at its duration limit carries on where it was. Only the host's click gets here: what was
+   * unfinished is asked again as a new Attempt beside the old one, or the next member speaks if a stop fell between turns.
+   */
+  private async continueAfterLimit(run: RunRecord): Promise<void> {
+    const last = this.database.listTurns(run.id).at(-1);
+    if (last && canRetryTurn(last.status as TurnStatus)) { await this.repeatAttempt(run.id, last.id); return; }
+    const context = this.contexts.get(run.id) ?? this.contextFrom(run);
+    if (context.executing) throw new ContractError('invalid_state');
+    this.assertSettled(run.id);
+    const renewed = this.renewDuration(run, context);
+    this.schedule(context, () => this.setRunState(run.id, { status: 'running', finishedAt: null, lastError: null, ...renewed }, { status: 'running' }));
+    await context.promise;
   }
 
   private async resumePaused(runId: string, mode: RunContext['mode']): Promise<void> {
@@ -442,9 +461,9 @@ export class RunService {
     const context = this.contexts.get(runId) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
     this.assertSettled(runId);
-    this.assertDurationLeft(run);
+    const renewed = this.renewDuration(run, context);
     context.mode = mode;
-    this.schedule(context, () => this.setRunState(runId, { status: 'running', mode }, { status: 'running' }));
+    this.schedule(context, () => this.setRunState(runId, { status: 'running', mode, ...renewed }, { status: 'running' }));
     await context.promise;
   }
 
@@ -472,13 +491,13 @@ export class RunService {
     const attempt = requestId ? this.database.getAttempt(requestId) : undefined;
     if (!turn || turn.id !== turnId || !canRetryTurn(turn.status as TurnStatus) || !attempt
       || !canRetryTurn(attempt.status) || !attempt.inputSnapshot) throw new ContractError('invalid_state');
-    this.assertDurationLeft(run);
+    const renewed = this.renewDuration(run, context);
     const messages = suffixOf === undefined ? attempt.inputSnapshot.messages : [
       ...attempt.inputSnapshot.messages,
       { role: 'assistant' as const, content: suffixOf },
       { role: 'user' as const, content: continuePrompt },
     ];
-    this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }),
+    this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null, ...renewed }, { status: 'running' }),
       { turn, messages, modelId: attempt.inputSnapshot.modelId,sourceRequestId:attempt.requestId,kind:suffixOf===undefined?'retry':'continue' });
     await context.promise;
   }
@@ -516,7 +535,7 @@ export class RunService {
     if (plan.reason) throw new ContractError('invalid_state');
     const context = this.contextFrom(run);
     const elapsedBaseMs = run.elapsedExecutionMs!;
-    context.maxDurationMs = this.durationLimit({ run, continuations: [{ actionId: '', runId: run.id, agentIds: plan.agentIds, elapsedBaseMs, createdAt: '' }] }, this.workflowPlan(run));
+    context.maxDurationMs = this.durationLimit({ run, continuations: [{ actionId: '', runId: run.id, agentIds: plan.agentIds, elapsedBaseMs, createdAt: '' }] });
     const actionId = randomUUID();
     const messageId = randomUUID();
     this.schedule(context, () => {
@@ -609,6 +628,7 @@ export class RunService {
     const { member, through, existing, basedOn, slots, snapshot } = plan;
     const context = this.contexts.get(run.id) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
+    this.allowSideRequest(context);
     const requestId = randomUUID(); const messageId = randomUUID();
     const summaryId = existing?.id ?? messageId;
     const covered = slots.filter(slot => slot.number <= through.number).map(slot => slot.slotId);
@@ -767,6 +787,7 @@ export class RunService {
     const { member, request, existing } = plan;
     const context = this.contexts.get(run.id) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
+    this.allowSideRequest(context);
     const requestId = randomUUID(); const versionId = randomUUID();
     const artifactId = existing?.id ?? randomUUID();
     const inputSnapshot = streamChatInputSchema.parse({ requestId, modelId: member.modelId ?? 'mock', messages: request.messages, outputTokenLimit: plan.outputTokenLimit,
@@ -958,7 +979,8 @@ export class RunService {
       });
     } catch (error) {
       const code = toPublicError(error).code;
-      const aborted = context.stopRequested || context.timedOut || code === 'cancelled' || code === 'timeout';
+      // A request's own timeout is a failure of that request; only the discussion's limit (timedOut) stops it from outside.
+      const aborted = context.stopRequested || context.timedOut || code === 'cancelled';
       this.database.transaction(() => {
         // Only the public code is kept: never the response body, headers or anything that could hold a Key.
         hooks.ended(content, aborted, code);
@@ -979,8 +1001,7 @@ export class RunService {
     const agent = this.database.getAgentConfiguration(agentId);
     if (!agent || agent.roomId !== run.roomId || !agent.enabled || agent.archivedAt !== null) throw new ContractError('invalid_state');
     // D110: an Override is inserted outside the plan, so a Run whose plan Turns are used up can still take one.
-    const limits = this.contexts.get(runId) ?? this.contextFrom(run);
-    if (run.elapsedExecutionMs! >= limits.maxDurationMs) throw new ContractError('invalid_state');
+    // D146: nor does a used-up duration refuse it: it waits for the host to continue, which renews the duration.
     const plan = this.workflowPlan(run);
     if (!plan) return;
     const stage = plan.steps[planTurnsOf(this.database.listTurns(runId)).length] ?? plan.steps.at(-1)!;
@@ -1020,7 +1041,6 @@ export class RunService {
     if (!version || !turn || !member || snapshot.messages.some(message => message.status === 'streaming')) throw new ContractError('invalid_state');
     const context = this.contexts.get(runId) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
-    this.assertDurationLeft(run);
     const latest = snapshot.attempts.filter(attempt => attempt.turnId === turn.id).at(-1);
     const base = { turn, modelId: member.modelId ?? 'mock', sourceRequestId: latest?.requestId ?? turn.requestId, kind: 'regenerate' as const, sourceMessageId: messageId, actionId };
     let extend: { messages: StreamChatInput['messages']; prefix: string } | undefined;
@@ -1035,10 +1055,12 @@ export class RunService {
     if (!extend && turn.id === snapshot.turns.at(-1)!.id && canRetryTurn(turn.status as TurnStatus)) {
       assertRunCommand('retryTurn', run.status);
       if (!latest || !canRetryTurn(latest.status)) throw new ContractError('invalid_state');
-      this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }), { ...base, job: false });
+      const renewed = this.renewDuration(run, context);
+      this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null, ...renewed }, { status: 'running' }), { ...base, job: false });
       return;
     }
     if (!turnSettled(snapshot, turn) || !['paused', 'completed', 'error', 'cancelled', 'interrupted'].includes(run.status)) throw new ContractError('invalid_state');
+    this.allowSideRequest(context);
     context.job = {};
     const job = { ...base, job: true, ...(extend ? { extend } : {}) };
     try {
@@ -1101,8 +1123,8 @@ export class RunService {
       return;
     }
     this.assertSettled(runId);
-    this.assertDurationLeft(run);
-    this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' }));
+    const renewed = this.renewDuration(run, context);
+    this.schedule(context, () => this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null, ...renewed }, { status: 'running' }));
     await context.promise;
   }
 
@@ -1117,15 +1139,41 @@ export class RunService {
     const plan = this.workflowPlan(run);
     return { runId: run.id, roomId: run.roomId, members: run.membersSnapshot,
       mode: run.mode, maxTurns: Math.min(run.maxTurns, plan?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
-      maxDurationMs: this.durationLimit({ run, continuations: this.database.listContinuations(run.id) }, plan),
+      maxDurationMs: this.durationLimit({ run, continuations: this.database.listContinuations(run.id) }),
       outputTokenLimit: Math.min(run.outputTokenLimit, plan?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: run.elapsedExecutionMs, executing: false };
   }
 
-  /** The duration limit; a continued Run (D111) gets its full allowance again from the moment it was continued. */
-  private durationLimit(data: Pick<Snapshot, 'run' | 'continuations'>, plan: WorkflowSnapshot | undefined): number {
-    const base = Math.min(data.run.maxDurationMs, plan?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER);
-    return Math.min(Number.MAX_SAFE_INTEGER, base + (data.continuations.at(-1)?.elapsedBaseMs ?? 0));
+  /**
+   * The duration limit; a continued Run (D111) gets its full allowance again from the moment it was continued. A Run
+   * starts with `maxDurationMs` no higher than its plan's limit; only the host continuing past it (D146) raises it.
+   */
+  private durationLimit(data: Pick<Snapshot, 'run' | 'continuations'>): number {
+    return Math.min(Number.MAX_SAFE_INTEGER, data.run.maxDurationMs + (data.continuations.at(-1)?.elapsedBaseMs ?? 0));
+  }
+
+  /** D146: stopped because the time ran out, whenever that was: older Runs read the same as new ones. */
+  private durationStop(data: Pick<Snapshot, 'run' | 'continuations'>): { limitMs: number; nextAllowanceMs: number } | undefined {
+    const { run } = data;
+    if (run.status !== 'error' || run.elapsedExecutionMs === null || run.task === null) return undefined;
+    const limitMs = this.durationLimit(data);
+    return run.elapsedExecutionMs >= limitMs ? { limitMs, nextAllowanceMs: Math.max(DEFAULT_RUN_DURATION_MS, run.maxDurationMs) } : undefined;
+  }
+
+  /** D146: the host asked to go on past a used-up duration, so it gets a fresh allowance. Nothing else ever calls this. */
+  private renewDuration(run: RunRecord, context: RunContext): { maxDurationMs?: number } {
+    const continuations = this.database.listContinuations(run.id);
+    const limit = this.durationLimit({ run, continuations });
+    if (run.elapsedExecutionMs === null || run.elapsedExecutionMs < limit) return {};
+    const maxDurationMs = run.elapsedExecutionMs + Math.max(DEFAULT_RUN_DURATION_MS, run.maxDurationMs) - (limit - run.maxDurationMs);
+    context.maxDurationMs = this.durationLimit({ run: { ...run, maxDurationMs }, continuations });
+    return { maxDurationMs };
+  }
+
+  /** D146: a summary or artifact of a stopped discussion is one request of its own; it is not cut off by the time the discussion used. */
+  private allowSideRequest(context: RunContext): void {
+    const elapsed = this.elapsed(context);
+    if (elapsed >= context.maxDurationMs) context.maxDurationMs = elapsed + DEFAULT_RUN_DURATION_MS;
   }
 
   private hasWorkflowPlan(value: RunRecord['workflowSnapshot']): boolean {
@@ -1187,7 +1235,9 @@ export class RunService {
     // rather than letting the plan's own `limit` decision surface as invalid_state.
     const elapsed = this.elapsed(context);
     if (elapsed >= context.maxDurationMs && this.deadlineReached(context)) throw new ContractError('timeout');
-    const decision = nextWorkflowStep(plan, { ...run, nextTurnIndex: planTurns.length, elapsedExecutionMs: elapsed },
+    // The plan knows its own limit: what it is asked about is the time used within the allowance, however often that was renewed.
+    const allowed = Math.min(plan.config.limits.maxDurationMs, run.maxDurationMs);
+    const decision = nextWorkflowStep(plan, { ...run, nextTurnIndex: planTurns.length, elapsedExecutionMs: Math.max(0, elapsed - Math.max(0, context.maxDurationMs - allowed)) },
       planTurns.map((turn, index) => ({ ...turn, turnIndex: index })));
     if (decision.kind !== 'next' || decision.step.index !== planTurns.length || decision.step.agentId !== member.agentId) throw new ContractError('invalid_state');
     return decision.step;
@@ -1215,10 +1265,6 @@ export class RunService {
   private assertSettled(runId: string): void {
     const snapshot = this.database.readRunSnapshot(runId);
     if (snapshot.turns.some(turn => !turnSettled(snapshot, turn))) throw new ContractError('invalid_state');
-  }
-
-  private assertDurationLeft(run: RunRecord): void {
-    if (run.elapsedExecutionMs !== null && run.elapsedExecutionMs >= this.durationLimit({ run, continuations: this.database.listContinuations(run.id) }, undefined)) throw new ContractError('timeout');
   }
 
   private assertAvailable(context?: RunContext): void {
@@ -1307,7 +1353,7 @@ export class RunService {
     } catch (error) {
       const code = toPublicError(error).code;
       this.finishRun(context, context.stopRequested || code === 'cancelled' ? 'cancelled' : 'error',
-        context.timedOut || code === 'timeout' ? 'Maximum run duration reached' : undefined,
+        context.timedOut ? 'Maximum run duration reached' : undefined,
         context.failureReason ?? toPublicError(error).message);
     }
   }
@@ -1474,7 +1520,8 @@ export class RunService {
       });
     } catch (error) {
       const code = toPublicError(error).code;
-      const aborted = context.stopRequested || context.timedOut || code === 'cancelled' || code === 'timeout';
+      // A request's own timeout is a failure of that request; only the discussion's limit (timedOut) stops it from outside.
+      const aborted = context.stopRequested || context.timedOut || code === 'cancelled';
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
         if (!job) this.database.updateTurn(turnId, { status: transitionTurn('running', aborted ? 'aborted' : 'failed'), partialContent: content });

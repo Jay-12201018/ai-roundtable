@@ -3,7 +3,7 @@ import { Check, X } from 'lucide-react';
 import { upstreamText } from '../../../shared/schemas/error';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { Avatar, Button, IconButton, Pill, Tabs, cx } from '../../components/ui';
-import { statusLabels } from '../../locales/zhCN';
+import { durationStopText, runStatusLabel } from '../../locales/zhCN';
 import { HostTextArea } from '../host/HostTextArea';
 import { canContinueRun, canDirectRun, isContinuationTurn, nextSpeaker, nextSpeakerText, overrideCandidates, planTurnCount, scheduledNext, summaryWritable, timelineSlots, usedSummary } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
@@ -151,8 +151,9 @@ export function RunPanel({ snapshot, commands, providers, tab, onTab, onClose, o
     <details className="dev-details"><summary>运行详情（排查问题时用）</summary>
       <dl><dt>运行 ID</dt><dd>{snapshot?.runId ?? '—'}</dd><dt>事件序列</dt><dd>{snapshot?.sequence ?? 0}</dd>
         <dt>回合</dt><dd>{snapshot?.turns.length ?? 0}{snapshot?.execution ? ` / ${snapshot.execution.maxTurns}` : ''}</dd>
-        <dt>运行状态</dt><dd>{snapshot ? statusLabels[snapshot.status] ?? '未知状态' : '—'}</dd><dt>状态来源</dt><dd>{syncLabel}</dd>
-        {snapshot?.lastFailure && <><dt>最近一次失败</dt><dd>{upstreamText(snapshot.lastFailure.upstream) || '请求没有到达服务商，或者服务商没有说明'}</dd></>}</dl>
+        <dt>运行状态</dt><dd>{snapshot ? runStatusLabel(snapshot) : '—'}</dd><dt>状态来源</dt><dd>{syncLabel}</dd>
+        {snapshot?.durationStop && <><dt>停止原因</dt><dd>{durationStopText(snapshot.durationStop.limitMs)}</dd></>}
+        {snapshot?.lastFailure && !snapshot.durationStop && <><dt>最近一次失败</dt><dd>{upstreamText(snapshot.lastFailure.upstream) || '请求没有到达服务商，或者服务商没有说明'}</dd></>}</dl>
     </details>
   </aside>;
 }

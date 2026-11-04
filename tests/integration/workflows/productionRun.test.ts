@@ -10,6 +10,7 @@ import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import type { NormalizedChunk, StreamChatInput } from '../../../src/main/providers/types';
 import { compileWorkflow, readWorkflowSnapshot, workflowStageInstruction } from '../../../src/main/workflow';
 import { workflowConfigSchema } from '../../../src/main/workflow/definition';
+import { publicError } from '../../../src/shared/schemas/error';
 import { config, members, roomId } from '../../unit/workflows/fixtures';
 
 type SavedInput = Omit<StreamChatInput, 'signal'>;
@@ -198,7 +199,107 @@ describe('R11 real RunService / R05 production plan consumer', () => {
     expect(f.service.getSnapshot(run.runId)).toMatchObject({ status: 'error', workflow: { completedTurns: 0, limitReason: 'max_duration' },
       messages: [{ status: 'aborted', content: 'partial before timeout' }], attempts: [{ status: 'aborted' }] });
     expect(f.provider.inputs).toHaveLength(1); expect(readWorkflowSnapshot(f.db.getRun(run.runId)!.workflowSnapshot).steps).toHaveLength(5);
-    await expect(f.service.retryTurn(run.runId, f.db.listTurns(run.runId)[0].id)).rejects.toMatchObject({ code: 'timeout' });
+  });
+
+  describe('D146 the duration limit', () => {
+    const hangingFirst = () => new RecordingProvider(async function* ({ requestId }, call) {
+      yield { type: 'start', requestId };
+      if (call === 1) { yield { type: 'text_delta', requestId, text: 'partial before the limit' }; await new Promise<void>(() => {}); }
+      yield { type: 'text_delta', requestId, text: `opinion ${call}` }; yield { type: 'finish', requestId, reason: 'stop' };
+    });
+    const reasons = (f: ReturnType<typeof fixture>, runId: string) => f.db.listRunEvents(runId, 0).filter(event => event.type === 'run_state_changed').map(event => (event.payload as { reason?: string }).reason).filter(Boolean);
+    // As after a restart: the old service holds nothing of the Run any more.
+    const another = async (f: ReturnType<typeof fixture>) => {
+      await f.service.shutdown(); f.services.length = 0;
+      const service = new RunService(f.db, f.provider, createPublicMessagesBuilder()); f.services.push(service); return service;
+    };
+
+    it('allows two hours unless told otherwise; a plan\'s own lower limit still holds', async () => {
+      const f = fixture();
+      const free = await f.service.start({ roomId, task: 'Task', workflowSnapshot: {}, maxTurns: 1 });
+      expect(f.db.getRun(free.runId)!.maxDurationMs).toBe(7_200_000);
+      await f.service.waitForIdle(free.runId);
+      const planned = await start(f, 'free-chat');
+      expect(f.db.getRun(planned.runId)!.maxDurationMs).toBe(300000);
+      await f.service.waitForIdle(planned.runId);
+    });
+
+    it('stops, sends nothing more on its own, and carries on from the unfinished turn when the host asks, with time to finish', async () => {
+      const f = fixture(hangingFirst());
+      const run = await start(f, 'review-revision', { maxDurationMs: 50 });
+      await f.service.waitForIdle(run.runId);
+      const stopped = f.service.getSnapshot(run.runId);
+      expect(stopped).toMatchObject({ status: 'error', durationStop: { limitMs: 50, nextAllowanceMs: 7_200_000 }, messages: [{ status: 'aborted', content: 'partial before the limit' }] });
+      expect(reasons(f, run.runId)).toEqual(['Maximum run duration reached']);
+      expect(f.provider.inputs).toHaveLength(1);
+      const usedUp = stopped.execution!.elapsedExecutionMs!;
+      await f.service.resumeRun(run.runId);
+      const finished = f.service.getSnapshot(run.runId);
+      expect(finished.status).toBe('completed');
+      expect(finished.durationStop).toBeUndefined();
+      expect(f.provider.inputs).toHaveLength(6);
+      expect(finished.workflow).toMatchObject({ completedTurns: 5, totalTurns: 5 });
+      expect(finished.attempts!.filter(attempt => attempt.status === 'aborted')).toHaveLength(1);
+      expect(finished.messages.some(message => message.content === 'partial before the limit')).toBe(true);
+      expect(f.db.getRun(run.runId)!.maxDurationMs).toBe(usedUp + 7_200_000);
+      expect(finished.execution!.elapsedExecutionMs!).toBeLessThan(f.db.getRun(run.runId)!.maxDurationMs);
+    });
+
+    it('the retry button works the same', async () => {
+      const f = fixture(hangingFirst());
+      const run = await start(f, 'free-chat', { maxDurationMs: 50 });
+      await f.service.waitForIdle(run.runId);
+      await f.service.retryTurn(run.runId, f.db.listTurns(run.runId)[0].id);
+      expect(f.service.getSnapshot(run.runId).status).toBe('completed');
+    });
+
+    it('a Run left stopped by an older version reads the same and is untouched until the host continues; the next member speaks if no turn was cut', async () => {
+      const f = fixture();
+      const run = await start(f, 'review-revision', { mode: 'step' });
+      await f.service.waitForIdle(run.runId);
+      expect(f.service.getSnapshot(run.runId).status).toBe('paused');
+      const later = await another(f);
+      f.db.updateRunProgress(run.runId, { elapsedExecutionMs: 300000 });
+      f.db.updateRun(run.runId, { status: 'error', finishedAt: new Date().toISOString() });
+      expect(later.getSnapshot(run.runId).durationStop).toEqual({ limitMs: 300000, nextAllowanceMs: 7_200_000 });
+      expect(f.db.getRun(run.runId)!.maxDurationMs).toBe(300000);
+      expect(f.provider.inputs).toHaveLength(1);
+      await later.resumeRun(run.runId);
+      expect(later.getSnapshot(run.runId).status).toBe('paused');
+      expect(f.provider.inputs).toHaveLength(2);
+      expect(f.db.getRun(run.runId)!.maxDurationMs).toBe(7_500_000);
+    });
+
+    it('a paused discussion out of time resumes too', async () => {
+      const f = fixture();
+      const run = await start(f, 'free-chat', { mode: 'step' });
+      await f.service.waitForIdle(run.runId);
+      const later = await another(f);
+      f.db.updateRunProgress(run.runId, { elapsedExecutionMs: 300000 });
+      f.db.updateRun(run.runId, { status: 'paused', finishedAt: null });
+      expect(later.getSnapshot(run.runId).durationStop).toBeUndefined();
+      await later.resumeRun(run.runId);
+      expect(later.getSnapshot(run.runId).status).toBe('completed');
+    });
+
+    it('a request that times out by itself is that request\'s failure, not the limit', async () => {
+      const f = fixture(new RecordingProvider(async function* ({ requestId }, call) {
+        yield { type: 'start', requestId };
+        if (call === 1) { yield { type: 'error', requestId, error: publicError('timeout') }; return; }
+        yield { type: 'text_delta', requestId, text: 'answer' }; yield { type: 'finish', requestId, reason: 'stop' };
+      }));
+      const run = await start(f, 'free-chat');
+      await f.service.waitForIdle(run.runId);
+      const stopped = f.service.getSnapshot(run.runId);
+      expect(stopped.status).toBe('error');
+      expect(stopped.durationStop).toBeUndefined();
+      expect(stopped.lastFailure).toMatchObject({ code: 'timeout' });
+      expect(reasons(f, run.runId)).toEqual([]);
+      expect(f.db.listRunEvents(run.runId, 0).map(event => event.type)).toContain('turn_failed');
+      await f.service.retryTurn(run.runId, f.db.listTurns(run.runId)[0].id);
+      expect(f.service.getSnapshot(run.runId).status).toBe('completed');
+      expect(f.db.getRun(run.runId)!.maxDurationMs).toBe(300000);
+    });
   });
 
   it('ends exactly after the configured stage and does not mark omitted later stages as executed', async () => {

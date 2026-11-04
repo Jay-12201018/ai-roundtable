@@ -61,7 +61,13 @@ describe('joint interrupted recovery and reload',()=>{
       f.provider.release(0);await operation;expect(session.store.getState().snapshot?.status).toBe('completed');expect(f.db.listTurns('run')).toHaveLength(2);
     }finally{dispose();await f.close();}
   });
-  it.each([{legacy:true},{exhausted:true}])('disables paid recovery for incomplete or exhausted metadata: %j',async options=>{
+  it('a used-up duration does not bar recovery: the host decides, and continuing renews it (D146)',async()=>{
+    const f=recovered({exhausted:true});const session=createRendererSession(f.api);const dispose=session.mount();
+    try{
+      await session.selectRun('run');expect(canRecover(session.store.getState(),'retry')).toBe(true);expect(f.provider.inputs).toEqual([]);
+    }finally{dispose();await f.close();}
+  });
+  it.each([{legacy:true}])('disables paid recovery for incomplete metadata: %j',async options=>{
     const f=recovered(options);const session=createRendererSession(f.api);const dispose=session.mount();
     try{
       await session.selectRun('run');for(const decision of ['resume','retry'] as const){expect(canRecover(session.store.getState(),decision)).toBe(false);await session.recover(decision);}
@@ -87,7 +93,7 @@ describe('joint interrupted recovery and reload',()=>{
       const run=await service.start({roomId:service.createDemoRoom('room'),task:'task',workflowSnapshot:{},maxDurationMs:cause==='timeout'?150:300000});await session.selectRun(run.runId);
       await waitFor(()=>expect(session.store.getState().snapshot?.status).toBe('error'));
       expect(session.store.getState().snapshot?.messages[0].content).toBe('alpha');expect(session.store.getState().snapshot?.messages[0].status).toBe(cause==='timeout'?'aborted':'failed');
-      expect(session.store.getState().error).toContain(cause==='timeout'?'请求已超时':'模型未完整完成响应');
+      expect(session.store.getState().error).toContain(cause==='timeout'?'达到了时长上限':'模型未完整完成响应');expect(session.store.getState().error).not.toContain('超时');
       if(cause==='timeout')expect(provider.signals[0]?.aborted).toBe(true);
       expect(db.listAttempts(run.runId)[0].status).toBe(cause==='timeout'?'aborted':'failed');expect(service.hasActiveRuns()).toBe(false);
     }finally{dispose();provider.releaseAll();await service.shutdown();db.close();}

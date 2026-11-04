@@ -21,7 +21,7 @@ const codeMessages: Record<string, string> = {
   invalid_state: '当前状态不允许这个操作：请等正在进行的请求结束后再试。',
   not_found: '没有找到这条记录，请刷新后重试。',
   transport_error: '与主进程的连接失败，请重试。',
-  timeout: '本次运行已达到最长运行时间，不能继续。',
+  timeout: '这场讨论达到了时长上限，先点“继续讨论”。',
 };
 /** The Chinese reason for a refused summary or artifact command; the public error carries only code and field. */
 export function commandErrorMessage(error: unknown): string {

@@ -1,6 +1,7 @@
-import { CircleStop, History, Layers, RefreshCw, TriangleAlert } from 'lucide-react';
+import { CircleStop, Clock, History, Layers, RefreshCw, TriangleAlert } from 'lucide-react';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { Button, Note, NoticeCard } from '../../components/ui';
+import { durationStopText, durationText } from '../../locales/zhCN';
 import { canContinueRun, summaryWritable } from '../host/model';
 
 /** D107: the moment to summarize is the host's call; this only says how full the context is. */
@@ -20,12 +21,12 @@ export function ContextHint({ snapshot, onSummarize }: { snapshot: RunSnapshot; 
 type Repeat = { enabled: boolean; run: () => void };
 type Props = {
   snapshot: RunSnapshot | undefined; error?: string; syncFailed: boolean; onRetrySync: () => void;
-  retry: Repeat; resume: Repeat;
+  retry: Repeat; resume: Repeat; carryOn?: Repeat;
   recover: { inspect: Repeat; resume: Repeat; discard: Repeat }; onSummarize: () => void; summaryOpen: boolean;
 };
 
 /** Everything that ends or blocks a Run sits right after the last message it describes, with its one way forward. */
-export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, resume, recover, onSummarize, summaryOpen }: Props) {
+export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, resume, carryOn, recover, onSummarize, summaryOpen }: Props) {
   if (syncFailed) return <div className="run-notices"><NoticeCard tone="danger" icon={RefreshCw} title="同步运行状态失败">
     <p>{error ?? '已保留当前文本。'}</p>
     <div className="notice-row"><Button variant="primary" onClick={onRetrySync}>重试同步</Button></div>
@@ -55,7 +56,12 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, re
     {snapshot.status === 'cancelled' && <NoticeCard tone="info" icon={CircleStop} title="已停止 · 已生成的文字都保留" role="status">
       <p>后续回合不会再进行，也不会自动继续。{canContinueRun(snapshot) ? '要接着讨论，在下方输入框写下你的话：所有成员各回应一次，或用 @ 只让一位回应。' : ''}</p>{repeatButtons}
     </NoticeCard>}
-    {snapshot.status === 'error' && <NoticeCard tone="danger" icon={TriangleAlert} title="运行失败">
+    {snapshot.durationStop && <NoticeCard tone="info" icon={Clock} title="已到时长上限" role="status">
+      <p>{durationStopText(snapshot.durationStop.limitMs)}已生成的发言都保留，现在没有在发送请求。</p>
+      <div className="notice-row"><Button variant="primary" disabled={!carryOn?.enabled} onClick={carryOn?.run}>继续讨论</Button></div>
+      <p className="notice-hint">点了才会发送：{retry.enabled ? '没说完的这位成员会重新回复' : '下一位成员接着发言'}，可能产生费用。继续后最多再运行 {durationText(snapshot.durationStop.nextAllowanceMs)}。</p>
+    </NoticeCard>}
+    {snapshot.status === 'error' && !snapshot.durationStop && <NoticeCard tone="danger" icon={TriangleAlert} title="运行失败">
       <p>{error ?? '运行失败，历史输出已保留。'}</p>{repeatButtons}
     </NoticeCard>}
     {error && snapshot.status !== 'error' && <p className="run-error" role="alert">{error}</p>}

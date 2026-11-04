@@ -661,12 +661,13 @@ export class Database {
     });
   }
 
-  updateRun(id: string, patch: { status?: string;mode?:'automatic'|'step'; currentTurnId?: string | null; currentAgentId?: string | null; startedAt?: string | null; finishedAt?: string | null; lastError?: string | null }): void {
+  updateRun(id: string, patch: { maxDurationMs?: number; status?: string;mode?:'automatic'|'step'; currentTurnId?: string | null; currentAgentId?: string | null; startedAt?: string | null; finishedAt?: string | null; lastError?: string | null }): void {
     this.assertInitialized();
     const fields: string[] = [];
     const values: unknown[] = [];
     if(patch.mode!==undefined) z.enum(['automatic','step']).parse(patch.mode);
-    const mapping = { status: 'status',mode:'mode', currentTurnId: 'current_turn_id', currentAgentId: 'current_agent_id', startedAt: 'started_at', finishedAt: 'finished_at', lastError: 'last_error' } as const;
+    if(patch.maxDurationMs!==undefined) sequenceSchema.refine(value=>value>0).parse(patch.maxDurationMs);
+    const mapping = { maxDurationMs: 'max_duration_ms', status: 'status',mode:'mode', currentTurnId: 'current_turn_id', currentAgentId: 'current_agent_id', startedAt: 'started_at', finishedAt: 'finished_at', lastError: 'last_error' } as const;
     for (const [key, column] of Object.entries(mapping)) {
       const value = patch[key as keyof typeof patch];
       if (value === undefined) continue;
@@ -1390,6 +1391,12 @@ export class Database {
     });
   }
 
+  private stoppedAtDurationLimit(runId: string): boolean {
+    const run = this.getRun(runId);
+    if (!run || run.task === null || run.elapsedExecutionMs === null) return false;
+    return run.elapsedExecutionMs >= run.maxDurationMs + (this.listContinuations(runId).at(-1)?.elapsedBaseMs ?? 0);
+  }
+
   listRoomRuns(input: RoomRunPageInput): RoomRunPage {
     const { roomId, cursor, limit } = configurationInput(roomRunPageInputSchema, input);
     return this.transaction(() => {
@@ -1408,7 +1415,8 @@ export class Database {
       const args = cursor ? [roomId, throughRowId, cursor.after.createdAt, cursor.after.id, through.createdAt, through.id, limit + 1] : [roomId, throughRowId, through.createdAt, through.id, limit + 1];
       const rows = this.db.prepare(`SELECT id,room_id AS roomId,status,task,created_at AS createdAt,updated_at AS updatedAt FROM workflow_runs WHERE room_id=? AND rowid<=? ${afterSql} AND (created_at,id)<=(?,?) ORDER BY created_at,id LIMIT ?`).all(...args) as Array<{ id: string; createdAt: string }>;
       const selected = rows.slice(0, limit); const hasMore = rows.length > limit; const last = selected.at(-1)!;
-      return configurationOutput(roomRunPageSchema, { items: selected, hasMore, nextCursor: hasMore ? { roomId, throughRowId, after: { createdAt: last.createdAt, id: last.id }, through } : null });
+      const items = selected.map(row => (row as { status?: string }).status === 'error' && this.stoppedAtDurationLimit(row.id) ? { ...row, durationStop: true as const } : row);
+      return configurationOutput(roomRunPageSchema, { items, hasMore, nextCursor: hasMore ? { roomId, throughRowId, after: { createdAt: last.createdAt, id: last.id }, through } : null });
     });
   }
 

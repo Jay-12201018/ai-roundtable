@@ -150,6 +150,8 @@ export const roomRunPageInputSchema = z.object({ roomId: idSchema, cursor: roomR
   .refine((input) => input.cursor === undefined || input.cursor.roomId === input.roomId, 'Cursor belongs to another room');
 export const runSummarySchema = z.object({
   id: idSchema, roomId: idSchema, status: z.enum(runStatusValues), task: z.string().nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
+  /** D146: the Run stopped at its duration limit rather than failing. */
+  durationStop: z.literal(true).optional(),
 }).strict();
 export const roomRunPageSchema = z.object({ items: z.array(runSummarySchema), nextCursor: roomRunCursorSchema.nullable(), hasMore: z.boolean() }).strict()
   .refine((page) => (page.hasMore === (page.nextCursor !== null))

@@ -242,7 +242,7 @@ export function HostComposer({ snapshot, commands, controls, settledSlot, notice
     event.preventDefault(); void send();
   };
   const placeholder = continuing ? '在这场讨论里继续：写下你的问题或要求，所有成员按顺序各回应一次；输入 @ 只让一位成员回应…'
-    : ['error', 'cancelled', 'interrupted'].includes(status) ? '插话会在重试或恢复后被成员看到；要讨论新问题，点「新讨论」'
+    : ['error', 'cancelled', 'interrupted'].includes(status) ? '插话会在讨论继续后被成员看到；要讨论新问题，点「新讨论」'
     : '插话，所有成员从下一回合起可见；输入 @ 点名下一位…';
   const hint = status === 'paused' ? <><span><span className="kbd">Enter</span> 发送插话</span><span aria-hidden>·</span><span>下一步：只让下一位说一次</span><span aria-hidden>·</span><span>继续：恢复自动轮流</span></>
     : status === 'pausing' ? <span>当前回合说完后会停下</span>

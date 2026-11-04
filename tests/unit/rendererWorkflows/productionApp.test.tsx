@@ -42,7 +42,7 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
     fireEvent.click(within(dialog).getByRole('button', { name: '用于这个房间' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '讨论方式' })).toBeNull());
     expect(mode()).toBe(label);
-    expect(JSON.parse(localStorage.getItem('roundtable.workflow.room')!)).toMatchObject({ version: 1, draft: { template } });
+    expect(JSON.parse(localStorage.getItem('roundtable.workflow.room')!)).toMatchObject({ version: 2, draft: { template } });
     const checks = f.previewWorkflow.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
     await waitFor(() => expect(f.api.run.start).toHaveBeenCalledOnce());

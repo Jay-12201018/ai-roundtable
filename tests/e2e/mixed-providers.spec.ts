@@ -11,7 +11,7 @@ const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUN
 const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
   'settings-sections', 'services-dark', 'wizard-choose-dark', 'wizard-key-dark', 'discussion-dark', 'usage-dark',
   'stopped-service', 'stopped-member', 'stopped-service-dark', 'stopped-member-dark',
-  'failure-card', 'failure-card-dark', 'failure-discussion', 'failure-details', 'failure-recovered', 'failure-list-refused', 'failure-rekey', 'setup-blocked', 'setup-first', 'setup-dialogue', 'setup-dialogue-dark', 'setup-dialogue-finished', 'setup-five', 'setup-three', 'setup-review', 'setup-custom', 'setup-narrow', 'setup-narrow-dark', 'setup-eight', 'setup-eight-dark',
+  'limit-thinking', 'limit-reached', 'limit-reached-dark', 'limit-details', 'limit-continued', 'limit-finished', 'failure-card', 'failure-card-dark', 'failure-discussion', 'failure-details', 'failure-recovered', 'failure-list-refused', 'failure-rekey', 'setup-blocked', 'setup-first', 'setup-dialogue', 'setup-dialogue-dark', 'setup-dialogue-finished', 'setup-five', 'setup-three', 'setup-review', 'setup-custom', 'setup-narrow', 'setup-narrow-dark', 'setup-eight', 'setup-eight-dark',
   'multimodal-wizard', 'multimodal-member', 'discover-wizard', 'discover-members', 'discover-services', 'discover-delisted', 'discover-delisted-dark', 'pick-model', 'picked-discussion', 'picked-members', 'picked-member-dialog', 'picked-default', 'picked-finished', 'picked-members-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
@@ -594,6 +594,68 @@ test('new discussion: choose how it runs and how many, give each one a model, an
   await running.quit();
 });
 
+test('D146 a discussion that reaches its duration limit says so and carries on in place; a slow model shows it is still waiting', async ({ harness }) => {
+  test.setTimeout(180_000);
+  const { fixture } = harness;
+  fixture.reply = body => `${memberOf(body) ?? '成员'}的发言。`;
+  // The second member thinks past the limit and has not said a word; once continued, it answers.
+  let holding = true;
+  fixture.reasoning = () => '内部推演';
+  fixture.holdAfterReasoning = body => holding && memberOf(body) === '审查者';
+  const running = await harness.launch();
+  const { page } = running;
+  await theme(running, 'light');
+  await page.getByRole('button', { name: '连接…' }).click();
+  await connect(running, /^DeepSeek/u);
+  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  await newDiscussion(running, roomName, '试点方案。');
+  await page.getByRole('button', { name: '自定义流程' }).click();
+  const dialog = page.getByRole('dialog', { name: '讨论方式' });
+  await expect(dialog.getByLabel('时长上限'), 'Two hours unless changed').toHaveValue('120');
+  await dialog.getByLabel('时长上限').fill('1');
+  await expect(dialog.getByRole('button', { name: '用于这个房间' })).toBeEnabled();
+  await dialog.getByRole('button', { name: '用于这个房间' }).click();
+  await page.getByRole('button', { name: '开始讨论' }).click();
+
+  // Still waiting: it says so, for how long, and how to leave.
+  await expect(page.getByText(/还没有输出文字… 已等待 \d+ 秒/u)).toBeVisible();
+  await expect(page.getByRole('button', { name: '停止' }).first()).toBeVisible();
+  await capture(running, 'limit-thinking', '模型在思考，一个字没出：写明还在等、等了多久，“停止”就在手边。');
+
+  // The limit: said as the limit, with one way on and nothing sent.
+  await expect(page.getByText('这场讨论达到了时长上限（1 分钟）。').first()).toBeVisible({ timeout: 70_000 });
+  await expect(page.getByText('已到时长上限').first()).toBeVisible();
+  const atLimit = await page.evaluate(() => document.body.innerText);
+  for (const word of ['超时', '网络', '运行失败', '重试当前回合']) expect(atLimit, word).not.toContain(word);
+  await capture(running, 'limit-reached', '到达时长上限：如实说是这场讨论的上限，不说超时和网络；一个“继续讨论”，写明会发什么、还能运行多久。');
+  await theme(running, 'dark');
+  await capture(running, 'limit-reached-dark', '深色主题：到达时长上限。');
+  await theme(running, 'light');
+  if (!(await page.locator('.run-panel').isVisible())) await page.getByRole('button', { name: '本场信息' }).click();
+  await page.locator('.dev-details summary').click();
+  await expect(page.locator('.dev-details')).toContainText('这场讨论达到了时长上限（1 分钟）。');
+  await expect(page.locator('.run-panel')).toContainText('点“继续讨论”后接着进行');
+  await capture(running, 'limit-details', '运行详情写明停止原因。');
+  const sent = fixture.requests.length;
+  await page.waitForTimeout(1500);
+  expect(fixture.requests.length, 'Nothing is sent again on its own').toBe(sent);
+  const attempts = (): number => harness.sql('SELECT COUNT(*) AS n FROM request_attempts')[0]![0].n;
+  const before = attempts();
+
+  // Carrying on: asks the unfinished member again, keeps the record, and finishes.
+  holding = false;
+  await page.getByRole('button', { name: '继续讨论' }).click();
+  await expect(page.getByText('审查者的发言。').first()).toBeVisible({ timeout: 30_000 });
+  await capture(running, 'limit-continued', '继续后没说完的这位成员重新回复，没有另开一场。');
+  await expect(page.getByText(/讨论已完成/u).first()).toBeVisible({ timeout: 30_000 });
+  expect(await page.getByText('这场讨论达到了时长上限').count()).toBe(0);
+  expect(attempts(), 'The stopped attempt stays beside the new one').toBeGreaterThan(before);
+  await capture(running, 'limit-finished', '讨论完成：之前的发言都在，也没有再被上限掐断。');
+
+  if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
+  await running.quit();
+});
+
 test('when a service refuses: the page says what the service said in its own code, in plain words, and the green label follows what was last seen', async ({ harness }) => {
   test.setTimeout(120_000);
   const { fixture } = harness;
@@ -665,7 +727,6 @@ test('when a service refuses: the page says what the service said in its own cod
   await expect(card).toContainText('Key 可能有问题');
   await expect(card).not.toContainText('可以使用');
   await capture(running, 'failure-list-refused', '模型列表接口拒绝时不显示绿色，提示用“测试连接”确认。');
-  if (await page.getByRole('button', { name: '展开 DeepSeek' }).count()) await page.getByRole('button', { name: '展开 DeepSeek' }).click();
   await card.getByRole('button', { name: '测试连接' }).click();
   await expect(card).toContainText('可以使用');
 
@@ -674,7 +735,6 @@ test('when a service refuses: the page says what the service said in its own cod
   await page.getByRole('button', { name: '添加服务' }).click();
   await connect(running, /^Kimi/u);
   const kimi = page.getByRole('region', { name: 'Kimi', exact: true });
-  if (await page.getByRole('button', { name: '展开 Kimi' }).count()) await page.getByRole('button', { name: '展开 Kimi' }).click();
   await kimi.getByRole('button', { name: '更换', exact: true }).click();
   const dialog = page.locator('dialog[open]');
   await dialog.getByRole('textbox', { name: 'API Key' }).fill(FAKE_KEY);

@@ -3,7 +3,7 @@ import { Archive, ArchiveRestore, CircleAlert, Ellipsis, GitBranch, GripVertical
 import type { AgentConfiguration, CreateAgentInput, ProviderReadiness, ProviderSummary, RoomConfiguration, RoomManagementApiContract, RunSummary } from '../../../shared/contracts/configuration';
 import { createRoomInputSchema } from '../../../shared/schemas/configuration';
 import { Avatar, Button, Field, IconButton, Modal, Pill, Switch, Tag, cx, useDismiss } from '../../components/ui';
-import { statusLabels } from '../../locales/zhCN';
+import { runStatusLabel } from '../../locales/zhCN';
 import { delistedText, modelBlockText } from '../settings/model';
 import { MemberDialog } from './MemberDialog';
 import { agentInput as input, roleShown, roomErrorText } from './templates';
@@ -157,7 +157,7 @@ export function RoomPage({ api, room, providers, readiness, runs, workflow, onNe
       {runs.length === 0 ? <p className="muted small">还没有讨论。写下目标就能开始第一场。</p>
         : <ul className="card run-list">{runs.map(run => <li key={run.id} className="card-row">
           <span className={cx('run-dot', liveStatuses.includes(run.status) && 'is-live', run.status === 'error' && 'is-warn')} aria-hidden />
-          <div className="grow"><b>{run.task ?? '旧任务（目标未记录）'}</b><small>{statusLabels[run.status] ?? run.status} · {when(run.createdAt)}</small></div>
+          <div className="grow"><b>{run.task ?? '旧任务（目标未记录）'}</b><small>{runStatusLabel(run)} · {when(run.createdAt)}</small></div>
           <Button size="sm" variant="quiet" onClick={() => onOpenRun(run.id)}>打开</Button></li>)}</ul>}
     </section>
 

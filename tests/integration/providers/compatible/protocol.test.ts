@@ -61,7 +61,7 @@ describe('R02 protocol consumption with isolated HTTP fixtures', () => {
       const stored = database.readRunSnapshot(run.runId);
       expect(stored.messages[0].content).toBe('persisted partial');
       expect(stored.turns[0].partialContent).toBe('persisted partial');
-      expect(stored.messages[0].status).toBe(mode === 'disconnect' ? 'failed' : 'aborted');
+      expect(stored.messages[0].status).toBe(mode === 'stop' ? 'aborted' : 'failed');
       expect(stored.attempts).toHaveLength(1); expect(calls).toBe(1); expect(networkSignal?.aborted).toBe(true);
       expect(stored.run.status).toBe(mode === 'stop' ? 'cancelled' : 'error');
       expect(database.listRunEvents(run.runId, 0).filter(e => e.type === 'turn_completed')).toHaveLength(0);

@@ -1,3 +1,4 @@
+import { DEFAULT_RUN_DURATION_MINUTES } from '../../../shared/schemas/workflow';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT } from '../../../shared/schemas/run';
 
 export type WorkflowTemplate = 'free-chat' | 'two-model-dialogue' | 'review-revision' | 'deep-debate';
@@ -39,11 +40,11 @@ export function createWorkflowDraft(template: WorkflowTemplate, members: readonl
   ] : template === 'deep-debate' ? [one('opening', '立论', [...ids]), one('rebuttal', '交锋', [...ids], '2'), one('closing', '总结', [...ids])]
     : template === 'two-model-dialogue' ? [one('dialogue', '对话', [ids[0] ?? '', ids[1] ?? ''], '2')]
       : [one('discussion', '轮流发言', ids.length ? [...ids] : [''])];
-  // A bigger room needs room to finish: the limits grow with the turns, so the default flow always fits.
+  // A bigger room needs room to finish: the turn limit grows with the turns, so the default flow always fits.
   const turns = turnsOf(phases);
-  return { template, phases, turnLimit: String(Math.max(12, turns)), durationMinutes: String(Math.max(5, turns)), outputTokens: String(DEFAULT_OUTPUT_TOKEN_LIMIT), finishAt: '' };
+  return { template, phases, turnLimit: String(Math.max(12, turns)), durationMinutes: String(DEFAULT_RUN_DURATION_MINUTES), outputTokens: String(DEFAULT_OUTPUT_TOKEN_LIMIT), finishAt: '' };
 }
-const turnsOf = (phases: WorkflowDraft['phases']) => phases.reduce((total, phase) => total + phase.participants.filter(Boolean).length * (Number(phase.repeat) || 1), 0);
+export const turnsOf = (phases: WorkflowDraft['phases']) => phases.reduce((total, phase) => total + phase.participants.filter(Boolean).length * (Number(phase.repeat) || 1), 0);
 
 export const MIN_PARTICIPANTS = 2;
 export const MAX_PARTICIPANTS = 8;

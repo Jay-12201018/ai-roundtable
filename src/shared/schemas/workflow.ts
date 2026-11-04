@@ -1,4 +1,8 @@
 import { z } from 'zod';
+
+/** D146: rounds already bound how long a discussion is, and one request stops at 600 seconds; this is only a backstop. */
+export const DEFAULT_RUN_DURATION_MINUTES = 120;
+export const DEFAULT_RUN_DURATION_MS = DEFAULT_RUN_DURATION_MINUTES * 60_000;
 import { idSchema, sequenceSchema } from './common';
 import { memberSnapshotSchema } from './persistence';
 

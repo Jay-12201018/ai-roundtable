@@ -21,7 +21,7 @@ import { Sidebar, useRoomDirectory } from './features/shell/Sidebar';
 import { Topbar } from './features/shell/Topbar';
 import { Avatar, Button, Drawer, Pill } from './components/ui';
 import { useLayout, useTheme } from './theme/useTheme';
-import { statusLabels } from './locales/zhCN';
+import { statusLabels, runStatusLabel } from './locales/zhCN';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT } from '../shared/schemas/run';
 import { canCommand, canRecover, selectTaskTitle } from './store/rendererStore';
 import { createRendererSession } from './subscriptions/rendererSession';
@@ -352,8 +352,8 @@ export function App() {
 
   const statusPill = (() => {
     if (!snapshot) return undefined;
-    const label = statusLabels[snapshot.status] ?? '未知状态';
-    const tone = ['running', 'pausing', 'cancelling'].includes(snapshot.status) ? 'live' : snapshot.status === 'completed' ? 'ok' : snapshot.status === 'error' ? 'danger' : snapshot.status === 'interrupted' ? 'warn' : 'neutral';
+    const label = runStatusLabel(snapshot);
+    const tone = ['running', 'pausing', 'cancelling'].includes(snapshot.status) ? 'live' : snapshot.status === 'completed' ? 'ok' : snapshot.durationStop ? 'warn' : snapshot.status === 'error' ? 'danger' : snapshot.status === 'interrupted' ? 'warn' : 'neutral';
     return <Pill tone={tone} dot={tone !== 'ok'} icon={tone === 'ok' ? Check : undefined}>{label}</Pill>;
   })();
   // A workflow Run reads 第 3/5 步 · 修订 (the stage being spoken or next); other Runs count turns.
@@ -407,6 +407,7 @@ export function App() {
         <div className="sys-line">{snapshot.workflow ? workflowTemplateLabels[snapshot.workflow.templateId] : '按顺序轮流发言'}{runMembers?.length ? ` · ${runMembers.join(' → ')}` : ''}</div></>}
       footer={<RunNotices snapshot={snapshot} error={error} syncFailed={syncStatus === 'error'} onRetrySync={synchronizeHost}
         retry={{ enabled: retryEnabled, run: () => void session.repeat('retryTurn') }} resume={{ enabled: continueEnabled, run: () => void session.repeat('continueMessage') }}
+        carryOn={{ enabled: resumeEnabled, run: () => void session.control('resumeRun') }}
         recover={{ inspect: { enabled: inspectEnabled, run: () => void session.recover('inspect') }, resume: { enabled: recoverEnabled, run: () => void session.recover('resume') }, discard: { enabled: inspectEnabled, run: () => void session.recover('discard') } }}
         onSummarize={() => void summarizeNow()} summaryOpen={summaryTarget !== undefined} />} />;
     if (runId) return <div className="discussion-empty"><div className="empty-room">

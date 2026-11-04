@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChartColumn, PanelLeftClose, Plus, Settings2, Users, X } from 'lucide-react';
 import type { RoomConfiguration, RoomManagementApiContract, RunSummary } from '../../../shared/contracts/configuration';
 import { Button, IconButton, cx } from '../../components/ui';
-import { statusLabels } from '../../locales/zhCN';
+import { runStatusLabel } from '../../locales/zhCN';
 import { Logo } from './Logo';
 
 const RUNS_SHOWN = 12;
@@ -76,9 +76,9 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed
         {runs.length === 0 && !runsFailed && <li className="sb-empty small">还没有讨论。写下目标就能开始第一场。</li>}
         {shown.map(run => <li key={run.id}>
           <button type="button" className="sb-item" aria-current={run.id === runId && page === 'discussion' ? 'page' : undefined} onClick={() => onSelectRun(run.id)}
-            title={`${run.task ?? '旧任务（目标未知）'} · ${statusLabels[run.status] ?? run.status}`}>
+            title={`${run.task ?? '旧任务（目标未知）'} · ${runStatusLabel(run)}`}>
             <span className={cx('run-dot', liveStatuses.includes(run.status) && 'is-live', run.status === 'error' && 'is-warn')} aria-hidden />
-            <span className="t">{run.task ?? '旧任务（目标未知）'}</span><span className="sr-only">（{statusLabels[run.status] ?? run.status}）</span></button>
+            <span className="t">{run.task ?? '旧任务（目标未知）'}</span><span className="sr-only">（{runStatusLabel(run)}）</span></button>
         </li>)}
         {runs.length > RUNS_SHOWN && <li><button type="button" className="sb-more" onClick={() => setShowAll(value => !value)}>{showAll ? '收起' : `显示全部 ${runs.length} 场`}</button></li>}
       </ul>}

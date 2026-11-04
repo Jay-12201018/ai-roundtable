@@ -144,9 +144,9 @@ describe('structured artifacts (D118–D123)', () => {
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(f.provider.inputs.length).toBe(before + 1);
     }
-    // A provider timeout ends the request as stopped, with its code; a host stop says cancelled.
+    // A provider timeout is a failure of this request, with its code (D146); a host stop says cancelled.
     f.provider.outcomes.set(f.provider.inputs.length, { error: 'timeout' });
-    expect((await generate(f, runId, 'actions', 'g-timeout')).version().version.request).toMatchObject({ status: 'aborted', errorCode: 'timeout' });
+    expect((await generate(f, runId, 'actions', 'g-timeout')).version().version.request).toMatchObject({ status: 'failed', errorCode: 'timeout' });
     const index = f.provider.inputs.length;
     f.provider.hold.add(index);
     const held = f.run.generateArtifact({ runId, clientRequestId: 'g-stop', kind: 'code', agentId: 'a' });
