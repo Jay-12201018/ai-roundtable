@@ -23,13 +23,13 @@ async function bounded<T>(promise: Promise<T>): Promise<T> {
 async function fixture(delayed = false) {
   const database = new Database(':memory:'); database.initialize(); databases.push(database);
   const baseUrl = 'http://127.0.0.1:12345/v1';
-  database.createProvider({ id: 'p', name: 'Authentication race fixture', kind: 'openai-compatible', baseUrl });
+  database.createProvider({ id: 'p', name: 'Authentication race fixture', kind: 'compatible', baseUrl });
   const keys = new KeyService(database, createMemoryKeyBackend());
   await keys.storeKey('p', 'r09-fake-authentication-key');
   const entered = deferred(); const release = deferred();
   const requests: Request[] = [];
   const registry = new ProviderRegistry(database, keys, {
-    capabilitiesResolver: () => ({ outputTokenParameter: null, streamUsage: false, listModels: true, authentication: 'models' }),
+    capabilitiesResolver: () => ({ streamUsage: false, listModels: true, authentication: 'models' }),
     transportFactory: guard => async (url, init) => {
       guard(); requests.push(new Request(url, init)); entered.resolve();
       if (delayed) await release.promise;

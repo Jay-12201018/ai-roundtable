@@ -21,7 +21,7 @@ async function bounded<T>(promise: Promise<T>): Promise<T> {
 }
 async function fixture(options: { decrypt?: (call: number) => Promise<void>; prepareTransport?: (guard: () => void) => Promise<void> } = {}) {
   const database = new Database(':memory:'); database.initialize(); databases.push(database);
-  database.createProvider({ id: 'p', name: 'Race fixture', kind: 'openai-compatible', baseUrl: 'http://127.0.0.1:12345/v1' });
+  database.createProvider({ id: 'p', name: 'Race fixture', kind: 'compatible', baseUrl: 'http://127.0.0.1:12345/v1' });
   let decryptCalls = 0;
   const backend: KeyStorageBackend = {
     mode: 'secure', backend: 'r09-race-fixture-only', persistent: true,
@@ -32,7 +32,7 @@ async function fixture(options: { decrypt?: (call: number) => Promise<void>; pre
   await keys.storeKey('p', 'r09-fake-original');
   const sent = vi.fn(async (_url: Parameters<typeof fetch>[0], _init?: RequestInit) => Response.json({ data: [{ id: 'manual-model' }] }));
   const registry = new ProviderRegistry(database, keys, {
-    capabilitiesResolver: () => ({ outputTokenParameter: 'max_tokens', streamUsage: false, listModels: true, authentication: 'models' }),
+    capabilitiesResolver: () => ({ streamUsage: false, listModels: true, authentication: 'models' }),
     transportFactory: guard => async (url, init) => { await options.prepareTransport?.(guard); return sent(url, init); },
   });
   const change = (values: { enabled?: boolean; baseUrl?: string }) => {

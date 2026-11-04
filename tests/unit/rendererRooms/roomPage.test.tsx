@@ -5,12 +5,12 @@ import type { AgentConfiguration, ProviderReadiness, ProviderSummary, RoomManage
 import { publicError } from '../../../src/shared/schemas/error';
 import { agent, deferred, props as roomProps, room, timestamp } from './fixtures';
 
-const deepseek: ProviderSummary = { id: 'ds', name: 'DeepSeek', kind: 'openai-compatible', enabled: true, isDefault: true, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }], configurationValid: true, hasStoredKey: true };
-const openai: ProviderSummary = { id: 'oa', name: 'OpenAI', kind: 'openai', enabled: true, isDefault: false, defaultModelId: 'gpt-4o-mini', customModels: [], configurationValid: true, hasStoredKey: true };
+const deepseek: ProviderSummary = { id: 'ds', name: 'DeepSeek', kind: 'compatible', enabled: true, isDefault: true, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }], configurationValid: true, hasStoredKey: true };
+const kimi: ProviderSummary = { id: 'oa', name: 'Kimi', kind: 'compatible', enabled: true, isDefault: false, defaultModelId: 'kimi-k3.1-pro', customModels: [], configurationValid: true, hasStoredKey: true };
 const mock: ProviderSummary = { id: 'mk', name: '演示（Mock）', kind: 'mock', enabled: true, isDefault: false, defaultModelId: 'mock', customModels: [], configurationValid: true, hasStoredKey: false };
 const readiness: ProviderReadiness[] = [
   { providerId: 'ds', keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
-  { providerId: 'oa', keyState: 'configured', baseUrl: 'https://api.openai.com/v1', models: [{ modelId: 'gpt-4o-mini', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] },
+  { providerId: 'oa', keyState: 'configured', baseUrl: 'https://service.example/v1', models: [{ modelId: 'kimi-k3.1-pro', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] },
   { providerId: 'mk', keyState: 'none', baseUrl: null, models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] },
 ];
 const member = (id: string, displayName: string, role: string, extra: Partial<AgentConfiguration> = {}): AgentConfiguration =>
@@ -19,7 +19,7 @@ function show(agents: AgentConfiguration[], extra: { runs?: RunSummary[]; api?: 
   const api = extra.api ?? roomProps().api;
   vi.mocked(api.listAgentConfigurations).mockResolvedValue(agents);
   const callbacks = { onNewDiscussion: vi.fn(), onOpenRun: vi.fn(), onOpenSettings: vi.fn(), onChanged: vi.fn(), onDeleted: vi.fn(), change: vi.fn() };
-  const view = render(<RoomPage api={api} room={room()} providers={extra.providers ?? [deepseek, openai, mock]} readiness={readiness} runs={extra.runs ?? []}
+  const view = render(<RoomPage api={api} room={room()} providers={extra.providers ?? [deepseek, kimi, mock]} readiness={readiness} runs={extra.runs ?? []}
     workflow={{ label: '自由讨论 · 3 回合', detail: '没有单独设置', onChange: callbacks.change }} {...callbacks} />);
   return { api, view, ...callbacks };
 }
@@ -28,10 +28,10 @@ afterEach(cleanup);
 
 describe('房间页: members', () => {
   it('says per member which model and whether it can take part now — never a silent Mock', async () => {
-    show([member('a', '起草者', '起草'), member('b', '审查者', '审查', { providerId: 'oa', modelId: 'gpt-4o-mini' }), member('c', '综合者', '综合', { providerId: null, modelId: null }),
+    show([member('a', '起草者', '起草'), member('b', '审查者', '审查', { providerId: 'oa', modelId: 'kimi-k3.1-pro' }), member('c', '综合者', '综合', { providerId: null, modelId: null }),
       member('d', '老周', '反方')]);
     await waitFor(() => expect(row('起草者').textContent).toContain('DeepSeek Flash · 可以使用'));
-    expect(row('审查者').textContent).toContain('gpt-4o-mini · 还没填写 Key');
+    expect(row('审查者').textContent).toContain('kimi-k3.1-pro · 还没填写 Key');
     expect(row('综合者').textContent).toContain('还没选模型，暂时不会参与讨论');
     expect(within(row('综合者')).getByRole('button', { name: '去选择' })).toBeTruthy();
     // The role tag is shown only when the name does not already say it.
@@ -106,7 +106,7 @@ describe('房间页: archive and delete', () => {
 describe('添加成员 (D5-A)', () => {
   const dialog = (extra: Partial<Parameters<typeof MemberDialog>[0]> = {}) => {
     const onSave = vi.fn(async () => {}); const onOpenSettings = vi.fn();
-    render(<MemberDialog roomId="r1" order={3} providers={[deepseek, openai, mock]} readiness={readiness} onSave={onSave} onClose={() => {}} onOpenSettings={onOpenSettings} {...extra} />);
+    render(<MemberDialog roomId="r1" order={3} providers={[deepseek, kimi, mock]} readiness={readiness} onSave={onSave} onClose={() => {}} onOpenSettings={onOpenSettings} {...extra} />);
     return { onSave, onOpenSettings };
   };
   it('a role template fills name, role and 设定; the default service’s usable model is preselected', async () => {
@@ -121,10 +121,10 @@ describe('添加成员 (D5-A)', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ roomId: 'r1', displayName: '老周', roleTemplateId: '审查', providerId: 'ds', modelId: 'deepseek-flash', displayOrder: 3 })));
   });
   it('says why a model cannot take part, and with no usable default leaves the model empty instead of using Mock', async () => {
-    const { onOpenSettings } = dialog({ providers: [{ ...deepseek, isDefault: false }, openai, mock] });
+    const { onOpenSettings } = dialog({ providers: [{ ...deepseek, isDefault: false }, kimi, mock] });
     expect((screen.getByLabelText('模型') as HTMLSelectElement).value).toBe('');
     expect(screen.getByRole('status').textContent).toContain('还没选模型，暂时不会参与讨论');
-    fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'oa\u0000gpt-4o-mini' } });
+    fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'oa\u0000kimi-k3.1-pro' } });
     expect(screen.getByRole('status').textContent).toContain('暂时不能参与讨论：还没填写 Key');
     fireEvent.click(screen.getByRole('button', { name: '去设置' })); expect(onOpenSettings).toHaveBeenCalled();
   });
@@ -144,7 +144,7 @@ describe('新房间默认三位成员', () => {
     await createStarterRoom(api, { name: '新房间' }, defaultModelFor([deepseek], readiness));
     expect(vi.mocked(api.createAgent).mock.calls.map(([input]) => [input.displayName, input.roleTemplateId, input.modelId, input.displayOrder]))
       .toEqual([['起草者', '起草', 'deepseek-flash', 0], ['审查者', '审查', 'deepseek-flash', 1], ['综合者', '综合', 'deepseek-flash', 2]]);
-    expect(defaultModelFor([{ ...openai, isDefault: true }], readiness)).toBeUndefined();
+    expect(defaultModelFor([{ ...kimi, isDefault: true }], readiness)).toBeUndefined();
     expect(defaultModelFor([deepseek], undefined)).toBeUndefined();
   });
 });

@@ -1,11 +1,10 @@
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
-import { app, dialog, session, BrowserWindow } from 'electron';
+import { app, dialog, BrowserWindow } from 'electron';
 import { Database } from './database/Database';
 import { createElectronKeyBackend } from './security/electronSafeStorage';
 import { KeyService } from './security/KeyService';
 import { ProviderRegistry } from './providers/ProviderRegistry';
-import { NetworkSettingsService } from './settings/NetworkSettings';
 export { ProviderRegistry };
 import { mockModelBudget } from './providers/mock/tokenBudget';
 import { MockProvider } from './providers/mock/MockProvider';
@@ -32,7 +31,6 @@ let hostService: HostService | undefined;
 let usageService: UsageService | undefined;
 let artifactService: ArtifactService | undefined;
 let codeExportService: CodeExportService | undefined;
-let networkSettings: NetworkSettingsService | undefined;
 let shutdownRequested = false;
 let shutdownPromise: Promise<void> | undefined;
 let shutdownExitCode = 0;
@@ -68,9 +66,7 @@ if (!hasLock) {
       const keyService = new KeyService(database, createElectronKeyBackend());
       void keyService.getStatus();
       roomService = new RoomService(database);
-      // D137: read for each request, from the settings page and the operating system; off by default.
-      networkSettings = new NetworkSettingsService(app.getPath('userData'), url => session.defaultSession.resolveProxy(url));
-      const providers = new ProviderRegistry(database, keyService, { proxy: networkSettings.route });
+      const providers = new ProviderRegistry(database, keyService);
       settingsService = new ProviderSettingsService(database, keyService, providers);
       const modelBudget = (modelId: string | null, member: { providerId: string | null }) =>
         member.providerId ? providers.budget(member.providerId, modelId!) : modelId === 'mock' ? mockModelBudget : undefined;
@@ -134,7 +130,7 @@ function createAppWindow(): void {
           properties: ['openDirectory', 'createDirectory'] });
         return result.canceled ? undefined : result.filePaths[0];
       }),
-    }, network: networkSettings });
+    } });
     unregisterIpc = dispose;
     createdWindow.on('close', (event) => {
       if (shutdownRequested || !runService?.hasActiveRuns()) return;

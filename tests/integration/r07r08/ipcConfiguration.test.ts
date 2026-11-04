@@ -87,8 +87,8 @@ describe('production configuration IPC and Preload with actual services', () => 
 
   it('revokes fake session Keys across replacement, target change and deletion without leaking ordinary outputs', async () => {
     const api = fixture.api!;
-    const provider = await api.settings.createProvider({ name: 'Target', kind: 'openai-compatible', baseUrl: 'https://one.example/v1' });
-    const other = await api.settings.createProvider({ name: 'Other', kind: 'openai' });
+    const provider = await api.settings.createProvider({ name: 'Target', kind: 'compatible', baseUrl: 'https://one.example/v1' });
+    const other = await api.settings.createProvider({ name: 'Other', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     const first = await api.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-first' });
     const second = await api.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-second' });
     expect(first.state).toBe('session'); expect(second.state).toBe('session');
@@ -112,7 +112,7 @@ describe('production configuration IPC and Preload with actual services', () => 
     const mock = await api.settings.createProvider({ name: 'Mock', kind: 'mock' });
     expect(await api.settings.listModels({ providerId: mock.id })).toEqual({ providerId: mock.id, models: [{ id: 'mock', name: 'Mock' }] });
     expect(await api.settings.testConnection({ providerId: mock.id, level: 'generation', modelId: 'mock' })).toMatchObject({ providerId: mock.id, result: { ok: true, level: 'generation' } });
-    const real = await api.settings.createProvider({ name: 'Real', kind: 'openai' });
+    const real = await api.settings.createProvider({ name: 'Real', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     await expect(api.settings.listModels({ providerId: real.id })).rejects.toMatchObject({ code: 'unsupported' });
     for (const level of ['authentication', 'generation'] as const) {
       expect(await api.settings.testConnection({ providerId: real.id, level, ...(level === 'generation' ? { modelId: 'custom' } : {}) })).toMatchObject({ providerId: real.id, result: { level, ok: false, error: { code: 'unsupported' } } });
@@ -122,7 +122,7 @@ describe('production configuration IPC and Preload with actual services', () => 
   it('rejects unsafe inputs before mutation and keeps secrets out of errors and logs', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const secret = 'fixture-r78-do-not-echo';
-    expect(await invoke('settings.createProvider', { name: 'Bad', kind: 'openai', apiKey: secret })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(await invoke('settings.createProvider', { name: 'Bad', kind: 'compatible', baseUrl: 'https://service.example/v1', apiKey: secret })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(await invoke('settings.listProviderSummaries')).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(await invoke('settings.listProviderSummaries', undefined, secret)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     const error = await invoke('settings.setKey', { providerId: 'missing', apiKey: secret });
@@ -146,7 +146,7 @@ describe('production configuration IPC and Preload with actual services', () => 
     dispose = registerIpc({ webContents: { send: () => {} } } as unknown as BrowserWindow, {
       ...withHost(new RunService(database, new MockProvider())), rooms: new RoomService(database), settings,
     });
-    const provider = await settings.createProvider({ name: 'Delayed', kind: 'openai' });
+    const provider = await settings.createProvider({ name: 'Delayed', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     const pending = fixture.api!.settings.setKey({ providerId: provider.id, apiKey: 'fixture-r78-drain-key' }).catch(error => error);
     await encrypting;
     dispose();
@@ -185,7 +185,7 @@ describe('production configuration IPC and Preload with actual services', () => 
     ['navigation', 'success'], ['disposal', 'success'], ['replacement', 'success'],
     ['navigation', 'failure'], ['disposal', 'failure'], ['replacement', 'failure'],
   ] as const)('withholds a delayed result after %s (%s)', async (change, outcome) => {
-    const provider = await settings.createProvider({ name: 'P', kind: 'openai' });
+    const provider = await settings.createProvider({ name: 'P', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     let resolve!: (value: typeof provider) => void;
     let reject!: (error: Error) => void;
     vi.spyOn(settings, 'getProviderConfiguration').mockImplementationOnce(() => new Promise((release, fail) => { resolve = release; reject = fail; }));

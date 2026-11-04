@@ -94,11 +94,6 @@ const api: RoundtableApiContract = {
     testConnection: (input) => invoke('settings.testConnection', input),
     listModelReadiness: () => invoke('settings.listModelReadiness', undefined),
   },
-  network: {
-    getSettings: () => invoke('network.getSettings', undefined),
-    saveSettings: (input) => invoke('network.saveSettings', input),
-    testProxy: (input) => invoke('network.testProxy', input),
-  },
   run: {
     previewWorkflow: (input) => invoke('run.previewWorkflow', input),
     getSnapshot: (runId) => invoke('run.getSnapshot', runId),

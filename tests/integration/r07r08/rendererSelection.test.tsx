@@ -159,7 +159,7 @@ it('shows unrecorded metadata for old Runs without using live member configurati
 
 it.each(['createProvider', 'deleteProvider', 'setKey', 'deleteKey'] as const)('refreshes Provider summaries after %s settles outside settings', async operation => {
   const f = fixture(); f.db.createRoom({ id: 'r1', name: '房间' });
-  f.db.createProvider({ id: 'p', name: '原 Provider', kind: operation.includes('Key') ? 'openai' : 'mock' });
+  f.db.createProvider({ id: 'p', name: '原 Provider', kind: operation.includes('Key') ? 'compatible' : 'mock', baseUrl: operation.includes('Key') ? 'https://service.example/v1' : null });
   if (operation === 'deleteKey') await f.api.settings.setKey({ providerId: 'p', apiKey: 'fixture-key' });
   const summaries = vi.spyOn(f.api.settings, 'listProviderSummaries');
   const gate = deferred<void>();

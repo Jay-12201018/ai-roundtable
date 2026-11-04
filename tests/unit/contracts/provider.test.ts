@@ -21,7 +21,7 @@ describe('Provider contract Mock', () => {
       expect(await provider.testConnection({ requestId: 'test-1', level, modelId: 'mock' })).toMatchObject({ level, ok: true });
     }
   });
-  it.each(['openai', 'anthropic', 'gemini', 'openai-compatible'])('accepts a SDK-free %s fixture with all six event types', async (modelId) => {
+  it.each(['mock', 'compatible'])('accepts a %s fixture with all six event types', async (modelId) => {
     const fixture: ProviderAdapter = {
       async listModels() { return [{ id: modelId, name: modelId }]; },
       async testConnection(input) { return { requestId: input.requestId, level: input.level, ok: true }; },

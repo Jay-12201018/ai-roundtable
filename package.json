@@ -28,12 +28,9 @@
     "rehearse:upgrade": "node scripts/electron-node.cjs scripts/rehearse-upgrade.cjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.62.0",
-    "@google/genai": "^1.20.0",
     "@radix-ui/react-slot": "^1.2.3",
     "better-sqlite3": "12.11.1",
     "lucide-react": "^0.544.0",
-    "openai": "^5.20.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^10.1.0",

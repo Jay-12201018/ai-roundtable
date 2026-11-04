@@ -152,7 +152,7 @@ export const memberTexts = (page: Page) => page.locator('.thread-item .msg-body 
 
 /** A DeepSeek service with the fake Key, and a room of three members (the UI path is covered in key-safety.spec). */
 export async function seedDeepSeekRoom(running: RunningApp, roomName = 'E2E 讨论') {
-  const provider = await running.api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: DEEPSEEK, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
+  const provider = await running.api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'compatible', baseUrl: DEEPSEEK, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await running.api('settings.setKey', { providerId: provider.id, apiKey: FAKE_KEY });
   const room = await running.api('rooms.createRoom', { name: roomName, objective: '' });
   const agents = [];

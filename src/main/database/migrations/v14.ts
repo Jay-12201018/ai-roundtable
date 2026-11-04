@@ -67,6 +67,11 @@ UPDATE workflow_runs SET last_error='这场讨论是旧版本按预算限制停�
 -- D136: a Key and its address need no separate confirmation any more.
 DROP TABLE provider_target_approvals;
 
+-- D143: one interface type. Services of a type no longer offered stay as stopped ones: discussions keep their names and
+-- history, and the host can remove them with their Keys or give them an address.
+UPDATE providers SET enabled=0, is_default=0, type='compatible' WHERE type IN ('openai','anthropic','gemini');
+UPDATE providers SET type='compatible' WHERE type='openai-compatible';
+
 -- D139: a version that passed validation is usable at once. The same rules as migrations 12 and 13, without adoption.
 DROP TRIGGER artifact_export_insert;
 CREATE TRIGGER artifact_export_insert BEFORE INSERT ON artifact_exports BEGIN

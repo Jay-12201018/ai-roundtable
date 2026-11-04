@@ -8,7 +8,6 @@ import type { ArtifactCommandResult, ArtifactEditInput, ArtifactExportInput, Art
   ArtifactPreview, ArtifactPreviewInput, ArtifactVersionDetail, ArtifactVersionInput, CodeCandidateList } from '../schemas/artifact';
 import type { CodeExportChooseRootInput, CodeExportChooseRootResult, CodeExportPreview, CodeExportPreviewInput, CodeExportWriteInput, CodeExportWriteResult } from '../schemas/codeExport';
 import type { UsageExportResult, UsageRange, UsageReport } from '../schemas/usage';
-import type { NetworkSettings, ProxySettings, ProxyTestResult } from '../schemas/network';
 
 export type RoomMessage = z.infer<typeof roomMessageSchema>;
 export type CreateDemoResult = z.infer<typeof createDemoResultSchema>;
@@ -56,13 +55,6 @@ export interface CodeExportApiContract {
   preview(input: CodeExportPreviewInput): Promise<CodeExportPreview>;
   write(input: CodeExportWriteInput): Promise<CodeExportWriteResult>;
 }
-/** D115: the local proxy settings; saved for the next launch, never applied to this one. */
-export interface NetworkApiContract {
-  getSettings(): Promise<NetworkSettings>;
-  saveSettings(input: ProxySettings): Promise<NetworkSettings>;
-  /** D137: one connection attempt the way these settings would connect; no Key, no request body. */
-  testProxy(input: ProxySettings): Promise<ProxyTestResult>;
-}
 export interface RoundtableApiContract {
   room: RoomApiContract;
   host: HostApiContract;
@@ -75,8 +67,6 @@ export interface RoundtableApiContract {
   run: RunApiContract;
   rooms: RoomManagementApiContract;
   settings: ProviderSettingsApiContract;
-  /** Optional (D115): Preload always provides them; a page without them hides the network settings. */
-  network?: NetworkApiContract;
 }
 
 export type RunSessionApiContract = Pick<RoundtableApiContract, 'room' | 'run'>;

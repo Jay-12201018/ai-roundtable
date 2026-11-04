@@ -55,7 +55,7 @@ async function main() {
 
   // Setup (accepted hands-on in R13A/R13B): a DeepSeek Provider with a fake Key and confirmed session target,
   // and a room with three DeepSeek members. Everything after this is real input in the new screen.
-  const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
+  const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
   const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
   const agents = [];

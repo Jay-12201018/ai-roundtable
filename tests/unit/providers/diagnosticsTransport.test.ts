@@ -10,9 +10,9 @@ import { execFileSync } from 'node:child_process';
 import type { lookup as dnsLookup } from 'node:dns/promises';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createSafeFetch } from '../../../src/main/providers/network';
-import { OpenAICompatibleProvider } from '../../../src/main/providers/openai-compatible/OpenAICompatibleProvider';
+import { CompatibleProvider } from '../../../src/main/providers/compatible/CompatibleProvider';
 import { ContractError } from '../../../src/shared/contracts/errors';
-import { configuration, input, collect, sse, chunk } from './openai/fixtures';
+import { configuration, input, collect, sse, chunk } from './compatible/fixtures';
 import type { DiagnosticEvent } from '../../../src/main/providers/diagnostics';
 
 vi.mock('node:https', async original => ({ ...await original<typeof import('node:https')>(), request: vi.fn() }));
@@ -30,9 +30,9 @@ function fakeRequest(code: string, connected = false) {
   }) as unknown as typeof https.request);
   return request;
 }
-function provider(observer: (event: DiagnosticEvent) => void, options: Partial<ConstructorParameters<typeof OpenAICompatibleProvider>[0]> = {}) {
-  return new OpenAICompatibleProvider({ configuration: { ...configuration, kind: 'openai-compatible', baseUrl: 'https://fixture.example' },
-    confirmedBaseUrl: 'https://fixture.example', capabilities: { outputTokenParameter: 'max_tokens', streamUsage: true, listModels: false, authentication: 'unsupported' },
+function provider(observer: (event: DiagnosticEvent) => void, options: Partial<ConstructorParameters<typeof CompatibleProvider>[0]> = {}) {
+  return new CompatibleProvider({ configuration: { ...configuration, kind: 'compatible', baseUrl: 'https://fixture.example' },
+    confirmedBaseUrl: 'https://fixture.example', capabilities: { streamUsage: true, listModels: false, authentication: 'unsupported' },
     resolveKey: async () => 'fake-secret', diagnostics: observer, fetch: async () => sse(chunk('OK'), chunk(null, 'stop'), '[DONE]'), ...options });
 }
 
@@ -167,12 +167,6 @@ it.each([
   expect(events.at(-1)).toMatchObject({ type: 'error', error: { code: 'unsupported' } });
   expect(d.events).toContainEqual({ stage: 'stream', category: 'response_invalid' });
   expect(d.events.some(e => e.category === 'policy_rejected')).toBe(false); expect(fetcher).toHaveBeenCalledTimes(1);
-});
-it('retains policy_rejected for unsupported capabilities before credentials or HTTP', async () => {
-  const d = observe(); const fetcher = vi.fn(); const resolveKey = vi.fn(async () => 'fake-secret');
-  const events = await collect(provider(d.observer, { fetch: fetcher, resolveKey, capabilities: { outputTokenParameter: null, streamUsage: false, listModels: false, authentication: 'unsupported' } }).streamChat(input));
-  expect(events.at(-1)).toMatchObject({ type: 'error', error: { code: 'unsupported' } });
-  expect(d.events).toContainEqual({ category: 'policy_rejected' }); expect(resolveKey).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
 });
 it('keeps timeout during pending DNS in the DNS phase', async () => {
   const d = observe(); const controller = new AbortController();

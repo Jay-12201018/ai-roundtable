@@ -8,36 +8,21 @@ import type { ModelTokenCounter } from '../context/types';
 import { countModelTokens } from '../context/buildPublicContext';
 import { MockProvider } from './mock/MockProvider';
 import { mockModelBudget } from './mock/tokenBudget';
-import { OpenAIProvider } from './openai/OpenAIProvider';
-import { OpenAICompatibleProvider } from './openai-compatible/OpenAICompatibleProvider';
-import { AnthropicProvider } from './anthropic/AnthropicProvider';
-import { GeminiProvider } from './gemini/GeminiProvider';
-import type { ChatCompletionCapabilities } from './openai/ChatCompletionProvider';
+import { CompatibleProvider, compatibleCapabilities, type CompatibleCapabilities } from './compatible/CompatibleProvider';
 import type { ProviderMessage } from './types';
-import { createNativeSafeFetch, createSafeFetch } from './network';
+import { createSafeFetch } from './network';
 import type { DiagnosticObserver } from './diagnostics';
-import type { ProxyResolver } from './proxyTunnel';
 
 type Options = {
-  /** D137: how a request reaches its target now; absent means directly. */
-  proxy?: ProxyResolver;
-  capabilitiesResolver?: (configuration: ProviderConfiguration) => ChatCompletionCapabilities;
+  capabilitiesResolver?: (configuration: ProviderConfiguration) => CompatibleCapabilities;
   transportFactory?: (guard: () => void, diagnostics?: DiagnosticObserver) => typeof fetch;
 };
 /** What a request for a model may use: the host's per-model limits or the defaults (D134), with an input counter. */
 export type ModelBudget = { contextWindowTokens: number; maxOutputTokens: number; counter: ModelTokenCounter };
 /** What a request was prepared for; it stops if the service's kind, address or Key changes under it. */
 type Binding = { kind: string; baseUrl: string; revision: string };
-const officialCapabilities: ChatCompletionCapabilities = { outputTokenParameter: 'max_completion_tokens', streamUsage: true, listModels: true, authentication: 'models' };
-type RegistryCapabilities = Omit<ChatCompletionCapabilities, 'outputTokenParameter'> & { outputTokenParameter: 'max_tokens' | 'max_completion_tokens' | 'maxOutputTokens' | null };
 /** D135: a long reply from a slow model must not be cut off; the Run's duration limit is what bounds a discussion. */
 const STREAM_TIMEOUT_MS = 600_000;
-/**
- * D135: every OpenAI-compatible address gets the same request; there is no per-service branch. `max_tokens` is what these
- * services have in common. Usage is asked for, and a stream that does not report it still completes, with its usage unknown.
- */
-const compatibleCapabilities = { outputTokenParameter: 'max_tokens', streamUsage: true, listModels: true, authentication: 'models' } as const;
-const officialTargets = { openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com/v1beta' } as const;
 
 // D136: saving a service is what lets its Key go to its address; Renderer and model names cannot change where it goes.
 export class ProviderRegistry {
@@ -47,17 +32,11 @@ export class ProviderRegistry {
     const configuration = this.database.getProviderConfiguration(id);
     if (!configuration) throw new ContractError('not_found');
     if (!configuration.enabled) throw new ContractError('invalid_state');
-    if (!['mock', 'openai', 'openai-compatible', 'anthropic', 'gemini'].includes(configuration.kind)) throw new ContractError('unsupported');
     return configuration;
   }
   private target(configuration: ProviderConfiguration): string {
-    const fixed = configuration.kind === 'openai' ? officialTargets.openai : undefined;
-    const fallback = configuration.kind === 'anthropic' || configuration.kind === 'gemini' ? officialTargets[configuration.kind] : undefined;
-    const base = configuration.baseUrl ?? fixed ?? fallback ?? '';
-    if (!base) throw new ContractError('invalid_input');
-    const target = new URL(base).toString().replace(/\/+$/u, '');
-    if (fixed && target !== fixed) throw new ContractError('invalid_input');
-    return target;
+    if (!configuration.baseUrl) throw new ContractError('invalid_input');
+    return new URL(configuration.baseUrl).toString().replace(/\/+$/u, '');
   }
   /** Where this service's Key and content go; undefined when its configuration is unusable. */
   targetOf(configuration: ProviderConfiguration): string | undefined {
@@ -72,16 +51,11 @@ export class ProviderRegistry {
     const configuration = this.configuration(id);
     return { kind: configuration.kind, baseUrl: this.target(configuration), revision: this.database.getProviderKeyRevision(id) };
   }
-  resolveCapabilities(configuration: ProviderConfiguration): RegistryCapabilities {
-    if (configuration.kind === 'anthropic' || configuration.kind === 'gemini') return {
-      outputTokenParameter: configuration.kind === 'gemini' ? 'maxOutputTokens' : 'max_tokens',
-      streamUsage: true, listModels: true, authentication: 'models',
-    };
-    if (configuration.kind === 'openai') return officialCapabilities;
+  resolveCapabilities(configuration: ProviderConfiguration): CompatibleCapabilities {
     return this.options.capabilitiesResolver?.(configuration) ?? compatibleCapabilities;
   }
   createTransport(guard: () => void, diagnostics?: DiagnosticObserver): typeof fetch {
-    return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics, this.options.proxy);
+    return this.options.transportFactory?.(guard, diagnostics) ?? createSafeFetch(guard, undefined, diagnostics);
   }
   assertSelection(providerId: string, modelId: string): void {
     const configuration = this.database.validateModelSelection(providerId, modelId);
@@ -115,8 +89,6 @@ export class ProviderRegistry {
     onDispatch?: () => void): ProviderAdapter {
     const providerId = configuration.id;
     const safeTransport = this.createTransport(guard, diagnostics);
-    const transport = configuration.kind === 'anthropic' || configuration.kind === 'gemini'
-      ? createNativeSafeFetch(configuration.kind, binding.baseUrl, safeTransport, guard) : safeTransport;
     const options = { configuration, confirmedBaseUrl: binding.baseUrl, diagnostics, streamTimeoutMs: STREAM_TIMEOUT_MS,
       resolveKey: async (id: string) => {
         guard();
@@ -126,14 +98,9 @@ export class ProviderRegistry {
         guard(); return key;
       },
       // The single path to the network: a request that never reached it provably was not sent.
-      fetch: (async (url, init) => { guard(); onDispatch?.(); return transport(url, init); }) as typeof fetch,
+      fetch: (async (url, init) => { guard(); onDispatch?.(); return safeTransport(url, init); }) as typeof fetch,
     };
-    if (configuration.kind === 'anthropic') return new AnthropicProvider(options);
-    if (configuration.kind === 'gemini') return new GeminiProvider(options);
-    if (configuration.kind === 'openai') return new OpenAIProvider(options);
-    const capabilities = this.resolveCapabilities(configuration);
-    if (capabilities.outputTokenParameter === 'maxOutputTokens') throw new ContractError('unsupported');
-    return new OpenAICompatibleProvider({ ...options, capabilities: { ...capabilities, outputTokenParameter: capabilities.outputTokenParameter } });
+    return new CompatibleProvider({ ...options, capabilities: this.resolveCapabilities(configuration) });
   }
 
   getAdapter(providerId: string, modelId?: string, onDispatch?: () => void): ProviderAdapter {

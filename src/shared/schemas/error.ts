@@ -17,8 +17,6 @@ export const errorMessages = {
   network_error: 'Provider connection failed',
   // D138: the address resolved to a private or reserved network, which is never connected to directly.
   target_rejected: 'The address resolves to a private or reserved network',
-  // D137: the system's proxy is of a type this app cannot use; never turned into a direct connection silently.
-  proxy_unsupported: 'The configured proxy type is not supported',
   // D133: nothing raises this any more; events of old Runs keep it and recovery still has to read them.
   budget_exceeded: 'Run budget is insufficient for the next request',
 } as const;

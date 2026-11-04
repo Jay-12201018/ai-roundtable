@@ -9,7 +9,7 @@ const databases: Database[] = [];
 afterEach(() => { databases.splice(0).forEach(db => db.close()); vi.restoreAllMocks(); });
 function fixture() {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
-  for (const id of ['p', 'q']) db.createProvider({ id, name: id, kind: 'openai' });
+  for (const id of ['p', 'q']) db.createProvider({ id, name: id, kind: 'compatible', baseUrl: 'https://service.example/v1' });
   return db;
 }
 describe('provider-owned Key lifecycle', () => {
@@ -72,7 +72,7 @@ describe('provider-owned Key lifecycle', () => {
 
 it('does not resurrect a session Key when a deleted Provider ID is reused', async () => {
   const db = fixture(); const keys = new KeyService(db, createMemoryKeyBackend()); const reference = await keys.storeKey('p', 'old-session');
-  db.deleteProvider('p'); db.createProvider({ id: 'p', name: 'Different instance', kind: 'openai' });
+  db.deleteProvider('p'); db.createProvider({ id: 'p', name: 'Different instance', kind: 'compatible', baseUrl: 'https://service.example/v1' });
   expect(await keys.resolveKey('p', reference)).toBeUndefined();
   expect(await keys.getProviderKeyState('p')).toMatchObject({ state: 'missing', keyReference: null });
 });

@@ -14,7 +14,7 @@ describe('KeyService', () => {
   it('stores only encrypted data and resolves the key inside the main process', async () => {
     const database = new Database(':memory:');
     database.initialize();
-    database.createProvider({ id: 'provider-1', name: 'Fixture', kind: 'openai' });
+    database.createProvider({ id: 'provider-1', name: 'Fixture', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     const service = new KeyService(database, secureBackend);
 
     const reference = await service.storeKey('provider-1', 'sk-secret');
@@ -28,7 +28,7 @@ describe('KeyService', () => {
   it('uses session memory when the backend is not persistent', async () => {
     const database = new Database(':memory:');
     database.initialize();
-    database.createProvider({ id: 'provider-1', name: 'Fixture', kind: 'openai' });
+    database.createProvider({ id: 'provider-1', name: 'Fixture', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     const memoryBackend: KeyStorageBackend = {
       mode: 'memory',
       backend: 'basic_text',

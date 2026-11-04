@@ -39,8 +39,10 @@ describe('configuration inputs', () => {
       id: 'p', name: 'Mock', kind: 'mock', baseUrl: null, enabled: true, isDefault: false, defaultModelId: null, customModels: [],
     });
   });
-  it.each(['mock', 'openai', 'openai-compatible', 'anthropic', 'gemini'])('accepts a supported %s provider', (kind) => {
-    expect(schema('providerInputSchema').safeParse({ id: 'p', name: 'Provider', kind }).success).toBe(true);
+  it('accepts the demo service, and a compatible one with an address or stopped', () => {
+    for (const input of [{ kind: 'mock' }, { kind: 'compatible', baseUrl: 'https://service.example/v1' }, { kind: 'compatible', enabled: false }])
+      expect(schema('providerInputSchema').safeParse({ id: 'p', name: 'Provider', ...input }).success).toBe(true);
+    expect(schema('providerInputSchema').safeParse({ id: 'p', name: 'Provider', kind: 'compatible' }).success).toBe(false);
   });
   it.each([
     ['https://EXAMPLE.com:443/v1/', 'https://example.com/v1/'],
@@ -48,7 +50,7 @@ describe('configuration inputs', () => {
     ['http://127.0.0.1:8080', 'http://127.0.0.1:8080/'],
     ['http://[::1]:8080/v1', 'http://[::1]:8080/v1'],
   ])('normalizes an approved endpoint %s', (baseUrl, expected) => {
-    expect(schema('providerInputSchema').parse({ id: 'p', name: 'Local', kind: 'openai-compatible', baseUrl })).toMatchObject({ baseUrl: expected });
+    expect(schema('providerInputSchema').parse({ id: 'p', name: 'Local', kind: 'compatible', baseUrl })).toMatchObject({ baseUrl: expected });
   });
   it.each([
     'http://example.com/v1', 'http://localhost.attacker/v1', 'http://127.1/v1', 'http://2130706433/v1',
@@ -56,14 +58,14 @@ describe('configuration inputs', () => {
     'https://user:password@example.com/v1', 'https://@example.com/v1', 'https://example.com/v1?token=fake',
     'https://example.com/v1?', 'https://example.com/v1#fragment', 'https://example.com/v1#', 'file:///tmp/provider', 'not-a-url',
   ])('rejects an unsafe or ambiguous endpoint %s', (baseUrl) => {
-    expect(schema('providerInputSchema').safeParse({ id: 'p', name: 'Provider', kind: 'openai-compatible', baseUrl }).success).toBe(false);
+    expect(schema('providerInputSchema').safeParse({ id: 'p', name: 'Provider', kind: 'compatible', baseUrl }).success).toBe(false);
   });
   it('rejects Mock endpoints, unsupported kinds and credentials in ordinary configuration', () => {
     for (const input of [
       { id: 'p', name: 'Mock', kind: 'mock', baseUrl: 'https://example.com/' },
       { id: 'p', name: 'Provider', kind: 'unknown' },
-      { id: 'p', name: 'Provider', kind: 'openai', apiKey: 'fixture-secret' },
-      { id: 'p', name: 'Provider', kind: 'openai', customModels: [{ id: 'model-1', name: 'Model', apiKey: 'fixture-secret' }] },
+      { id: 'p', name: 'Provider', kind: 'compatible', baseUrl: 'https://service.example/v1', apiKey: 'fixture-secret' },
+      { id: 'p', name: 'Provider', kind: 'compatible', baseUrl: 'https://service.example/v1', customModels: [{ id: 'model-1', name: 'Model', apiKey: 'fixture-secret' }] },
     ]) expect(schema('providerInputSchema').safeParse(input).success).toBe(false);
     expect(schema('providerConfigurationSchema').safeParse({ ...provider, keyReference: { id: 'key-1', apiKey: 'fixture-secret' } }).success).toBe(false);
   });

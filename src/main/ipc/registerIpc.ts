@@ -9,11 +9,8 @@ import type { RoomManagementApiContract, ProviderSettingsApiContract } from '../
 import type { RunService } from '../services/RunService';
 import type { HostApiContract } from '../../shared/contracts/app';
 import type { UsageExportResult, UsageRange, UsageReport } from '../../shared/schemas/usage';
-import type { NetworkSettings, ProxySettings, ProxyTestResult } from '../../shared/schemas/network';
 import { ContractError } from '../../shared/contracts/errors';
 
-/** D115: saved proxy settings, a keyless proxy check and a restart; absent in tests that do not need them. */
-export type NetworkIpcService = { getSettings(): Promise<NetworkSettings>; saveSettings(input: ProxySettings): Promise<NetworkSettings>; testProxy(input: ProxySettings): Promise<ProxyTestResult> };
 
 /** R13B: the usage report and the CSV export; the export writes only the file the user picks in Main's dialog. */
 export type UsageIpcService = { getReport(range?: UsageRange): UsageReport; exportCsv(window: BrowserWindow, range?: UsageRange): Promise<UsageExportResult> };
@@ -35,8 +32,8 @@ export type IpcDisposer = (() => void) & { drain(): Promise<void> };
 let currentDisposer: IpcDisposer | undefined;
 
 export function registerIpc(window: BrowserWindow, services: { run: RunService; rooms: RoomManagementApiContract; settings: ProviderSettingsApiContract; host: HostApiContract; usage: UsageIpcService;
-  network?: NetworkIpcService; artifacts?: ArtifactIpcService; codeExport?: CodeExportIpcService }): IpcDisposer {
-  const { run: service, rooms, settings, host, usage, network, artifacts, codeExport } = services;
+  artifacts?: ArtifactIpcService; codeExport?: CodeExportIpcService }): IpcDisposer {
+  const { run: service, rooms, settings, host, usage, artifacts, codeExport } = services;
   const unsupported = (): never => { throw new ContractError('unsupported'); };
   currentDisposer?.();
   let disposed = false;
@@ -116,9 +113,6 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
     'settings.listModels': (input) => settings.listModels(input),
     'settings.testConnection': (input) => settings.testConnection(input),
     'settings.listModelReadiness': () => settings.listModelReadiness ? settings.listModelReadiness() : unsupported(),
-    'network.getSettings': () => network ? network.getSettings() : unsupported(),
-    'network.saveSettings': (input) => network ? network.saveSettings(input) : unsupported(),
-    'network.testProxy': (input) => network ? network.testProxy(input) : unsupported(),
   };
   const register = <C extends IpcChannel>(channel: C) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
@@ -139,7 +133,7 @@ export function registerIpc(window: BrowserWindow, services: { run: RunService; 
         return response;
       })();
       if (channel.startsWith('rooms.') || channel.startsWith('settings.') || channel === 'host.command' || channel === 'run.continueDiscussion'
-        || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'summary.revoke' || channel === 'network.saveSettings'
+        || channel === 'usage.exportCsv' || channel === 'summary.generate' || channel === 'summary.confirm' || channel === 'summary.revoke'
         || channel === 'artifact.generate' || channel === 'artifact.edit' || channel === 'artifact.export' || channel === 'codeExport.write') {
         pendingConfiguration.add(operation);
         void operation.then(() => pendingConfiguration.delete(operation), () => pendingConfiguration.delete(operation));

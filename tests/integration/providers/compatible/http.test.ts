@@ -2,7 +2,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { setImmediate } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
-import { OpenAICompatibleProvider } from '../../../../src/main/providers/openai-compatible/OpenAICompatibleProvider';
+import { CompatibleProvider } from '../../../../src/main/providers/compatible/CompatibleProvider';
 import type { NormalizedChunk, StreamChatInput } from '../../../../src/main/providers/types';
 import type { ProviderConfiguration } from '../../../../src/shared/contracts/configuration';
 import { normalizedChunkSchema } from '../../../../src/shared/schemas/provider';
@@ -72,14 +72,14 @@ async function fixture(
 
 function provider(value: Fixture) {
   const configuration: ProviderConfiguration = {
-    id: 'loopback-instance', name: 'Isolated loopback fixture', kind: 'openai-compatible',
+    id: 'loopback-instance', name: 'Isolated loopback fixture', kind: 'compatible',
     baseUrl: value.baseUrl, enabled: true, isDefault: false, defaultModelId: null, customModels: [],
     keyReference: { id: 'fixture-reference' }, createdAt: '2026-10-17T00:00:00.000Z', updatedAt: '2026-10-17T00:00:00.000Z',
   };
-  return new OpenAICompatibleProvider({
+  return new CompatibleProvider({
     configuration, confirmedBaseUrl: value.baseUrl, resolveKey: async () => fixtureKey,
     timeoutMs: 2000, fetch: value.fetch,
-    capabilities: { outputTokenParameter: 'max_tokens', streamUsage: false, listModels: false, authentication: 'unsupported' },
+    capabilities: { streamUsage: false, listModels: false, authentication: 'unsupported' },
   });
 }
 
@@ -96,12 +96,12 @@ async function waitForClose(promise: Promise<void>) {
   let timer!: ReturnType<typeof setTimeout>;
   try {
     await Promise.race([promise, new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(new Error('SDK did not close the fixture transport after Stop')), 1000);
+      timer = setTimeout(() => reject(new Error('The fixture transport did not close after Stop')), 1000);
     })]);
   } finally { clearTimeout(timer); }
 }
 
-describe('OpenAI Compatible actual Node SDK loopback HTTP', () => {
+describe('Compatible adapter over loopback HTTP', () => {
   it('streams fragmented UTF-8/DONE with the bounded request and fake authorization', async () => {
     await fixture(async (_request, response) => {
       response.writeHead(200, { 'content-type': 'text/event-stream' });

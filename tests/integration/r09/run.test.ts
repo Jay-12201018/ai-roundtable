@@ -30,9 +30,9 @@ async function fixture(mode:'normal'|'hang'|'broken'|'length'='normal'){
  cleanup.push(()=>new Promise<void>(r=>{server.closeAllConnections();server.close(()=>r());}));
  const db=new Database(':memory:');db.initialize();cleanup.push(()=>db.close());
  db.createRoom({id:'room',name:'Room'});
- db.createProvider({id:'p',name:'local',kind:'openai-compatible',baseUrl:`http://127.0.0.1:${port}/v1`,customModels:[{id:'fixture',name:'fixture'}]});
+ db.createProvider({id:'p',name:'local',kind:'compatible',baseUrl:`http://127.0.0.1:${port}/v1`,customModels:[{id:'fixture',name:'fixture'}]});
  const keys=new KeyService(db,createMemoryKeyBackend());await keys.storeKey('p','fake-p');
- const registry=new ProviderRegistry(db,keys,{capabilitiesResolver:()=>({outputTokenParameter:'max_tokens',streamUsage:true,listModels:true,authentication:'models'})});
+ const registry=new ProviderRegistry(db,keys,{capabilitiesResolver:()=>({streamUsage:true,listModels:true,authentication:'models'})});
  for(let i=0;i<3;i++)db.createAgent({id:`a${i}`,roomId:'room',displayName:`Agent${i}`,roleTemplateId:`Role${i}`,systemPrompt:`System${i}`,providerId:'p',modelId:'fixture',displayOrder:i});
  const mock=new MockProvider(); const mockCall=vi.spyOn(mock,'streamChat');
  const run=new RunService(db,mock,createPublicMessagesBuilder((model,member)=>member.providerId?registry.budget(member.providerId,model!):undefined),registry);cleanup.push(()=>run.shutdown());

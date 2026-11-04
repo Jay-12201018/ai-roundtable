@@ -16,9 +16,9 @@ const keyLike = [
   'a3f9c2e17b4d8a6f0e5c1b9d7a2f4e6c8b0d3a5f',
 ];
 const modelIds = [
-  'deepseek-flash', 'deepseek-v4-pro', 'gpt-4o-mini', 'claude-sonnet-4-5', 'models/gemini-2.5-flash', 'mock',
-  'qwen2.5-72b-instruct', 'meta-llama/Llama-3.1-8B-Instruct', 'accounts/fireworks/models/llama-v3p1-70b-instruct',
-  'anthropic.claude-3-5-sonnet-20241022-v2:0', '@cf/meta/llama-3-8b-instruct', 'ft:gpt-4o-mini:org:custom:9qLb2xYz', 'sky-chat', 'skill',
+  'deepseek-flash', 'deepseek-v4-pro', 'kimi-k3.1-pro', 'doubao-seed-2-1-pro-260915', 'models/some-model-2.5', 'mock',
+  'qwen2.5-72b-instruct', 'vendor/Some-Model-3.1-8B-Instruct', 'accounts/example/models/some-v3p1-70b-instruct',
+  'vendor.some-model-3-5-20241022-v2:0', '@cf/vendor/some-3-8b-instruct', 'ft:some-4o-mini:org:custom:9qLb2xYz', 'sky-chat', 'skill',
 ];
 
 describe('D096 model IDs refuse API-key-like text', () => {
@@ -34,9 +34,9 @@ describe('D096 model IDs refuse API-key-like text', () => {
 
   it('applies to every user-entered model field and to the request that would carry it', () => {
     const key = keyLike[0];
-    expect(createProviderInputSchema.safeParse({ name: 'D', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: key }).success).toBe(false);
-    expect(createProviderInputSchema.safeParse({ name: 'D', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: key, name: 'x' }] }).success).toBe(false);
-    expect(createProviderInputSchema.safeParse({ name: 'D', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash' }).success).toBe(true);
+    expect(createProviderInputSchema.safeParse({ name: 'D', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: key }).success).toBe(false);
+    expect(createProviderInputSchema.safeParse({ name: 'D', kind: 'compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: key, name: 'x' }] }).success).toBe(false);
+    expect(createProviderInputSchema.safeParse({ name: 'D', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash' }).success).toBe(true);
     expect(createAgentInputSchema.safeParse({ roomId: 'r', displayName: 'A', roleTemplateId: 'x', providerId: 'p', modelId: key }).success).toBe(false);
     expect(agentInputSchema.safeParse({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'x', providerId: 'p', modelId: key }).success).toBe(false);
     expect(providerConnectionTestInputSchema.safeParse({ providerId: 'p', level: 'generation', modelId: key, allowGeneration: true }).success).toBe(false);
@@ -50,7 +50,7 @@ describe('D096 stored legacy values are withheld on read and refused on use', ()
   function legacy() {
     const db = new Database(':memory:'); db.initialize(); opened.push(db);
     db.createRoom({ id: 'r', name: 'Room' });
-    db.createProvider({ id: 'p', name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'flash' }] });
+    db.createProvider({ id: 'p', name: 'DeepSeek', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'flash' }] });
     db.createAgent({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'Drafter', providerId: 'p', modelId: 'deepseek-flash' });
     // Rows written before D096, when the key was typed into the model fields.
     const raw = (db as unknown as { db: import('better-sqlite3').Database }).db;
@@ -93,7 +93,7 @@ describe('D096 stored key-like model IDs are cleared at startup', () => {
     const key = keyLike[0];
     const db = new Database(path); await db.initialize();
     db.createRoom({ id: 'r', name: 'Room' });
-    db.createProvider({ id: 'p', name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'flash' }] });
+    db.createProvider({ id: 'p', name: 'DeepSeek', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'flash' }] });
     db.createAgent({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'Drafter', providerId: 'p', modelId: 'deepseek-flash' });
     db.createAgent({ id: 'b', roomId: 'r', displayName: 'B', roleTemplateId: 'Critic', providerId: 'p', modelId: 'deepseek-flash' });
     const raw = (db as unknown as { db: import('better-sqlite3').Database }).db;

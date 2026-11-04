@@ -480,7 +480,7 @@ export function App() {
         {composer}
       </> : page === 'settings' ? <>
         {(layout === 'narrow' || sidebarCollapsed) && pageTopbar('settings')}
-        <SettingsPage api={settingsApi} network={api.network} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
+        <SettingsPage api={settingsApi} providers={providers} providerLoadState={providerLoadState} onProvidersChanged={() => { void reloadProviders(); void readiness.reload(); }}
           theme={theme} setTheme={setTheme} section={settingsSection} onSection={setSettingsSection} onConnected={createFirstRoom}
           onStart={made => { const target = made ?? roomId; if (target) newDiscussion(target); else goDiscussion(); }} />
       </> : page === 'rooms' ? <>

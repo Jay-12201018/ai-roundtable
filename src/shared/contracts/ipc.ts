@@ -10,7 +10,6 @@ import { compareRunPositions } from '../schemas/configuration';
 import { hostCommandResultSchema, hostCommandSchema } from '../schemas/host';
 import { summaryCommandResultSchema, summaryConfirmInputSchema, summaryGenerateInputSchema, summaryPreviewInputSchema, summaryPreviewSchema } from '../schemas/summary';
 import { usageExportResultSchema, usageReportInputSchema, usageReportSchema } from '../schemas/usage';
-import { networkSettingsSchema, proxySettingsSchema, proxyTestResultSchema } from '../schemas/network';
 import { artifactCommandResultSchema, artifactEditInputSchema, artifactExportInputSchema, artifactExportResultSchema, artifactGenerateInputSchema,
   artifactListInputSchema, artifactListSchema, artifactPreviewInputSchema, artifactPreviewSchema, artifactVersionDetailSchema, artifactVersionInputSchema, codeCandidateListSchema } from '../schemas/artifact';
 import { codeExportChooseRootInputSchema, codeExportChooseRootResultSchema, codeExportPreviewInputSchema, codeExportPreviewSchema, codeExportWriteInputSchema,
@@ -87,11 +86,8 @@ export const ipcContracts = {
   'settings.getKeyStorageStatus': providerSettingsContracts.getKeyStorageStatus,
   'settings.listModels': providerSettingsContracts.listModels,
   'settings.testConnection': providerSettingsContracts.testConnection,
-  // D114: per-model readiness as Main decides it; D115: saved proxy settings, a keyless proxy check and a restart.
+  // D114: per-model readiness as Main decides it.
   'settings.listModelReadiness': providerSettingsContracts.listModelReadiness,
-  'network.getSettings': { input: z.undefined(), output: networkSettingsSchema },
-  'network.saveSettings': { input: proxySettingsSchema, output: networkSettingsSchema },
-  'network.testProxy': { input: proxySettingsSchema, output: proxyTestResultSchema },
 } as const;
 export type IpcChannel = keyof typeof ipcContracts;
 export type IpcInput<C extends IpcChannel> = z.input<(typeof ipcContracts)[C]['input']>;

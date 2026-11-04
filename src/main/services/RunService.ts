@@ -1528,11 +1528,11 @@ export class RunService {
   /** D134: the output limit of one member's requests: the Run's, never above what that member's model takes. */
   private memberOutputLimit(limit: number, member: MemberSnapshot): number {
     const budget = this.modelBudget(member);
-    if (!budget) return limit;
-    if (limit !== DEFAULT_OUTPUT_TOKEN_LIMIT || member.modelId === 'mock') return Math.min(limit, budget.maxOutputTokens);
+    const modelMax = budget?.maxOutputTokens ?? limit;
+    if (!budget || limit !== DEFAULT_OUTPUT_TOKEN_LIMIT || member.modelId === 'mock') return Math.min(limit, modelMax);
     // D135: a limit the host left at the default follows the model's setting, so raising it there works on the next retry.
     // At least half of the context stays for the discussion, whatever the setting says.
-    return Math.min(budget.maxOutputTokens, Math.max(limit, Math.floor(budget.contextWindowTokens / 2)));
+    return Math.min(modelMax, Math.max(limit, Math.floor(budget.contextWindowTokens / 2)));
   }
 
   /** The usage page counts what a service reported; a demo member's numbers are made up and stay out of it. */

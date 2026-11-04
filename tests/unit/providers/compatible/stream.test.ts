@@ -1,17 +1,17 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OpenAIProvider } from '../../../../src/main/providers/openai/OpenAIProvider';
+import { CompatibleProvider } from '../../../../src/main/providers/compatible/CompatibleProvider';
 import { normalizedChunkSchema, connectionTestResultSchema } from '../../../../src/shared/schemas/provider';
 import { configuration, input, chunk, sse, collect } from './fixtures';
 
 const fakeKey = 'fixture-secret-only';
-function setup(fetcher: typeof fetch, extra: Partial<ConstructorParameters<typeof OpenAIProvider>[0]> = {}) {
+function setup(fetcher: typeof fetch, extra: Partial<ConstructorParameters<typeof CompatibleProvider>[0]> = {}) {
   const resolveKey = vi.fn(async () => fakeKey);
-  return { resolveKey, provider: new OpenAIProvider({ configuration, confirmedBaseUrl: 'https://api.openai.com/v1', resolveKey, fetch: fetcher, ...extra }) };
+  return { resolveKey, provider: new CompatibleProvider({ configuration, confirmedBaseUrl: 'https://service.example/v1', resolveKey, fetch: fetcher, ...extra }) };
 }
 afterEach(() => vi.restoreAllMocks());
 
-describe('OpenAI chat adapter', () => {
+describe('compatible adapter over a stream', () => {
   it('maps trusted context/model/real token limit, fragmented Unicode, usage and one terminal event', async () => {
     const requests: Array<{url:string; body:unknown; headers:Headers; redirect:unknown}> = [];
     const { provider, resolveKey } = setup(async (url, init) => {
@@ -25,11 +25,11 @@ describe('OpenAI chat adapter', () => {
     ]);
     events.forEach(e => expect(normalizedChunkSchema.safeParse(e).success).toBe(true));
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe('https://api.openai.com/v1/chat/completions');
+    expect(requests[0].url).toBe('https://service.example/v1/chat/completions');
     expect(requests[0].redirect).toBe('error');
     expect(requests[0].headers.get('authorization')).toBe(`Bearer ${fakeKey}`);
-    expect(requests[0].body).toEqual({ model: 'manual-model', messages: input.messages, stream: true, max_completion_tokens: 23, stream_options: { include_usage: true } });
-    expect(resolveKey).toHaveBeenCalledWith('official-instance', { id: 'fixture-reference' });
+    expect(requests[0].body).toEqual({ model: 'manual-model', messages: input.messages, stream: true, max_tokens: 23, stream_options: { include_usage: true } });
+    expect(resolveKey).toHaveBeenCalledWith('service-instance', { id: 'fixture-reference' });
     expect(JSON.stringify(events)).not.toContain(fakeKey);
   });
 

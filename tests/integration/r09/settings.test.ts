@@ -10,11 +10,11 @@ afterEach(() => { vi.restoreAllMocks(); databases.splice(0).forEach(db => db.clo
 const baseUrl = 'http://127.0.0.1:12345/v1';
 function fixture(approved = true) {
   const db = new Database(':memory:'); db.initialize(); databases.push(db);
-  db.createProvider({ id: 'p', name: 'Fixture', kind: 'openai-compatible', baseUrl });
+  db.createProvider({ id: 'p', name: 'Fixture', kind: 'compatible', baseUrl });
   const keys = new KeyService(db, createMemoryKeyBackend());
   const requests: Request[] = [];
   const registry = new ProviderRegistry(db, keys, {
-    capabilitiesResolver: () => ({ outputTokenParameter: 'max_tokens', streamUsage: false, listModels: true, authentication: 'models' }),
+    capabilitiesResolver: () => ({ streamUsage: false, listModels: true, authentication: 'models' }),
     
     transportFactory: guard => async (resource, init) => {
       guard(); const request = new Request(resource, init); requests.push(request);

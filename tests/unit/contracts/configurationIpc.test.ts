@@ -5,7 +5,7 @@ const parse = parseIpcOutput as (channel: string, input: unknown, output: unknow
 const timestamp = '2026-10-17T00:00:00.000Z';
 const room = { id: 'r', name: 'Room', objective: '', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const agent = { id: 'a', roomId: 'r', displayName: 'Agent', roleTemplateId: 'draft', systemPrompt: '', providerId: null, modelId: null, enabled: true, displayOrder: 0, archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
-const provider = { id: 'p', name: 'Provider', kind: 'openai', baseUrl: null, enabled: true, isDefault: false, defaultModelId: null, customModels: [], keyReference: null, createdAt: timestamp, updatedAt: timestamp };
+const provider = { id: 'p', name: 'Provider', kind: 'compatible', baseUrl: 'https://service.example/v1', enabled: true, isDefault: false, defaultModelId: null, customModels: [], keyReference: null, createdAt: timestamp, updatedAt: timestamp };
 const storage = { mode: 'memory', backend: 'memory', persistent: false, message: '当前系统没有可靠的安全存储，密钥仅在本次会话有效。' };
 const key = { providerId: 'p', state: 'missing', keyReference: null, storage };
 const message = { id: 'm', roomId: 'r', runId: null, turnId: null, senderType: 'user', senderName: 'User', content: 'History', status: 'completed', sortKey: 6, createdAt: timestamp, updatedAt: timestamp };
@@ -23,7 +23,7 @@ describe('configuration IPC response identity', () => {
     ['rooms.listAgentConfigurations', { roomId: 'r' }, [agent], [{ ...agent, roomId: 'other' }]],
     ['rooms.reorderAgents', { roomId: 'r', agentIds: ['a'] }, [agent], [{ ...agent, id: 'other' }]],
     ['settings.getProviderConfiguration', { id: 'p' }, provider, { ...provider, id: 'other' }],
-    ['settings.updateProvider', { id: 'p', name: 'Provider', kind: 'openai' }, provider, { ...provider, id: 'other' }],
+    ['settings.updateProvider', { id: 'p', name: 'Provider', kind: 'compatible', baseUrl: 'https://service.example/v1' }, provider, { ...provider, id: 'other' }],
     ['settings.getProviderKeyState', { providerId: 'p' }, key, { ...key, providerId: 'other' }],
     ['settings.setKey', { providerId: 'p', apiKey: 'fixture-secret' }, key, { ...key, providerId: 'other' }],
     ['settings.listModels', { providerId: 'p' }, { providerId: 'p', models: [] }, { providerId: 'other', models: [] }],

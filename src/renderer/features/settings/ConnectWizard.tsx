@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Check, CircleAlert, FlaskConical, Info, Lock } from 'lucide-react';
-import type { KeyStorageStatus, ProviderConfiguration, ProviderKind, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
+import type { KeyStorageStatus, ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../shared/contracts/configuration';
 import { providerBaseUrlSchema } from '../../../shared/schemas/configuration';
 import { Button, Choice, Field, Modal } from '../../components/ui';
-import { interfaceTypes, presets, presetOf, targetOf, type ServicePreset } from './presets';
+import { presets, presetOf, targetOf, type ServicePreset } from './presets';
 import { errorMessage, modelIdProblem, testService, type ServiceTest } from './model';
 
 /** What the app did after a connection: the room it created for the first real service, if any. */
@@ -32,7 +32,6 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   const [preset, setPreset] = useState<ServicePreset>(() => rekey ? presetOf(rekey) ?? presets.find(item => item.id === 'custom')! : presets[0]!);
   const [name, setName] = useState(() => rekey?.name ?? presets[0]!.name);
   const [address, setAddress] = useState('');
-  const [kind, setKind] = useState<ProviderKind>('openai-compatible');
   const [modelId, setModelId] = useState(() => presets[0]!.models[0]?.id ?? '');
   const [hasKey, setHasKey] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
@@ -47,15 +46,14 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
 
   const custom = rekey ? !presetOf(rekey) : preset.id === 'custom';
   const mock = !rekey && preset.id === 'mock';
-  const type = interfaceTypes.find(item => item.kind === kind)!;
   const typed = custom && !rekey && address.trim() ? providerBaseUrlSchema.safeParse(address) : undefined;
-  const target = rekey ? targetOf(rekey) : custom ? (typed?.success ? typed.data.replace(/\/+$/u, '') : address.trim() ? null : targetOf({ kind, baseUrl: null })) : preset.baseUrl;
+  const target = rekey ? targetOf(rekey) : custom ? (typed?.success ? typed.data.replace(/\/+$/u, '') : null) : preset.baseUrl;
   const chosenModel = modelId.trim();
   const modelProblem = modelIdProblem(chosenModel);
   const displayName = rekey?.name ?? (name.trim() || preset.name);
 
   function choose(next: ServicePreset) {
-    setPreset(next); setName(next.id === 'custom' ? '' : next.name); setModelId(next.models[0]?.id ?? ''); setAddress(''); setKind('openai-compatible'); setError(''); setTest(undefined);
+    setPreset(next); setName(next.id === 'custom' ? '' : next.name); setModelId(next.models[0]?.id ?? ''); setAddress(''); setError(''); setTest(undefined);
     setPicking(false);
   }
   function close() { clearSecret(); onClose(); }
@@ -72,7 +70,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   async function saveConfiguration(): Promise<ProviderConfiguration> {
     const models = mock ? [] : [...new Map([{ id: chosenModel, name: chosenModel }, ...preset.models.map(model => ({ id: model.id, name: model.name }))].map(model => [model.id, model])).values()];
     const hasDefault = providers.some(provider => provider.isDefault && provider.enabled && provider.kind !== 'mock');
-    const input = { name: displayName, kind: custom ? kind : preset.kind, baseUrl: mock ? null : custom ? (address.trim() || null) : preset.baseUrl,
+    const input = { name: displayName, kind: preset.kind, baseUrl: mock ? null : custom ? (address.trim() || null) : preset.baseUrl,
       enabled: true, isDefault: !mock && !hasDefault, defaultModelId: mock ? 'mock' : chosenModel || null, customModels: models };
     const value = saved ? await api.updateProvider({ ...input, id: saved.id, isDefault: saved.isDefault }) : await api.createProvider(input);
     if (alive.current) setSaved(value);
@@ -83,7 +81,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
   async function store(): Promise<ProviderConfiguration | undefined> {
     const apiKey = secret.current?.value ?? '';
     if (!mock && custom && !rekey && !name.trim()) { setError('请填写服务名称。'); return; }
-    if (!mock && custom && !rekey && (!target || type.addressRequired && !address.trim())) { setError('先填写这个服务的地址，例如 https://api.example.com/v1。'); return; }
+    if (!mock && custom && !rekey && !target) { setError('先填写这个服务的地址，例如 https://api.example.com/v1。'); return; }
     if (!mock && !keySaved && apiKey.trim() === '') { setError('请粘贴 API Key。'); return; }
     if (!rekey && !mock && !chosenModel) { setError('请填写模型名，例如服务商文档里的模型 ID。'); return; }
     // What looks like a Key in the model field means the two may be mixed up: nothing typed stays on the page.
@@ -140,10 +138,8 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
     : <form id="connect-form" className="form-stack" onSubmit={submit} onChange={() => { setError(''); setTest(undefined); }} noValidate>
       {custom && !rekey && <>
         <Field label="服务名称">{props => <input {...props} className="input" value={name} disabled={busy} autoFocus onChange={event => setName(event.target.value)} placeholder="例如：公司内部模型" />}</Field>
-        <Field label="接口类型">{props => <select {...props} className="select input" value={kind} disabled={busy} onChange={event => setKind(event.target.value as ProviderKind)}>
-          {interfaceTypes.map(item => <option key={item.kind} value={item.kind}>{item.label}</option>)}</select>}</Field>
-        <Field label="地址" optional={!type.addressRequired} error={typed && !typed.success ? '地址必须以 https:// 开头（本机服务可以用 http://localhost），不能带账号、问号参数或 # 片段。' : undefined}
-          help={type.addressRequired ? '照服务商文档填写，通常以 /v1 结尾。' : `照服务商文档填写；留空时用 ${targetOf({ kind, baseUrl: null })}。`}>
+        <Field label="地址" error={typed && !typed.success ? '地址必须以 https:// 开头（本机服务可以用 http://localhost），不能带账号、问号参数或 # 片段。' : undefined}
+          help="照服务商文档填写，通常以 /v1 结尾。">
           {props => <input {...props} className="input mono" value={address} disabled={busy} onChange={event => setAddress(event.target.value)} placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false}
             aria-invalid={Boolean(typed && !typed.success) || undefined} />}</Field>
       </>}

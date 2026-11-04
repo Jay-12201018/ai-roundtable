@@ -8,9 +8,8 @@ const messages: Record<ErrorCode, string> = {
   forbidden: '服务商拒绝了这次访问。', unsupported: '这个服务不支持这样使用（例如没有模型列表接口）。', not_found: '这个服务已经不存在，请重新打开设置。',
   invalid_state: '现在不能这样操作：可能有讨论正在使用它，或还有成员、讨论记录引用它。', internal_error: '操作失败，请重试。',
   transport_error: '连接中断，请重试。', authentication_failed: 'Key 无效或已过期，请检查后重新填写。', rate_limited: '请求太频繁，请稍后再试。',
-  timeout: '服务没有及时回应，请稍后再试。', cancelled: '已取消。', network_error: '连接不上，请检查网络和地址。如果开着网络代理，也请检查代理设置。',
-  target_rejected: '这个地址解析到了内网或保留地址，不会直接连接。请检查地址；如果你的网络环境需要通过代理连接，可以到“设置 › 网络”打开。',
-  proxy_unsupported: '现在的代理类型不支持，请求没有发出。可以到“设置 › 网络”的高级选项里手动填写 HTTP 代理地址。',
+  timeout: '服务没有及时回应，请稍后再试。', cancelled: '已取消。', network_error: '连接不上，请检查网络和地址。',
+  target_rejected: '这个地址解析到了内网或保留地址，不会直接连接。请检查地址。',
   budget_exceeded: '这是旧版本因预算限制留下的记录。',
 };
 /** A fixed Chinese message per error code; never the error text itself, which could carry an echoed secret. */

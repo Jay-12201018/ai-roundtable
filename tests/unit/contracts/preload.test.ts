@@ -18,9 +18,7 @@ const emit = (value: unknown) => { for (const handler of fixture.handlers) handl
 beforeEach(() => { fixture.invoke.mockReset(); fixture.handlers.clear(); });
 describe('restricted Preload contract', () => {
   it('exposes only typed feature methods and sends one explicit undefined argument for no-input requests', async () => {
-    expect(Object.keys(fixture.api!).sort()).toEqual(['artifact', 'codeExport', 'host', 'network', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
-    // D137: saved proxy settings and a keyless connection check; no generic file or process access.
-    expect(Object.keys(fixture.api!.network!)).toEqual(['getSettings', 'saveSettings', 'testProxy']);
+    expect(Object.keys(fixture.api!).sort()).toEqual(['artifact', 'codeExport', 'host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']);
     expect(Object.keys(fixture.api!.host)).toEqual(['command']);
     // R13B: typed ledger and summary commands only; no file system, Key or generic invoke reaches the page.
     expect(Object.keys(fixture.api!.summary)).toEqual(['preview', 'generate', 'confirm', 'revoke']);

@@ -30,13 +30,12 @@ const usable = (registry: ProviderRegistry, providerId: string, modelId: string)
 };
 const pick = (name: RegExp) => fireEvent.click(screen.getByRole('button', { name }));
 
-it('D142 offers the domestic services, a custom service and the demo, and no other name', () => {
+it('D143 offers the domestic services, a custom service and the demo, and no other name', () => {
   const { api } = fixture();
   open(api);
   const offered = within(screen.getByRole('group', { name: '服务' })).getAllByRole('button').map(button => button.textContent ?? '');
   for (const [index, name] of ['DeepSeek', 'Kimi', '通义千问', '智谱 GLM', '豆包', 'MiniMax', '自定义服务', '演示（Mock）'].entries()) expect(offered[index]).toContain(name);
   expect(offered).toHaveLength(8);
-  expect(offered.join('')).not.toMatch(/OpenAI(?! 兼容)|Claude|Gemini|Anthropic/u);
   // Every built-in address is the service's own https endpoint, and each has at least one model to pick.
   for (const preset of presets.filter(item => item.baseUrl)) {
     expect(preset.baseUrl!.startsWith('https://')).toBe(true);
@@ -62,7 +61,7 @@ it('D136 connects a service with a pasted Key: pick it, paste, save, and the dis
   expect(keyInput().value).toBe('');
   await waitFor(() => expect(onClose).toHaveBeenCalled());
   const provider = database.listProviderSummaries()[0];
-  expect(provider).toMatchObject({ name: 'DeepSeek', kind: 'openai-compatible', isDefault: true, defaultModelId: 'deepseek-flash' });
+  expect(provider).toMatchObject({ name: 'DeepSeek', kind: 'compatible', isDefault: true, defaultModelId: 'deepseek-flash' });
   expect((await api.getProviderKeyState({ providerId: provider.id })).state).toBe('session');
   expect(database.getProviderConfiguration(provider.id)?.baseUrl).toBe('https://api.deepseek.com/');
   expect(usable(registry, provider.id, 'deepseek-flash')).toBe(true);
@@ -76,7 +75,7 @@ it('D136 connects a service with a pasted Key: pick it, paste, save, and the dis
 
 it('D134 a second service works right after its Key is saved, and does not take the default', async () => {
   const { database, api } = fixture();
-  const { onConnected, onStart, onClose } = open(api, { providers: [{ id: 'x', name: 'DeepSeek', kind: 'openai-compatible', enabled: true, isDefault: true, defaultModelId: 'deepseek-flash', customModels: [], configurationValid: true, hasStoredKey: true }] });
+  const { onConnected, onStart, onClose } = open(api, { providers: [{ id: 'x', name: 'DeepSeek', kind: 'compatible', enabled: true, isDefault: true, defaultModelId: 'deepseek-flash', customModels: [], configurationValid: true, hasStoredKey: true }] });
   pick(/^Kimi/u);
   expect(screen.getByRole('note').textContent).toBe('Key 只会发往 https://api.moonshot.cn/v1');
   fireEvent.change(keyInput(), { target: { value: 'owned-fake-kimi-key' } });
@@ -87,7 +86,7 @@ it('D134 a second service works right after its Key is saved, and does not take 
   expect(database.listProviderSummaries().find(item => item.name === 'Kimi')).toMatchObject({ isDefault: false, defaultModelId: 'kimi-k3.1-pro' });
 });
 
-it('D142 a built-in service is only a shortcut: any model name can be typed, and the suggestions stay', async () => {
+it('D143 a built-in service is only a shortcut: any model name can be typed, and the suggestions stay', async () => {
   const { database, registry, api } = fixture();
   const { onClose } = open(api);
   pick(/^Kimi/u);
@@ -98,12 +97,12 @@ it('D142 a built-in service is only a shortcut: any model name can be typed, and
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(onClose).toHaveBeenCalled());
   const provider = database.listProviderSummaries()[0];
-  expect(provider).toMatchObject({ kind: 'openai-compatible', defaultModelId: 'typed-by-hand' });
+  expect(provider).toMatchObject({ kind: 'compatible', defaultModelId: 'typed-by-hand' });
   expect(database.getProviderConfiguration(provider.id)!.customModels.map(item => item.id)).toEqual(['typed-by-hand', 'kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed']);
   expect(usable(registry, provider.id, 'typed-by-hand')).toBe(true);
 });
 
-it('D142 a custom service takes a name, an interface type, a safe address, a Key and any model name', async () => {
+it('D143 a custom service takes a name, a safe address, a Key and any model name', async () => {
   const { database, registry, api } = fixture();
   const { onClose } = open(api);
   pick(/^自定义服务/u);
@@ -127,22 +126,8 @@ it('D142 a custom service takes a name, an interface type, a safe address, a Key
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(onClose).toHaveBeenCalled());
   const provider = database.listProviderSummaries()[0];
-  expect(database.getProviderConfiguration(provider.id)).toMatchObject({ name: '公司模型', kind: 'openai-compatible', baseUrl: 'https://models.example/v1', defaultModelId: 'any-model-v9' });
+  expect(database.getProviderConfiguration(provider.id)).toMatchObject({ name: '公司模型', kind: 'compatible', baseUrl: 'https://models.example/v1', defaultModelId: 'any-model-v9' });
   expect(usable(registry, provider.id, 'any-model-v9')).toBe(true);
-});
-
-it.each([['anthropic', 'https://api.anthropic.com'], ['gemini', 'https://generativelanguage.googleapis.com']] as const)('D142 the %s interface type shows its default address and can leave it empty', async (kind, target) => {
-  const { database, api } = fixture();
-  const { onClose } = open(api);
-  pick(/^自定义服务/u);
-  fireEvent.change(screen.getByLabelText('服务名称'), { target: { value: '我的服务' } });
-  fireEvent.change(screen.getByLabelText('接口类型'), { target: { value: kind } });
-  expect(screen.getByRole('note').textContent).toContain(target);
-  fireEvent.change(screen.getByLabelText('模型名'), { target: { value: 'typed-model' } });
-  fireEvent.change(keyInput(), { target: { value: 'owned-fake-native-key' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-  await waitFor(() => expect(onClose).toHaveBeenCalled());
-  expect(database.listProviderSummaries()[0]).toMatchObject({ kind, defaultModelId: 'typed-model' });
 });
 
 it('测试连接 saves what is filled in and says what it found; it stays beside its cost note and nothing waits for it', async () => {
@@ -183,7 +168,7 @@ it('adds the demo service without a Key, address or network, and never as the de
 
 it('replacing a Key goes straight to the Key; closing without saving changes nothing', async () => {
   const { database, keys, api } = fixture();
-  const provider = await api.createProvider({ name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
+  const provider = await api.createProvider({ name: 'DeepSeek', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   const reference = await keys.storeKey(provider.id, 'owned-old-key');
   const { onClose } = open(api, { rekey: database.getProviderConfiguration(provider.id)! });
   expect(screen.getByRole('heading', { name: '更换 DeepSeek 的 API Key' })).toBeTruthy();

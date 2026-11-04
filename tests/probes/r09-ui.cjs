@@ -51,7 +51,7 @@ async function page(stage, saved, endpoint) {
   const snapshots={};
   if(stage==='first'){
     await click('设置');
-    for(const [name,kind,url,key] of [['R09 fixture Compatible','openai-compatible',endpoint,'r09-fake-key-compatible'],['R09 fixture Official','openai','','r09-fake-key-official']]){
+    for(const [name,kind,url,key] of [['R09 fixture Compatible','compatible',endpoint,'r09-fake-key-compatible'],['R09 fixture Official','openai','','r09-fake-key-official']]){
       // The connect wizard for a user-added service; the official-endpoint adapter has no preset (D142), so its service comes from the API.
       if(kind==='openai'){const made=await api.settings.createProvider({name,kind,enabled:true,isDefault:false,defaultModelId:'fixture',customModels:[{id:'fixture',name:'fixture'}]});await api.settings.setKey({providerId:made.id,apiKey:key});await click('添加服务');await clickIn('dialog[open] .modal-foot','取消');}
       else{await click('添加服务');await clickPrefix('自定义服务',dialog());await fill('服务名称',name);await fill('地址',url);await fill('模型名','fixture');check(dialog().querySelector('.target').textContent==='Key 只会发往 '+url,'Typed target not shown');await fill('API Key',key);await click('保存');}
@@ -78,7 +78,7 @@ async function page(stage, saved, endpoint) {
     for(const starter of await api.rooms.listAgentConfigurations({roomId:saved.roomId})){await memberAction(starter.displayName,'删除…');await clickIn('dialog[open]','删除');await wait(dialog,d=>!d,'Member deletion did not finish');}
     for(let i=0;i<3;i++){
       await click('添加成员');await clickPrefix('自定义',dialog());await fill('名字','R09 Agent '+i);await fill('角色','Role '+i);await fill('设定可选','R09 system '+i);
-      await fill('模型',(i===1?saved.openai:saved['openai-compatible'])+'\u0000fixture');await clickIn('dialog[open]','添加');await wait(dialog,d=>!d,'Member dialog did not close');
+      await fill('模型',(i===1?saved.openai:saved['compatible'])+'\u0000fixture');await clickIn('dialog[open]','添加');await wait(dialog,d=>!d,'Member dialog did not close');
     }
     check((await api.rooms.listAgentConfigurations({roomId:saved.roomId})).length===3,'Not three members');
     await clickIn('.room-page','新讨论');await fill('讨论目标','R09 three Agent public context');await click('开始讨论');saved.runId=await wait(()=>localStorage.getItem('roundtable.runId'),Boolean,'Run absent');
@@ -109,7 +109,7 @@ async function page(stage, saved, endpoint) {
     await wait(()=>api.rooms.listRooms(),rs=>rs.some(r=>r.id===saved.roomId),'Room configuration lost');
     await clickIn('.sidebar','R09 fixture Room');await wait(roomTitle,t=>t==='R09 fixture Room','Room page absent');
     await openRun('R09 three Agent public context');snapshots.restarted=await settle(saved.runId,'completed');check(snapshots.restarted.attempts.length===3,'History lost on restart');
-    for(const id of [saved.openai,saved['openai-compatible']]){const state=await api.settings.getProviderKeyState({providerId:id});check(state.state==='configured','Fake secure Key not restored');}
+    for(const id of [saved.openai,saved['compatible']]){const state=await api.settings.getProviderKeyState({providerId:id});check(state.state==='configured','Fake secure Key not restored');}
     // D113 (R16 D1-B): after a restart the same Key, address and kind need no confirmation; an explicit start sends.
     await wait(()=>field('继续讨论'),Boolean,'Completed Run did not offer to continue in place');check(!field('讨论目标'),'Completed Run offered a new-goal box');
     const runsBefore=(await api.rooms.listRoomRuns({roomId:saved.roomId})).items.map(r=>r.id);

@@ -50,7 +50,7 @@ async function main() {
   const openNav = async () => { if (await js(`!document.querySelector('.app-side')`)) await click('打开导航'); };
   const keyLeak = async () => check(!(await text()).includes(fakeKey) && await js(`[...document.querySelectorAll('input')].every(e => !e.value.includes(${JSON.stringify(fakeKey)}))`), 'The Key never shows in the page');
   const providers = () => api('settings.listProviderSummaries');
-  const deepseek = async () => (await providers()).find(provider => provider.kind === 'openai-compatible');
+  const deepseek = async () => (await providers()).find(provider => provider.kind === 'compatible');
 
   if (phase === 'first') {
     // ── G · first use ──────────────────────────────────────────────────────────

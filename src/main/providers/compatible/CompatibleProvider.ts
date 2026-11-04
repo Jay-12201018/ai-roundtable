@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import { z } from 'zod';
 import { ContractError, toPublicError } from '../../../shared/contracts/errors';
 import type { KeyReference, ProviderConfiguration } from '../../../shared/contracts/configuration';
@@ -10,7 +9,7 @@ import type { ConnectionTestResult, ListModelsInput, NormalizedChunk, ProviderAd
 import { readSse } from './sse';
 import type { DiagnosticObserver } from '../diagnostics';
 
-export interface ChatCompletionOptions {
+export interface CompatibleOptions {
   configuration: ProviderConfiguration;
   /** Main attests that this exact endpoint was validated and confirmed by the user. */
   confirmedBaseUrl: string;
@@ -20,15 +19,16 @@ export interface ChatCompletionOptions {
   streamTimeoutMs?: number;
   fetch?: typeof fetch;
   diagnostics?: DiagnosticObserver;
+  capabilities?: CompatibleCapabilities;
 }
-export interface ChatCompletionCapabilities {
-  outputTokenParameter: 'max_tokens' | 'max_completion_tokens' | null;
+export interface CompatibleCapabilities {
   streamUsage: boolean;
   listModels: boolean;
   authentication: 'models' | 'unsupported';
 }
+/** D143: what every address gets; there is no per-service branch. */
+export const compatibleCapabilities: CompatibleCapabilities = { streamUsage: true, listModels: true, authentication: 'models' };
 const capabilitySchema = z.object({
-  outputTokenParameter: z.enum(['max_tokens', 'max_completion_tokens']).nullable(),
   streamUsage: z.boolean(), listModels: z.boolean(), authentication: z.enum(['models', 'unsupported']),
 }).strict();
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -38,12 +38,11 @@ const completionChunk = z.object({
     refusal: z.string().nullable().optional(), tool_calls: z.unknown().optional(),
     function_call: z.unknown().optional(), audio: z.unknown().optional(),
   }).nullish(), finish_reason: z.string().nullable().optional() })).max(1),
-  // DeepSeek also reports how much of the prompt hit its context cache (hit + miss = prompt_tokens).
+  // Some services also report how much of the prompt hit a context cache (hit + miss = prompt_tokens).
   usage: z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
     prompt_cache_hit_tokens: tokenCount.optional(), prompt_cache_miss_tokens: tokenCount.optional() }).nullable().optional(),
 });
 const modelList = z.object({ data: z.array(z.object({ id: providerModelSchema.shape.id })).max(10000), has_more: z.boolean().optional() });
-const officialBaseUrl = 'https://api.openai.com/v1';
 const thinkOpen = '<think>';
 const thinkClose = '</think>';
 
@@ -84,25 +83,25 @@ class LeadingThink {
 }
 const normalizeBase = (url: string) => providerBaseUrlSchema.parse(url).replace(/\/+$/u, '');
 
-/** Shared transport for the two R09 text Chat Completions adapters; no registration or scheduling. */
-export class ChatCompletionProvider implements ProviderAdapter {
+/** D143: the one adapter: `/chat/completions` and `/models` over the safe transport Main gives it; no registration or scheduling. */
+export class CompatibleProvider implements ProviderAdapter {
   private readonly configuration: ProviderConfiguration;
   private readonly baseUrl: string;
-  private readonly capabilities: ChatCompletionCapabilities;
+  private readonly capabilities: CompatibleCapabilities;
   private readonly timeoutMs: number;
   private readonly streamTimeoutMs: number;
-  private readonly resolveKey: ChatCompletionOptions['resolveKey'];
+  private readonly resolveKey: CompatibleOptions['resolveKey'];
   private readonly fetcher: typeof fetch;
   private readonly diagnostics?: DiagnosticObserver;
 
-  protected constructor(options: ChatCompletionOptions, kind: 'openai' | 'openai-compatible', capabilities: ChatCompletionCapabilities) {
+  constructor(options: CompatibleOptions) {
     try {
       this.configuration = providerConfigurationSchema.parse(options.configuration);
-      if (this.configuration.kind !== kind || !this.configuration.enabled) throw new ContractError('invalid_state');
-      if (kind === 'openai-compatible' && this.configuration.baseUrl === null) throw new ContractError('invalid_input');
-      this.baseUrl = normalizeBase(this.configuration.baseUrl ?? officialBaseUrl);
-      if (kind === 'openai' && this.baseUrl !== officialBaseUrl || normalizeBase(options.confirmedBaseUrl) !== this.baseUrl) throw new ContractError('invalid_input');
-      this.capabilities = capabilitySchema.parse(capabilities);
+      if (this.configuration.kind !== 'compatible' || !this.configuration.enabled) throw new ContractError('invalid_state');
+      if (this.configuration.baseUrl === null) throw new ContractError('invalid_input');
+      this.baseUrl = normalizeBase(this.configuration.baseUrl);
+      if (normalizeBase(options.confirmedBaseUrl) !== this.baseUrl) throw new ContractError('invalid_input');
+      this.capabilities = capabilitySchema.parse(options.capabilities ?? compatibleCapabilities);
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
       this.streamTimeoutMs = z.number().int().min(1).max(2147483647).parse(options.streamTimeoutMs ?? this.timeoutMs);
       this.resolveKey = options.resolveKey;
@@ -118,7 +117,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
       parse(listModelsInputSchema, withoutSignal(input)); scope.check();
       if (!this.capabilities.listModels) throw new ContractError('unsupported');
       return await this.models(scope);
-    } catch (error) { throw this.failure(error, scope, true); }
+    } catch (error) { throw this.failure(error, scope); }
     finally { scope.close(); }
   }
 
@@ -142,7 +141,7 @@ export class ChatCompletionProvider implements ProviderAdapter {
         if (!complete) throw new ContractError('invalid_response');
       }
       return { requestId: parsed.requestId, level: parsed.level, ok: true };
-    } catch (error) { return { requestId: input.requestId, level: input.level, ok: false, error: this.failure(error, scope, input.level === 'authentication').detail }; }
+    } catch (error) { return { requestId: input.requestId, level: input.level, ok: false, error: this.failure(error, scope).detail }; }
     finally { scope.close(); }
   }
 
@@ -154,15 +153,11 @@ export class ChatCompletionProvider implements ProviderAdapter {
     try {
       const parsed = parse(streamChatInputSchema, withoutSignal(input)); scope.check();
       if (parsed.outputTokenLimit === undefined) throw new ContractError('invalid_input');
-      const outputParameter = this.capabilities.outputTokenParameter;
-      if (outputParameter === null) throw new ContractError('unsupported');
-      const client = await this.client(scope);
-      const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-        model: parsed.modelId, messages: parsed.messages, stream: true,
-        [outputParameter]: parsed.outputTokenLimit,
+      const body = {
+        model: parsed.modelId, messages: parsed.messages, stream: true, max_tokens: parsed.outputTokenLimit,
         ...(this.capabilities.streamUsage ? { stream_options: { include_usage: true } } : {}),
       };
-      const response = await scope.wait(() => client.chat.completions.create(body, { signal: scope.signal, maxRetries: 0 }).asResponse());
+      const response = await this.send(scope, '/chat/completions', { method: 'POST', body: JSON.stringify(body) }, 'text/event-stream');
       scope.check();
       parsingStream = true;
       this.diagnostics?.({ stage: 'stream' });
@@ -222,7 +217,8 @@ export class ChatCompletionProvider implements ProviderAdapter {
     finally { scope.close(); }
   }
 
-  private async client(scope: RequestScope): Promise<OpenAI> {
+  /** One request, never repeated. The Key goes in one header; an error's body and headers are dropped unread. */
+  private async send(scope: RequestScope, path: '/models' | '/chat/completions', init: { method: 'GET' | 'POST'; body?: string }, accept: string, listing = false): Promise<Response> {
     this.diagnostics?.({ stage: 'credential' });
     let key: string | undefined;
     try { key = await scope.wait(() => this.resolveKey(this.configuration.id, this.configuration.keyReference)); scope.check(); }
@@ -233,38 +229,24 @@ export class ChatCompletionProvider implements ProviderAdapter {
     if (typeof key !== 'string' || key.length === 0 || /\s|\p{Cc}/u.test(key)) {
       this.diagnostics?.({ stage: 'credential', category: 'credential_unavailable' }); throw new ContractError('authentication_failed');
     }
-    const baseUrl = this.baseUrl;
-    const fetcher: typeof fetch = async (url, init) => {
-      scope.check();
-      const target = String(url);
-      if (!(target === `${baseUrl}/models` && init?.method === 'GET'
-        || target === `${baseUrl}/chat/completions` && init?.method === 'POST')) throw new ContractError('invalid_input');
-      this.diagnostics?.({ stage: 'network_client', evidence: 'client_invoked' });
-      scope.check();
-      const response = await this.fetcher(url, { ...init, redirect: 'error' });
-      if (response.status >= 100 && response.status <= 599) this.diagnostics?.({ stage: 'response', evidence: 'http_response', httpStatus: response.status });
-      else this.diagnostics?.({ stage: 'response', category: 'response_invalid' });
-      try { scope.check(); } catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
-      if (response.redirected || response.status >= 300 && response.status < 400) {
-        this.diagnostics?.({ stage: 'response', category: 'http_error' });
-        void response.body?.cancel().catch(() => {}); throw new ContractError('invalid_response');
-      }
-      if (!response.ok) {
-        this.diagnostics?.({ stage: 'response', category: 'http_error' });
-        // Discard untrusted error bodies/headers before the SDK can retain or log credentials.
-        void response.body?.cancel().catch(() => {});
-        return new Response(null, { status: response.status });
-      }
-      return response;
-    };
-    return new OpenAI({ apiKey: key, baseURL: baseUrl, organization: null, project: null, webhookSecret: null,
-      // The scope ends every call at its own total, so the SDK's limit only has to allow the longest of them.
-      maxRetries: 0, timeout: this.streamTimeoutMs, logLevel: 'off', fetch: fetcher });
+    this.diagnostics?.({ stage: 'network_client', evidence: 'client_invoked' });
+    const headers = { authorization: `Bearer ${key}`, accept, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) };
+    const pending = this.fetcher(`${this.baseUrl}${path}`, { ...init, headers, redirect: 'error', signal: scope.signal });
+    // A transport that ignored the signal may still answer after the deadline; nothing reads that body.
+    void pending.then(late => { if (scope.signal.aborted) void late.body?.cancel().catch(() => {}); }, () => {});
+    const response = await scope.wait(() => pending);
+    if (response.status >= 100 && response.status <= 599) this.diagnostics?.({ stage: 'response', evidence: 'http_response', httpStatus: response.status });
+    else this.diagnostics?.({ stage: 'response', category: 'response_invalid' });
+    try { scope.check(); } catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
+    if (response.ok) return response;
+    this.diagnostics?.({ stage: 'response', category: 'http_error' });
+    // Discard untrusted error bodies and headers: they may echo a Key.
+    void response.body?.cancel().catch(() => {});
+    throw new ContractError(response.status >= 300 && response.status < 400 ? 'invalid_response' : statusCode(response.status, listing));
   }
 
   private async models(scope: RequestScope) {
-    const client = await this.client(scope);
-    const response = await scope.wait(() => client.models.list({ signal: scope.signal, maxRetries: 0 }).asResponse());
+    const response = await this.send(scope, '/models', { method: 'GET' }, 'application/json', true);
     if (!/^application\/json(?:\s*;|$)/iu.test(response.headers.get('content-type') ?? '') || !response.body) {
       void response.body?.cancel().catch(() => {}); throw new ContractError('invalid_response');
     }
@@ -291,22 +273,19 @@ export class ChatCompletionProvider implements ProviderAdapter {
     } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
 
-  private failure(error: unknown, scope: RequestScope, listing = false): ContractError {
+  private failure(error: unknown, scope: RequestScope): ContractError {
     if (scope.signal.aborted) return new ContractError(scope.signal.reason instanceof ContractError ? scope.signal.reason.code : 'cancelled');
     if (error instanceof ContractError) return new ContractError(error.code);
-    if (error instanceof OpenAI.APIConnectionTimeoutError) return new ContractError('timeout');
-    if (error instanceof OpenAI.APIConnectionError && error.cause instanceof ContractError) return new ContractError(error.cause.code);
-    if (error instanceof OpenAI.APIError) {
-      const status = error.status;
-      if (listing && (status === 404 || status === 405)) return new ContractError('unsupported');
-      const code: ErrorCode = status === 401 ? 'authentication_failed' : status === 403 ? 'forbidden'
-        : status === 429 ? 'rate_limited' : status === 404 ? 'not_found'
-        : status !== undefined && status >= 500 ? 'internal_error'
-        : status !== undefined && status >= 400 ? 'invalid_input' : 'network_error';
-      return new ContractError(code);
-    }
+    // The transport's own connection timeout, told apart by its cause; the text goes no further.
+    if (error instanceof TypeError && error.cause instanceof Error && /time(?:d)?\s*-?out/iu.test(error.cause.message)) return new ContractError('timeout');
     return new ContractError(toPublicError(error, 'network_error').code);
   }
+}
+
+function statusCode(status: number, listing: boolean): ErrorCode {
+  if (listing && (status === 404 || status === 405)) return 'unsupported';
+  return status === 401 ? 'authentication_failed' : status === 403 ? 'forbidden' : status === 429 ? 'rate_limited' : status === 404 ? 'not_found'
+    : status >= 500 ? 'internal_error' : status >= 400 ? 'invalid_input' : 'network_error';
 }
 
 function withoutSignal<T extends { signal?: AbortSignal }>(input: T) { const { signal: _, ...parameters } = input; return parameters; }

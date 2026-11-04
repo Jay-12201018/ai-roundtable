@@ -128,7 +128,7 @@ export class ProviderSettingsService implements ProviderSettingsApiContract {
       try {
         const provider = await this.getProviderConfiguration({ id: providerId });
         if (!provider.enabled) throw new ContractError('invalid_state');
-        if (provider.kind === 'openai-compatible' && provider.baseUrl === null) throw new ContractError('invalid_input');
+        if (provider.kind === 'compatible' && provider.baseUrl === null) throw new ContractError('invalid_input');
         if (modelId !== undefined) this.database.validateModelSelection(providerId, modelId);
         if (provider.kind === 'mock') {
           return schemas.providerConnectionTestResultSchema.parse({ providerId, result: await this.mock.testConnection({ requestId, level, ...(modelId === undefined ? {} : { modelId }) }) });

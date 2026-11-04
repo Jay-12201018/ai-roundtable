@@ -20,7 +20,7 @@ function fixture(options = {}) {
   return { database, provider, service };
 }
 function changeProvider(database: Database, change: 'kind' | 'disabled') {
-  database.updateProvider({ id: 'provider', name: 'Updated', kind: change === 'kind' ? 'openai' : 'mock', enabled: change !== 'disabled' });
+  database.updateProvider({ id: 'provider', name: 'Updated', kind: change === 'kind' ? 'compatible' : 'mock', baseUrl: change === 'kind' ? 'https://service.example/v1' : null, enabled: change !== 'disabled' });
 }
 const start = { roomId: 'room', task: 'Preserve evidence', workflowSnapshot: {}, maxTurns: 2 };
 

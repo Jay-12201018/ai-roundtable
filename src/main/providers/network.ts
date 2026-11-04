@@ -2,66 +2,8 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP, type LookupFunction } from 'node:net';
-import { z } from 'zod';
 import type { DiagnosticEvent, DiagnosticObserver } from './diagnostics';
 import { ContractError } from '../../shared/contracts/errors';
-import { ProxyTunnelAgent, type ProxyResolver } from './proxyTunnel';
-
-const nativeText = z.object({ text: z.string() }).strict();
-const positiveTokens = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const anthropicBody = z.object({
-  model: z.string().trim().min(1), stream: z.literal(true), max_tokens: positiveTokens,
-  system: z.array(z.object({ type: z.literal('text'), text: z.string() }).strict()).optional(),
-  messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().trim().min(1) }).strict()).min(1),
-}).strict();
-const geminiBody = z.object({
-  contents: z.array(z.object({ role: z.enum(['user', 'model']), parts: z.array(nativeText).min(1) }).strict()).min(1),
-  systemInstruction: z.object({ parts: z.array(nativeText).min(1) }).strict().optional(),
-  generationConfig: z.object({ candidateCount: z.literal(1), maxOutputTokens: positiveTokens }).strict(),
-}).strict();
-
-/** Native protocols add an exact credential boundary on top of DNS-pinned/TLS transport. */
-export function createNativeSafeFetch(kind: 'anthropic' | 'gemini', baseUrl: string, transport: typeof fetch, guard?: () => void): typeof fetch {
-  const base = new URL(`${baseUrl}/`);
-  return async (input, init = {}) => {
-    guard?.();
-    try {
-      if (typeof input !== 'string' && !(input instanceof URL) || /\s|\\|\p{Cc}/u.test(String(input))) throw new Error();
-      const url = new URL(String(input)); const method = init.method ?? 'GET';
-      const headers = new Headers(init.headers);
-      if (url.username || url.password || url.hash || init.redirect !== 'error' || headers.has('authorization')
-        || headers.has('proxy-authorization') || headers.has('cookie')) throw new Error();
-      const keyHeader = kind === 'anthropic' ? 'x-api-key' : 'x-goog-api-key';
-      const otherKey = kind === 'anthropic' ? 'x-goog-api-key' : 'x-api-key';
-      const key = headers.get(keyHeader);
-      if (!key || /\s|\p{Cc}/u.test(key) || headers.has(otherKey)) throw new Error();
-      // Exactly the request shapes the adapter sends, relative to the address this service was saved with.
-      if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) throw new Error();
-      const path = url.pathname.slice(base.pathname.length);
-      const entries = [...url.searchParams];
-      if (new Set(entries.map(([name]) => name)).size !== entries.length) throw new Error();
-      let listing = false; let generation = false;
-      if (kind === 'anthropic') {
-        if (headers.get('anthropic-version') !== '2023-06-01') throw new Error();
-        listing = method === 'GET' && path === 'v1/models' && url.searchParams.get('limit') === '1000'
-          && entries.every(([name, value]) => name === 'limit' || name === 'after_id' && value.length > 0 && value.length <= 4096);
-        generation = method === 'POST' && path === 'v1/messages' && !url.search;
-      } else {
-        listing = method === 'GET' && path === 'models' && url.searchParams.get('pageSize') === '100'
-          && entries.every(([name, value]) => name === 'pageSize' || name === 'pageToken' && value.length > 0 && value.length <= 4096);
-        generation = method === 'POST' && /^models\/[a-zA-Z0-9][a-zA-Z0-9._-]*:streamGenerateContent$/u.test(path)
-          && entries.length === 1 && url.searchParams.get('alt') === 'sse';
-      }
-      if (listing ? init.body !== undefined && init.body !== null : !generation) throw new Error();
-      if (generation && (typeof init.body !== 'string' || !(kind === 'anthropic' ? anthropicBody : geminiBody).safeParse(JSON.parse(init.body)).success)) throw new Error();
-    } catch { throw new ContractError('forbidden'); }
-    guard?.();
-    const response = await transport(input, init);
-    try { guard?.(); }
-    catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
-    return response;
-  };
-}
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {
@@ -91,11 +33,8 @@ function loopback(address: string): boolean {
   return isIP(address) === 4 && address.startsWith('127.') || address === '::1';
 }
 
-/**
- * Main-only transport: pin public DNS directly, or tunnel through the proxy this request's route names (D137). A proxy
- * resolves names itself, so only literal addresses can be checked here; TLS to the target is always verified.
- */
-export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver, resolveProxy?: ProxyResolver): typeof fetch {
+/** Main-only transport: pin public DNS, verify TLS, follow nothing. */
+export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = dnsLookup, observe?: DiagnosticObserver): typeof fetch {
   return async (input, init = {}) => {
     if (typeof input !== 'string' && !(input instanceof URL)) throw new TypeError('Unsupported request');
     const raw = String(input);
@@ -112,16 +51,8 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     const signal = init.signal;
     const abortReason = () => signal?.reason instanceof Error ? signal.reason : new DOMException('Request aborted', 'AbortError');
     signal?.throwIfAborted(); guard?.();
-    // A service on this computer is reached directly, whatever the proxy setting says.
-    const route = local || !resolveProxy ? { kind: 'direct' as const } : await resolveProxy(url);
-    signal?.throwIfAborted(); guard?.();
-    if (route.kind === 'unsupported') { observe?.({ stage: 'proxy', category: 'proxy_rejected' }); throw new ContractError('proxy_unsupported'); }
-    const proxy = route.kind === 'http' ? route : undefined;
-    if (proxy && isIP(hostname) && !publicAddress(hostname)) { observe?.({ stage: 'proxy', category: 'target_rejected' }); throw new ContractError('target_rejected'); }
     observe?.({ stage: 'network_client', evidence: 'client_invoked' });
     signal?.throwIfAborted();
-    let selected: { address: string; family: number } | undefined;
-    if (!proxy) {
     observe?.({ stage: 'dns' });
     signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
     let stopDns!: () => void;
@@ -142,19 +73,14 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     if (addresses.length === 0 || addresses.some(value => value.family !== isIP(value.address) || !(local ? loopback(value.address) : publicAddress(value.address) || !isIP(hostname) && nameMappedAddress(value.address)))) {
       observe?.({ stage: 'dns', category: 'target_rejected' }); throw new ContractError('target_rejected');
     }
-    selected = addresses[0];
-    }
+    const selected = addresses[0];
     const pinned: LookupFunction = (_host, options, callback) => {
-      if (options.all) callback(null, [selected!]);
-      else callback(null, selected!.address, selected!.family);
+      if (options.all) callback(null, [selected]);
+      else callback(null, selected.address, selected.family);
     };
     return await new Promise<Response>((resolve, reject) => {
       let request: ClientRequest | undefined; let response: IncomingMessage | undefined;
-      let phase: 'tcp' | 'proxy' | 'tls' | 'request' | 'response' = 'tcp';
-      const agent = proxy ? new ProxyTunnelAgent(proxy, guard, signal, event => {
-        if (event.stage === 'tcp' || event.stage === 'proxy' || event.stage === 'tls') phase = event.stage;
-        observe?.(event);
-      }, hostname, url.port ? Number(url.port) : 443) : undefined;
+      let phase: 'tcp' | 'tls' | 'request' | 'response' = 'tcp';
       const diagnose = (error: unknown) => {
         const code = nativeCode(error);
         let category: DiagnosticEvent['category'];
@@ -165,7 +91,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         else category = 'network_unknown';
         observe?.({ stage: phase, category });
       };
-      const cleanup = () => { signal?.removeEventListener('abort', abort); agent?.destroy(); };
+      const cleanup = () => { signal?.removeEventListener('abort', abort); };
       const fail = (error: Error) => { diagnose(error); cleanup(); reject(error); };
       const abort = () => {
         const error = abortReason();
@@ -176,8 +102,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         const send = local ? httpRequest : httpsRequest;
         observe?.({ stage: 'tcp' });
         signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
-        request = send(url, { method, headers: Object.fromEntries(headers), agent: agent ?? false,
-          ...(proxy ? {} : { lookup: pinned, family: selected!.family }),
+        request = send(url, { method, headers: Object.fromEntries(headers), agent: false, lookup: pinned, family: selected.family,
           ...(local ? {} : { rejectUnauthorized: true, servername: isIP(hostname) ? '' : hostname }),
         }, incoming => {
           response = incoming; phase = 'response';
@@ -228,7 +153,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         signal?.addEventListener('abort', abort, { once: true });
         if (signal?.aborted) { abort(); return; }
         request.once('socket', socket => {
-          if (!local && !proxy) socket.once('connect', () => { phase = 'tls'; observe?.({ stage: 'tls' }); });
+          if (!local) socket.once('connect', () => { phase = 'tls'; observe?.({ stage: 'tls' }); });
           socket.once(local ? 'connect' : 'secureConnect', () => {
             try {
               signal?.throwIfAborted(); guard?.();

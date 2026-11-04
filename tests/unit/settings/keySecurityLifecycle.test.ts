@@ -12,7 +12,7 @@ const databases: Database[] = [];
 afterEach(() => { databases.splice(0).forEach(database => database.close()); vi.restoreAllMocks(); });
 function fixture() {
   const database = new Database(':memory:'); database.initialize(); databases.push(database);
-  database.createProvider({ id: 'p', name: 'P', kind: 'openai', baseUrl: 'https://one.example/v1' });
+  database.createProvider({ id: 'p', name: 'P', kind: 'compatible', baseUrl: 'https://one.example/v1' });
   return database;
 }
 function deferred<T>() {
@@ -29,9 +29,9 @@ describe('Key status consistency after asynchronous decryption', () => {
     const reader = new KeyService(database, { ...secure, decrypt: async () => { started.resolve(); return decrypted.promise; } });
     const pending = reader.getProviderKeyState('p'); await started.promise;
     if (change === 'delete-key') await writer.deleteKey('p');
-    if (change === 'change-target') database.updateProvider({ id: 'p', name: 'P', kind: 'openai', baseUrl: 'https://two.example/v1' });
+    if (change === 'change-target') database.updateProvider({ id: 'p', name: 'P', kind: 'compatible', baseUrl: 'https://two.example/v1' });
     if (change === 'recreate-provider') {
-      database.deleteProvider('p'); database.createProvider({ id: 'p', name: 'New P', kind: 'openai' });
+      database.deleteProvider('p'); database.createProvider({ id: 'p', name: 'New P', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     }
     decrypted.resolve('fixture-secret');
     expect(await pending).toMatchObject({ state: 'missing', keyReference: null });
@@ -67,8 +67,8 @@ describe('queued Key mutations stay bound to their original Provider target', ()
     const keys = new KeyService(database, { ...secure, encrypt });
     const first = keys.storeKey('p', 'fixture-first'); await started.promise;
     const second = keys.storeKey('p', 'fixture-second');
-    if (change === 'change-target') database.updateProvider({ id: 'p', name: 'P', kind: 'openai', baseUrl: 'https://two.example/v1' });
-    else { database.deleteProvider('p'); database.createProvider({ id: 'p', name: 'New P', kind: 'openai' }); }
+    if (change === 'change-target') database.updateProvider({ id: 'p', name: 'P', kind: 'compatible', baseUrl: 'https://two.example/v1' });
+    else { database.deleteProvider('p'); database.createProvider({ id: 'p', name: 'New P', kind: 'compatible', baseUrl: 'https://service.example/v1' }); }
     encrypted.resolve('cipher');
     await expect(first).rejects.toMatchObject({ code: 'invalid_state' });
     await expect(second).rejects.toMatchObject({ code: 'invalid_state' });
@@ -81,7 +81,7 @@ describe('queued Key mutations stay bound to their original Provider target', ()
     const keys = new KeyService(database, { ...secure, encrypt: async () => { started.resolve(); return encrypted.promise; } });
     const first = keys.storeKey('p', 'fixture-first'); await started.promise;
     const deletion = keys.deleteProvider('p');
-    database.deleteProvider('p'); database.createProvider({ id: 'p', name: 'New P', kind: 'openai' });
+    database.deleteProvider('p'); database.createProvider({ id: 'p', name: 'New P', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     encrypted.resolve('cipher');
     await expect(first).rejects.toMatchObject({ code: 'invalid_state' });
     await expect(deletion).rejects.toMatchObject({ code: 'invalid_state' });

@@ -2,7 +2,7 @@ import type { ProviderConfiguration } from '../../../../src/shared/contracts/con
 import type { NormalizedChunk, StreamChatInput } from '../../../../src/main/providers/types';
 
 export const configuration: ProviderConfiguration = {
-  id: 'official-instance', name: 'Fixture', kind: 'openai', baseUrl: null,
+  id: 'service-instance', name: 'Fixture', kind: 'compatible', baseUrl: 'https://service.example/v1',
   enabled: true, isDefault: false, defaultModelId: null, customModels: [],
   keyReference: { id: 'fixture-reference' }, createdAt: '2026-10-17T00:00:00.000Z', updatedAt: '2026-10-17T00:00:00.000Z',
 };

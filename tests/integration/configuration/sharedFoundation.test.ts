@@ -61,12 +61,12 @@ describe('shared Room / Agent / Provider persistence', () => {
   });
   it('keeps one enabled default Provider and scopes identical model names by instance', () => {
     const db = fixture();
-    db.createProvider({ id: 'x', name: 'X', kind: 'openai-compatible', baseUrl: 'https://example.test/v1', defaultModelId: 'same', isDefault: true });
-    db.createProvider({ id: 'y', name: 'Y', kind: 'openai-compatible', baseUrl: 'http://127.0.0.1:8080/v1', defaultModelId: 'same', isDefault: true });
+    db.createProvider({ id: 'x', name: 'X', kind: 'compatible', baseUrl: 'https://example.test/v1', defaultModelId: 'same', isDefault: true });
+    db.createProvider({ id: 'y', name: 'Y', kind: 'compatible', baseUrl: 'http://127.0.0.1:8080/v1', defaultModelId: 'same', isDefault: true });
     expect(db.listProviderSummaries().filter(p => p.isDefault).map(p => p.id)).toEqual(['y']);
     expect(db.validateModelSelection('x', 'same').id).toBe('x');
     expect(db.validateModelSelection('y', 'same').id).toBe('y');
-    expect(() => db.updateProvider({ id: 'y', name: 'Y', kind: 'openai-compatible', enabled: false, isDefault: true })).toThrow();
+    expect(() => db.updateProvider({ id: 'y', name: 'Y', kind: 'compatible', enabled: false, isDefault: true })).toThrow();
   });
   it('checks active frozen Provider references even after current Agent is rebound', () => {
     const db = fixture(); member(db); frozenRun(db);
@@ -134,7 +134,7 @@ it('uses the same Unicode ID ordering as SQLite BINARY for same-time Run history
 it.each(['real-provider', 'disabled-provider'])('does not silently route %s configuration to Mock', async scenario => {
   const db = fixture(); member(db);
   if (scenario === 'real-provider') {
-    db.createProvider({ id: 'real', name: 'Saved real configuration', kind: 'openai' });
+    db.createProvider({ id: 'real', name: 'Saved real configuration', kind: 'compatible', baseUrl: 'https://service.example/v1' });
     db.updateAgent({ id: 'a', roomId: 'r', displayName: 'A', roleTemplateId: 'draft', providerId: 'real', modelId: 'mock' });
   } else db.updateProvider({ id: 'p', name: 'Disabled', kind: 'mock', enabled: false });
   const provider = new MockProvider({ tokenDelayMs: 0 }); const stream = vi.spyOn(provider, 'streamChat');

@@ -160,6 +160,29 @@ describe('migration 14 (D133)', () => {
     } finally { raw.close(); }
   });
 
+  it('D143: one interface type; services of other types stay as stopped ones, with their names and history', async () => {
+    const path = historical(13);
+    const seed = new Sqlite(path);
+    for (const [id, type, base, isDefault] of [['generic', 'openai-compatible', 'https://api.deepseek.com', 1], ['stopped-a', 'openai', null, 0], ['stopped-b', 'anthropic', null, 0], ['stopped-c', 'gemini', 'https://gateway.example/v1', 0], ['demo', 'mock', null, 0]] as const)
+      seed.prepare('INSERT INTO providers(id,name,type,base_url,enabled,is_default,custom_models_json,key_revision,created_at,updated_at) VALUES(?,?,?,?,1,?,?,?,?,?)').run(id, `原名 ${id}`, type, base, isDefault, id === 'demo' ? '[]' : '[{"id":"m","name":"m"}]', 'revision', time, time);
+    seed.close();
+    const db = new Database(path); await db.initialize();
+    try {
+      const byId = Object.fromEntries(db.listProviderSummaries().map(row => [row.id, row]));
+      expect(byId.generic).toMatchObject({ name: '原名 generic', kind: 'compatible', enabled: true, isDefault: true, configurationValid: true });
+      for (const id of ['stopped-a', 'stopped-b', 'stopped-c']) expect(byId[id]).toMatchObject({ name: `原名 ${id}`, kind: 'compatible', enabled: false, isDefault: false, configurationValid: true, customModels: [{ id: 'm', name: 'm' }] });
+      expect(byId.demo).toMatchObject({ kind: 'mock', enabled: true });
+      expect(db.getProviderConfiguration('stopped-a')).toMatchObject({ baseUrl: null, enabled: false });
+      expect(db.getProviderConfiguration('stopped-c')).toMatchObject({ baseUrl: 'https://gateway.example/v1', enabled: false });
+      // No history uses it here, so it can go, and its Key with it.
+      db.deleteProvider('stopped-a');
+      expect(db.listProviderSummaries().map(row => row.id)).not.toContain('stopped-a');
+      // Without an address it cannot be turned back on.
+      expect(() => db.updateProvider({ id: 'stopped-b', name: '原名 stopped-b', kind: 'compatible', baseUrl: null, enabled: true })).toThrow();
+      expect(db.updateProvider({ id: 'stopped-b', name: '原名 stopped-b', kind: 'compatible', baseUrl: 'https://models.example/v1', enabled: true })).toMatchObject({ enabled: true, keyReference: null });
+    } finally { db.close(); }
+  });
+
   it('gives a Run the old budget stopped a stop reason with no amount, and lets it continue', async () => {
     const path = historical(13);
     const db = new Database(path); await db.initialize();

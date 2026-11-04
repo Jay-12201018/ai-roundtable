@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { ContractError } from '../../../../src/shared/contracts/errors';
-import { readSse } from '../../../../src/main/providers/openai/sse';
+import { readSse } from '../../../../src/main/providers/compatible/sse';
 
 const encoder = new TextEncoder();
 const headers = { 'content-type': 'text/event-stream; charset=utf-8' };

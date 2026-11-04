@@ -3,7 +3,7 @@ import { idSchema, modelIdSchema, sequenceSchema, timestampSchema } from './comm
 import { connectionLevelSchema, connectionTestResultSchema, providerModelSchema } from './provider';
 import { messageStatusValues, runStatusValues } from '../types/run';
 
-export const providerKindSchema = z.enum(['mock', 'openai', 'openai-compatible', 'anthropic', 'gemini']);
+export const providerKindSchema = z.enum(['mock', 'compatible']);
 export const keyReferenceSchema = z.object({ id: idSchema }).strict();
 export const keyStorageStatusSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('secure'), backend: z.string().min(1), persistent: z.literal(true), message: z.literal('密钥将使用系统安全存储持久化。') }).strict(),
@@ -38,13 +38,15 @@ const providerInputObject = z.object({
 const enabledDefault = (input: { enabled: boolean; isDefault: boolean }) => !input.isDefault || input.enabled;
 const uniqueModels = (input: { customModels: Array<{id:string}> }) => new Set(input.customModels.map(m => m.id)).size === input.customModels.length;
 const mockHasNoEndpoint = (input: { kind: string; baseUrl: string | null }) => input.kind !== 'mock' || input.baseUrl === null;
-export const providerInputSchema = providerInputObject.refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
-export const createProviderInputSchema = providerInputObject.omit({ id: true }).refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
+// D143: a service in use needs an address. Migration 14 leaves services with none as stopped ones, so their history stays readable.
+const usableHasEndpoint = (input: { kind: string; baseUrl: string | null; enabled: boolean }) => input.kind !== 'compatible' || input.baseUrl !== null || !input.enabled;
+export const providerInputSchema = providerInputObject.refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(usableHasEndpoint, 'A service in use needs an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
+export const createProviderInputSchema = providerInputObject.omit({ id: true }).refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(usableHasEndpoint, 'A service in use needs an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
 export const providerConfigurationSchema = providerInputObject.extend({
   keyReference: keyReferenceSchema.nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
   // D096: Main withheld stored model IDs that look like an API key; they are never returned or used.
   withheldModelIds: z.literal(true).optional(),
-}).refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
+}).refine(mockHasNoEndpoint, 'Mock provider cannot have an endpoint').refine(usableHasEndpoint, 'A service in use needs an endpoint').refine(enabledDefault, 'Default provider must be enabled').refine(uniqueModels, 'Model identities must be unique');
 export const providerSummarySchema = z.object({
   id: idSchema, name: z.string().trim().min(1), kind: providerKindSchema.nullable(), enabled: z.boolean(),
   isDefault: z.boolean(), defaultModelId: idSchema.nullable(), customModels: z.array(providerModelSchema),

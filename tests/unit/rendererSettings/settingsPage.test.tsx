@@ -1,24 +1,22 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage, type SettingsSection } from '../../../src/renderer/features/settings';
-import type { NetworkApiContract } from '../../../src/shared/contracts/app';
 import type { ProviderConfiguration, ProviderReadiness, ProviderSettingsApiContract, ProviderSummary } from '../../../src/shared/contracts/configuration';
 import { publicError } from '../../../src/shared/schemas/error';
-import type { NetworkSettings } from '../../../src/shared/schemas/network';
 
 const at = '2026-10-16T00:00:00.000Z';
 const config = (value: Partial<ProviderConfiguration> & Pick<ProviderConfiguration, 'id' | 'name' | 'kind'>): ProviderConfiguration => ({
   baseUrl: null, enabled: true, isDefault: false, defaultModelId: null, customModels: [], keyReference: null, createdAt: at, updatedAt: at, ...value });
 const summary = (value: ProviderConfiguration): ProviderSummary => ({ id: value.id, name: value.name, kind: value.kind, enabled: value.enabled, isDefault: value.isDefault,
   defaultModelId: value.defaultModelId, customModels: value.customModels, configurationValid: true, hasStoredKey: false });
-const deepseek = config({ id: 'ds', name: 'DeepSeek', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com/', isDefault: true, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
-const openai = config({ id: 'oa', name: 'OpenAI', kind: 'openai', defaultModelId: 'gpt-4o-mini' });
-const kimi = config({ id: 'km', name: 'Kimi', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1', defaultModelId: 'moonshot', customModels: [{ id: 'moonshot', name: 'moonshot' }] });
+const deepseek = config({ id: 'ds', name: 'DeepSeek', kind: 'compatible', baseUrl: 'https://api.deepseek.com/', isDefault: true, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
+const glm = config({ id: 'oa', name: '智谱 GLM', kind: 'compatible', baseUrl: 'https://service.example/v1', defaultModelId: 'kimi-k3.1-pro' });
+const kimi = config({ id: 'km', name: 'Kimi', kind: 'compatible', baseUrl: 'https://kimi.example/v1', defaultModelId: 'moonshot', customModels: [{ id: 'moonshot', name: 'moonshot' }] });
 const mock = config({ id: 'mk', name: '演示（Mock）', kind: 'mock', defaultModelId: 'mock' });
 const ready = (providerId: string, value: Partial<ProviderReadiness>): ProviderReadiness => ({ providerId, keyState: 'missing', baseUrl: null, models: [], ...value });
 
 function fixture(readiness: ProviderReadiness[]) {
-  const records = new Map([deepseek, openai, kimi, mock].map(value => [value.id, structuredClone(value)]));
+  const records = new Map([deepseek, glm, kimi, mock].map(value => [value.id, structuredClone(value)]));
   const api: ProviderSettingsApiContract = {
     listProviderSummaries: vi.fn(async () => [...records.values()].map(summary)),
     getProviderConfiguration: vi.fn(async ({ id }) => structuredClone(records.get(id)!)),
@@ -32,10 +30,10 @@ function fixture(readiness: ProviderReadiness[]) {
   };
   return { api, records };
 }
-function show(api: ProviderSettingsApiContract, extra: { section?: SettingsSection; network?: NetworkApiContract } = {}) {
-  const providers = [deepseek, openai, kimi, mock].map(summary);
+function show(api: ProviderSettingsApiContract, extra: { section?: SettingsSection } = {}) {
+  const providers = [deepseek, glm, kimi, mock].map(summary);
   return render(<SettingsPage api={api} providers={providers} providerLoadState="ready" onProvidersChanged={() => {}} theme="system" setTheme={() => {}}
-    section={extra.section ?? 'services'} onSection={() => {}} network={extra.network} />);
+    section={extra.section ?? 'services'} onSection={() => {}} />);
 }
 const card = (name: string) => screen.getByRole('region', { name });
 afterEach(cleanup);
@@ -44,13 +42,13 @@ describe('设置 › 模型服务', () => {
   it('states each service in words, as Main decides it (D114)', async () => {
     const { api } = fixture([
       ready('ds', { keyState: 'configured', baseUrl: 'https://api.deepseek.com', models: [{ modelId: 'deepseek-flash', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
-      ready('oa', { keyState: 'missing', models: [{ modelId: 'gpt-4o-mini', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
+      ready('oa', { keyState: 'missing', models: [{ modelId: 'kimi-k3.1-pro', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: false, blockedBy: 'key' }] }),
       ready('km', { keyState: 'configured', baseUrl: 'https://kimi.example/v1', models: [{ modelId: 'moonshot', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
       ready('mk', { keyState: 'none', models: [{ modelId: 'mock', contextWindowTokens: 128000, maxOutputTokens: 8192, usable: true, blockedBy: null }] }),
     ]);
     show(api);
     await waitFor(() => expect(within(card('DeepSeek')).getByText('可以使用')).toBeTruthy());
-    expect(within(card('OpenAI')).getByText('还没填写 Key')).toBeTruthy();
+    expect(within(card('智谱 GLM')).getByText('还没填写 Key')).toBeTruthy();
     // D136: a Key is all a service needs, whichever address it goes to.
     expect(within(card('Kimi')).getByText('可以使用')).toBeTruthy();
     expect(within(card('演示（Mock）')).getByText('内置')).toBeTruthy();
@@ -128,69 +126,12 @@ describe('设置 › 模型服务', () => {
   });
 });
 
-describe('设置 › 网络 (D137)', () => {
-  const base: NetworkSettings = { saved: { enabled: false, manual: null }, status: { state: 'off' }, savedInvalid: false };
-  const network = (value: NetworkSettings, status: NetworkSettings['status'] = { state: 'proxy', source: 'system', host: '127.0.0.1', port: 7890 }) => ({
-    getSettings: vi.fn(async () => value),
-    saveSettings: vi.fn(async (input: NetworkSettings['saved']) => ({ ...value, saved: input, status: input.enabled ? status : { state: 'off' as const } })),
-    testProxy: vi.fn(async () => ({ ok: false, via: 'direct', failure: 'refused' } as const)),
-  });
-  const open = async (net: ReturnType<typeof network>) => {
+describe('设置的分类', () => {
+  it('offers services, appearance and privacy, and nothing else', async () => {
     const { api } = fixture([]);
-    show(api, { section: 'network', network: net as unknown as NetworkApiContract });
-    return screen.findByRole('switch', { name: '使用系统代理' });
-  };
-
-  it('starts off, and one switch reads the system setting; there is nothing to restart', async () => {
-    const net = network(base);
-    const toggle = await open(net);
-    expect(toggle.getAttribute('aria-checked')).toBe('false');
-    expect(screen.getByText('未开启，直接连接。')).toBeTruthy();
-    fireEvent.click(toggle);
-    await screen.findByText('已检测到系统代理 127.0.0.1:7890');
-    expect(net.saveSettings).toHaveBeenCalledWith({ enabled: true, manual: null });
-    expect(screen.queryByRole('button', { name: '立即重启' })).toBeNull();
-    expect(document.body.textContent).not.toMatch(/重启/u);
-  });
-
-  it.each([
-    [{ state: 'direct' } as const, '系统没有设置代理，将直接连接。'],
-    [{ state: 'unsupported', scheme: 'socks' } as const, '系统代理是 SOCKS，这个应用现在不支持，请求不会发出。可以在高级选项里手动填写 HTTP 代理地址。'],
-    [{ state: 'proxy', source: 'manual', host: '10.0.0.2', port: 3128 } as const, '使用手动填写的代理 10.0.0.2:3128'],
-  ])('says what the switch found: %j', async (status, words) => {
-    await open(network({ ...base, saved: { enabled: true, manual: status.state === 'proxy' ? { host: status.host, port: status.port } : null }, status }));
-    expect(screen.getByText(words)).toBeTruthy();
-  });
-
-  it('tests the connection with what is saved and says what happened, in neutral words', async () => {
-    const net = network(base);
-    await open(net);
-    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
-    await screen.findByText('连接不上，请检查网络和地址。');
-    expect(net.testProxy).toHaveBeenCalledWith({ enabled: false, manual: null });
-    net.testProxy.mockResolvedValueOnce({ ok: true, via: 'direct' } as never);
-    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
-    await screen.findByText('连接正常。');
-  });
-
-  it('keeps the manual address under 高级, checks its form and clears it', async () => {
-    const net = network(base);
-    await open(net);
-    fireEvent.click(screen.getByText('高级：手动填写地址'));
-    fireEvent.change(screen.getByLabelText('代理地址'), { target: { value: '127.0.0.1' } });
-    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '99999' } });
-    expect(screen.getByRole('alert').textContent).toContain('填写代理的地址和端口');
-    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '7890' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-    await waitFor(() => expect(net.saveSettings).toHaveBeenCalledWith({ enabled: false, manual: { host: '127.0.0.1', port: 7890 } }));
-    fireEvent.click(await screen.findByRole('button', { name: '清除' }));
-    await waitFor(() => expect(net.saveSettings).toHaveBeenLastCalledWith({ enabled: false, manual: null }));
-  });
-
-  it('says in neutral words what the page is for', async () => {
-    await open(network(base));
-    expect(document.querySelector('.page-head p')!.textContent).toBe('如果你的网络环境需要通过代理连接，在这里打开。');
-    expect(document.querySelector('.net-card')!.textContent).toBe('使用系统代理未开启，直接连接。测试连接只做一次连接握手，不发送 Key 或内容。高级：手动填写地址系统代理读不到时使用。填写后，开关打开时优先用这个地址。:保存');
+    show(api);
+    await screen.findByRole('button', { name: '添加服务' });
+    expect(['模型服务', '外观', '数据与隐私'].every(name => screen.queryAllByRole('button', { name }).length > 0)).toBe(true);
+    expect(screen.queryByRole('button', { name: '网络' })).toBeNull();
   });
 });

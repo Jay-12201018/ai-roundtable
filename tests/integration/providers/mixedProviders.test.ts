@@ -7,25 +7,22 @@ import { RunService } from '../../../src/main/services/RunService';
 import { MockProvider } from '../../../src/main/providers/mock/MockProvider';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { UsageService } from '../../../src/main/usage/UsageService';
-import { response as anthropicResponse, success } from '../../unit/providers/anthropic/fixtures';
-import { sse as geminiSse, chunk as geminiChunk } from '../../unit/providers/gemini/fixtures';
 import type { ModelTokenCounter } from '../../../src/main/context/types';
 
 type Seen = { url: string; body: Record<string, any>; headers: Headers };
 const cleanup: Array<() => unknown> = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close(); });
 
-const openAiStream = (text: string, usage: Record<string, unknown>) => new Response([
+const stream = (text: string, usage: Record<string, unknown>) => new Response([
   { choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] },
   { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage },
 ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
 
 const services = [
-  { id: 'ds', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro', name: 'DeepSeek' },
-  { id: 'oa', kind: 'openai', baseUrl: null, target: 'https://api.openai.com/v1', model: 'gpt-6-astra', name: 'OpenAI' },
-  { id: 'an', kind: 'anthropic', baseUrl: null, target: 'https://api.anthropic.com', model: 'claude-opus-5-5', name: 'Anthropic' },
-  { id: 'ge', kind: 'gemini', baseUrl: null, target: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3.8-flash', name: 'Gemini' },
-  { id: 'km', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1', model: 'kimi-k2', name: 'Kimi' },
+  { id: 'ds', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro', name: 'DeepSeek', reply: 'DeepSeek 的审计意见', usage: { prompt_tokens: 30, completion_tokens: 3, prompt_cache_hit_tokens: 10, prompt_cache_miss_tokens: 20 } },
+  { id: 'qw', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', name: '通义千问', reply: '通义千问的审计意见', usage: { prompt_tokens: 20, completion_tokens: 2 } },
+  { id: 'gl', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5.3', name: '智谱 GLM', reply: '智谱的审计意见', usage: { prompt_tokens: 40, completion_tokens: 12 } },
+  { id: 'cu', baseUrl: 'https://models.example/v1', model: 'company-model', name: '公司模型', reply: '公司模型的审计意见', usage: { prompt_tokens: 50, completion_tokens: 5 } },
 ] as const;
 
 /** Real registry, adapters, RunService, context builder and usage records; only the wire is an owned fixture. */
@@ -37,13 +34,11 @@ async function fixture(members: ReadonlyArray<typeof services[number]['id']>) {
   const send = async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = new Request(url, init); const body = await request.clone().json() as Record<string, any>;
     seen.push({ url: request.url, body, headers: request.headers });
-    if (request.url.includes('api.anthropic.com')) return anthropicResponse(success('Claude 的审计意见'));
-    if (request.url.includes('generativelanguage')) return geminiSse({ ...geminiChunk('Gemini 的审计意见', 'STOP'), usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 5, thoughtsTokenCount: 7, totalTokenCount: 52 } });
-    if (request.url.includes('deepseek')) return openAiStream('DeepSeek 的审计意见', { prompt_tokens: 30, completion_tokens: 3, prompt_cache_hit_tokens: 10, prompt_cache_miss_tokens: 20 });
-    return openAiStream('OpenAI 的审计意见', { prompt_tokens: 20, completion_tokens: 2 });
+    const service = services.find(item => request.url.startsWith(item.baseUrl))!;
+    return stream(service.reply, service.usage);
   };
   for (const service of services) {
-    db.createProvider({ id: service.id, name: service.name, kind: service.kind, baseUrl: service.baseUrl, customModels: [{ id: service.model, name: service.model }] });
+    db.createProvider({ id: service.id, name: service.name, kind: 'compatible', baseUrl: service.baseUrl, customModels: [{ id: service.model, name: service.model }] });
     await keys.storeKey(service.id, `owned-fake-${service.id}-key`);
   }
   const registry = new ProviderRegistry(db, keys, { transportFactory: guard => async (url, init) => { guard(); return send(url, init); } });
@@ -55,75 +50,58 @@ async function fixture(members: ReadonlyArray<typeof services[number]['id']>) {
   return { db, keys, registry, run, seen };
 }
 
-const textOf = (seen: Seen) => JSON.stringify(seen.body.messages ?? seen.body.contents);
+const textOf = (seen: Seen) => JSON.stringify(seen.body.messages);
 
-describe('one discussion across DeepSeek, OpenAI, Anthropic and Gemini (D134, D135)', () => {
+describe('one discussion across several services through the one adapter (D134, D143)', () => {
   it('a limit left at the default follows the model setting; one the host set stays the lower of the two', async () => {
-    const f = await fixture(['km']);
-    f.db.updateProvider({ id: 'km', name: 'Kimi', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1', customModels: [{ id: 'kimi-k2', name: 'kimi-k2', maxOutputTokens: 16000 }] });
+    const f = await fixture(['cu']);
+    const update = (model: Record<string, unknown>) => f.db.updateProvider({ id: 'cu', name: '公司模型', kind: 'compatible', baseUrl: 'https://models.example/v1', customModels: [{ id: 'company-model', name: 'company-model', ...model }] });
+    update({ maxOutputTokens: 16000 });
     for (const outputTokenLimit of [undefined, 2000]) {
       const started = await f.run.start({ roomId: 'room', task: '看上限', workflowSnapshot: {}, maxTurns: 1, ...(outputTokenLimit ? { outputTokenLimit } : {}) });
       await f.run.waitForIdle(started.runId);
     }
     expect(f.seen.map(seen => seen.body.max_tokens)).toEqual([16000, 2000]);
     // A maximum as large as the whole context still leaves half of it for the discussion.
-    f.db.updateProvider({ id: 'km', name: 'Kimi', kind: 'openai-compatible', baseUrl: 'https://kimi.example/v1', customModels: [{ id: 'kimi-k2', name: 'kimi-k2', contextWindowTokens: 100000, maxOutputTokens: 100000 }] });
+    update({ contextWindowTokens: 100000, maxOutputTokens: 100000 });
     const started = await f.run.start({ roomId: 'room', task: '看上限', workflowSnapshot: {}, maxTurns: 1 });
     await f.run.waitForIdle(started.runId);
     expect(f.run.getSnapshot(started.runId).status).toBe('completed');
     expect(f.seen.at(-1)!.body.max_tokens).toBe(50000);
   });
 
-  it('each member reaches its own service with that service\'s Key, parameter and format, and reads the others as public text', async () => {
-    const f = await fixture(['ds', 'oa', 'an', 'ge']);
+  it('each member reaches its own service with its own Key and model, in the same request shape, and reads the others as public text', async () => {
+    const f = await fixture(['ds', 'qw', 'gl', 'cu']);
     const started = await f.run.start({ roomId: 'room', task: '交叉审计这份方案', workflowSnapshot: {}, maxTurns: 4 });
     await f.run.waitForIdle(started.runId);
     const snapshot = f.run.getSnapshot(started.runId);
     expect(snapshot.status).toBe('completed');
-    expect(snapshot.messages.map(message => message.content)).toEqual(['DeepSeek 的审计意见', 'OpenAI 的审计意见', 'Claude 的审计意见', 'Gemini 的审计意见']);
-
-    const [deepseek, openai, anthropic, gemini] = f.seen;
-    expect(deepseek.url).toBe('https://api.deepseek.com/chat/completions');
-    expect(deepseek.body).toMatchObject({ model: 'deepseek-v4-pro', stream: true, max_tokens: 8192, stream_options: { include_usage: true } });
-    expect(deepseek.body).not.toHaveProperty('max_completion_tokens');
-    expect(deepseek.headers.get('authorization')).toBe('Bearer owned-fake-ds-key');
-
-    expect(openai.url).toBe('https://api.openai.com/v1/chat/completions');
-    expect(openai.body).toMatchObject({ model: 'gpt-6-astra', stream: true, max_completion_tokens: 8192 });
-    expect(openai.body).not.toHaveProperty('max_tokens'); expect(openai.body).not.toHaveProperty('thinking');
-    expect(openai.headers.get('authorization')).toBe('Bearer owned-fake-oa-key');
-
-    expect(anthropic.url).toBe('https://api.anthropic.com/v1/messages');
-    expect(anthropic.body).toMatchObject({ model: 'claude-opus-5-5', stream: true, max_tokens: 8192 });
-    expect(anthropic.body).not.toHaveProperty('thinking');
-    expect(anthropic.body.messages.at(-1).role).toBe('user');
-    expect(anthropic.headers.get('x-api-key')).toBe('owned-fake-an-key');
-    expect(anthropic.headers.get('authorization')).toBeNull();
-
-    expect(gemini.url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse');
-    expect(gemini.body.generationConfig).toEqual({ candidateCount: 1, maxOutputTokens: 8192 });
-    expect(gemini.body).not.toHaveProperty('max_tokens');
-    expect(gemini.headers.get('x-goog-api-key')).toBe('owned-fake-ge-key');
-
+    expect(snapshot.messages.map(message => message.content)).toEqual(services.map(service => service.reply));
+    for (const [index, service] of services.entries()) {
+      const request = f.seen[index];
+      expect(request.url).toBe(`${service.baseUrl}/chat/completions`);
+      expect(Object.keys(request.body).sort()).toEqual(['max_tokens', 'messages', 'model', 'stream', 'stream_options']);
+      expect(request.body).toMatchObject({ model: service.model, stream: true, max_tokens: 8192, stream_options: { include_usage: true } });
+      expect(request.headers.get('authorization')).toBe(`Bearer owned-fake-${service.id}-key`);
+    }
     // D095: the other members' words are quoted public text on the user side, whatever service said them.
-    expect(textOf(gemini)).toContain('DeepSeek 的审计意见'); expect(textOf(gemini)).toContain('OpenAI 的审计意见'); expect(textOf(gemini)).toContain('Claude 的审计意见');
-    expect(textOf(gemini)).toContain('【成员「成员1」');
-    expect(gemini.body.contents.every((content: { role: string }) => content.role === 'user' || content.role === 'model')).toBe(true);
+    const last = f.seen.at(-1)!;
+    for (const service of services.slice(0, 3)) expect(textOf(last)).toContain(service.reply);
+    expect(textOf(last)).toContain('【成员「成员1」');
     // Nobody's Key travels with anyone else's request.
-    for (const request of f.seen) for (const service of services) if (!request.headers.get('authorization')?.includes(service.id) && request.headers.get('x-api-key') !== `owned-fake-${service.id}-key`
-      && request.headers.get('x-goog-api-key') !== `owned-fake-${service.id}-key`) expect(JSON.stringify(request.body)).not.toContain(`owned-fake-${service.id}-key`);
+    for (const request of f.seen) for (const service of services) expect(JSON.stringify(request.body)).not.toContain(`owned-fake-${service.id}-key`);
   });
 
   it('records each member\'s tokens under its own service and model, with no amount anywhere', async () => {
-    const f = await fixture(['ds', 'oa', 'an', 'ge']);
+    const f = await fixture(['ds', 'qw', 'gl', 'cu']);
     const started = await f.run.start({ roomId: 'room', task: '交叉审计', workflowSnapshot: {}, maxTurns: 4 });
     await f.run.waitForIdle(started.runId);
     const report = new UsageService(f.db, 'UTC').getReport();
     const row = (model: string) => report.byModel.find(item => item.modelId === model)!;
     expect(row('deepseek-v4-pro')).toMatchObject({ providerName: 'DeepSeek', inputTokens: 30, outputTokens: 3, cacheHitTokens: 10, reportedRequests: 1 });
-    expect(row('gpt-6-astra')).toMatchObject({ providerName: 'OpenAI', inputTokens: 20, outputTokens: 2 });
-    expect(row('claude-opus-5-5')).toMatchObject({ providerName: 'Anthropic', reportedRequests: 1 });
-    expect(row('gemini-3.8-flash')).toMatchObject({ providerName: 'Gemini', inputTokens: 40, outputTokens: 12 });
+    expect(row('qwen3.7-plus')).toMatchObject({ providerName: '通义千问', inputTokens: 20, outputTokens: 2 });
+    expect(row('glm-5.3')).toMatchObject({ providerName: '智谱 GLM', inputTokens: 40, outputTokens: 12 });
+    expect(row('company-model')).toMatchObject({ providerName: '公司模型', reportedRequests: 1 });
     expect(report.totals.requests).toBe(4);
     const csv = new UsageService(f.db, 'UTC').csv().text;
     expect(csv).not.toMatch(/金额|单价|¥|元/u);
@@ -132,27 +110,18 @@ describe('one discussion across DeepSeek, OpenAI, Anthropic and Gemini (D134, D1
   });
 
   it('a member whose model takes less output is clamped, without stopping the others (D134)', async () => {
-    const f = await fixture(['oa', 'an']);
-    f.db.updateProvider({ id: 'an', name: 'Anthropic', kind: 'anthropic', baseUrl: null, customModels: [{ id: 'claude-opus-5-5', name: 'Opus', maxOutputTokens: 2000 }] });
-    await f.keys.storeKey('an', 'owned-fake-an-key');
+    const f = await fixture(['ds', 'cu']);
+    f.db.updateProvider({ id: 'cu', name: '公司模型', kind: 'compatible', baseUrl: 'https://models.example/v1', customModels: [{ id: 'company-model', name: 'company-model', maxOutputTokens: 2000 }] });
+    await f.keys.storeKey('cu', 'owned-fake-cu-key');
     const started = await f.run.start({ roomId: 'room', task: '夹紧', workflowSnapshot: {}, maxTurns: 2, outputTokenLimit: 16000 });
     await f.run.waitForIdle(started.runId);
     expect(f.run.getSnapshot(started.runId).status).toBe('completed');
-    expect(f.seen[0].body.max_completion_tokens).toBe(8192);
+    expect(f.seen[0].body.max_tokens).toBe(8192);
     expect(f.seen[1].body.max_tokens).toBe(2000);
   });
 
-  it('a compatible service at a typed address uses max_tokens, no thinking parameter, and its own model', async () => {
-    const f = await fixture(['km']);
-    const started = await f.run.start({ roomId: 'room', task: '兼容服务', workflowSnapshot: {}, maxTurns: 1 });
-    await f.run.waitForIdle(started.runId);
-    expect(f.seen[0].url).toBe('https://kimi.example/v1/chat/completions');
-    expect(f.seen[0].body).toMatchObject({ model: 'kimi-k2', max_tokens: 8192 });
-    expect(f.seen[0].body).not.toHaveProperty('thinking'); expect(f.seen[0].body).not.toHaveProperty('max_completion_tokens');
-  });
-
   it('shows what a service says about an over-long request honestly and does not resend it', async () => {
-    const f = await fixture(['oa']);
+    const f = await fixture(['ds']);
     const db = f.db; const keys = f.keys;
     const bad = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'secret-body-text context_length_exceeded', code: 'context_length_exceeded' } }), { status: 400 }));
     const registry = new ProviderRegistry(db, keys, { transportFactory: guard => async () => { guard(); return bad(); } });

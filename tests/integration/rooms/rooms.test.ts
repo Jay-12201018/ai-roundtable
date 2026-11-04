@@ -115,7 +115,7 @@ describe('R07 persistence and protected configuration', () => {
     const f = await fixture(); const calls = vi.spyOn(f.provider, 'streamChat');
     if (scenario === 'disabled-provider') f.db.updateProvider({ id: 'mock-explicit', name: '禁用', kind: 'mock', enabled: false });
     else if (scenario === 'real-provider') {
-      f.db.createProvider({ id: 'real', name: '真实配置', kind: 'openai' });
+      f.db.createProvider({ id: 'real', name: '真实配置', kind: 'compatible', baseUrl: 'https://service.example/v1' });
       for (const a of f.agents) await f.rooms.updateAgent({ ...input(a), providerId: 'real', modelId: 'custom-not-a-white-list' });
     } else if (scenario === 'invalid-provider') {
       // Corrupt a disposable fixture only, to exercise safe legacy-invalid handling.

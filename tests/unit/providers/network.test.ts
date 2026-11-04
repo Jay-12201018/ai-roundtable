@@ -209,14 +209,11 @@ describe('Main safe Provider transport', () => {
     expect(fixture.response.destroyed).toBe(true);
   });
 
-  it('ignores ambient proxy and global-agent configuration', async () => {
+  it('never goes through a shared connection agent', async () => {
     const fixture = httpsFixture();
-    vi.stubEnv('HTTPS_PROXY', 'http://127.0.0.1:1');
-    try {
-      const response = await createSafeFetch(undefined, lookup([{ address: '8.8.8.8', family: 4 }]))('https://provider.example/models');
-      await response.body?.cancel();
-      expect(fixture.outbound.mock.calls[0][1]).toMatchObject({ agent: false });
-    } finally { vi.unstubAllEnvs(); }
+    const response = await createSafeFetch(undefined, lookup([{ address: '8.8.8.8', family: 4 }]))('https://provider.example/models');
+    await response.body?.cancel();
+    expect(fixture.outbound.mock.calls[0][1]).toMatchObject({ agent: false });
   });
 
   it('returns a redirect without a second request or origin change', async () => {

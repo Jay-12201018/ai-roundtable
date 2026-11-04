@@ -2,8 +2,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildPublicContext } from '../../../src/main/context/buildPublicContext';
 import { agentBriefText, builtInRoleGuides, discussionRulesText, isAssistantEntry, quoteText, renderEntry, revisionRuleText } from '../../../src/main/context/transcript';
-import { buildAnthropicMessages } from '../../../src/main/providers/anthropic/messages';
-import { buildGeminiContents } from '../../../src/main/providers/gemini/GeminiProvider';
 import { countInputUpperBound } from '../../../src/main/providers/ProviderRegistry';
 import type { ContextInput, ModelTokenCounter } from '../../../src/main/context/types';
 import type { ProviderMessage } from '../../../src/main/providers/types';
@@ -75,18 +73,6 @@ describe('D095 discussion roles and merging', () => {
     expect(result.messages.at(-1)!.content).toMatch(/^【轮到你发言】\n现在由你（成员「A」· role-a）发言。/u);
   });
 
-  it('produces Provider-native shapes without adapter fix-ups: Anthropic alternation and Gemini user-first', () => {
-    for (const [speakers, current] of [[[], 'a'], [['a'], 'a'], [['b', 'host', 'a', 'a', 'c'], 'a'], [['a', 'b', 'c', 'a'], 'b']] as const) {
-      const result = build(sequence([...speakers], current));
-      const anthropic = buildAnthropicMessages(result.messages);
-      expect(anthropic.messages).toEqual(chat(result.messages));
-      expect(anthropic.messages[0].role).toBe('user');
-      anthropic.messages.forEach((m, i) => { if (i) expect(m.role).not.toBe(anthropic.messages[i - 1].role); });
-      const gemini = buildGeminiContents(result.messages);
-      expect(gemini.contents.map(c => c.role)).toEqual(chat(result.messages).map(m => m.role === 'assistant' ? 'model' : 'user'));
-      expect(gemini.contents.every(c => c.parts!.length === 1)).toBe(true);
-    }
-  });
 });
 
 describe('D095 label integrity', () => {

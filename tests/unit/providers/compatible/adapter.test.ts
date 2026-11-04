@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OpenAICompatibleProvider } from '../../../../src/main/providers/openai-compatible/OpenAICompatibleProvider';
+import { CompatibleProvider } from '../../../../src/main/providers/compatible/CompatibleProvider';
 import type { ProviderConfiguration } from '../../../../src/shared/contracts/configuration';
 import type { NormalizedChunk, StreamChatInput, TestConnectionInput } from '../../../../src/shared/contracts/provider';
 import { ContractError } from '../../../../src/shared/contracts/errors';
@@ -10,7 +10,7 @@ import { normalizedChunkSchema } from '../../../../src/shared/schemas/provider';
 const baseUrl = 'https://compatible.example/v1/';
 const fixtureKey = 'fixture-compatible-secret';
 const configuration: ProviderConfiguration = {
-  id: 'compatible-one', name: 'Compatible fixture', kind: 'openai-compatible',
+  id: 'compatible-one', name: 'Compatible fixture', kind: 'compatible',
   baseUrl, enabled: true, isDefault: false, defaultModelId: null, customModels: [],
   keyReference: { id: 'key-reference-one' },
   createdAt: '2026-10-17T00:00:00.000Z', updatedAt: '2026-10-17T00:00:00.000Z',
@@ -24,9 +24,9 @@ const input: StreamChatInput = {
   ],
 };
 const capabilities = {
-  outputTokenParameter: 'max_tokens', streamUsage: false, listModels: true, authentication: 'models',
+  streamUsage: false, listModels: true, authentication: 'models',
 } as const;
-type Options = ConstructorParameters<typeof OpenAICompatibleProvider>[0];
+type Options = ConstructorParameters<typeof CompatibleProvider>[0];
 type Outbound = { url: string; method: string; headers: Headers; body: Record<string, unknown> | null; redirect: RequestRedirect };
 
 function chunk(delta: Record<string, unknown>, finishReason: string | null = null) {
@@ -63,7 +63,7 @@ function networkFixture(response: (request: Request) => Response | Promise<Respo
 }
 
 function provider(fetcher: typeof fetch, overrides: Partial<Options> = {}) {
-  return new OpenAICompatibleProvider({
+  return new CompatibleProvider({
     configuration, confirmedBaseUrl: baseUrl, resolveKey: async () => fixtureKey,
     capabilities, fetch: fetcher, ...overrides,
   });
@@ -94,7 +94,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-describe('OpenAI Compatible endpoint and capability boundaries', () => {
+describe('Compatible endpoint and capability boundaries', () => {
   it.each([null, { ...input, requestId: 'invalid identity' }])('rejects invalid streaming identity (%j) without yielding an invalid DTO', async invalid => {
     const { fetcher } = networkFixture();
     const emitted: NormalizedChunk[] = [];
@@ -139,7 +139,7 @@ describe('OpenAI Compatible endpoint and capability boundaries', () => {
     ['credentials', { baseUrl: 'https://user:password@compatible.example/v1/' }, 'https://user:password@compatible.example/v1/'],
     ['query', { baseUrl: 'https://compatible.example/v1/?token=raw-vendor-secret' }, 'https://compatible.example/v1/?token=raw-vendor-secret'],
     ['disabled provider', { enabled: false }, baseUrl],
-    ['wrong provider kind', { kind: 'openai' }, baseUrl],
+    ['wrong provider kind', { kind: 'mock', baseUrl: null }, baseUrl],
     ['missing target', { baseUrl: null }, baseUrl],
   ])('rejects %s before network or key access', async (_label, changes, confirmedBaseUrl) => {
     const { fetcher } = networkFixture();
@@ -155,9 +155,8 @@ describe('OpenAI Compatible endpoint and capability boundaries', () => {
   });
 
   it.each([
-    undefined,
-    { outputTokenParameter: 'max_tokens', streamUsage: false, listModels: true },
-    { outputTokenParameter: 'guessed_parameter', streamUsage: false, listModels: true, authentication: 'models' },
+    { streamUsage: false, listModels: true },
+    { streamUsage: false, listModels: true, authentication: 'guessed' },
   ])('requires a complete explicit compatible capability profile (%j)', async profile => {
     const { fetcher } = networkFixture();
     expect(() => provider(fetcher, { capabilities: profile as Options['capabilities'] })).toThrow(ContractError);
@@ -182,16 +181,6 @@ describe('OpenAI Compatible endpoint and capability boundaries', () => {
     expect(requests[0].url).toBe('http://127.0.0.1:1234/v1/chat/completions');
   });
 
-  it('refuses an unknown output limit parameter before resolving a key', async () => {
-    const { fetcher } = networkFixture();
-    const resolveKey = vi.fn(async () => fixtureKey);
-    const events = await collect(provider(fetcher, {
-      resolveKey, capabilities: { ...capabilities, outputTokenParameter: null },
-    }).streamChat(input));
-    expectError(events, 'unsupported');
-    expect(resolveKey).not.toHaveBeenCalled();
-    expect(fetcher).not.toHaveBeenCalled();
-  });
 
   it.each([undefined, 0, -1, 1.5])('refuses an absent or invalid output limit (%s) before making a request', async outputTokenLimit => {
     const { fetcher } = networkFixture();
@@ -209,12 +198,12 @@ describe('OpenAI Compatible endpoint and capability boundaries', () => {
   });
 });
 
-describe('OpenAI Compatible request mapping and stream normalization', () => {
-  it.each(['max_tokens', 'max_completion_tokens'] as const)('sends model, public roles and the actual %s limit', async outputTokenParameter => {
+describe('Compatible request mapping and stream normalization', () => {
+  it('sends model, public roles and the actual limit as max_tokens', async () => {
     const { fetcher, requests } = networkFixture();
     const resolveKey = vi.fn(async () => fixtureKey);
     const events = await collect(provider(fetcher, {
-      resolveKey, capabilities: { ...capabilities, outputTokenParameter },
+      resolveKey, capabilities,
     }).streamChat(input));
     expect(resolveKey).toHaveBeenCalledWith('compatible-one', { id: 'key-reference-one' });
     expect(requests).toHaveLength(1);
@@ -227,8 +216,7 @@ describe('OpenAI Compatible request mapping and stream normalization', () => {
         ],
       },
     });
-    expect(requests[0].body?.[outputTokenParameter]).toBe(31);
-    expect(requests[0].body).not.toHaveProperty(outputTokenParameter === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens');
+    expect(requests[0].body?.max_tokens).toBe(31);
     expect(requests[0].body).not.toHaveProperty('stream_options');
     expect(requests[0].headers.get('authorization')).toBe('Bearer fixture-compatible-secret');
     expect(events.every(event => event.requestId === 'main-request')).toBe(true);
@@ -237,10 +225,10 @@ describe('OpenAI Compatible request mapping and stream normalization', () => {
   });
 
   it('ignores OpenAI environment credentials, endpoint, organization and project', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'raw-vendor-secret');
-    vi.stubEnv('OPENAI_BASE_URL', 'https://environment.example/secret/');
-    vi.stubEnv('OPENAI_ORG_ID', 'raw-vendor-secret');
-    vi.stubEnv('OPENAI_PROJECT_ID', 'raw-vendor-secret');
+    vi.stubEnv('SERVICE_API_KEY', 'raw-vendor-secret');
+    vi.stubEnv('SERVICE_BASE_URL', 'https://environment.example/secret/');
+    vi.stubEnv('SERVICE_ORG_ID', 'raw-vendor-secret');
+    vi.stubEnv('SERVICE_PROJECT_ID', 'raw-vendor-secret');
     const { fetcher, requests } = networkFixture();
     await collect(provider(fetcher).streamChat(input));
     expect(requests[0].url).toBe('https://compatible.example/v1/chat/completions');
@@ -313,7 +301,7 @@ describe('OpenAI Compatible request mapping and stream normalization', () => {
   });
 });
 
-describe('OpenAI Compatible model discovery and explicit connection levels', () => {
+describe('Compatible model discovery and explicit connection levels', () => {
   it('maps model ids to safe model DTOs with one GET to the confirmed endpoint', async () => {
     const { fetcher, requests } = networkFixture(() => Response.json({
       object: 'list', data: [
@@ -389,7 +377,7 @@ describe('OpenAI Compatible model discovery and explicit connection levels', () 
   });
 });
 
-describe('OpenAI Compatible failures, cancellation and deadlines', () => {
+describe('Compatible failures, cancellation and deadlines', () => {
   it.each([
     [401, 'authentication_failed', false], [403, 'forbidden', false],
     [429, 'rate_limited', true], [500, 'internal_error', false],
@@ -457,8 +445,8 @@ describe('OpenAI Compatible failures, cancellation and deadlines', () => {
 
 describe('D135 compatible services differ in when they report usage', () => {
   const stop = { id: 'x', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
-  const provider = (events: unknown[], capabilities = {}) => new OpenAICompatibleProvider({ configuration, confirmedBaseUrl: baseUrl, resolveKey: async () => 'owned-fake-key',
-    capabilities: { outputTokenParameter: 'max_tokens', streamUsage: true, listModels: true, authentication: 'models', ...capabilities },
+  const provider = (events: unknown[], capabilities = {}) => new CompatibleProvider({ configuration, confirmedBaseUrl: baseUrl, resolveKey: async () => 'owned-fake-key',
+    capabilities: { streamUsage: true, listModels: true, authentication: 'models', ...capabilities },
     fetch: async () => sse(events) });
   const all = async (stream: AsyncIterable<NormalizedChunk>) => { const events: NormalizedChunk[] = []; for await (const event of stream) events.push(event); return events; };
   const request = { requestId: 'main-request', modelId: 'manual-chat-model', outputTokenLimit: 8, messages: [{ role: 'user' as const, content: 'hi' }] };

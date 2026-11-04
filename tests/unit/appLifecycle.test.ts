@@ -120,7 +120,7 @@ describe('application lifecycle', () => {
     expect(ProviderSettingsService).toHaveBeenCalledExactlyOnceWith(fixture.database, fixture.keys, registry);
     expect(vi.mocked(RunService).mock.calls[0][3]).toBe(registry);
     expect(fixture.registerIpc).toHaveBeenCalledWith(fixture.windows[0], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(),
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) },
       artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
   });
@@ -240,7 +240,7 @@ describe('application lifecycle', () => {
 
     expect(fixture.unregister[0]).toHaveBeenCalledTimes(1);
     expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(),
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) },
       artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
     expect(fixture.windows[1]?.destroyed).toBe(false);
@@ -504,7 +504,7 @@ describe('application lifecycle', () => {
     emit('second-instance');
     expect(fixture.unregister[0]).toHaveBeenCalledOnce();
     expect(fixture.registerIpc).toHaveBeenLastCalledWith(fixture.windows[1], { run: fixture.service, rooms: fixture.rooms, settings: fixture.settings, host: fixture.host,
-      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) }, network: expect.anything(),
+      usage: { getReport: expect.any(Function), exportCsv: expect.any(Function) },
       artifacts: { list: expect.any(Function), getVersion: expect.any(Function), edit: expect.any(Function), listCodeCandidates: expect.any(Function), export: expect.any(Function) },
       codeExport: { preview: expect.any(Function), write: expect.any(Function), chooseRoot: expect.any(Function) } });
     expect(fixture.windows.filter((window) => !window.destroyed)).toHaveLength(1);

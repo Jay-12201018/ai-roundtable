@@ -15,7 +15,7 @@ const usage = (overrides: Partial<RequestUsage> = {}): RequestUsage => requestUs
 const bucket = (overrides: Partial<UsageBucket> = {}): UsageBucket => ({ requests: 2, reportedRequests: 1, inputTokens: 300, cacheHitTokens: 40, outputTokens: 6, unknownRequests: 1, inFlightRequests: 0, notSentRequests: 0, ...overrides });
 const report = (): UsageReport => ({ generatedAt: time, timeZone: 'Asia/Shanghai', totals: bucket(),
   byRun: [{ runId: 'run', roomId: 'room', roomName: '房间', task: '目标', createdAt: time, ...bucket() }],
-  byModel: [{ providerId: 'p', providerName: 'DeepSeek', modelId: 'deepseek-flash', ...bucket() }, { providerId: 'q', providerName: 'OpenAI', modelId: 'gpt-6-astra', ...bucket() }],
+  byModel: [{ providerId: 'p', providerName: 'DeepSeek', modelId: 'deepseek-flash', ...bucket() }, { providerId: 'q', providerName: 'Kimi', modelId: 'kimi-k3.1-pro', ...bucket() }],
   byDate: [{ date: '2026-10-22', ...bucket() }], byKind: [{ kind: 'turn', ...bucket() }],
   unknownRequests: [{ requestId: 'r2', runId: 'run', roomName: '房间', task: '目标', kind: 'turn', speaker: '审查者', providerName: 'DeepSeek', modelId: 'deepseek-flash', createdAt: time, observedInputTokens: null, observedOutputTokens: null }] });
 
@@ -62,7 +62,7 @@ it('the usage page shows tokens per model, says the provider bills, and exports 
   expect(screen.getByText(/费用由服务商收取，请到服务商控制台查看账单；这里不估算/u)).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '按模型' }));
   const table = screen.getByRole('table');
-  expect(within(table).getByText('gpt-6-astra')).toBeTruthy();
+  expect(within(table).getByText('kimi-k3.1-pro')).toBeTruthy();
   expect(screen.getByRole('region', { name: '没拿到用量的请求' }).textContent).toContain('审查者');
   expect(document.body.textContent).not.toMatch(/¥|预算|花费|金额|核销|预留/u);
   fireEvent.click(screen.getByRole('button', { name: '导出 CSV' }));

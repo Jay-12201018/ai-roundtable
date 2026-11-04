@@ -24,7 +24,7 @@ export async function deepSeekFixture(options: { modes?: Mode[]; cacheHit?: numb
   const db = new Database(options.filename ?? ':memory:');
   await db.initialize();
   db.createRoom({ id: 'room', name: '用量房间' });
-  db.createProvider({ id: 'deepseek', name: 'DeepSeek 直连', kind: 'openai-compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: 'deepseek-flash', name: 'deepseek-flash' }] });
+  db.createProvider({ id: 'deepseek', name: 'DeepSeek 直连', kind: 'compatible', baseUrl: 'https://api.deepseek.com', customModels: [{ id: 'deepseek-flash', name: 'deepseek-flash' }] });
   const keys = new KeyService(db, createMemoryKeyBackend());
   await keys.storeKey('deepseek', 'owned-fake-deepseek-key');
   const modes = [...(options.modes ?? [])];
