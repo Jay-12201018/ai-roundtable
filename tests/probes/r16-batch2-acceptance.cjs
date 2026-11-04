@@ -133,7 +133,7 @@ async function main() {
 
     // A discussion in the remembered mode: Main checks it again at the start; the status line and messages show the stage.
     await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
-    check(await js(`document.querySelector('[aria-label^="讨论方式："]').getAttribute('aria-label')`) === '讨论方式：审查修订链', 'The composer chip shows the remembered mode');
+    check(await js(`document.querySelector('.setup-seg [aria-pressed="true"]').textContent`) === '审查修订链', 'The page shows the remembered mode');
     await field('讨论目标'); await selectAll(); await ime('sheji', '为学校设计一个校园跑腿平台的试点方案：说清范围、定价和衡量指标。');
     fixture.chunkMs = 250;
     await click('开始讨论');

@@ -29,3 +29,12 @@ export function writeRoomWorkflow(roomId: string, draft: WorkflowDraft | null): 
     return true;
   } catch { return false; }
 }
+
+const countKey = (roomId: string) => `roundtable.participants.${roomId}`;
+/** How many take part in a room's adjustable modes, for coming back from a mode of two. */
+export function readRoomCount(roomId: string): number | undefined {
+  try { const value = Number(localStorage.getItem(countKey(roomId))); return Number.isInteger(value) && value >= 2 && value <= 8 ? value : undefined; } catch { return undefined; }
+}
+export function writeRoomCount(roomId: string, count: number): void {
+  try { localStorage.setItem(countKey(roomId), String(count)); } catch { /* Only a convenience: the default applies instead. */ }
+}

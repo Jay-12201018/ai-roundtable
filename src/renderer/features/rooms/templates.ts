@@ -1,4 +1,4 @@
-import type { AgentConfiguration, ProviderReadiness, ProviderSummary, RoomConfiguration, RoomManagementApiContract } from '../../../shared/contracts/configuration';
+import type { AgentConfiguration, CreateAgentInput, ProviderReadiness, ProviderSummary, RoomConfiguration, RoomManagementApiContract } from '../../../shared/contracts/configuration';
 import { errorCodeSchema } from '../../../shared/schemas/error';
 
 /**
@@ -51,8 +51,17 @@ export async function createStarterRoom(api: RoomManagementApiContract, input: {
 }
 
 /** Fixed Chinese text per error code, never the error message itself. */
+/** The next member a room grows by: the next role template it lacks, then plain numbered members. Its model is the default one, or none; the host picks. */
+export function nextMemberInput(roomId: string, members: readonly AgentConfiguration[], model: { providerId: string; modelId: string } | undefined): CreateAgentInput {
+  const template = roleTemplates.filter(item => item.id !== 'custom').find(item => !members.some(member => member.roleTemplateId === item.role || member.displayName === item.name));
+  let number = members.length + 1;
+  while (members.some(member => member.displayName === `成员 ${number}`)) number++;
+  return { roomId, displayName: template?.name ?? `成员 ${number}`, roleTemplateId: template?.role ?? '讨论', systemPrompt: template?.prompt ?? '',
+    providerId: model?.providerId ?? null, modelId: model?.modelId ?? null, enabled: true, displayOrder: members.length ? Math.max(...members.map(member => member.displayOrder)) + 1 : 0 };
+}
+
 /** What updateAgent takes, from what the page holds. */
-export const agentInput = (agent: AgentConfiguration) => { const { archivedAt: _a, createdAt: _c, updatedAt: _u, withheldModelId: _w, ...rest } = agent; return rest; };
+export const agentInput = (agent: AgentConfiguration) => { const { archivedAt: _a, createdAt: _c, updatedAt: _u, withheldModelId: _w, builtInDemo: _d, ...rest } = agent; return rest; };
 
 export function roomErrorText(error: unknown): string {
   const value = error && typeof error === 'object' ? error as { code?: unknown; detail?: { code?: unknown } } : undefined;

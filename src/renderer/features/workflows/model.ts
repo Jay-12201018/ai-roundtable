@@ -17,7 +17,7 @@ export type WorkflowProgress = {
 export const templates: Array<{ id: WorkflowTemplate; label: string; description: string; steps: number }> = [
   { id: 'free-chat', label: '自由讨论', description: '全员按顺序轮流发言，适合发散。', steps: 3 },
   { id: 'two-model-dialogue', label: '双人对话', description: '两位成员来回讨论一个问题。', steps: 2 },
-  { id: 'review-revision', label: '审查修订链', description: '起草 → 审查 → 修订 → 复审 → 定稿。', steps: 5 },
+  { id: 'review-revision', label: '审查修订链', description: '起草者写、审查者挑错，修订复审后定稿。', steps: 5 },
   { id: 'deep-debate', label: '深度辩论', description: '各自立论 → 两轮交锋 → 总结。', steps: 4 },
 ];
 export const templateLabel = (id: WorkflowTemplate) => templates.find(item => item.id === id)!.label;
@@ -39,7 +39,67 @@ export function createWorkflowDraft(template: WorkflowTemplate, members: readonl
   ] : template === 'deep-debate' ? [one('opening', '立论', [...ids]), one('rebuttal', '交锋', [...ids], '2'), one('closing', '总结', [...ids])]
     : template === 'two-model-dialogue' ? [one('dialogue', '对话', [ids[0] ?? '', ids[1] ?? ''], '2')]
       : [one('discussion', '轮流发言', ids.length ? [...ids] : [''])];
-  return { template, phases, turnLimit: '12', durationMinutes: '5', outputTokens: String(DEFAULT_OUTPUT_TOKEN_LIMIT), finishAt: '' };
+  // A bigger room needs room to finish: the limits grow with the turns, so the default flow always fits.
+  const turns = turnsOf(phases);
+  return { template, phases, turnLimit: String(Math.max(12, turns)), durationMinutes: String(Math.max(5, turns)), outputTokens: String(DEFAULT_OUTPUT_TOKEN_LIMIT), finishAt: '' };
+}
+const turnsOf = (phases: WorkflowDraft['phases']) => phases.reduce((total, phase) => total + phase.participants.filter(Boolean).length * (Number(phase.repeat) || 1), 0);
+
+export const MIN_PARTICIPANTS = 2;
+export const MAX_PARTICIPANTS = 8;
+/** 双人对话 and the review chain take exactly two: the chain's writer and reviewer are all createWorkflowDraft assigns. */
+export const isFixedPair = (template: WorkflowTemplate) => template === 'two-model-dialogue' || template === 'review-revision';
+
+/** Who speaks: the members a remembered flow names, or everyone taking part. By display order. */
+export function speakersOf<T extends WorkflowMember | { id: string; enabled: boolean }>(draft: WorkflowDraft | undefined, members: readonly T[]): T[] {
+  if (!draft) return members.filter(member => member.enabled);
+  const end = draft.finishAt ? draft.phases.findIndex(phase => phase.key === draft.finishAt) : -1;
+  const named = new Set(draft.phases.slice(0, end >= 0 ? end + 1 : undefined).flatMap(phase => phase.participants));
+  return members.filter(member => named.has(member.id));
+}
+/** The review chain reads by who writes first, whatever the room's order is. */
+export function speakingOrder<T extends { id: string }>(speakers: readonly T[], draft: WorkflowDraft | undefined): T[] {
+  if (draft?.template !== 'review-revision') return [...speakers];
+  const first = draft.phases[0]?.participants[0];
+  return [...speakers].sort((a, b) => Number(b.id === first) - Number(a.id === first));
+}
+
+/** Which members a mode with this many takes: the first ones by display order, or the chain's writer and reviewer by their roles. */
+export function participantsFor(template: WorkflowTemplate, members: readonly WorkflowMember[], count: number): string[] {
+  if (template === 'review-revision') {
+    const { phases } = createWorkflowDraft(template, members.map(member => ({ ...member, enabled: true })));
+    return [phases[0]!.participants[0]!, phases[1]!.participants[0]!].filter(Boolean);
+  }
+  return members.slice(0, isFixedPair(template) ? 2 : count).map(member => member.id);
+}
+
+/** The sentence under the modes: what happens, how long, and in the chain who does what, named as they are. */
+export function modeSummary(template: WorkflowTemplate, draft: WorkflowDraft | undefined, speakers: ReadonlyArray<WorkflowMember | { id: string; displayName: string }>): string {
+  const name = (id: string | undefined) => { const member = speakers.find(item => item.id === id) as { name?: string; displayName?: string } | undefined; return member?.displayName ?? member?.name; };
+  const description = templates.find(item => item.id === template)!.description;
+  const lead = template === 'review-revision' && name(draft?.phases[0]?.participants[0]) && name(draft?.phases[1]?.participants[0])
+    ? `${name(draft!.phases[0]!.participants[0])}写、${name(draft!.phases[1]!.participants[0])}挑错，修订复审后定稿。` : description;
+  const turns = draft ? turnsOf(draft.phases) : Math.max(3, speakers.length);
+  return `${lead}共 ${turns} 回合。`;
+}
+
+/**
+ * The flow that goes with a new mode or number of members. A default flow is simply made again. One the host has adjusted keeps
+ * its stages and limits when the new members fit in it; when they cannot, it starts over and says so.
+ */
+export function nextDraft({ template, previous, previousMembers, members }: { template: WorkflowTemplate; previous: WorkflowDraft | undefined; previousMembers: readonly WorkflowMember[]; members: readonly WorkflowMember[] }): { draft: WorkflowDraft | null; notice?: string } {
+  const fresh = template === 'free-chat' ? null : createWorkflowDraft(template, members);
+  if (!previous || JSON.stringify(previous) === JSON.stringify(createWorkflowDraft(previous.template, previousMembers))) return { draft: fresh };
+  if (previous.template !== template) return { draft: fresh, notice: `之前细调的流程不适用于「${templateLabel(template)}」，已换成它的默认流程。` };
+  const before = speakersOf(previous, previousMembers).map(member => member.id);
+  const enabled = members.filter(member => member.enabled).map(member => member.id);
+  const added = enabled.filter(id => !before.includes(id));
+  const phases = previous.phases.map(phase => ({ ...phase, participants: [...phase.participants.filter(id => enabled.includes(id)), ...(before.every(id => phase.participants.includes(id)) ? added : [])] }));
+  const turns = turnsOf(phases);
+  const kept: WorkflowDraft = { ...previous, phases, turnLimit: String(Math.max(Number(previous.turnLimit) || 0, turns)) };
+  const everyoneSpeaks = enabled.every(id => speakersOf(kept, members).some(member => member.id === id));
+  if (everyoneSpeaks && draftProblems(kept, members).length === 0) return { draft: kept };
+  return { draft: fresh, notice: '之前细调的流程放不下现在的成员，已换回默认流程。' };
 }
 
 const positive = (text: string, max: number) => /^\d+$/u.test(text) && Number(text) >= 1 && Number(text) <= max;

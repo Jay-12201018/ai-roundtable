@@ -35,9 +35,9 @@ export function modelChoice(value: string): { providerId: string | null; modelId
 }
 
 /** The choices of a model select, under each service's name. A choice no longer on offer stays visible and says so; nothing replaces it. */
-export function ModelOptions({ options, value }: { options: readonly Option[]; value: string }) {
+export function ModelOptions({ options, value, emptyLabel = '暂不选择' }: { options: readonly Option[]; value: string; emptyLabel?: string }) {
   return <>
-    <option value="">暂不选择</option>
+    <option value="">{emptyLabel}</option>
     {value !== '' && !options.some(option => option.value === value) && <option value={value}>原来的选择已不可用，请换一个模型</option>}
     {[...new Set(options.map(option => option.providerId))].map(providerId => {
       const group = options.filter(option => option.providerId === providerId);

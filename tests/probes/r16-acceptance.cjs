@@ -67,7 +67,7 @@ async function main() {
   // ── 1. New discussion ──────────────────────────────────────────────
   // R16 batch 2: the room opens on its page; 新讨论 there starts a discussion in it.
   await click('校园跑腿讨论', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
-  await until(`document.body.innerText.includes('这场讨论要解决什么？') && document.body.innerText.includes('起草者、审查者、综合者')`, 'empty room state');
+  await until(`document.body.innerText.includes('这场讨论要解决什么？') && document.querySelectorAll('.setup-row').length === 3`, 'empty room state');
   await field('讨论目标'); await selectAll();
   // An Enter that only confirms the IME candidate must not start anything; ⌘Enter is the start shortcut.
   await ime('sheji', '为学校设计一个校园跑腿平台的试点方案：说清服务范围、定价、骑手来源和衡量指标。', { enterWhileComposing: true });

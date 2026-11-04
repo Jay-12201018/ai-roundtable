@@ -19,6 +19,7 @@ const when = (iso: string) => {
 /** Whether Main would refuse this member at the start of a discussion. A model the service's list dropped may still work, and that is the host's call. */
 export function memberBlocked(agent: AgentConfiguration, providers: readonly ProviderSummary[], readiness: readonly ProviderReadiness[] | undefined): boolean {
   if (!readiness) return false;
+  if (agent.builtInDemo) return false;
   if (agent.withheldModelId || !agent.providerId || !agent.modelId) return true;
   const provider = providers.find(item => item.id === agent.providerId);
   if (!provider || !provider.enabled) return true;
@@ -31,6 +32,7 @@ export function memberBlocked(agent: AgentConfiguration, providers: readonly Pro
 
 /** One line per member: which model and whether it can take part now, as Main decides it (D114). */
 export function memberLine(agent: AgentConfiguration, providers: readonly ProviderSummary[], readiness: readonly ProviderReadiness[] | undefined): { text: string; warn: boolean } {
+  if (agent.builtInDemo) return { text: '内置演示 · 回复是预先写好的示例', warn: false };
   if (agent.withheldModelId) return { text: '之前填的模型名像 API Key，已隐藏且不会使用；请重新选择模型', warn: true };
   if (!agent.providerId || !agent.modelId) return { text: '还没选模型，暂时不会参与讨论', warn: true };
   const provider = providers.find(item => item.id === agent.providerId);

@@ -69,6 +69,8 @@ export const createAgentInputSchema = agentInputObject.omit({ id: true }).refine
 export const agentConfigurationSchema = agentInputObject.extend({
   archivedAt: timestampSchema.nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
   withheldModelId: z.literal(true).optional(),
+  /** Never configured: Main runs it on the built-in demo. Choosing a model or changing it in any way ends that. */
+  builtInDemo: z.literal(true).optional(),
 });
 
 export const configurationIdInputSchema = z.object({ id: idSchema }).strict();

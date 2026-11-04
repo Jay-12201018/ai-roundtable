@@ -1189,11 +1189,14 @@ export class Database {
 
   getAgentConfiguration(id: string): AgentConfiguration | undefined {
     this.assertInitialized(); configurationInput(idSchema, id);
-    const row = this.db.prepare('SELECT id,room_id AS roomId,display_name AS displayName,role_template_id AS roleTemplateId,provider_id AS providerId,model_id AS modelId,system_prompt AS systemPrompt,enabled,display_order AS displayOrder,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM agents WHERE id=?').get(id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare('SELECT id,room_id AS roomId,display_name AS displayName,role_template_id AS roleTemplateId,provider_id AS providerId,model_id AS modelId,system_prompt AS systemPrompt,enabled,display_order AS displayOrder,archived_at AS archivedAt,configuration_version AS configurationVersion,created_at AS createdAt,updated_at AS updatedAt FROM agents WHERE id=?').get(id) as Record<string, unknown> | undefined;
     if (!row) return;
     // D096: a stored model ID that looks like an API key is withheld, never returned to the Renderer or used.
     const withheld = typeof row.modelId === 'string' && looksLikeApiKey(row.modelId);
-    return configurationOutput(agentConfigurationSchema, { ...row, enabled: row.enabled === 1, ...(withheld ? { modelId: null, withheldModelId: true } : {}) });
+    const { configurationVersion, ...agent } = row;
+    // Never configured: listAgents lets it run on the built-in demo, and the page should say so rather than ask for a model.
+    const builtInDemo = configurationVersion === 0 && agent.providerId === null && agent.modelId === null;
+    return configurationOutput(agentConfigurationSchema, { ...agent, enabled: row.enabled === 1, ...(withheld ? { modelId: null, withheldModelId: true } : {}), ...(builtInDemo ? { builtInDemo: true } : {}) });
   }
 
   listAgentConfigurations(roomId: string, includeArchived = false): AgentConfiguration[] {

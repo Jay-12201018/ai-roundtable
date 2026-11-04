@@ -15,21 +15,39 @@
 .run-list .run-dot.is-warn { background: var(--warn); }
 .model-state { margin: -8px 0 0; }
 
-/* 新讨论 › 参与成员: sits right above the goal. Below this width the model list takes a line of its own. */
-.discussion-empty.is-new .empty-room { display: flex; flex-direction: column; justify-content: flex-end; box-sizing: border-box; min-height: 100%; max-width: 760px; padding: 24px 24px 12px; }
-.roster { container-type: inline-size; width: 100%; margin-top: 4px; text-align: left; }
-.roster h3 { margin: 0 0 2px; font-size: 14px; line-height: 20px; font-weight: 600; }
-.roster > p.small { margin: 0 0 8px; }
-.roster-list { list-style: none; margin: 0; padding: 0; }
-.roster-row { display: grid; grid-template-columns: auto minmax(84px, .55fr) minmax(0, 2fr) auto auto; align-items: center; gap: 4px 10px; padding: 8px 10px 8px 12px; }
-.roster-row + .roster-row { border-top: 1px solid var(--line); }
-.roster-row.is-off .avatar, .roster-row.is-off .roster-who { opacity: .55; }
-.roster-who { min-width: 0; overflow-wrap: anywhere; }
-.roster-who .tag { vertical-align: 1px; margin-left: 2px; }
-.roster-model { width: 100%; min-width: 0; height: 32px; font-size: 13px; text-overflow: ellipsis; }
-.roster-row .roster-note { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; }
-.roster-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 8px 0 0; }
+/* 新讨论: one column, one title, thin lines, right above the goal. Below this width the model list takes a line of its own. */
+.discussion-empty.is-new { display: flex; }
+.discussion-empty.is-new .empty-room { display: flex; flex-direction: column; justify-content: flex-end; box-sizing: border-box; flex: 1; min-width: 0; min-height: 0; max-width: 720px; padding: 16px 24px 8px; }
+.discussion-empty.is-new .empty-room > * { flex: none; }
+.discussion-empty.is-new .empty-room h2 { margin: 0 0 14px; }
+.discussion-empty.is-new .empty-room > .setup { flex: 0 1 auto; display: flex; flex-direction: column; min-height: 240px; container-type: inline-size; width: 100%; text-align: left; }
+.setup > * { flex: none; }
+.setup-line { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.setup-label { font-size: 13px; line-height: 20px; color: var(--text-2); }
+.setup-line > .setup-label { line-height: 36px; }
+.setup-control { min-width: 0; }
+.setup-seg { display: flex; flex-wrap: wrap; width: fit-content; max-width: 100%; }
+.setup-seg button { white-space: nowrap; }
+.setup-seg button:disabled { cursor: default; }
+.empty-room p.setup-hint { margin: 6px 0 0; }
+.setup-link { margin-left: 8px; font-size: inherit; }
+.setup-fixed { font-size: 13px; line-height: 36px; color: var(--text); }
+.stepper { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; }
+.stepper-value { min-width: 24px; text-align: center; font-size: 14px; font-weight: 600; }
+.setup > .setup-members { flex: 0 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 10px 0 0; border-top: 1px solid var(--line); }
+.setup-list { flex: 0 1 auto; min-height: 44px; list-style: none; margin: 4px 0 0; padding: 0; overflow-y: auto; }
+.setup-row { display: grid; grid-template-columns: auto minmax(84px, .6fr) minmax(0, 2fr) auto; align-items: center; gap: 2px 10px; padding: 5px 0; }
+.setup-who { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.setup-who b { font-weight: 600; }
+.setup-who .tag { vertical-align: 1px; margin-left: 2px; }
+.setup-model { width: 100%; min-width: 0; height: 32px; font-size: 13px; text-overflow: ellipsis; }
+.empty-room p.setup-note { grid-column: 2 / -1; margin: 0; overflow-wrap: anywhere; }
+.empty-room p.setup-message { margin: 6px 0 0; }
+.empty-room p.setup-foot { margin: 8px 0 0; }
+.discussion-empty.is-new .suggest { justify-content: flex-start; margin-top: 8px; max-height: 38px; overflow: hidden; }
+.discussion-empty.is-new .suggest button { padding: 4px 10px; font-size: 13px; }
 @container (max-width: 520px) {
-  .roster-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
-  .roster-model { grid-column: 1 / -1; grid-row: 2; }
+  .setup-line { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .setup-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .setup-model { grid-column: 1 / -1; grid-row: 2; }
 }

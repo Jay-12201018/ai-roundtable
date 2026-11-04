@@ -263,7 +263,7 @@ async function main() {
   // goes on to the next member, and once it has finished a truncated reply can be continued as a new version.
   await click('新讨论', { scope: '.controls' });
   // R16 batch 2 (D116): 讨论方式 is a dialog that Main checks as you edit; 用于这个房间 remembers it for the room.
-  await click('讨论方式：自由讨论 · 3 回合');
+  await click('自定义流程');
   await field('单次发言上限'); await selectAll(); await send('Input.insertText', { text: '3' });
   await until(`document.body.innerText.includes('已核对：预计 3 回合')`, 'workflow checked');
   await click('用于这个房间');
@@ -286,8 +286,8 @@ async function main() {
   await capture('continued', '运行结束后点第一条的"续写"：生成"续写 · 当前有效 · 版本 2/2"，从原来的文字接着写（这里仍受上限 3 限制，所以再次标注截断，可以继续续写）；原版本保留为版本 1，后续发言被标为受影响。', 0);
 
   // The 3-token mode was only for this path: back to the room's default before the next one.
-  await click('新讨论', { scope: '.controls' }); await click('讨论方式：自由讨论'); await click('恢复默认');
-  await until(`document.querySelector('[aria-label="讨论方式：自由讨论 · 3 回合"]')`, 'default mode restored');
+  await click('新讨论', { scope: '.controls' }); await click('自定义流程'); await click('恢复默认');
+  await until(`document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent === '自由讨论' && document.querySelector('.stepper-value')?.textContent === '3'`, 'default mode restored');
   // Path 5b: Stop keeps the partial text; an explicit retry then succeeds.
   // The production Mock finishes a 3-turn Run in about 1.5 s, so Stop (now two clicks, D098) can lose the race to the
   // end of the Run. Each attempt waits for explicit state: the first turn streaming, then the confirmation, then a

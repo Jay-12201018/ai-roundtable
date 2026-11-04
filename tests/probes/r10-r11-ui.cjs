@@ -5,8 +5,8 @@ async function page(stage, saved = {}) {
   const wait = async (read, accepts, message) => { const deadline = Date.now() + 60000; for (;;) { const value = await read(); if (accepts(value)) return value; if (Date.now() > deadline) throw new Error(message); await sleep(); } };
   const visible = e => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
   const findButton = name => [...document.querySelectorAll('button')].find(e => visible(e) && (e.getAttribute('aria-label') === name || e.textContent.trim() === name));
-  // R16: 讨论方式 opens from the composer chip, named after the current choice.
-  const openWorkflow = async () => { const chip = await wait(() => [...document.querySelectorAll('button')].find(e => visible(e) && e.getAttribute('aria-label')?.startsWith('讨论方式：')), b => b && !b.disabled, 'Unavailable 讨论方式 chip'); chip.click(); await sleep(); };
+  // The flow's details open from 自定义流程 on the new-discussion page.
+  const openWorkflow = async () => { const chip = await wait(() => findButton('自定义流程'), b => b && !b.disabled, 'Unavailable 自定义流程'); chip.click(); await sleep(); };
   const clickIn = async (scope, name) => { const button = await wait(() => [...document.querySelectorAll(scope + ' button')].find(e => visible(e) && (e.getAttribute('aria-label') === name || e.textContent.trim() === name)), b => b && !b.disabled, 'Unavailable button in ' + scope + ': ' + name); button.click(); await sleep(); };
   const click = async name => { const button = await wait(() => findButton(name), b => b && !b.disabled, 'Unavailable button: ' + name); button.click(); await sleep(); };
   const field = name => [...document.querySelectorAll('input,select,textarea')].find(e => visible(e) && (e.getAttribute('aria-label') === name || e.labels?.[0]?.textContent?.trim() === name || e.closest('label')?.firstChild?.textContent?.trim() === name));
@@ -58,7 +58,7 @@ async function page(stage, saved = {}) {
     await wait(() => document.querySelector('dialog[open]')?.textContent, text => text?.includes('已核对：预计'), 'Main check did not appear');
     check(saved.runIds.length === runs.length, 'The check unexpectedly created a Run');
     await clickIn('dialog[open]', '用于这个房间'); await wait(() => document.querySelector('dialog[open]'), value => !value, 'Dialog did not close');
-    await wait(() => findButton('讨论方式：' + labels[template]), Boolean, 'Mode not remembered for the room');
+    await wait(() => document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent, value => value === labels[template], 'Mode not remembered for the room');
     await fill('讨论目标', 'Fixture workflow ' + template); await click('开始讨论');
     const runId = await wait(() => localStorage.getItem('roundtable.runId'), id => id && !saved.runIds.includes(id), 'New Run absent'); saved.runIds.push(runId);
     if (template === 'free-chat') {

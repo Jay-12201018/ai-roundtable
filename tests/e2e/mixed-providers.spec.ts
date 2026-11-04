@@ -11,7 +11,7 @@ const screens = process.env.ROUNDTABLE_E2E_SCREENS ? join(root, process.env.ROUN
 const kept = new Set(['welcome', 'wizard-choose', 'wizard-key', 'first-discussion', 'services', 'room', 'paused', 'finished', 'summary', 'artifact', 'usage-run',
   'settings-sections', 'services-dark', 'wizard-choose-dark', 'wizard-key-dark', 'discussion-dark', 'usage-dark',
   'stopped-service', 'stopped-member', 'stopped-service-dark', 'stopped-member-dark',
-  'roster-blocked', 'roster-first', 'roster-connect', 'roster-connected', 'roster-three', 'roster-three-dark', 'roster-finished', 'roster-narrow', 'roster-narrow-dark', 'roster-eight', 'roster-eight-dark',
+  'setup-blocked', 'setup-first', 'setup-dialogue', 'setup-dialogue-dark', 'setup-dialogue-finished', 'setup-five', 'setup-three', 'setup-review', 'setup-custom', 'setup-narrow', 'setup-narrow-dark', 'setup-eight', 'setup-eight-dark',
   'multimodal-wizard', 'multimodal-member', 'discover-wizard', 'discover-members', 'discover-services', 'discover-delisted', 'discover-delisted-dark', 'pick-model', 'picked-discussion', 'picked-members', 'picked-member-dialog', 'picked-default', 'picked-finished', 'picked-members-dark', 'thinking-wait', 'quota-used-up', 'quota-regenerated']);
 const captions: Array<{ file: string; caption: string }> = [];
 let shot = 0;
@@ -169,7 +169,7 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
 
   // The first reply is held so 暂停 and 点名 happen as a person would do them.
   await newDiscussion(running, roomName, '交叉审计校园跑腿的试点方案。');
-  await expect(page.getByText(/自由讨论 · 4 回合/u).first(), 'The label says what will happen with four members').toBeVisible();
+  await expect(page.getByText(/共 4 回合/u).first(), 'The sentence says what will happen with four members').toBeVisible();
   await capture(running, 'composer', '开始前：输入框没有预算项；底部只说一句费用由服务商收取、这里不估算。');
   fixture.mode = 'hang';
   await page.getByRole('button', { name: '开始讨论' }).click();
@@ -339,9 +339,9 @@ test('D143 what an older version left behind: a service outside the catalog stay
   // On the new-discussion page: who is in the way, why, and the list to change it, right there.
   await expect(page.getByRole('button', { name: '开始讨论' })).toBeDisabled();
   await expect(page.getByText('还不能开始：审查者、综合者的模型要先处理', { exact: false })).toBeVisible();
-  await expect(page.locator('.roster-row', { hasText: '审查者' })).toContainText('这个服务已不再支持');
-  await expect(page.locator('.roster-row', { hasText: '综合者' })).toContainText('这个模型已不再支持');
-  await capture(running, 'roster-blocked', '开始按钮不可用时：输入框上方写明是哪几位成员，原因写在各自那一行，下拉框就地可改。');
+  await expect(page.locator('.setup-row', { hasText: '审查者' })).toContainText('这个服务已不再支持');
+  await expect(page.locator('.setup-row', { hasText: '综合者' })).toContainText('这个模型已不再支持');
+  await capture(running, 'setup-blocked', '开始按钮不可用时：输入框上方写明是哪几位成员，原因写在各自那一行，下拉框就地可改。');
   expect(fixture.requests, 'Nothing is sent for a discussion that cannot start').toEqual([]);
 
   await page.locator('.sidebar .sb-item', { hasText: 'E2E 讨论' }).first().click();
@@ -426,8 +426,8 @@ test('D143 the host picks the model: every model of a service is offered, nothin
   await running.quit();
 });
 
-test('new discussion: each member gets its model right above the goal, from any service, and what goes out is what was picked', async ({ harness }) => {
-  test.setTimeout(180_000);
+test('new discussion: choose how it runs and how many, give each one a model, and what goes out is what was chosen', async ({ harness }) => {
+  test.setTimeout(240_000);
   const { fixture } = harness;
   fixture.reply = body => `${memberOf(body) ?? '成员'}（${body.model}）的发言。`;
   const running = await harness.launch();
@@ -436,12 +436,24 @@ test('new discussion: each member gets its model right above the goal, from any 
   await page.getByRole('button', { name: '连接…' }).click();
   await connect(running, /^DeepSeek/u);
 
-  // Right after connecting: no click away from the members and their models.
-  const row = (name: string) => page.locator('.roster-row', { hasText: name });
+  const rows = () => page.locator('.setup-row b').allTextContents();
   const model = (name: string) => page.getByRole('combobox', { name: `${name} 的模型` });
-  await expect(page.getByText('每位成员可以用不同的模型。改动对这场和之后的讨论生效，已有讨论不变。')).toBeVisible();
-  await expect(page.locator('.roster-row')).toHaveCount(3);
-  await capture(running, 'roster-first', '新讨论页：目标上方就是参与成员，每行有模型下拉框、参与开关和编辑。只连了一家时，下面有“连接更多模型服务”。');
+  const mode = (name: string) => page.locator('.setup-seg').getByRole('button', { name, exact: true });
+  const count = page.locator('.stepper-value');
+  const pick = async (name: string, service: string, id: string) => {
+    const value = await model(name).locator(`optgroup[label="${service}"] option`, { hasText: `（${id}）` }).getAttribute('value');
+    await model(name).selectOption(value!);
+    await expect(model(name)).toBeEnabled();
+    await expect(model(name)).toHaveValue(value!);
+  };
+  const started = () => fixture.requests.filter(request => request.maxTokens !== 8);
+
+  // Opens on free discussion with three; everything is on the page without a click.
+  await expect(mode('自由讨论')).toHaveAttribute('aria-pressed', 'true');
+  await expect(count).toHaveText('3');
+  expect(await rows()).toEqual(['起草者', '审查者', '综合者']);
+  await expect(page.getByRole('switch')).toHaveCount(0);
+  await capture(running, 'setup-first', '新讨论页：讨论方式、几位成员、成员和模型从上到下，输入框在最下面，打开就看得见。默认自由讨论、3 人。');
 
   // A goal typed first survives connecting another service from here.
   const box = page.getByRole('textbox', { name: '讨论目标' });
@@ -449,79 +461,134 @@ test('new discussion: each member gets its model right above the goal, from any 
   await page.keyboard.press('Meta+A');
   await running.ime('shidian', '校园跑腿的试点方案');
   await page.getByRole('button', { name: '连接更多模型服务' }).click();
-  await capture(running, 'roster-connect', '从新讨论页打开连接向导。');
   await connect(running, /^Kimi/u);
   await expect(box, 'The goal is still there').toHaveValue('校园跑腿的试点方案');
-  await expect(page.locator('dialog[open]')).toHaveCount(0);
-  await expect(page.locator('.roster-row')).toHaveCount(3);
   await expect(model('审查者').locator('optgroup[label="Kimi"] option').first()).toBeAttached();
   await expect(page.getByRole('button', { name: '连接更多模型服务' })).toHaveCount(0);
-  await capture(running, 'roster-connected', '连接后回到同一页，目标还在，下拉框里已经有 Kimi。');
 
-  // A third service from settings; back on the page the draft is still there.
-  await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
-  await page.getByRole('button', { name: '添加服务' }).click();
-  await connect(running, /^智谱 GLM/u);
-  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
-  await newDiscussion(running, roomName, '校园跑腿的试点方案');
-  const pick = async (name: string, service: string, id: string) => {
-    const value = await model(name).locator(`optgroup[label="${service}"] option`, { hasText: `（${id}）` }).getAttribute('value');
-    await model(name).selectOption(value!);
-    await expect(model(name)).toBeEnabled();
-    await expect(model(name)).toHaveValue(value!);
-  };
+  // Two-person dialogue: only two rows, each on its own service.
+  await mode('双人对话').click();
+  await expect(page.locator('.setup-row')).toHaveCount(2);
+  await expect(page.getByText('固定 2 人')).toBeVisible();
+  await expect(page.getByRole('button', { name: '增加一位成员' })).toHaveCount(0);
   await pick('起草者', 'DeepSeek', 'deepseek-v4-pro');
   await pick('审查者', 'Kimi', 'kimi-k3');
-  await pick('综合者', '智谱 GLM', 'glm-5.2');
-  await capture(running, 'roster-three', '三位成员就地选了三家服务的模型，选完立刻保存。');
+  await capture(running, 'setup-dialogue', '双人对话：固定 2 人，只有两行，分别选了不同服务的模型。');
   await theme(running, 'dark');
-  await capture(running, 'roster-three-dark', '深色主题：参与成员。');
+  await capture(running, 'setup-dialogue-dark', '深色主题：双人对话。');
   await theme(running, 'light');
-  const [saved] = harness.sql("SELECT display_name AS name, model_id AS model FROM agents ORDER BY display_order");
-  expect(saved).toEqual([{ name: '起草者', model: 'deepseek-v4-pro' }, { name: '审查者', model: 'kimi-k3' }, { name: '综合者', model: 'glm-5.2' }]);
-
-  // One taken out and back, as a person would before starting.
-  await page.getByRole('switch', { name: '审查者 参与讨论' }).click();
-  await expect(row('审查者')).toContainText('已暂停参与');
-  await expect(page.getByText('2 位成员会按', { exact: false })).toBeVisible();
-  await page.getByRole('switch', { name: '审查者 参与讨论' }).click();
-  await expect(page.getByText('3 位成员会按', { exact: false })).toBeVisible();
-
   await page.getByRole('button', { name: '开始讨论' }).click();
   await statusHas(page, '已完成');
-  await expect(page.locator('.roster')).toHaveCount(0);
-  await capture(running, 'roster-finished', '讨论开始后列表收起，不占讨论区；服务收到的 model 各自正确。');
-  const sent = discussionRequests(fixture);
-  expect(sent.map(request => [request.service, request.raw.model])).toEqual([['deepseek', 'deepseek-v4-pro'], ['kimi', 'kimi-k3'], ['glm', 'glm-5.2']]);
+  await expect(page.locator('.setup')).toHaveCount(0);
+  await capture(running, 'setup-dialogue-finished', '讨论开始后这些控件收起，不占讨论区。');
+  let sent = started();
+  expect(new Set(sent.map(request => `${memberOf(request as never)}|${request.service}|${request.raw.model}`))).toEqual(new Set(['起草者|deepseek|deepseek-v4-pro', '审查者|kimi|kimi-k3']));
 
-  // A change now applies to the next one; the one that ran keeps what it used.
-  await newDiscussion(running, roomName, '第二场');
-  await pick('起草者', 'DeepSeek', 'deepseek-flash');
-  const [frozen] = harness.sql("SELECT members_snapshot AS members FROM workflow_runs");
-  expect(JSON.stringify(frozen)).toContain('deepseek-v4-pro');
-  expect(JSON.stringify(frozen)).not.toContain('"modelId":"deepseek-flash"');
+  // Free discussion with five: two more members are made from the role templates.
+  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  await newDiscussion(running, roomName, '第二场：五个人讨论');
+  await mode('自由讨论').click();
+  await expect(count).toHaveText('3');
+  await page.getByRole('button', { name: '增加一位成员' }).click();
+  await expect(count).toHaveText('4');
+  await page.getByRole('button', { name: '增加一位成员' }).click();
+  await expect(count).toHaveText('5');
+  expect(await rows()).toEqual(['起草者', '审查者', '综合者', '反方', '核查员']);
+  await pick('综合者', 'Kimi', 'kimi-k3.1-pro');
+  await pick('反方', 'Kimi', 'kimi-k3');
+  await pick('核查员', 'DeepSeek', 'deepseek-flash');
+  await capture(running, 'setup-five', '自由讨论改成 5 人：多出来的两位按角色模板新建，模型各选各的。');
+  const before = fixture.requests.length;
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await statusHas(page, '已完成');
+  sent = fixture.requests.slice(before);
+  expect(sent.map(request => request.raw.model)).toEqual(['deepseek-v4-pro', 'kimi-k3', 'kimi-k3.1-pro', 'kimi-k3', 'deepseek-flash']);
+
+  // Back to three and to five: the two who stepped out return as they were.
+  await newDiscussion(running, roomName, '第三场');
+  await page.getByRole('button', { name: '减少一位成员' }).click();
+  await expect(count).toHaveText('4');
+  await page.getByRole('button', { name: '减少一位成员' }).click();
+  await expect(count).toHaveText('3');
+  expect(await rows()).toEqual(['起草者', '审查者', '综合者']);
+  await capture(running, 'setup-three', '减回 3 人：只显示前三位，多出来的两位暂不参与，配置保留。');
+  const [kept] = harness.sql("SELECT display_name AS name, enabled, model_id AS model FROM agents WHERE display_name IN ('反方','核查员') ORDER BY display_order");
+  expect(kept).toEqual([{ name: '反方', enabled: 0, model: 'kimi-k3' }, { name: '核查员', enabled: 0, model: 'deepseek-flash' }]);
+  await page.getByRole('button', { name: '增加一位成员' }).click();
+  await expect(count).toHaveText('4');
+  await page.getByRole('button', { name: '增加一位成员' }).click();
+  await expect(count).toHaveText('5');
+  await expect(model('反方').locator('option:checked')).toContainText('kimi-k3');
+  await expect(model('核查员').locator('option:checked')).toContainText('deepseek-flash');
+
+  // The room remembers: reload, and it is still free discussion with five.
+  await page.reload();
+  await page.waitForSelector('.sidebar');
+  await newDiscussion(running, roomName, '第三场');
+  await expect(mode('自由讨论')).toHaveAttribute('aria-pressed', 'true');
+  await expect(count).toHaveText('5');
+
+  // The review chain: the writer and the reviewer by role, and the page names them.
+  await mode('审查修订链').click();
+  await expect(page.locator('.setup-row')).toHaveCount(2);
+  await expect(page.getByText('起草者写、审查者挑错', { exact: false })).toBeVisible();
+  await capture(running, 'setup-review', '审查修订链：固定 2 人，写明谁写、谁挑错，按实际发言的人显示。');
+  const third = fixture.requests.length;
+  await page.getByRole('button', { name: '开始讨论' }).click();
+  await statusHas(page, '已完成', 60_000);
+  sent = fixture.requests.slice(third);
+  expect(sent.map(request => [memberOf(request as never), request.raw.model])).toEqual([['起草者', 'deepseek-v4-pro'], ['审查者', 'kimi-k3'], ['起草者', 'deepseek-v4-pro'], ['审查者', 'kimi-k3'], ['起草者', 'deepseek-v4-pro']]);
+
+  // Every step of the flow can still be adjusted, behind one link.
+  await newDiscussion(running, roomName, '第四场');
+  await mode('深度辩论').click();
+  await expect(count).toHaveText('5');
+  await page.getByRole('button', { name: '自定义流程' }).click();
+  const dialog = page.getByRole('dialog', { name: '讨论方式' });
+  await expect(dialog.getByLabel('最多回合')).toHaveValue('20');
+  await expect(dialog).toContainText('立论');
+  await dialog.getByLabel('最多回合').fill('24');
+  await expect(dialog.getByRole('button', { name: '用于这个房间' })).toBeEnabled();
+  await capture(running, 'setup-custom', '“自定义流程”打开原来的细调：阶段、轮数、上限一个都没少。');
+  await dialog.getByRole('button', { name: '用于这个房间' }).click();
+  await page.getByRole('button', { name: '减少一位成员' }).click();
+  await expect(count).toHaveText('4');
+  const stored = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith('roundtable.workflow.'))?.[1]);
+  expect(JSON.parse(stored!).draft.turnLimit, 'The adjusted limit is kept').toBe('24');
 
   // A narrow window and a full room: the rows fit and the goal stays on screen.
   const inView = () => page.evaluate(() => { const box = document.querySelector('.dock')!.getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; });
+  const allOnScreen = () => page.evaluate(() => { const area = document.querySelector('.discussion-empty')!; return area.scrollHeight <= area.clientHeight + 1; });
+  await mode('自由讨论').click();
+  await expect(mode('自由讨论')).toHaveAttribute('aria-pressed', 'true');
+  await expect(count, 'Between adjustable modes the number stays').toHaveText('4');
+  await expect(page.getByText('没有找到这个房间的讨论方式', { exact: false }), 'Choosing free discussion is not a lost mode').toHaveCount(0);
+  await page.getByRole('button', { name: '减少一位成员' }).click();
+  await expect(count).toHaveText('3');
+  await size(running, 1280, 800);
+  expect(await allOnScreen(), 'The three steps and the box fit one screen at 1280×800').toBe(true);
+  expect(await inView()).toBe(true);
   await size(running, 800);
   expect(await noSideScroll(running), 'No horizontal scroll at 800').toBe(true);
   expect(await inView(), 'The goal box is on screen').toBe(true);
-  await capture(running, 'roster-narrow', '800 宽：没有横向滚动，输入框在屏幕内。');
+  await capture(running, 'setup-narrow', '800 宽：没有横向滚动，输入框在屏幕内。');
   await theme(running, 'dark');
-  await capture(running, 'roster-narrow-dark', '800 宽、深色。');
+  await capture(running, 'setup-narrow-dark', '800 宽、深色。');
   await theme(running, 'light');
-  await size(running, 1280);
-  const room = (await running.api<{ id: string }[]>('rooms.listRooms'))[0]!;
-  const provider = (await running.api<{ id: string; name: string }[]>('settings.listProviderSummaries')).find(item => item.name === 'DeepSeek')!;
-  for (let index = 4; index <= 8; index++) await running.api('rooms.createAgent', { roomId: room.id, displayName: `成员${index}`, roleTemplateId: '审查', systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', displayOrder: index });
-  await page.locator('.sidebar .sb-item', { hasText: '用量' }).click();
-  await newDiscussion(running, roomName, '第二场');
-  await expect(page.locator('.roster-row')).toHaveCount(8);
+  await size(running, 1280, 800);
+  for (const expected of ['4', '5', '6', '7', '8']) {
+    await page.getByRole('button', { name: '增加一位成员' }).click();
+    await expect(count).toHaveText(expected);
+  }
+  await expect(page.getByRole('button', { name: '增加一位成员' })).toBeDisabled();
+  expect(await rows()).toEqual(['起草者', '审查者', '综合者', '反方', '核查员', '成员 6', '成员 7', '成员 8']);
   expect(await inView(), 'The goal box stays on screen with eight members').toBe(true);
-  expect(await noSideScroll(running), 'No horizontal scroll with eight members').toBe(true);
-  await capture(running, 'roster-eight', '8 位成员：列表在输入框上方滚动，输入框始终在屏幕内。');
+  expect(await allOnScreen(), 'Eight members scroll inside their own list').toBe(true);
+  expect(await page.locator('.setup-list').evaluate(list => list.scrollHeight > list.clientHeight)).toBe(true);
+  expect(await noSideScroll(running)).toBe(true);
+  await capture(running, 'setup-eight', '8 位成员：成员列表自己滚动，三步和输入框都在屏幕内。新成员的模型是默认模型，可以逐个改。');
   await theme(running, 'dark');
-  await capture(running, 'roster-eight-dark', '8 位成员、深色。');
+  await capture(running, 'setup-eight-dark', '8 位成员、深色。');
   await theme(running, 'light');
   if (screens) writeFileSync(join(screens, 'captions.json'), JSON.stringify(captions, null, 1));
   await running.quit();

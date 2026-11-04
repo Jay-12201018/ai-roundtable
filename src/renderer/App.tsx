@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useStore } from 'zustand';
 import { Check, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentConfiguration, ProviderSettingsApiContract, ProviderSummary } from '../shared/contracts/configuration';
-import { MemberRoster, memberBlocked, RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
-import { defaultModeLabel, WorkflowDialog, draftProblems, readRoomWorkflow, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
+import { NewDiscussionSetup, memberBlocked, RoomDialog, RoomPage, createStarterRoom, defaultModelFor } from './features/rooms';
+import { defaultModeLabel, WorkflowDialog, draftProblems, readRoomCount, readRoomWorkflow, speakersOf, stageLabels, templateLabel, workflowConfigFromDraft, workflowPlanSummary, workflowTemplateLabels,
   writeRoomWorkflow, type WorkflowCheck, type WorkflowDraft, type WorkflowMember } from './features/workflows';
 import { errorCodeSchema } from '../shared/schemas/error';
 import { ConnectWizard, SettingsPage, useReadiness, type ConnectedRoom, type SettingsSection } from './features/settings';
@@ -159,10 +159,12 @@ export function App() {
     return () => { cancelled = true; };
   }, [api, roomId, page, generation, roomMembersNeeded, workflowVersion]);
   const reloadRoomMembers = useCallback(async () => {
-    if (!roomId) return;
+    if (!roomId) return [];
     const members = await api.rooms.listAgentConfigurations({ roomId });
-    setWorkflowMembers({ roomId, members: Array.isArray(members) ? members : [] });
+    const list = Array.isArray(members) ? members : [];
+    setWorkflowMembers({ roomId, members: list });
     void directory.reload();
+    return list.filter(member => !member.archivedAt);
   }, [api, roomId]);
   const modeMembers: WorkflowMember[] = roomId && workflowMembers?.roomId === roomId
     ? workflowMembers.members.filter(member => !member.archivedAt).map(member => ({ id: member.id, name: member.displayName, enabled: member.enabled, role: member.roleTemplateId })) : [];
@@ -305,7 +307,8 @@ export function App() {
   // D116: a room whose last discussion used a workflow, with nothing remembered here, lost its saved mode: say so once.
   const latestRun = directory.runs[0]?.id;
   useEffect(() => {
-    if (!roomId || stored.draft || stored.damaged || !latestRun) return;
+    // Having chosen free discussion on the new-discussion page is a choice, not a lost mode.
+    if (!roomId || stored.draft || stored.damaged || !latestRun || readRoomCount(roomId) !== undefined) return;
     let current = true;
     void Promise.resolve().then(() => api.run.getSnapshot(latestRun)).then(last => {
       if (current && last?.roomId === roomId && last.workflow) setLostWorkflow({ roomId, label: templateLabel(last.workflow.templateId) });
@@ -342,7 +345,7 @@ export function App() {
   const roomMembers = roomId && workflowMembers && workflowMembers.roomId === roomId ? workflowMembers.members.filter(member => !member.archivedAt) : undefined;
   const enabledMembers = roomMembers?.filter(member => member.enabled);
   // Who stands in the way of starting; the list above the goal says why, on that member's row.
-  const blockedMembers = snapshot ? [] : (enabledMembers ?? []).filter(member => memberBlocked(member, providers, readiness.rows));
+  const blockedMembers = snapshot || !roomMembers ? [] : speakersOf(stored.draft, roomMembers).filter(member => memberBlocked(member, providers, readiness.rows));
   const defaultMode = defaultModeLabel(enabledMembers?.length);
   const workflowLabel = stored.draft ? templateLabel(stored.draft.template) : defaultMode;
   const runMembers = snapshot?.execution?.membersSnapshot?.map(member => member.displayName) ?? enabledMembers?.map(member => member.displayName);
@@ -375,7 +378,7 @@ export function App() {
     : stored.damaged ? `这个房间保存的讨论方式读不出来，这次按「${defaultMode}」进行。`
       : lostWorkflow?.roomId === roomId && !stored.draft ? `这台电脑上没有找到这个房间的讨论方式（例如清理过浏览器数据），已退回「${defaultMode}」${lostWorkflow?.label ? `；上次用的是「${lostWorkflow.label}」` : ''}。` : undefined;
   const taskNotices = (error && !snapshot && syncStatus !== 'error') || modeNotice || workflowMembersError || otherLive || blockedMembers.length > 0 ? <div className="composer-alerts">
-    {blockedMembers.length > 0 && <p role="note" className="composer-blocked">还不能开始：{blockedMembers.map(member => member.displayName).join('、')}的模型要先处理，原因写在上面的成员列表里。</p>}
+    {blockedMembers.length > 0 && <p role="note" className="composer-blocked">还不能开始：{blockedMembers.map(member => member.displayName).join('、')}的模型要先处理，原因写在上面的成员那一行。</p>}
     {otherLive && <p role="alert" className="composer-blocked">「{otherLive.task}」还没有结束（{statusLabels[otherLive.status] ?? '进行中'}）。同一时间只能进行一场讨论：先回到那场讨论停止它，或等它结束，再开始或继续别的讨论。<button type="button" className="link-btn" onClick={() => selectRun(otherLive.runId)}>回到那场讨论</button></p>}
     {error && !snapshot && syncStatus !== 'error' && !otherLive && <p role="alert" className="field-error">{error}</p>}
     {modeNotice && <p role={workflowNotice ? 'alert' : 'note'} className={workflowNotice ? 'composer-blocked' : 'composer-target'}>{modeNotice}<button type="button" className="link-btn" onClick={() => setWorkflowOpen(true)}>更改讨论方式</button></p>}
@@ -393,7 +396,7 @@ export function App() {
       starting={pending?.command === 'start' || startChecking} onStart={() => void startRun()} notices={<>{syncNotices}{taskNotices}</>}
       placeholder={snapshot ? '在这个房间开始新的讨论，写下目标和约束…' : undefined}
       settings={{ outputLimitText, setOutputLimitText, outputLimitValid: outputTokenLimit !== undefined,
-        stepMode, setStepMode, workflowLabel, onOpenWorkflow: roomId ? () => setWorkflowOpen(true) : undefined }} />;
+        stepMode, setStepMode, workflowLabel, onOpenWorkflow: roomId && snapshot ? () => setWorkflowOpen(true) : undefined }} />;
   })();
 
   const recentTasks = [...new Set(directory.runs.map(run => run.task).filter((task): task is string => Boolean(task?.trim())))].slice(0, 3);
@@ -416,13 +419,11 @@ export function App() {
       {!directory.rooms?.length && <Button variant="primary" icon={Plus} disabled={!bootReady} onClick={() => setRoomDialog(true)}>新建房间</Button>}</div></div>;
     return <div className="discussion-empty is-new"><div className="empty-room">
       <h2>这场讨论要解决什么？</h2>
-      <p>{enabledMembers === undefined ? '正在读取房间成员…'
-        : enabledMembers.length === 0 ? '这个房间还没有参与讨论的成员，先在下面添加或打开一位。'
-        : `${enabledMembers.length} 位成员会按「${workflowLabel}」依次发言，不会同时生成。你随时可以暂停、插话或点名。`}</p>
-      {recentTasks.length > 0 && <div className="suggest" aria-label="最近的讨论目标">{recentTasks.map(task => <button key={task} type="button" title={`填入：${task}`} onClick={() => session.store.getState().setDraft(task)}>{task}</button>)}</div>}
-      {roomMembers && <MemberRoster api={api.rooms} roomId={roomId} members={roomMembers} providers={providers} readiness={readiness.rows} readOnly={Boolean(room?.archivedAt)}
-        onChanged={reloadRoomMembers} onOpenSettings={() => openSettings()} onConnectMore={() => { setConnectKeepsRoom(true); setConnectOpen(true); }}
+      {!roomMembers && <p>正在读取房间成员…</p>}
+      {roomMembers && <NewDiscussionSetup api={api.rooms} roomId={roomId} members={roomMembers} draft={stored.draft} providers={providers} readiness={readiness.rows} readOnly={Boolean(room?.archivedAt)}
+        reload={reloadRoomMembers} onDraft={saveWorkflow} onCustomFlow={() => setWorkflowOpen(true)} onOpenSettings={() => openSettings()} onConnectMore={() => { setConnectKeepsRoom(true); setConnectOpen(true); }}
         onShown={() => refreshStaleModels(settingsApi, providers)} />}
+      {recentTasks.length > 0 && <div className="suggest" aria-label="最近的讨论目标">{recentTasks.map(task => <button key={task} type="button" title={`填入：${task}`} onClick={() => session.store.getState().setDraft(task)}>{task}</button>)}</div>}
     </div></div>;
   })();
 

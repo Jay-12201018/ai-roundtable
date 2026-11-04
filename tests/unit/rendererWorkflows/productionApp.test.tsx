@@ -26,12 +26,13 @@ function fixture(runs: Array<{ id: string; task: string }> = []) {
 }
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 const ready = () => waitFor(() => expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(false));
-const chip = () => screen.getByRole('button', { name: /^讨论方式：/u });
+const chip = () => screen.getByRole('button', { name: '自定义流程' });
+const mode = () => document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent;
 
 describe('D116 the room remembers its discussion mode; Main checks it at every start', () => {
   it.each(['free-chat', 'two-model-dialogue', 'review-revision', 'deep-debate'] as const)('%s: checked in the dialog, remembered for the room, checked again at start', async template => {
     const f = fixture(); render(<App />); await ready();
-    expect(chip().textContent).toContain('自由讨论 · 3 回合');
+    expect(mode()).toBe('自由讨论');
     fireEvent.click(chip());
     const dialog = await screen.findByRole('dialog', { name: '讨论方式' });
     const label = { 'free-chat': '自由讨论', 'two-model-dialogue': '双人对话', 'review-revision': '审查修订链', 'deep-debate': '深度辩论' }[template];
@@ -40,7 +41,7 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
     expect(f.api.run.start).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: '用于这个房间' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '讨论方式' })).toBeNull());
-    expect(chip().textContent).toContain(label);
+    expect(mode()).toBe(label);
     expect(JSON.parse(localStorage.getItem('roundtable.workflow.room')!)).toMatchObject({ version: 1, draft: { template } });
     const checks = f.previewWorkflow.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
@@ -56,7 +57,7 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
     draft.phases[1].participants = ['gone']; draft.phases[3].participants = ['gone'];
     localStorage.setItem('roundtable.workflow.room', JSON.stringify({ version: 1, draft }));
     const f = fixture(); render(<App />); await ready();
-    expect(chip().textContent).toContain('审查修订链');
+    expect(mode()).toBe('审查修订链');
     fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
     await screen.findByText(/讨论方式「审查修订链」需要调整：有一位成员已经不在这个房间里/u);
     expect(f.previewWorkflow).not.toHaveBeenCalled(); expect(f.api.run.start).not.toHaveBeenCalled();
@@ -117,7 +118,7 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
     fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
     await act(async () => late.resolve({ previewId: 'late', snapshot: compileWorkflow(workflowConfigFromDraft(createWorkflowDraft('free-chat', members)), 'room', agents) }));
     expect(localStorage.getItem('roundtable.workflow.room')).toBeNull(); expect(f.api.run.start).not.toHaveBeenCalled();
-    expect(chip().textContent).toContain('自由讨论 · 3 回合');
+    expect(mode()).toBe('自由讨论');
   });
 });
 
