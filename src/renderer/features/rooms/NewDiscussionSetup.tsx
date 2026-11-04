@@ -95,9 +95,9 @@ export function NewDiscussionSetup({ api, roomId, members, draft, providers, rea
     <div className="setup-line"><span className="setup-label">几位成员</span>
       <div className="setup-control">
         {fixed ? <span className="setup-fixed">固定 2 人</span>
-          : <span className="stepper" role="group" aria-label="几位成员">
+          : <span className="member-count" role="group" aria-label="几位成员">
             <IconButton size="sm" icon={Minus} label="减少一位成员" disabled={disabled || count <= MIN_PARTICIPANTS} onClick={() => void arrange(template, count - 1)} />
-            <output className="stepper-value tabular" aria-live="polite">{count}</output>
+            <output className="member-count-value tabular" aria-live="polite">{count}</output>
             <IconButton size="sm" icon={Plus} label="增加一位成员" disabled={disabled || count >= MAX_PARTICIPANTS} onClick={() => void arrange(template, count + 1)} /></span>}
       </div></div>
     <div className="setup-members"><span className="setup-label">成员和模型</span>

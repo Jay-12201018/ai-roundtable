@@ -84,71 +84,123 @@
   "caption": "深色主题：房间里的成员。"
  },
  {
-  "file": "22-pick-model.png",
+  "file": "22-setup-blocked.png",
+  "caption": "开始按钮不可用时：输入框上方写明是哪几位成员，原因写在各自那一行，下拉框就地可改。"
+ },
+ {
+  "file": "23-pick-model.png",
   "caption": "连接通义千问：模型下拉框始终显示，默认项看得见，这里改成 Qwen3.8 Flash；每个模型都有一句说明。"
  },
  {
-  "file": "23-picked-discussion.png",
-  "caption": "第一场讨论：写明三位成员都用 Qwen3.8 Flash。"
+  "file": "24-picked-discussion.png",
+  "caption": "第一场讨论：三位成员的模型下拉框都显示 Qwen3.8 Flash，就在目标上方。"
  },
  {
-  "file": "24-picked-members.png",
+  "file": "25-picked-members.png",
   "caption": "房间：三位成员都显示 Qwen3.8 Flash。"
  },
  {
-  "file": "25-picked-member-dialog.png",
+  "file": "26-picked-member-dialog.png",
   "caption": "编辑成员：模型按服务分组，这位成员单独换成 Qwen3.7 Max。"
  },
  {
-  "file": "26-picked-default.png",
+  "file": "27-picked-default.png",
   "caption": "设置 › 模型服务：随时可以改默认模型，已有成员不变。"
  },
  {
-  "file": "27-picked-members-dark.png",
+  "file": "28-picked-members-dark.png",
   "caption": "深色主题：成员各自的模型。"
  },
  {
-  "file": "28-picked-finished.png",
+  "file": "29-picked-finished.png",
   "caption": "讨论结束：服务收到的 model 就是所选的模型。"
  },
  {
-  "file": "29-multimodal-wizard.png",
+  "file": "30-setup-first.png",
+  "caption": "新讨论页：讨论方式、几位成员、成员和模型从上到下，输入框在最下面，打开就看得见。默认自由讨论、3 人。"
+ },
+ {
+  "file": "31-setup-dialogue.png",
+  "caption": "双人对话：固定 2 人，只有两行，分别选了不同服务的模型。"
+ },
+ {
+  "file": "32-setup-dialogue-dark.png",
+  "caption": "深色主题：双人对话。"
+ },
+ {
+  "file": "33-setup-dialogue-finished.png",
+  "caption": "讨论开始后这些控件收起，不占讨论区。"
+ },
+ {
+  "file": "34-setup-five.png",
+  "caption": "自由讨论改成 5 人：多出来的两位按角色模板新建，模型各选各的。"
+ },
+ {
+  "file": "35-setup-three.png",
+  "caption": "减回 3 人：只显示前三位，多出来的两位暂不参与，配置保留。"
+ },
+ {
+  "file": "36-setup-review.png",
+  "caption": "审查修订链：固定 2 人，写明谁写、谁挑错，按实际发言的人显示。"
+ },
+ {
+  "file": "37-setup-custom.png",
+  "caption": "“自定义流程”打开原来的细调：阶段、轮数、上限一个都没少。"
+ },
+ {
+  "file": "38-setup-narrow.png",
+  "caption": "800 宽：没有横向滚动，输入框在屏幕内。"
+ },
+ {
+  "file": "39-setup-narrow-dark.png",
+  "caption": "800 宽、深色。"
+ },
+ {
+  "file": "40-setup-eight.png",
+  "caption": "8 位成员：成员列表自己滚动，三步和输入框都在屏幕内。新成员的模型是默认模型，可以逐个改。"
+ },
+ {
+  "file": "41-setup-eight-dark.png",
+  "caption": "8 位成员、深色。"
+ },
+ {
+  "file": "42-multimodal-wizard.png",
   "caption": "多模态模型可以选，说明里写明多模态；下面写清目前只用文字讨论。"
  },
  {
-  "file": "30-multimodal-member.png",
+  "file": "43-multimodal-member.png",
   "caption": "编辑成员：选中多模态模型时同样写明只用文字。"
  },
  {
-  "file": "31-discover-wizard.png",
+  "file": "44-discover-wizard.png",
   "caption": "服务商列表多了一个本品牌新模型：排在内置模型后面，只显示模型 ID；其他品牌和翻译模型都没有进来。"
  },
  {
-  "file": "32-discover-members.png",
+  "file": "45-discover-members.png",
   "caption": "三位成员用的就是选中的新模型。"
  },
  {
-  "file": "33-discover-services.png",
+  "file": "46-discover-services.png",
   "caption": "服务卡片：写明模型列表来自服务商，旁边是“刷新模型列表”；上限和内置模型一样可以改。"
  },
  {
-  "file": "34-discover-delisted.png",
+  "file": "47-discover-delisted.png",
   "caption": "模型从服务商列表消失：成员的选择不变，写明可能已下线，由主持人决定。"
  },
  {
-  "file": "35-discover-delisted-dark.png",
+  "file": "48-discover-delisted-dark.png",
   "caption": "深色主题：模型可能已下线。"
  },
  {
-  "file": "36-thinking-wait.png",
+  "file": "49-thinking-wait.png",
   "caption": "思考期间：<think> 块和 reasoning_content 都不显示；第二位成员还没有正文，写明正在思考或生成，不像卡住。"
  },
  {
-  "file": "37-quota-used-up.png",
+  "file": "50-quota-used-up.png",
   "caption": "额度用完：第三位成员 8192 全用在思考上，没有正文。写明原因和解决办法，旁边就是“重新生成”。"
  },
  {
-  "file": "38-quota-regenerated.png",
+  "file": "51-quota-regenerated.png",
   "caption": "调高最大输出后重新生成：这次请求按 16000 发出，写出了正文。"
  }
 ]

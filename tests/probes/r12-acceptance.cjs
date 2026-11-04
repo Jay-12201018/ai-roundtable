@@ -287,7 +287,7 @@ async function main() {
 
   // The 3-token mode was only for this path: back to the room's default before the next one.
   await click('新讨论', { scope: '.controls' }); await click('自定义流程'); await click('恢复默认');
-  await until(`document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent === '自由讨论' && document.querySelector('.stepper-value')?.textContent === '3'`, 'default mode restored');
+  await until(`document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent === '自由讨论' && document.querySelector('.member-count-value')?.textContent === '3'`, 'default mode restored');
   // Path 5b: Stop keeps the partial text; an explicit retry then succeeds.
   // The production Mock finishes a 3-turn Run in about 1.5 s, so Stop (now two clicks, D098) can lose the race to the
   // end of the Run. Each attempt waits for explicit state: the first turn streaming, then the confirmation, then a

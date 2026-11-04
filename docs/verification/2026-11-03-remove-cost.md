@@ -1,6 +1,6 @@
 # 移除费用、只用内置目录：验收记录
 
-分支 `codex/remove-cost-open-models`。下表的全量结果在 `5abd3e9` 上；之后的修改（migration 里不留类型名、子模型补全、自动发现）只跑了受影响的部分，结果见“最后一轮”，全量由总控重跑。决策见 [DECISIONS](../DECISIONS.md) D133–D143。
+分支 `codex/remove-cost-open-models`。下表全部在 `f184a85` 上执行；之后只把“几位成员”的样式类改了名（和全局已有的类撞名，导致这一行对不齐），重跑了 typecheck、受影响的单元测试、`tests/e2e/mixed-providers.spec.ts`、r12-acceptance 和扫描，并增加本记录和截图。决策见 [DECISIONS](../DECISIONS.md) D133–D144。
 
 ## 第 1 层：自动化
 
@@ -8,10 +8,10 @@
 |---|---|
 | `pnpm run typecheck` | exit 0 |
 | `node scripts/scan-public-terms.cjs <外部词表>` | exit 0，命中 0 处 |
-| `pnpm test` | exit 0，112 个文件，1700 条通过 |
+| `pnpm test` | exit 0，114 个文件，1846 条通过 |
 | `pnpm build` | exit 0 |
-| `pnpm rehearse:upgrade <临时 v13 副本>` | exit 0，`schema_migrations` 13 → 14，输入文件没有变化 |
-| `pnpm e2e` | exit 0，26 条通过 |
+| `pnpm rehearse:upgrade <临时 v13 副本>`（旧 v11 文本和新 v11 文本各建一份） | 都 exit 0，`schema_migrations` 13 → 14，输入文件没有变化 |
+| `pnpm e2e` | exit 0，30 条通过 |
 | `pnpm run pack` 后 `pnpm e2e:packaged` | exit 0，3 条通过 |
 | 全部探针 | 都 PASS，见下 |
 
@@ -19,18 +19,12 @@
 
 探针：r01（默认、`--r03-recovery`、`--joint-ui`），r09-electron（首次、重启），r09-native，r12-electron（首次、重启），r12-acceptance，r07r08-electron（首次、重启），r10-r11-electron（首次、重启），r16-batch2（首次、两次重启），r14、r15（首次、重启），r16-acceptance，r16-continuity，r16-longhistory，premerge（首次、重启）。
 
-上一轮（`a4926bd`）`key-safety.spec.ts` 和 premerge 重启阶段失败，两处都是断言还按旧行为写。改完断言后在 `5abd3e9` 上从头重跑了一遍。
+上一轮（`4106d7e`）r01 联合界面、r12-electron、r12-acceptance、r16-acceptance 失败：前三个是内置演示成员被算成“没选模型”，是真 bug，已修；最后一个是文案断言。
 
 ### 扫描结果
 
 - src、tests、scripts、package.json、README、SPEC 命中 0 处（总控审查后的修改提交上重跑）。词表从外部文件读取，脚本本身不含词表。
 - `pnpm-lock.yaml` 8 处传递依赖：`http-proxy-agent`、`https-proxy-agent`，来自打包工具的依赖链，不进应用。
-
-### 最后一轮（子模型和自动发现）
-
-未提交前的同一份代码上执行：typecheck、全量 `pnpm test`、build、`pnpm e2e`（28 条）、词表扫描（命中 0 处）都通过；探针 r01、r07r08、r09、r10-r11（含重启）、r16-batch2、premerge（含重启）通过。升级演练（新 v11 文本重建的 v13 副本）通过，`provider_model_discovery` 新建，输入文件没有变化。`pnpm e2e:packaged` 和其他探针没有在这一轮跑，由总控重跑。
-
-多模态这一项之后，只跑了 typecheck、受影响的测试、`tests/e2e/mixed-providers.spec.ts`（6 条）、build 和扫描。
 
 ## 第 2 层：实操
 

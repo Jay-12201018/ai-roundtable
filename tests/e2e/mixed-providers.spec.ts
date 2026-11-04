@@ -439,7 +439,7 @@ test('new discussion: choose how it runs and how many, give each one a model, an
   const rows = () => page.locator('.setup-row b').allTextContents();
   const model = (name: string) => page.getByRole('combobox', { name: `${name} 的模型` });
   const mode = (name: string) => page.locator('.setup-seg').getByRole('button', { name, exact: true });
-  const count = page.locator('.stepper-value');
+  const count = page.locator('.member-count-value');
   const pick = async (name: string, service: string, id: string) => {
     const value = await model(name).locator(`optgroup[label="${service}"] option`, { hasText: `（${id}）` }).getAttribute('value');
     await model(name).selectOption(value!);

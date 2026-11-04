@@ -43,7 +43,7 @@ describe('新讨论 › 三步', () => {
   it('opens on free discussion with three, one row each, and no switch to take anyone out', () => {
     show();
     expect(mode('自由讨论').getAttribute('aria-pressed')).toBe('true');
-    expect(document.querySelector('.stepper-value')?.textContent).toBe('3');
+    expect(document.querySelector('.member-count-value')?.textContent).toBe('3');
     expect(rowsShown()).toEqual(['起草者', '审查者', '综合者']);
     expect(screen.queryByRole('switch')).toBeNull();
     expect(screen.getByRole('button', { name: '编辑「审查者」' })).toBeTruthy();
@@ -65,7 +65,7 @@ describe('新讨论 › 三步', () => {
     const spy = show();
     for (let count = 4; count <= 8; count++) {
       fireEvent.click(plus());
-      await waitFor(() => expect(document.querySelector('.stepper-value')?.textContent).toBe(String(count)));
+      await waitFor(() => expect(document.querySelector('.member-count-value')?.textContent).toBe(String(count)));
     }
     expect(rowsShown()).toEqual(['起草者', '审查者', '综合者', '反方', '核查员', '成员 6', '成员 7', '成员 8']);
     expect(spy.create).toHaveBeenCalledTimes(5);

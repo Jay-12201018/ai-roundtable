@@ -32,8 +32,8 @@
 .empty-room p.setup-hint { margin: 6px 0 0; }
 .setup-link { margin-left: 8px; font-size: inherit; }
 .setup-fixed { font-size: 13px; line-height: 36px; color: var(--text); }
-.stepper { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; }
-.stepper-value { min-width: 24px; text-align: center; font-size: 14px; font-weight: 600; }
+.member-count { display: flex; align-items: center; gap: 4px; height: 36px; }
+.member-count-value { min-width: 24px; text-align: center; font-size: 14px; font-weight: 600; }
 .setup > .setup-members { flex: 0 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 10px 0 0; border-top: 1px solid var(--line); }
 .setup-list { flex: 0 1 auto; min-height: 44px; list-style: none; margin: 4px 0 0; padding: 0; overflow-y: auto; }
 .setup-row { display: grid; grid-template-columns: auto minmax(84px, .6fr) minmax(0, 2fr) auto; align-items: center; gap: 2px 10px; padding: 5px 0; }
