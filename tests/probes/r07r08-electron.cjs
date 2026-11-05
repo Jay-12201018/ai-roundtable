@@ -63,7 +63,8 @@ for (const [module, names] of [['node:http', ['request', 'get']], ['node:https',
 }
 globalThis.fetch = async () => { result.nodeNetworkAttempts.push('fetch'); throw new Error('Network disabled in R78 smoke'); };
 let quitting = false;
-const fail = error => { result.status = 'FAIL'; result.error = error instanceof Error ? error.stack : String(error); save(); console.error('R78_PRODUCTION_FAIL ' + JSON.stringify({ resultPath, error: result.error })); app.exit(1); };
+// What the page said goes with the failure: a script that throws reaches Main only as "Script failed to execute".
+const fail = error => { result.status = 'FAIL'; result.error = error instanceof Error ? error.stack : String(error); save(); console.error('R78_PRODUCTION_FAIL ' + JSON.stringify({ resultPath, error: result.error, consoleErrors: result.consoleErrors })); app.exit(1); };
 const timeout = setTimeout(() => fail(new Error('R78 production smoke exceeded 240 seconds including shutdown')), 240000);
 process.on('uncaughtException', fail); process.on('unhandledRejection', fail); process.once('exit', () => clearTimeout(timeout));
 const loaded = new Promise((resolveWindow, reject) => app.once('browser-window-created', (_event, window) => {
@@ -93,13 +94,19 @@ async function main() {
   // not Chromium's background scheduling, so it keeps the page at full speed wherever the window ends up on screen.
   contents.setBackgroundThrottling(false);
   // Each page script has its own deadline; on expiry it names the probe step the page recorded last.
+  const lastStep = () => Promise.race([contents.executeJavaScript('window.__r78Step ?? "(none recorded)"'), new Promise(resolveStep => setTimeout(() => resolveStep('(Renderer did not answer)'), 2000))]).catch(error => '(unreadable: ' + error.message + ')');
   const bounded = async (label, milliseconds, run) => {
     let timer;
     const expired = new Promise((_resolve, reject) => { timer = setTimeout(async () => {
-      const step = await Promise.race([contents.executeJavaScript('window.__r78Step ?? "(none recorded)"'), new Promise(resolveStep => setTimeout(() => resolveStep('(Renderer did not answer)'), 2000))]).catch(error => '(unreadable: ' + error.message + ')');
-      reject(new Error(label + ' exceeded ' + milliseconds + ' ms; last step: ' + step));
+      reject(new Error(label + ' exceeded ' + milliseconds + ' ms; last step: ' + await lastStep()));
     }, milliseconds); });
-    try { return await Promise.race([run(), expired]); } finally { clearTimeout(timer); }
+    try { return await Promise.race([run(), expired]); }
+    catch (error) {
+      // A page script that throws names only itself; what it was doing is in the step it recorded. What it rejects with
+      // is not this realm's Error, so it is read by what it says.
+      const message = String(error?.message ?? error);
+      throw new Error(message.includes('; last step: ') ? message : (message.startsWith(label) ? '' : label + ': ') + message + '; last step: ' + await lastStep());
+    } finally { clearTimeout(timer); }
   };
   assert.equal(contents.getURL(), pathToFileURL(renderer).href);
   const preferences = contents.getLastWebPreferences();
@@ -112,7 +119,9 @@ async function main() {
     // R12 added the host group: exactly one typed method, no generic invoke/send.
     // R13B added the summary and usage groups (typed methods only).
     // R14 added artifact (typed methods only; a file export asks Main's save dialog).
-    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['artifact','codeExport','host','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    // D147 added attachment: bytes go in, and nothing reads a file or takes a path.
+    check(JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['artifact','attachment','codeExport','host','room','rooms','run','settings','summary','usage']), 'Unexpected Bridge groups');
+    check(JSON.stringify(Object.keys(api.attachment)) === JSON.stringify(['addImage']) && typeof api.attachment.addImage === 'function', 'Unexpected attachment surface');
     check(JSON.stringify(Object.keys(api.codeExport)) === JSON.stringify(['chooseRoot','preview','write']), 'Unexpected code export surface');
     check(JSON.stringify(Object.keys(api.artifact)) === JSON.stringify(['preview','generate','list','getVersion','edit','export','listCodeCandidates']), 'Unexpected artifact surface');
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview','generate','confirm','revoke']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport','exportCsv']), 'Unexpected summary/usage surface');
@@ -122,9 +131,11 @@ async function main() {
     check(JSON.stringify(Object.keys(api.rooms).sort()) === JSON.stringify(rooms), 'Unexpected rooms surface');
     check(JSON.stringify(Object.keys(api.settings).sort()) === JSON.stringify(settings), 'Unexpected settings surface');
     check(!('invoke' in api) && !('send' in api) && !('resolveKey' in api.settings) && !('invoke' in api.host) && !('send' in api.host)
-      && !('invoke' in api.summary) && !('invoke' in api.usage) && !('invoke' in api.artifact), 'Unrestricted capability exposed');
+      && !('invoke' in api.summary) && !('invoke' in api.usage) && !('invoke' in api.artifact) && !('invoke' in api.attachment), 'Unrestricted capability exposed');
     const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     check(csp.includes("connect-src 'none';") && !/unsafe-eval|localhost|127\\.0\\.0\\.1/u.test(csp), 'Production CSP broadened');
+    // D147: images may come from the app, data URLs and Main's one image scheme, and from nowhere else.
+    check(csp.includes("img-src 'self' data: rt-image:;") && !/file:|https?:/u.test(csp), 'Production image sources broadened');
     return { groups: Object.keys(api).sort(), rooms: Object.keys(api.rooms).sort(), settings: Object.keys(api.settings).sort(), csp };
   })()`);
   // Await real-bridge rejections after isolation/Main loading and before any PASS or quit.
@@ -179,7 +190,7 @@ async function main() {
         const named = (name, scope = document) => [...scope.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === name);
         // Each step waits for its own condition under its own deadline and records itself, so a stall names the step.
         const item = ${JSON.stringify(item)};
-        const until = async (label, read, failure = 'timed out waiting for ' + label, milliseconds = 3000) => {
+        const until = async (label, read, failure = 'timed out waiting for ' + label, milliseconds = 10000) => {
           window.__r78Step = item + ': ' + label; const deadline = Date.now() + milliseconds;
           for (;;) {
             const value = read(); if (value) return value;

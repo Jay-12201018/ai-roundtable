@@ -168,7 +168,9 @@ async function probe() {
     // R12 added the host group: exactly one typed method, no generic invoke/send.
     // R13B added the summary and usage groups: typed methods only, still no generic invoke/send.
     // R14 added artifact: typed methods only; a file export asks Main's save dialog, the page never passes a path.
-    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['artifact', 'codeExport', 'host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
+    // D147 added attachment: bytes go in, and nothing reads a file or takes a path.
+    check(api && JSON.stringify(Object.keys(api).sort()) === JSON.stringify(['artifact', 'attachment', 'codeExport', 'host', 'room', 'rooms', 'run', 'settings', 'summary', 'usage']), 'Unexpected Bridge top-level API');
+    check(JSON.stringify(Object.keys(api.attachment)) === JSON.stringify(['addImage']) && typeof api.attachment.addImage === 'function' && !('invoke' in api.attachment) && !('send' in api.attachment), 'Unexpected attachment API');
     check(JSON.stringify(Object.keys(api.codeExport)) === JSON.stringify(['chooseRoot', 'preview', 'write']), 'Unexpected code export surface');
     check(JSON.stringify(Object.keys(api.artifact)) === JSON.stringify(['preview', 'generate', 'list', 'getVersion', 'edit', 'export', 'listCodeCandidates'])
       && Object.values(api.artifact).every(value => typeof value === 'function') && !('invoke' in api.artifact) && !('send' in api.artifact), 'Unexpected artifact API');
@@ -199,7 +201,11 @@ async function probe() {
       check(policy.includes("connect-src 'self' ws://127.0.0.1:5173;"), 'Incorrect dev HMR source');
       const nonce = scriptPolicy.match(/'nonce-([^']+)'/)[1];
       check([...document.scripts].every((script) => script.nonce === nonce), 'Vite scripts lack matching CSP nonce');
-    } else check(policy.includes("connect-src 'none';") && !/localhost|127\\.0\\.0\\.1|nonce-/u.test(policy), 'Production CSP retains development sources');
+    } else {
+      check(policy.includes("connect-src 'none';") && !/localhost|127\\.0\\.0\\.1|nonce-/u.test(policy), 'Production CSP retains development sources');
+      // D147: images may come from the app, data URLs and Main's one image scheme, and from nowhere else.
+      check(policy.includes("img-src 'self' data: rt-image:;") && !/file:|https?:/u.test(policy), 'Production image sources broadened');
+    }
     check(Array.isArray(window.__r01ProbeViolations), 'CSP monitor missing');
     const recoveryChecks = [];
     if (${recoveryMode}) {
