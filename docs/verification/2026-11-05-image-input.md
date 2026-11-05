@@ -111,9 +111,31 @@ ROUNDTABLE_E2E_SCREENS=docs/verification/image-input-screens ROUNDTABLE_E2E_REAL
 
 只改了 `ready()` 等什么，没有放宽断言，没有加 retry 或 skip。
 
+## 探针
+
+所有探针都走隔离目录，在 `3c70e4c` 上全部跑了一遍，共 49 步（含 r07r08 的 5 轮），退出码都是 0：`profile-guard`；`r01-electron` 及 `--r03-recovery`、`--joint-ui`，各加 `r01-sqlite`；`r07r08-electron` 主流程加 `--restart` 连续 5 轮，每轮两次 `r07r08-sqlite`；`r09-native`，`r09-electron` 加 `--restart` 和两次 `r09-sqlite`；`r10-r11-electron`、`r12-electron` 各加 `--restart`；`r12-acceptance`；`r14-acceptance`、`r15-acceptance` 各加 `--restart`；`r16-acceptance`；`r16-batch2-acceptance` 加 `--restart`、`--restart2`；`r16-continuity-acceptance`；`r16-longhistory`；`premerge-quality-acceptance` 加 `--restart`。
+
+审计类探针（`*-sqlite`）要加 `ELECTRON_RUN_AS_NODE=1`。`r12-acceptance` 没有真实的重启阶段：它从不写 manifest。验收类探针会重写 `docs/verification/` 下已跟踪的截图目录，跑完要还原。
+
+**未验证**：`r01-electron.cjs --development`。它需要开发服务器，而 `electron-vite dev` 的所有形式都会启动 Electron，所以不跑。
+
+`tests/probes/profile-guard.cjs` 验证 D148，每个子进程都在加载主进程之前把 appData 指到临时目录：
+
+| 场景 | 结果 |
+| --- | --- |
+| 没有设置 userData | 落到 `<临时目录>/ai-roundtable-dev`，sessionData 也跟过去，没有出现 `<临时目录>/ai-roundtable` |
+| 显式设为隔离目录 | 保持不变 |
+| 显式设为 `<临时目录>/ai-roundtable` | 拒绝启动，退出码 1，写明原因，没有数据库文件 |
+| 显式设为指向它的符号链接 | 同上 |
+| 显式设为它里面的目录 | 同上 |
+
+前后用 lstat 比较 `~/Library/Application Support/ai-roundtable`，297 个条目都没有变化，没有打开其中任何文件；全量探针前后也比较过一次，同样没有变化。
+
+默认场景下，临时目录里还多了一个空的 `Electron` 目录，来源没有查明。真实的 `~/Library/Application Support/Electron` 修改时间没有变化。
+
 ## 第 3 层：真实模型实测
 
-**未验证。** 留给总控和用户：用自己的 Key、隔离试用 profile，事先说明预计花费并取得同意。本任务没有调用真实服务，没有读 Key，没有启动试用 profile，也没有碰真实数据库。
+**未验证。** 留给总控和用户：用自己的 Key、隔离试用 profile，事先说明预计花费并取得同意。本任务没有调用真实服务，没有读 Key，没有启动试用 profile。
 
 建议的观察点：
 
