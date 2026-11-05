@@ -2,6 +2,8 @@
 
 ## 当前状态（2026-11-05）
 
+- **事故：migration 15 误作用到真实数据库（已恢复）。** 2026-11-05 12:57:40，发图片子会话为跑探针执行 `electron-vite dev --rendererOnly`，它实际启动了未隔离的 Electron，打开正式数据目录。进程在约 1 分钟后被 `kill -9` 杀掉，迁移只写进了 `-wal`（137 帧，1 个提交，checkpoint 序号 0），主库未变。用户同意后，总控先把整个目录复制到 `~/Library/Application Support/ai-roundtable-incident-2026-11-05/`，确认主库和迁移前备份的 `.dump` 哈希相同（只有文件头 5 个字节不同），再把 `-wal`、`-shm`、Singleton 文件、`attachments`、`backups` 移到留证目录的 `moved-from-real/`。恢复后主库的 SHA-256 未变（`7cc10013…`），副本检查 `quick_check` 为 ok，版本 1，13 场讨论、38 条消息、5 个房间、无新表。Cookies、DIPS、Session Storage 等浏览器文件被更新，未回退；旧库 `key_records` 为 0，钥匙串未检查。留证目录保留，由用户决定何时删除。漏洞正在发图片分支上修（未打包的应用不能用正式目录）。
+
 - **移除费用、只留国产模型：merged / verified。** 分支 `codex/remove-cost-open-models`（`2127663`，基于 main `b7dab53`，30 个提交），以 ff-only 方式合入 main。决策 D133–D146，记录见 [移除费用](verification/2026-11-03-remove-cost.md)。
   - 彻底移除价格、预算和预计花费，用量页只显示 token。migration 14 建 `request_usage`、`provider_model_discovery`，删除费用相关表，转换并停用旧服务类型。破例改了 v11 的 CHECK 文字（任何数据库的最终状态不变）。
   - 只有内置目录的 8 家服务（DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax），Main 强制地址和模型；没有代理、自定义服务、本机模型和手填模型名。国外服务的适配器和 SDK 已删除。

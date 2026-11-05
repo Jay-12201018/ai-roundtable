@@ -38,4 +38,5 @@
 ## 工程约定
 - 测试统一在 Electron 自带的 Node 里跑：全量用 `pnpm test`，部分测试用 `pnpm test <路径>`。不要用 `pnpm exec vitest`（宿主 Node 加载不了 Electron ABI 的 SQLite），也不要写 `pnpm run test -- <路径>`（pnpm 11 会跑全量）。检查流程见 `verify` skill，收尾流程见 `deliver` skill。
 - 工具链：pnpm 11.25.0 和 Node 24（Homebrew `node@24`）都已经通过 Homebrew 安装。2026-10-21 已把 `/opt/homebrew/bin/node` 从 ChatGPT.app 内置的签名 Node 改为指向 Homebrew 的 Node（它原先导致原生模块报 Team ID 错误）。如果再出现 Team ID 报错，先用 `ls -l $(which node)` 检查这个链接有没有被改回去。
+- **不要从会话里运行 `pnpm dev`、`electron-vite dev`（含 `--rendererOnly`），也不要直接启动未隔离的应用。** 它们会打开真实数据目录并执行 migration（2026-11-05 事故，见 STATUS）。只用先隔离 userData 的入口（`tests/probes/*`、`tests/e2e`、`pnpm trial`）；不确定一条命令是否隔离时，先读代码确认，不要试。改 `HOME` 不算隔离。
 - shell 是 zsh：不要 `echo ===` 之类以 `=` 开头的参数（会触发 `=cmd` 展开报错）。
