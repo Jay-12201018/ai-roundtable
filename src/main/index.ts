@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { app, dialog, BrowserWindow } from 'electron';
 import { Database } from './database/Database';
 import { createElectronKeyBackend } from './security/electronSafeStorage';
@@ -21,6 +22,7 @@ import { ArtifactService } from './artifact/ArtifactService';
 import { CodeExportService } from './export/CodeExportService';
 import { AttachmentStore } from './attachments/AttachmentStore';
 import { handleImageRequests, registerImageScheme } from './attachments/imageProtocol';
+import { decideProfile, systemAppDataDirectory } from './profile';
 
 let database: Database | undefined;
 let window: BrowserWindow | undefined;
@@ -39,9 +41,25 @@ let shutdownPromise: Promise<void> | undefined;
 let shutdownExitCode = 0;
 let initializationPromise: Promise<void> | undefined;
 
+/** D148: before the first thing that could open a data folder. An unpackaged app never reaches the official one. */
+function settleProfile(): boolean {
+  if (app.isPackaged) return true;
+  const decide = () => decideProfile({ packaged: app.isPackaged, userData: app.getPath('userData'), sessionData: app.getPath('sessionData'), appData: app.getPath('appData'), appName: app.getName(),
+    systemAppData: systemAppDataDirectory(process.platform, userInfo().homedir, process.env), caseInsensitive: process.platform !== 'linux' });
+  const refuse = (message: string) => { console.error(`AI 圆桌没有启动：${message}`); app.exit(1); return false; };
+  const decision = decide();
+  if (decision.action === 'refuse') return refuse(decision.message);
+  if (decision.action === 'keep') return true;
+  app.setPath('userData', decision.userData);
+  // The folder it now has is checked again, by what the app really reports.
+  const check = decide();
+  return check.action === 'keep' ? true : refuse(check.action === 'refuse' ? check.message : `数据目录没有切换到 ${decision.userData}。`);
+}
+
+const profileSettled = settleProfile();
 // D147: Electron takes this only before the app is ready.
 registerImageScheme();
-const hasLock = app.requestSingleInstanceLock();
+const hasLock = profileSettled && app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
 } else {

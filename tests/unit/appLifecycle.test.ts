@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => {
   type Listener = (...args: any[]) => void;
@@ -37,7 +37,7 @@ const fixture = vi.hoisted(() => {
     windows: [] as Window[],
     ready: false,
     resolveReady: () => {},
-    app: { requestSingleInstanceLock: vi.fn(), on: vi.fn(), whenReady: vi.fn(), isReady: vi.fn(), getPath: vi.fn(), quit: vi.fn(), exit: vi.fn(), relaunch: vi.fn() },
+    app: { requestSingleInstanceLock: vi.fn(), on: vi.fn(), whenReady: vi.fn(), isReady: vi.fn(), isPackaged: true, getName: vi.fn(() => 'ai-roundtable'), setPath: vi.fn(), getPath: vi.fn(), quit: vi.fn(), exit: vi.fn(), relaunch: vi.fn() },
     dialog: { showErrorBox: vi.fn(), showMessageBoxSync: vi.fn() },
     database: { initialize: vi.fn(), purgeKeyLikeModelIds: vi.fn(() => 0), markInFlightRunsInterrupted: vi.fn(), close: vi.fn() },
     service: { shutdown: vi.fn(), hasActiveRuns: vi.fn() },
@@ -109,6 +109,50 @@ beforeEach(() => {
 });
 
 describe('application lifecycle', () => {
+  describe('D148: an unpackaged app and the official data folder', () => {
+    afterEach(() => { fixture.app.isPackaged = true; fixture.app.getName.mockReturnValue('ai-roundtable'); vi.restoreAllMocks(); });
+    const paths = (userData: string) => (name: string) => name === 'appData' ? '/test/appData' : name === 'userData' || name === 'sessionData' ? userData : '/test/other';
+
+    it('refuses before any database, lock or window, and says why', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      fixture.app.isPackaged = false; fixture.app.getName.mockReturnValue('Electron');
+      fixture.app.getPath.mockImplementation(paths('/test/appData/ai-roundtable'));
+      vi.resetModules(); await import('../../src/main/index');
+      expect(fixture.app.exit).toHaveBeenCalledExactlyOnceWith(1);
+      expect(error.mock.calls[0][0]).toContain('未打包的应用不能使用正式数据目录（/test/appData/ai-roundtable）');
+      const { Database } = await import('../../src/main/database/Database');
+      expect(Database).not.toHaveBeenCalled();
+      expect(fixture.app.requestSingleInstanceLock).not.toHaveBeenCalled();
+      expect(fixture.app.setPath).not.toHaveBeenCalled();
+      expect(fixture.createWindow).not.toHaveBeenCalled();
+    });
+
+    it('moves a folder nobody set to the development folder before anything opens', async () => {
+      fixture.app.isPackaged = false; fixture.app.requestSingleInstanceLock.mockReturnValue(true);
+      let userData = '/test/appData/ai-roundtable';
+      fixture.app.getPath.mockImplementation((name: string) => paths(userData)(name));
+      fixture.app.setPath.mockImplementation((_name: string, value: string) => { userData = value; });
+      vi.resetModules(); await import('../../src/main/index');
+      expect(fixture.app.setPath).toHaveBeenCalledExactlyOnceWith('userData', '/test/appData/ai-roundtable-dev');
+      expect(fixture.app.requestSingleInstanceLock.mock.invocationCallOrder[0]).toBeGreaterThan(fixture.app.setPath.mock.invocationCallOrder[0]);
+      expect(fixture.app.exit).not.toHaveBeenCalled();
+    });
+
+    it('stops if the app does not really move, rather than carrying on in the official folder', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      fixture.app.isPackaged = false; fixture.app.getPath.mockImplementation(paths('/test/appData/ai-roundtable'));
+      vi.resetModules(); await import('../../src/main/index');
+      expect(fixture.app.exit).toHaveBeenCalledExactlyOnceWith(1);
+      expect(fixture.app.requestSingleInstanceLock).not.toHaveBeenCalled();
+    });
+
+    it('a packaged app keeps its folder and is not asked anything else', async () => {
+      fixture.app.requestSingleInstanceLock.mockReturnValue(true); fixture.app.getPath.mockImplementation(paths('/test/appData/ai-roundtable'));
+      vi.resetModules(); await import('../../src/main/index');
+      expect(fixture.app.setPath).not.toHaveBeenCalled(); expect(fixture.app.exit).not.toHaveBeenCalled();
+    });
+  });
+
   it('assembles room and settings services with the same database and protected key service', async () => {
     await startApp();
     const { RoomService } = await import('../../src/main/room/RoomService');

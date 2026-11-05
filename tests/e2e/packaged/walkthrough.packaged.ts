@@ -70,6 +70,10 @@ async function checked(app: ElectronApplication): Promise<RunningApp> {
     throw new Error(`Packaged app is not isolated: ${JSON.stringify(report)}`);
   }
   expect(report.isPackaged).toBe(true);
+  // D148: only a package may have the official folder as its default, and it keeps the folder it is given. The test folder
+  // stands in for it: nothing here touches the real one, and a package is never moved to the development folder.
+  expect(['ai-roundtable', 'AI Roundtable']).toContain(report.name);
+  expect(existsSync(join(report.appData, 'ai-roundtable-dev'))).toBe(false);
   await running.page.waitForSelector('.app-shell');
   await expect.poll(() => existsSync(database)).toBe(true);
   const files = openFiles(pid);
