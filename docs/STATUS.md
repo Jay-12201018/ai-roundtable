@@ -2,7 +2,15 @@
 
 ## 当前状态（2026-11-05）
 
-- **事故：migration 15 误作用到真实数据库（已恢复）。** 2026-11-05 12:57:40，发图片子会话为跑探针执行 `electron-vite dev --rendererOnly`，它实际启动了未隔离的 Electron，打开正式数据目录。进程在约 1 分钟后被 `kill -9` 杀掉，迁移只写进了 `-wal`（137 帧，1 个提交，checkpoint 序号 0），主库未变。用户同意后，总控先把整个目录复制到 `~/Library/Application Support/ai-roundtable-incident-2026-11-05/`，确认主库和迁移前备份的 `.dump` 哈希相同（只有文件头 5 个字节不同），再把 `-wal`、`-shm`、Singleton 文件、`attachments`、`backups` 移到留证目录的 `moved-from-real/`。恢复后主库的 SHA-256 未变（`7cc10013…`），副本检查 `quick_check` 为 ok，版本 1，13 场讨论、38 条消息、5 个房间、无新表。Cookies、DIPS、Session Storage 等浏览器文件被更新，未回退；旧库 `key_records` 为 0，钥匙串未检查。留证目录保留，由用户决定何时删除。漏洞正在发图片分支上修（未打包的应用不能用正式目录）。
+- **讨论里发图片、数据目录保护、抽屉修复：merged / verified。** 分支 `codex/maint-r78-drawer`（`9981f62`，基于 main `14bef97`，9 个提交，已包含 `codex/image-input`），以 ff-only 方式合入 main。决策 D147、D148，记录见 [发图片](verification/2026-11-05-image-input.md)、[抽屉探针](verification/2026-11-05-maint-r78-drawer.md)。
+  - 发图片：目标框、插话框和继续框可以附 PNG、JPEG、WebP（回形针、粘贴、拖入），每张最多 10 MB，每条最多 4 张，单次请求图片最多 20 MB。图片存在 userData 的 `attachments/`，能看图的成员以 `image_url` 收到，看不了的只收到一句说明。migration 15。
+  - 数据目录保护：未打包的应用不能使用正式数据目录，默认落到 `ai-roundtable-dev`，指向正式目录（含符号链接）就拒绝启动，没有跳过开关。
+  - 抽屉修复：布局切换时关闭抽屉改为在渲染时做，窄屏点菜单不再被 effect 抵消。根因是最可能的解释，原来两次失败没有在非最小化条件下复现，尚未证实。
+- **这次的检查**：总控在 `9981f62` 上跑了完整检查：typecheck、122 个文件 / 1953 个测试、`pnpm e2e` 35 项、打包和 `pnpm e2e:packaged` 3 项、全部探针含重启阶段（含 `profile-guard`、`r78-drawer-acceptance`）、v14 副本升级演练；正式目录 297 个条目跑前跑后没有变化。build 由 `pnpm e2e` 前置步骤和打包执行。`r01 --development` 依赖开发服务器，按新规定未运行。
+- **第 3 层（用户亲手，试用版，`66733bc`，开着网络工具）**：一张 PNG。DeepSeek Flash 和豆包 Evolving 都读对图上数字；DeepSeek V4 Pro 没收到图，没有编造（目标里没要求它说明看不到，所以未验证它是否会明说）。**未验证**：JPEG、WebP、接近 10 MB 的大图、一次 4 张；拖入和真实 ⌘V；`66733bc` 之后的提交（保护、探针、抽屉）没有再做真实模型实测。
+- **下一步路线**：① 大众化专项（等用户说开始）。② 更新发布政策和 AGENTS.md，清理公开内容，做公开副本并发布（`Jay-12201018/ai-roundtable`，推送前确认一次）；发布前补测不开网络工具的情况和尽量多的服务。③ 自用安装（备份真实数据库并在副本上演练，真实库目前是版本 1，先问用户）。④ 用户确认后删除事故留证目录。
+
+- **事故：migration 15 误作用到真实数据库（已恢复）。** 2026-11-05 12:57:40，发图片子会话为跑探针执行 `electron-vite dev --rendererOnly`，它实际启动了未隔离的 Electron，打开正式数据目录。进程在约 1 分钟后被 `kill -9` 杀掉，迁移只写进了 `-wal`（137 帧，1 个提交，checkpoint 序号 0），主库未变。用户同意后，总控先把整个目录复制到 `~/Library/Application Support/ai-roundtable-incident-2026-11-05/`，确认主库和迁移前备份的 `.dump` 哈希相同（只有文件头 5 个字节不同），再把 `-wal`、`-shm`、Singleton 文件、`attachments`、`backups` 移到留证目录的 `moved-from-real/`。恢复后主库的 SHA-256 未变（`7cc10013…`），副本检查 `quick_check` 为 ok，版本 1，13 场讨论、38 条消息、5 个房间、无新表。Cookies、DIPS、Session Storage 等浏览器文件被更新，未回退；旧库 `key_records` 为 0，钥匙串未检查。留证目录保留，由用户决定何时删除。漏洞已由 D148 修复并合入 main。
 
 - **移除费用、只留国产模型：merged / verified。** 分支 `codex/remove-cost-open-models`（`2127663`，基于 main `b7dab53`，30 个提交），以 ff-only 方式合入 main。决策 D133–D146，记录见 [移除费用](verification/2026-11-03-remove-cost.md)。
   - 彻底移除价格、预算和预计花费，用量页只显示 token。migration 14 建 `request_usage`、`provider_model_discovery`，删除费用相关表，转换并停用旧服务类型。破例改了 v11 的 CHECK 文字（任何数据库的最终状态不变）。
@@ -11,7 +19,7 @@
   - 新讨论页三步：讨论方式 → 几位成员 → 每位成员的模型。默认总时长上限改为 2 小时。失败提示带服务商错误码。
 - **这次的检查**：总控在 `2127663` 上跑了完整检查：typecheck、build、117 个文件 / 1889 个测试、`pnpm e2e` 32 项、打包和 `pnpm e2e:packaged` 3 项、全部探针含重启阶段。两处第一次未过：① `r07r08` 在 800×600 下导航抽屉 3 秒内没打开，重跑两遍主流程和重启阶段都通过，判断为偶发，原因未查实，记为已知问题。② 升级演练输入用了已到 v14 的试用库，报 `Untrusted backup path`；换 v13 副本后通过，输入文件未变。
 - **第 3 层（用户亲手，试用版）**：开着网络工具时，DeepSeek Flash 和豆包 Evolving 同场跑完 4 轮双人对话，发言完整，无思考内容混入，互相审查质量好。**未验证**：不开网络工具（用户决定暂缓，发布前在两张卡片上各点一次「测试连接」）；其余 6 家只核对文档并用 fixture 测试；真实服务返回错误码的显示；三人以上混用多家的真实讨论。
-- **下一步路线**：① 讨论里发图片（用户已确认，单独任务）。② 大众化专项。③ 更新发布政策和 AGENTS.md，清理公开内容，做公开副本并发布（`Jay-12201018/ai-roundtable`，推送前确认一次）。④ 自用安装（备份真实数据库并在副本上演练，先问用户）。
+- **上一轮的路线**：讨论里发图片已合入，其余见本节开头的下一步路线。
 
 ## 较早状态（2026-11-03）
 
