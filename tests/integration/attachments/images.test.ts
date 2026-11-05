@@ -321,11 +321,13 @@ describe('a stored image is safe and stays where it belongs (D147)', () => {
     await expect(second.store.read(used.id)).resolves.toMatchObject({ attachment: used });
     await expect(second.store.read(unused.id)).rejects.toMatchObject({ code: 'attachment_missing' });
     expect(readdirSync(join(root, 'attachments')).sort()).toEqual([`${used.id}.png`, 'note.txt'].sort());
-    expect(new Sqlite(file, { readonly: true }).prepare('SELECT COUNT(*) FROM attachments').pluck().get()).toBe(1);
+    const raw = new Sqlite(file, { readonly: true });
+    try { expect(raw.prepare('SELECT COUNT(*) FROM attachments').pluck().get()).toBe(1); } finally { raw.close(); }
   });
 
   it('history keeps its images: a link cannot be changed or removed, and a used image cannot be deleted', async () => {
-    const f = await fixture({ members: [['看图', 'deepseek-flash']], file: join(mkdtempSync(join(tmpdir(), 'roundtable-images-')), 'db.sqlite') });
+    const folder = mkdtempSync(join(tmpdir(), 'roundtable-images-')); cleanup.push(() => rmSync(folder, { recursive: true, force: true }));
+    const f = await fixture({ members: [['看图', 'deepseek-flash']], file: join(folder, 'db.sqlite') });
     const attachment = await f.store.addImage({ bytes: png('历史') });
     await start(f, [attachment.id], 1);
     const raw = (f.db as unknown as { db: Sqlite.Database }).db;
