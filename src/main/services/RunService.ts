@@ -32,7 +32,7 @@ import { artifactOutputTokenLimit, buildArtifactRequest } from '../artifact/prom
 import { continuationPreviewInputSchema, continueDiscussionInputSchema, type ContinuationPreview, type ContinuationPreviewInput,
   type ContinueDiscussionInput, type ContinueDiscussionResult, type RunContinuation } from '../../shared/schemas/continuation';
 import { GROUP_CHAT_MAX_SCHEDULES, GROUP_CHAT_MAX_TURNS, GROUP_CHAT_SCHEDULE_MAX_TOKENS, GROUP_CHAT_SCHEDULE_TIMEOUT_MS, isGroupChatSnapshot, type GroupChatRoundState, type GroupChatState } from '../../shared/schemas/groupChat';
-import { classifyHostMessage, memberHints, parseScheduleOutput, ruleSpeakers, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
+import { classifyHostMessage, isStopMessage, memberHints, parseScheduleOutput, ruleSpeakers, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
 import { buildScheduleMessages } from '../groupChat/schedulePrompt';
 import type { GroupChatRound, GroupChatSpeaker } from '../database/Database';
 import type { GroupChatCue } from '../context/transcript';
@@ -210,7 +210,7 @@ export class RunService {
       this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: workflow ?? input.workflowSnapshot ?? {}, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
         task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 }, taskAttachmentIds);
       this.setRunState(runId, { status: 'running', startedAt: new Date().toISOString() }, { status: 'running' });
-      if (groupChat) this.openRound(context, input.task, undefined, runId);
+      if (groupChat) this.openRound(context, input.task, undefined, runId, taskAttachmentIds.length > 0);
     });
     if (input.workflowPreviewId) this.workflowPreviews.delete(input.workflowPreviewId);
     return this.getSnapshot(runId);
@@ -1445,12 +1445,15 @@ export class RunService {
     if (existing?.job) throw new ContractError('invalid_state');
     const context = existing ?? this.contextFrom(run);
     const messageId = randomUUID();
+    // D154: nothing to answer, so nothing starts; with something in flight, the loop finds no open round and ends.
+    const stopping = !input.attachments.length && isStopMessage(input.content);
     let result: (T & { actionId: string }) | undefined;
     const write = () => {
       this.database.insertMessage({ id: messageId, roomId: run.roomId, runId, senderType: 'user', senderName: hostSenderName, content: input.content, status: 'completed', ...(input.attachments.length ? { attachments: [...input.attachments] } : {}) });
       result = record(messageId);
-      this.openRound(context, input.content, messageId, messageId);
+      this.openRound(context, input.content, messageId, messageId, input.attachments.length > 0);
       this.appendEvent(runId, 'host_updated', { actionId: result.actionId, kind: 'interject' });
+      if (stopping) return;
       // Each message gets the full allowance again, so a long chat is not cut off by what it has already used.
       context.maxDurationMs = this.elapsed(context) + DEFAULT_RUN_DURATION_MS;
       context.timedOut = false;
@@ -1462,6 +1465,7 @@ export class RunService {
       context.abortController.abort(new ContractError('cancelled'));
       return result!;
     }
+    if (stopping) { this.database.transaction(write); return result!; }
     this.schedule(context, () => {
       write();
       this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' });
@@ -1477,16 +1481,26 @@ export class RunService {
     });
   }
 
-  /** Opens the round for one host message. The latest message is what counts: an earlier round ends here, and whoever was queued in it stands down. */
-  private openRound(context: RunContext, text: string, messageId: string | undefined, seed: string): void {
+  /**
+   * Opens the round for one host message. The latest message is what counts: an earlier round ends here, and whoever was queued in it stands
+   * down. D154: a message telling everyone to stop leaves a round with nobody in it, closed at once, so the page can say so.
+   */
+  private openRound(context: RunContext, text: string, messageId: string | undefined, seed: string, hasImages: boolean): void {
+    const stopping = !hasImages && isStopMessage(text);
     const previous = this.database.openGroupChatRound(context.runId);
-    if (previous) { this.database.closeGroupChatRound(previous.id, 'superseded'); this.appendEvent(context.runId, 'group_chat_updated', { roundId: previous.id, state: 'superseded' }); }
+    if (previous) { this.database.closeGroupChatRound(previous.id, stopping ? 'stopped' : 'superseded'); this.appendEvent(context.runId, 'group_chat_updated', { roundId: previous.id, state: stopping ? 'stopped' : 'superseded' }); }
+    const roundId = randomUUID();
+    const identity = { id: roundId, runId: context.runId, ...(messageId ? { messageId } : {}) };
+    if (stopping) {
+      this.database.insertGroupChatRound({ ...identity, classification: 'simple', scheduleMore: false, speakers: [] });
+      this.closeRound(context.runId, roundId, 'stopped');
+      return;
+    }
     const roster = this.chatRoster(context);
     if (!roster.length) throw new ContractError('invalid_state');
-    const plan = classifyHostMessage(text, roster, seedOf(seed));
-    const roundId = randomUUID();
+    const plan = classifyHostMessage(text, roster, seedOf(seed), hasImages);
     // Only a message the rules could not read may go on to the schedule.
-    this.database.insertGroupChatRound({ id: roundId, runId: context.runId, ...(messageId ? { messageId } : {}), classification: plan.classification, scheduleMore: plan.classification === 'open', speakers: plan.speakers });
+    this.database.insertGroupChatRound({ ...identity, classification: plan.classification, scheduleMore: plan.classification === 'open', speakers: plan.speakers });
     this.appendEvent(context.runId, 'group_chat_updated', { roundId, state: 'open' });
   }
 

@@ -136,15 +136,18 @@ test('@A 写前端，@B 写后端: only they act, with an IME, and the box says 
   await running.quit();
 });
 
-test('a simple question: one or two, briefly', async ({ harness }) => {
+test('a simple question: one, briefly', async ({ harness }) => {
   const running = await harness.launch(); const { page } = running; const { fixture } = harness;
   await open(running);
   fixture.reply = () => '周三。';
   await first(running, '今天星期几？');
   await waiting(running);
-  const count = (await spoke(page)).length;
-  expect(count).toBeGreaterThanOrEqual(1); expect(count).toBeLessThanOrEqual(2);
+  expect(await spoke(page)).toHaveLength(1);
   expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
+  expect(textIn(fixture.requests[0]!.messages.at(-1))).toContain('答完就停');
+  const week = ['日', '一', '二', '三', '四', '五', '六'][new Date().getDay()]!;
+  expect(textIn(fixture.requests[0]!.messages.find(message => textIn(message).startsWith('今天是')))).toContain(`星期${week}`);
+  expect(fixture.requests[0]!.messages.some(message => message.role === 'system' && textIn(message).includes('一律不要编'))).toBe(true);
   await capture(running, 'simple-question');
   await running.quit();
 });
@@ -309,5 +312,48 @@ test('a crash in the middle of a reply: its words stay, nothing is sent again, a
   await say(running, '@小雨 你来说说');
   await waiting(running);
   expect(await spoke(running.page)).toEqual(['林舟', '小雨']);
+  await running.quit();
+});
+
+test('typing 停止 stops everything, nobody answers, and it says so; 停止这个方案 is just talk', async ({ harness }) => {
+  const running = await harness.launch(); const { page } = running; const { fixture } = harness;
+  await open(running);
+  fixture.mode = () => 'hang';
+  fixture.reply = () => '这段话说到一半，后面还有两位排着';
+  await first(running, '@林舟 @阿哲 @小雨 都看看');
+  await expect(replies(page).first()).toContainText('这段话');
+  const sent = fixture.requests.length;
+  await say(running, '停止');
+  await expect(replies(page).first()).toContainText('被打断');
+  await waiting(running);
+  await expect(page.getByText('大家停下了，发新消息可以继续。')).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(fixture.requests.length, 'Nothing more goes out').toBe(sent);
+  expect(await spoke(page)).toEqual(['林舟']);
+  await capture(running, 'typed-stop');
+
+  // Saying it again with nothing going on changes nothing but the chat.
+  await say(running, '别说了');
+  await expect(page.locator('.bubble', { hasText: '别说了' })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(fixture.requests.length).toBe(sent);
+
+  fixture.mode = () => 'ok';
+  fixture.reply = body => isSchedule(body) ? JSON.stringify({ speakers: [{ name: '阿哲', intent: 'reply', length: 'medium' }] }) : `${memberOf(body)}说换一个`;
+  await say(running, '停止这个方案，换一个');
+  await expect(page.locator('.thread-item article.msg:not(.is-host) .msg-name')).toHaveCount(2);
+  await expect(page.getByText('大家停下了，发新消息可以继续。')).toHaveCount(0);
+  await running.quit();
+});
+
+test('a word like 1 gets one short reply and no model', async ({ harness }) => {
+  const running = await harness.launch(); const { page } = running; const { fixture } = harness;
+  await open(running);
+  fixture.reply = () => '嗯，我在。';
+  await first(running, '1');
+  await waiting(running);
+  expect(await spoke(page)).toHaveLength(1);
+  expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
+  await capture(running, 'very-short');
   await running.quit();
 });

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHostMessage, isGather, isSimpleQuestion, memberHints, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
+import { classifyHostMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
 import { fastReplyBodyOf, serviceCatalog } from '../../../src/shared/serviceCatalog';
 import { buildScheduleMessages } from '../../../src/main/groupChat/schedulePrompt';
-import { boundaryText, groupChatBoundaryText, groupChatCueText, groupChatRulesText, turnCueText } from '../../../src/main/context/transcript';
+import { boundaryText, discussionRulesText, groupChatBoundaryText, groupChatCueText, groupChatDateText, groupChatRulesText, turnCueText } from '../../../src/main/context/transcript';
+import { roleTemplates, starterTemplates } from '../../../src/renderer/features/rooms/templates';
 
 const roster = [{ agentId: 'a', displayName: '小林' }, { agentId: 'b', displayName: '小林子' }, { agentId: 'c', displayName: '阿哲' }, { agentId: 'd', displayName: 'Al' }];
 const ids = (text: string) => parseMentions(text, roster).mentions.map(item => item.agentId);
@@ -59,12 +60,11 @@ describe('D150 the rules', () => {
   it.each(['帮我写一份关于集合论的讲义', '集合论', '下午开会讨论预算该怎么分配比较合适呢大家说说'])('%s only has the word in it', text => {
     expect(isGather(text)).toBe(false);
   });
-  it.each(['今天几号？', '午饭吃什么？', '小王是谁', '有没有会议室'])('%s is a simple question for one or two', text => {
+  it.each(['今天几号？', '午饭吃什么？', '小王是谁', '有没有会议室'])('%s is a simple question for one, and only one', text => {
     expect(isSimpleQuestion(text)).toBe(true);
     const plan = classifyHostMessage(text, roster, 3);
     expect(plan.classification).toBe('simple');
-    expect(plan.speakers.length).toBeGreaterThanOrEqual(1);
-    expect(plan.speakers.length).toBeLessThanOrEqual(2);
+    for (const seed of [1, 2, 3, 4]) expect(classifyHostMessage(text, roster, seed).speakers).toHaveLength(1);
     expect(plan.speakers.every(item => item.length === 'short')).toBe(true);
   });
   it.each(['这个方案行吗？', '为什么留存掉了？', '你们觉得该不该做？', '帮我写个提纲？'])('%s asks for a judgement or for work, so it is not one', text => {
@@ -171,5 +171,63 @@ describe('D152 skipping thinking', () => {
   it('a fast model is one that can skip thinking, since a scheduling request allows few tokens', () => {
     for (const item of serviceCatalog) for (const model of item.models) if (model.fast) expect(fastReplyBodyOf(item, model.id)).toBeDefined();
     expect(serviceCatalog.filter(item => item.models.some(model => model.fast)).map(item => item.id)).toEqual(['deepseek', 'doubao', 'qwen']);
+  });
+});
+
+describe('D154 what the first real run showed', () => {
+  it.each(['停止', '停', '停！', '停一下', '停止吧', '停止了。', '别说了', '不用说了', '打住', '先这样', '先这样吧', '暂停', 'stop', 'STOP!', '大家停一下', '都别说了', '先停'])('%s tells everyone to stop', text => {
+    expect(isStopMessage(text)).toBe(true);
+  });
+  it.each(['停止这个方案，换一个', '停止吧，我们换个思路来聊聊', '不要停', '为什么停止', '暂停一周再上线', 'stop the rollout', '@林舟 停', '先这样改吧'])('%s is something to talk about', text => {
+    expect(isStopMessage(text)).toBe(false);
+  });
+  it.each(['1', '好', '嗯', 'ok', 'OK！', '？', '行', '嗯嗯。'])('%s gets one short word and no model', text => {
+    expect(isVeryShort(text)).toBe(true);
+    const plan = classifyHostMessage(text, roster, 3);
+    expect(plan.classification).toBe('simple');
+    expect(plan.speakers).toHaveLength(1);
+    expect(plan.speakers[0]).toMatchObject({ intent: 'reply', length: 'short', source: 'rule' });
+  });
+  it('继续 asks for more, and a word that asks for work or a judgement is not nothing', () => {
+    expect(classifyHostMessage('继续', roster, 3).classification).toBe('open');
+    expect(classifyHostMessage('继续！', roster, 3).classification).toBe('open');
+    for (const text of ['总结', '方案', '写吧', '你看']) expect(classifyHostMessage(text, roster, 3).classification).toBe('open');
+    expect(classifyHostMessage('集合', roster, 3).classification).toBe('gather');
+  });
+  it('a word with an image is about the image', () => {
+    expect(classifyHostMessage('好', roster, 3, true).classification).toBe('open');
+    expect(classifyHostMessage('大家好', roster, 3, true).classification).toBe('gather');
+  });
+  it('the rules say not to invent, not to promise later, to answer the latest, and to ask', () => {
+    const rules = groupChatRulesText(false);
+    for (const word of ['只能依据聊天记录和主持人说的话', '一律不要编', '信息不够就直接问主持人', '不要承诺明天或稍后', '先回应主持人最新这条', '旧话题除非主持人提起', '拿不准就问']) expect(rules).toContain(word);
+  });
+  const member = { agentId: 'a', displayName: '小林', roleTemplateId: '产品', systemPrompt: '', providerId: 'p', modelId: 'm', displayOrder: 0 };
+  it('a call for everyone brings no new subject, and a simple answer ends there', () => {
+    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'gather' })).toContain('不要引入新话题');
+    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'rule' })).toContain('答完就停，不要借机带回别的话题');
+    expect(groupChatCueText(member, { intent: 'report', length: 'long', source: 'rule' })).not.toContain('答完就停');
+  });
+  it('a delivery with too little to go on asks first', () => {
+    const cue = groupChatCueText(member, { intent: 'claim', length: 'long', source: 'mention', assignment: '写前端' });
+    expect(cue).toContain('先问清楚，不要开写');
+    expect(cue).toContain('> 写前端');
+    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'mention' })).not.toContain('先问清楚');
+  });
+  it('today is said plainly, by this computer\'s calendar', () => {
+    expect(groupChatDateText(new Date(2026, 10, 5))).toBe('今天是 2026 年 11 月 5 日，星期四（这台电脑的日期）。');
+    expect(groupChatDateText(new Date(2026, 10, 8))).toContain('星期日');
+  });
+  it('the schedule answers the latest, keeps a summary for when there is something to sum up, and does not fill the room', () => {
+    const prompt = String(buildScheduleMessages({ task: 'x', taskImages: 0, members: [member], lines: [], turnsUsed: 0, hinted: [] })[0]!.content);
+    for (const word of ['回应主持人最新这条', '旧话题不再排', '只有主持人要求，或者这一轮已有实质分歧或多个结论时才排 summarize', '人设是总结的，不代表每轮都要说', '别让所有人都说', '一般不写']) expect(prompt).toContain(word);
+  });
+  it('a default colleague is a character and an angle, not a job with a past', () => {
+    for (const template of starterTemplates) expect(template.prompt).not.toMatch(/团队|经理|工程师|同事/u);
+    expect(roleTemplates.find(template => template.id === 'custom')!.prompt).toBe('');
+  });
+  it('none of this reaches the stricter ways', () => {
+    for (const word of ['一律不要编', '先回应主持人最新这条']) expect(discussionRulesText(false)).not.toContain(word);
+    expect(turnCueText(member)).not.toContain('先问清楚');
   });
 });

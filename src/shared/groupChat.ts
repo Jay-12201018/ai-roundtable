@@ -71,11 +71,17 @@ function shuffled<T>(items: readonly T[], seed: number): T[] {
 const plainWords = (text: string) => text.replace(/[\s\p{P}\p{S}]+/gu, '');
 const gatherPatterns = [
   /^(大家|各位|同事们|伙计们|朋友们|诸位|全体|所有人|都)?(来)?(集合|开会|报到|签到|点名|冒泡|上线|露个面|出来|到齐了吗|都在吗|在吗|在不在|人呢|有人吗|有人在吗)(了|啦|吧|呀|一下)*(开会|一下|了|啦|吧|呀)*$/u,
-  /^(大家|各位|同事们|诸位)?(好|早|早啊|早上好|上午好|中午好|下午好|晚上好|午安|晚安)(呀|啊|哇|啦)?$/u,
+  // 好 alone is someone agreeing; 大家好 is a greeting.
+  /^(大家|各位|同事们|诸位)(好|早|早啊|早上好|上午好|中午好|下午好|晚上好|午安|晚安)(呀|啊|哇|啦)?$/u,
+  /^(早上好|上午好|中午好|下午好|晚上好|午安|晚安)(呀|啊|哇|啦)?$/u,
   /^(hi|hello|hey|嗨|哈喽|你们好)(大家|各位|all|everyone)?$/iu,
 ];
 /** A short call for everyone: 集合开会！, 都在吗, 大家好. Words that merely contain 集合 (集合论的讲义) are not one. */
 export const isGather = (text: string) => { const words = plainWords(text); return words.length > 0 && words.length <= 16 && gatherPatterns.some(pattern => pattern.test(words)); };
+
+const stopPattern = /^(大家|各位|你们|都|先)*(停止|停下来?|停一下|停一停|停|别说了|别聊了|别讲了|不用说了|不要说了|打住|先这样|暂停|stop)(吧|了|啦|呀|啊|哈|一下)*$/iu;
+/** D154: the host telling everyone to stop, as the whole message. Words that go on (停止这个方案，换一个) are something to talk about. */
+export const isStopMessage = (text: string) => stopPattern.test(plainWords(text));
 
 const workWords = /写|做|实现|设计|方案|规划|计划|分析|整理|总结|列出|列个|生成|翻译|对比|比较|评估|调研|起草|重构|优化|修改|改一下|帮我|给我|出一份|出个|报告|文档|代码|清单|提纲/u;
 const openWords = /为什么|为啥|怎么看|怎么办|怎么样|怎样|如何|建议|评价|看法|觉得|你看|应该|选哪|哪个好/u;
@@ -83,6 +89,8 @@ const questionMark = /[?？]\s*$/u;
 const questionWords = /[吗么嘛呢]\s*$|几点|几号|几个|多少|是谁|谁|哪里|哪儿|什么时候|是不是|有没有|能不能|要不要|可不可以|吃什么|叫什么|是什么/u;
 /** Asks for work to be delivered, rather than for a word. */
 export const isTaskLike = (text: string) => text.length > 120 || workWords.test(text);
+/** D154: 1, 好, 嗯, ok, ？: one or two characters that ask nothing. 继续 asks for more, and goes the usual way. */
+export const isVeryShort = (text: string) => { const words = plainWords(text); return text.trim().length > 0 && words.length <= 2 && !/^(继续|接着)$/u.test(words) && !isTaskLike(text) && !openWords.test(text); };
 /** A short question with one plain answer: 今天几号？ Anything that asks for a judgement or for work is not one. */
 export const isSimpleQuestion = (text: string) => text.trim().length > 0 && text.trim().length <= 30 && !isTaskLike(text) && !openWords.test(text) && (questionMark.test(text) || questionWords.test(text));
 
@@ -101,7 +109,7 @@ export function ruleSpeakers(text: string, roster: readonly RosterMember[], seed
 }
 
 /** D150: the program's reading of one host message. `open` is the one case that may ask a model; it still has `ruleSpeakers` to fall back on. */
-export function classifyHostMessage(text: string, roster: readonly RosterMember[], seed: number): HostMessagePlan {
+export function classifyHostMessage(text: string, roster: readonly RosterMember[], seed: number, hasImages = false): HostMessagePlan {
   const order = shuffled(roster, seed);
   const { mentions, everyone } = parseMentions(text, roster);
   if (mentions.length) {
@@ -116,10 +124,8 @@ export function classifyHostMessage(text: string, roster: readonly RosterMember[
     return { classification: 'mention', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: task ? 'medium' as const : 'short' as const, source: 'mention' as const })) };
   }
   if (isGather(text)) return { classification: 'gather', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'short' as const, source: 'gather' as const })) };
-  if (isSimpleQuestion(text)) {
-    const count = roster.length >= 3 && seed % 2 === 1 ? 2 : 1;
-    return { classification: 'simple', speakers: order.slice(0, count).map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'short' as const, source: 'rule' as const })) };
-  }
+  // D154: one answer is enough, and two the same is worse than none. An image is something to look at, however short the words with it.
+  if (isSimpleQuestion(text) || !hasImages && isVeryShort(text)) return { classification: 'simple', speakers: order.slice(0, 1).map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'short' as const, source: 'rule' as const })) };
   return { classification: 'open', speakers: [] };
 }
 

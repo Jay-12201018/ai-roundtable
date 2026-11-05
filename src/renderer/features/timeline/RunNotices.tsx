@@ -70,6 +70,7 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, re
     </NoticeCard>}
     {error && snapshot.status !== 'error' && <p className="run-error" role="alert">{error}</p>}
     {!summaryOpen && <ContextHint snapshot={snapshot} onSummarize={onSummarize} />}
+    {snapshot.groupChat?.round?.state === 'stopped' && !['running', 'pausing', 'cancelling', 'cancelled'].includes(snapshot.status) && <div className="sys-line" role="status">大家停下了，发新消息可以继续。</div>}
     {snapshot.groupChat?.round?.state === 'limit' && <div className="sys-line" role="status">这条消息的回复到了 {GROUP_CHAT_MAX_TURNS} 次发言的上限，大家先停下了。发新消息可以继续。</div>}
     {snapshot.status === 'completed' && !snapshot.groupChat && <div className="sys-line">讨论已完成{snapshot.workflow?.limitReason ? ` · ${snapshot.workflow.limitReason === 'max_turns' ? '回合数到限' : '累计时长到限'}` : ''} · 可以在下方继续这场讨论，或开始新讨论</div>}
   </div>;

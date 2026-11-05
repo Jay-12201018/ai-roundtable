@@ -11,6 +11,7 @@ import { UsageService } from '../../../src/main/usage/UsageService';
 import { createPublicMessagesBuilder } from '../../../src/main/context/wirePublicContext';
 import { groupChatWorkflowSnapshot } from '../../../src/shared/schemas/groupChat';
 import { runSnapshotSchema } from '../../../src/shared/schemas/run';
+import { boundaryText, discussionRulesText, groupChatDateText } from '../../../src/main/context/transcript';
 
 const backend: KeyStorageBackend = { mode: 'secure', backend: 'fixture', persistent: true,
   async encrypt(value) { return Buffer.from(value).toString('base64'); }, async decrypt(value) { return Buffer.from(value, 'base64').toString(); } };
@@ -138,11 +139,12 @@ describe('D150 who speaks', () => {
     const run = await f.start('@小雨 你怎么看'); await f.idle(run.runId);
     expect(f.spoke(run.runId)).toEqual(['小雨']);
   });
-  it('a simple question: one or two, briefly, with no model asked', async () => {
+  it('a simple question: one, briefly, told to stop there, with no model asked', async () => {
     const f = await fixture();
     const run = await f.start('今天几号？'); await f.idle(run.runId);
-    expect(f.spoke(run.runId).length).toBeLessThanOrEqual(2);
+    expect(f.spoke(run.runId)).toHaveLength(1);
     expect(f.schedules()).toHaveLength(0);
+    expect(String(f.members()[0]!.messages.at(-1)!.content)).toContain('答完就停');
   });
   it('what the rules cannot read asks the model once, and it does what the model says', async () => {
     const f = await fixture();
@@ -501,5 +503,139 @@ describe('D149 what the member is told', () => {
     expect(text).toContain('林舟的设定');
     expect(text).not.toContain('内置角色指引');
     expect(text).not.toContain('贡献');
+  });
+});
+
+describe('D154 a message that says stop', () => {
+  it('stops the reply being generated, drops the queue, sends nothing and lets nobody answer; it stays in the history', async () => {
+    const f = await fixture();
+    f.setReply((_body, index) => index === 0 ? (signal => held('说到一半', signal, new Promise(() => {}))) : sse('不该出现'));
+    const run = await f.start('@林舟 @阿哲 @小雨 都看看');
+    await until(() => f.service.getSnapshot(run.runId).messages[0]?.content === '说到一半');
+    const sent = f.requests.length;
+    await f.send(run.runId, '停止');
+    const done = await f.idle(run.runId);
+    expect(f.requests).toHaveLength(sent);
+    expect(done.status).toBe('completed');
+    expect(done.turns).toHaveLength(1);
+    expect(done.turns[0]!.status).toBe('aborted');
+    expect(done.messages[0]).toMatchObject({ content: '说到一半', status: 'aborted' });
+    expect(done.messages.at(-1)).toMatchObject({ content: '停止', senderName: '主持人' });
+    expect(done.groupChat?.round).toMatchObject({ state: 'stopped', queue: [], turnsUsed: 0 });
+    // The next message goes on, and the word is there for whoever reads the chat.
+    f.setReply(() => sse('好'));
+    await f.send(run.runId, '@小雨 你说'); await f.idle(run.runId);
+    expect(f.spoke(run.runId)).toEqual(['林舟', '小雨']);
+    expect(JSON.stringify(f.members().at(-1)!.messages)).toContain('> 停止');
+  });
+  it('stops a scheduling request in flight, and uses nothing it might have said', async () => {
+    const f = await fixture();
+    f.setSchedule(() => signal => held('{"speakers":', signal, new Promise(() => {})));
+    const run = await f.start('这个方向你们怎么看');
+    await until(() => f.schedules().length === 1);
+    await f.send(run.runId, '停止吧');
+    const done = await f.idle(run.runId);
+    expect(done.turns).toHaveLength(0);
+    expect(f.members()).toHaveLength(0);
+    expect(f.db.listScheduleRequests(run.runId)[0]).toMatchObject({ status: 'aborted' });
+    expect(done.groupChat?.round?.state).toBe('stopped');
+  });
+  it('with nothing going on it is just a word in the chat: nothing starts and nothing is sent', async () => {
+    const f = await fixture();
+    const run = await f.start('@林舟 在吗'); await f.idle(run.runId);
+    const sent = f.requests.length; const turns = f.service.getSnapshot(run.runId).turns.length;
+    await f.send(run.runId, '别说了');
+    const done = await f.idle(run.runId);
+    expect(f.requests).toHaveLength(sent);
+    expect(done.turns).toHaveLength(turns);
+    expect(done.status).toBe('completed');
+    expect(done.groupChat?.round?.state).toBe('stopped');
+    expect(f.service.isExecuting(run.runId)).toBe(false);
+  });
+  it('as the first message, nobody answers', async () => {
+    const f = await fixture();
+    const run = await f.start('停止'); const done = await f.idle(run.runId);
+    expect(f.requests).toHaveLength(0);
+    expect(done.status).toBe('completed');
+    expect(done.groupChat?.round?.state).toBe('stopped');
+  });
+  it('after a failure it drops the queue; nothing is retried', async () => {
+    const f = await fixture();
+    f.setReply(() => new Response('{}', { status: 500 }));
+    const run = await f.start('@林舟 @阿哲 看看');
+    expect((await f.idle(run.runId)).status).toBe('error');
+    const sent = f.requests.length;
+    await f.send(run.runId, '打住');
+    const done = await f.idle(run.runId);
+    expect(f.requests).toHaveLength(sent);
+    expect(done.groupChat?.round).toMatchObject({ state: 'stopped', queue: [] });
+  });
+  it('停止这个方案，换一个 is something to talk about', async () => {
+    const f = await fixture();
+    const run = await f.start('集合'); await f.idle(run.runId);
+    const before = f.members().length;
+    await f.send(run.runId, '停止这个方案，换一个'); const done = await f.idle(run.runId);
+    expect(f.members().length).toBeGreaterThan(before);
+    expect(done.groupChat?.round?.state).toBe('done');
+  });
+  it('with an image attached it is not an order', async () => {
+    const f = await fixture();
+    f.db.insertAttachment({ id: 'b'.repeat(64), mediaType: 'image/png', byteCount: 4 });
+    const run = await f.start('集合'); await f.idle(run.runId);
+    const before = f.service.getSnapshot(run.runId).turns.length;
+    await f.send(run.runId, '停', ['b'.repeat(64)]); const done = await f.idle(run.runId);
+    expect(done.groupChat?.round?.state).not.toBe('stopped');
+    expect(done.turns.length).toBeGreaterThan(before);
+  });
+});
+
+describe('D154 what the first real run showed', () => {
+  it.each(['1', '好', '嗯', 'ok', '？'])('%s gets one short reply and no model', async text => {
+    const f = await fixture();
+    const run = await f.start('集合'); await f.idle(run.runId);
+    const before = f.members().length;
+    await f.send(run.runId, text); await f.idle(run.runId);
+    expect(f.members().length - before).toBe(1);
+    expect(f.schedules()).toHaveLength(0);
+    expect(String(f.members().at(-1)!.messages.at(-1)!.content)).toContain('一两句话');
+  });
+  it('继续 still goes to the schedule', async () => {
+    const f = await fixture();
+    f.setSchedule(() => sse(JSON.stringify(plan(['林舟', 'reply', 'medium']))));
+    const run = await f.start('集合'); await f.idle(run.runId);
+    await f.send(run.runId, '继续'); await f.idle(run.runId);
+    expect(f.schedules()).toHaveLength(1);
+  });
+  it('every chat request carries today and the rule against inventing; a retry is the same request', async () => {
+    const f = await fixture();
+    const today = groupChatDateText(new Date());
+    let fail = true;
+    f.setReply(() => { if (fail) { fail = false; return new Response('{}', { status: 500 }); } return sse('好'); });
+    const run = await f.start('今天星期几？');
+    const failed = await f.idle(run.runId);
+    await f.service.retryTurn(run.runId, failed.turns[0]!.turnId);
+    for (const body of f.members()) {
+      const system = body.messages.filter(message => message.role === 'system').map(message => String(message.content)).join('\n');
+      expect(system).toContain(today);
+      expect(system).toContain('一律不要编');
+      expect(system).toContain('不要承诺明天或稍后');
+      expect(system).toContain('指令优先级：应用指令最高');
+    }
+    expect(f.members()[1]!.messages).toEqual(f.members()[0]!.messages);
+  });
+  it('a job with too little to go on is told to ask first', async () => {
+    const f = await fixture();
+    const run = await f.start('@林舟 写前端，@阿哲 写后端'); await f.idle(run.runId);
+    for (const body of f.members()) expect(String(body.messages.at(-1)!.content)).toContain('先问清楚，不要开写');
+  });
+  it('the other four ways get no date and none of these rules: their requests are as they were', async () => {
+    const f = await fixture();
+    const run = await f.service.start({ roomId: f.roomId, task: '讨论一下' }); await f.idle(run.runId);
+    for (const body of f.members()) {
+      const text = body.messages.map(message => String(message.content)).join('\n');
+      for (const word of ['今天是', '一律不要编', '不要承诺明天', '答完就停', '先问清楚']) expect(text).not.toContain(word);
+    }
+    expect(String(f.members()[0]!.messages[0]!.content)).toBe(boundaryText);
+    expect(String(f.members()[0]!.messages[1]!.content)).toBe(discussionRulesText(false));
   });
 });
