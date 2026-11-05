@@ -29,6 +29,22 @@ export function WaitingText({ since }: { since: string | null | undefined }) {
   return <>正在思考或生成，还没有输出文字… 已等待 {seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`}{seconds >= 60 ? '。有的模型会先思考几分钟；不想等可以点“停止”。' : ''}</>;
 }
 
+/** D149: how long someone in a group chat has been typing. */
+export function WaitingSeconds({ since }: { since: string | null | undefined }) {
+  const [mounted] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const seconds = Math.floor(Math.max(0, now - (since ? Date.parse(since) : mounted)) / 1000);
+  return <>已等待 {seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`}</>;
+}
+
+/** A group-chat reply that stopped: the host's next message interrupted it, or they pressed stop. */
+function chatStopText(snapshot: RunSnapshot, message: { id: string; content: string }): string {
+  const at = snapshot.messages.findIndex(item => item.id === message.id);
+  const interrupted = snapshot.messages.slice(at + 1).some(item => item.senderName === '主持人');
+  return `${interrupted ? '被打断' : '已停止'}${message.content ? ' · 已说的保留' : '，还没说话'}`;
+}
+
 export function useVersions(slot: TimelineSlot) {
   const [viewing, setViewing] = useState<string>();
   const index = Math.max(0, slot.versions.findIndex(version => version.messageId === (viewing ?? slot.active.messageId)));
@@ -97,8 +113,9 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
   const regenerate = () => void commands.send(`regenerate:${slot.slotId}`, { kind: 'regenerateMessage', messageId: shown.messageId }, '已发送重新生成请求。');
   const save = (content: string) => void commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content }, '已保存为新版本。')
     .then(ok => { if (ok) { setEditing(false); setViewing(undefined); } });
+  const chat = Boolean(snapshot.groupChat);
   const status = messageStatusText(shown.message);
-  return <article className={cx('msg', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · ${name}`}>
+  return <article className={cx('msg', chat && 'is-chat', chat && streaming && 'is-live', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · ${name}`}>
     <div className="msg-head">
       <Avatar name={name} /><span className="msg-name">{name}</span><span className="msg-meta">{modelLabel(member, providers)}</span>
       {stageOfTurn(snapshot, can.turn?.turnId) && <Tag title="讨论方式里的阶段">{stageOfTurn(snapshot, can.turn?.turnId)}</Tag>}
@@ -110,7 +127,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       {slot.number !== undefined && <span className="msg-num" aria-hidden>#{slot.number}</span>}
     </div>
     {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留；之后的发言会标出受影响）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
-      : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? <WaitingText since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /> : '（没有生成文字）'}</p>}</div>}
+      : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? chat ? <>{name} 正在输入… <WaitingSeconds since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /></> : <WaitingText since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /> : '（没有生成文字）'}</p>}</div>}
     {can.truncated && !shown.message.content.trim() && <Note icon={Scissors}
       action={shown.active && can.regenerate ? <Button size="sm" disabled={disabled} onClick={regenerate}>重新生成</Button> : undefined}>
       <b>这位成员的输出额度在思考阶段就用完了</b>，没有写出正文。可以到“设置 › 模型服务”调高这个模型的最大输出，再重新生成。</Note>}
@@ -126,9 +143,10 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
     {can.generating && <Note tone="info" icon={Sparkles} role="status">
       <b>正在重新生成版本 {can.generating.versionNumber}</b>{can.generating.message.content ? '：' : ' · 正在思考或生成，还没有输出文字…'}{can.generating.message.content && <span className="note-stream">{can.generating.message.content}</span>}
     </Note>}
-    {status && !streaming && <Note tone={shown.message.status === 'failed' ? 'danger' : 'neutral'} icon={Info} role="note">{status}</Note>}
+    {chat && shown.message.status === 'aborted' ? <p className="chat-stop" role="note">{chatStopText(snapshot, shown.message)}</p>
+      : status && !streaming && <Note tone={shown.message.status === 'failed' ? 'danger' : 'neutral'} icon={Info} role="note">{status}</Note>}
     <div className="msg-foot" role="group" aria-label={`${name} 的消息操作`}>
-      {streaming ? <span className="typing"><Sparkles aria-hidden size={14} />正在发言</span> : <>
+      {streaming ? <span className="typing"><Sparkles aria-hidden size={14} />{chat ? `${name} 正在输入…` : '正在发言'}</span> : <>
         <VersionSwitch slot={slot} index={index} onView={setViewing} />
         {slot.versions.length > 1 && <span>{originLabels[shown.origin]}{shown.active ? (shown.message.status === 'completed' || streaming ? '' : ' · 当前版本（未完成）') : ' · 未生效的历史版本'}</span>}
         <UsageButton usage={usage} open={details} onToggle={() => setDetails(value => !value)} controls={detailsId} />
@@ -156,8 +174,8 @@ export function HostMessage({ slot, snapshot, commands, coveredBy, revisedAfterS
   const images = shown.message.attachments;
   const save = (content: string) => void commands.send(`edit:${slot.slotId}`, { kind: 'editMessage', messageId: shown.messageId, content }, '已保存为新版本。')
     .then(ok => { if (ok) { setEditing(false); setViewing(undefined); } });
-  return <article className={cx('msg', 'is-host', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · 主持人`}>
-    <div className="host-label"><span>{snapshot.continuations?.some(item => item.messageId === slot.slotId) ? '主持人 · 继续讨论' : '主持人插话'}</span><span aria-hidden>·</span><span>#{slot.number}</span>
+  return <article className={cx('msg', 'is-host', snapshot.groupChat && 'is-chat', replaced && 'is-covered')} data-slot={slot.slotId} aria-label={`第 ${slot.number} 条 · 主持人`}>
+    <div className="host-label"><span>{snapshot.groupChat ? '主持人' : snapshot.continuations?.some(item => item.messageId === slot.slotId) ? '主持人 · 继续讨论' : '主持人插话'}</span><span aria-hidden>·</span><span>#{slot.number}</span>
       {replaced && <Tag title="原文保留；之后的请求用已确认的讨论摘要代替它">已由摘要代替</Tag>}
       {coveredBy && revisedAfterSummary && <Tag tone="accent" title="摘要生成后修改过，所以这条会照常发给之后的成员">摘要后已修改 · 照常发送</Tag>}</div>
     <MessageImages images={images} />
@@ -167,7 +185,7 @@ export function HostMessage({ slot, snapshot, commands, coveredBy, revisedAfterS
     <div className="msg-foot" role="group" aria-label="主持人 的消息操作">
       <VersionSwitch slot={slot} index={index} onView={setViewing} />
       {slot.versions.length > 1 && <span>{originLabels[shown.origin]}{shown.active ? '' : ' · 未生效的历史版本'}</span>}
-      {slot.versions.length < 2 && <span>{images?.length ? '从下一回合起发给成员；看不了图的成员只收到一句说明' : '从下一回合起所有成员可见'}</span>}
+      {slot.versions.length < 2 && !snapshot.groupChat && <span>{images?.length ? '从下一回合起发给成员；看不了图的成员只收到一句说明' : '从下一回合起所有成员可见'}</span>}
       {can.select && <Button size="sm" disabled={disabled} onClick={() => void commands.send(`select:${slot.slotId}`, { kind: 'selectVersion', messageId: shown.messageId }, '已切换当前有效版本。').then(ok => { if (ok) setViewing(undefined); })}>设为当前版本</Button>}
       <CopyButton text={[shown.message.content.trim() ? shown.message.content : '', images?.length ? `[附图 ${images.length} 张]` : ''].filter(Boolean).join('\n\n')} />
       {can.edit && !editing && <IconButton size="sm" icon={Pencil} label="修改" disabled={disabled} onClick={() => setEditing(true)} />}

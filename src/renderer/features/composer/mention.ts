@@ -23,6 +23,13 @@ export function mentionQuery(text: string, caret: number): { start: number; quer
   return match ? { start: before.length - match[2].length - 1, query: match[2] } : undefined;
 }
 
+/** D149: in a group chat an `@` may follow any word that is not Latin (请@小林): that is how Chinese is typed. */
+export function chatMentionQuery(text: string, caret: number): { start: number; query: string } | undefined {
+  const before = text.slice(0, caret);
+  const match = /(^|[^A-Za-z0-9_.@＠-])[@＠]([^\s@＠]{0,24})$/u.exec(before);
+  return match ? { start: before.length - match[2].length - 1, query: match[2] } : undefined;
+}
+
 /**
  * D4: which members the text names with `@名字`. Longer names win, so `@审查者` is not read as `@审查`.
  * Only whole names count; model text is never parsed for this — only what the host typed.

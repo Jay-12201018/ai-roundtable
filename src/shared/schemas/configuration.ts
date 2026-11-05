@@ -152,6 +152,8 @@ export const runSummarySchema = z.object({
   id: idSchema, roomId: idSchema, status: z.enum(runStatusValues), task: z.string().nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
   /** D146: the Run stopped at its duration limit rather than failing. */
   durationStop: z.literal(true).optional(),
+  /** D149: a group chat, which waits for the host when it has nothing to say. */
+  groupChat: z.literal(true).optional(),
 }).strict();
 export const roomRunPageSchema = z.object({ items: z.array(runSummarySchema), nextCursor: roomRunCursorSchema.nullable(), hasMore: z.boolean() }).strict()
   .refine((page) => (page.hasMore === (page.nextCursor !== null))

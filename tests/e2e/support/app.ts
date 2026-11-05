@@ -153,14 +153,19 @@ export const statusLine = (page: Page) => page.getByRole('status', { name: '运�
 export const threadItems = (page: Page) => page.locator('.thread-item');
 export const memberTexts = (page: Page) => page.locator('.thread-item .msg-body .md');
 
+/** Makes this room remember free discussion, as a room does where the host chose it. */
+export const strictRoom = (running: RunningApp, roomId: string) => running.page.evaluate(id => localStorage.setItem(`roundtable.mode.${id}`, 'free-chat'), roomId);
+
 /** A DeepSeek service with the fake Key, and a room of three members (the UI path is covered in key-safety.spec). */
-export async function seedDeepSeekRoom(running: RunningApp, roomName = 'E2E 讨论') {
+export async function seedDeepSeekRoom(running: RunningApp, roomName = 'E2E 讨论', options: { chat?: boolean; names?: Array<[string, string]> } = {}) {
   const provider = await running.api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'compatible', baseUrl: DEEPSEEK, defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await running.api('settings.setKey', { providerId: provider.id, apiKey: FAKE_KEY });
   const room = await running.api('rooms.createRoom', { name: roomName, objective: '' });
   const agents = [];
-  for (const [index, [displayName, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries())
+  for (const [index, [displayName, role]] of (options.names ?? [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']]).entries())
     agents.push(await running.api('rooms.createAgent', { roomId: room.id, displayName, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index }));
+  // These specs are about the stricter ways of discussing; group-chat.spec is about the default.
+  if (!options.chat) await strictRoom(running, room.id);
   await running.page.reload();
   await running.page.waitForSelector('.sidebar');
   return { provider, room, agents };
@@ -190,6 +195,7 @@ export async function newDiscussion(running: RunningApp, roomName: string, goal:
   const { page } = running;
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
   await page.locator('.room-page').getByRole('button', { name: '新讨论' }).click();
+  await page.getByRole('button', { name: '自由讨论' }).click();
   const box = page.getByRole('textbox', { name: '讨论目标' });
   await box.click();
   await page.keyboard.press('Meta+A');

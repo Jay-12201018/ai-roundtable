@@ -21,6 +21,8 @@ export interface CompatibleOptions {
   diagnostics?: DiagnosticObserver;
   /** D147: a stored image's bytes, read only when the request is written. */
   readImage?: (attachmentId: string) => Promise<Uint8Array>;
+  /** D152: what turns thinking off for a model, as the catalog has it; nothing for a model it does not say this of. */
+  fastReplyBody?: (modelId: string) => Readonly<Record<string, unknown>> | undefined;
 }
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const completionChunk = z.object({
@@ -84,6 +86,7 @@ export class CompatibleProvider implements ProviderAdapter {
   private readonly fetcher: typeof fetch;
   private readonly diagnostics?: DiagnosticObserver;
   private readonly readImage?: CompatibleOptions['readImage'];
+  private readonly fastReplyBody?: CompatibleOptions['fastReplyBody'];
 
   constructor(options: CompatibleOptions) {
     try {
@@ -98,6 +101,7 @@ export class CompatibleProvider implements ProviderAdapter {
       this.fetcher = options.fetch ?? globalThis.fetch;
       this.diagnostics = options.diagnostics;
       this.readImage = options.readImage;
+      this.fastReplyBody = options.fastReplyBody;
     } catch (error) { throw new ContractError(error instanceof ContractError ? error.code : 'invalid_input'); }
   }
 
@@ -131,6 +135,8 @@ export class CompatibleProvider implements ProviderAdapter {
       const parsed = parse(streamChatInputSchema, withoutSignal(input)); scope.check();
       if (parsed.outputTokenLimit === undefined) throw new ContractError('invalid_input');
       const body = {
+        // First, so nothing in it can replace what the request itself says.
+        ...(parsed.fastReply ? this.fastReplyBody?.(parsed.modelId) : undefined),
         model: parsed.modelId, messages: await scope.wait(() => this.wireMessages(parsed.messages)), stream: true, max_tokens: parsed.outputTokenLimit,
         stream_options: { include_usage: true },
       };

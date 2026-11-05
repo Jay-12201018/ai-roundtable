@@ -81,6 +81,7 @@ test('the demo members can produce a valid artifact without any network', async 
   const running = await harness.launch();
   const { page } = running;
   await page.getByRole('button', { name: '开始试玩' }).click();
+  await page.getByRole('button', { name: '自由讨论' }).click();
   await page.getByRole('button', { name: '开始讨论' }).click();
   await statusHas(page, '已完成');
   await openArtifacts(page);

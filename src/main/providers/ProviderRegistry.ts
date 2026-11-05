@@ -9,7 +9,7 @@ import { countModelTokens } from '../context/buildPublicContext';
 import { MockProvider } from './mock/MockProvider';
 import { mockModelBudget } from './mock/tokenBudget';
 import { CompatibleProvider } from './compatible/CompatibleProvider';
-import { catalogHosts, catalogServiceAt, imageSupportOf, modelAllowed, serviceCatalog, type CatalogService, type ImageSupport } from '../../shared/serviceCatalog';
+import { catalogHosts, catalogServiceAt, fastReplyBodyOf, imageSupportOf, modelAllowed, serviceCatalog, type CatalogService, type ImageSupport } from '../../shared/serviceCatalog';
 import type { ProviderMessage } from './types';
 import { createSafeFetch, type AllowedHosts } from './network';
 import type { DiagnosticObserver } from './diagnostics';
@@ -86,6 +86,24 @@ export class ProviderRegistry {
     return { ...this.limits(configuration, modelId), counter: { modelId, kind: 'upper_bound', method: inputBoundMethod, countMessages: countInputUpperBound },
       imageSupport: imageSupportOf(catalogServiceAt(this.catalog(), configuration.baseUrl), modelId) };
   }
+  /**
+   * D150: the model a group chat asks who speaks next: one the catalog marks fast, on a service with a Key saved, the discussion's own
+   * services first. Nothing qualifies, nothing is asked. The demo service is never one.
+   */
+  scheduleModel(preferred: readonly string[]): { providerId: string; modelId: string } | undefined {
+    const connected = this.database.listProviderSummaries().filter(provider => provider.enabled && provider.configurationValid && provider.hasStoredKey && provider.kind !== 'mock');
+    const ordered = [...connected].sort((a, b) => rank(preferred, a.id) - rank(preferred, b.id));
+    for (const provider of ordered) {
+      try {
+        const service = catalogServiceAt(this.catalog(), this.configuration(provider.id).baseUrl);
+        const model = service?.models.find(item => item.fast);
+        if (!model) continue;
+        this.assertSelection(provider.id, model.id);
+        return { providerId: provider.id, modelId: model.id };
+      } catch { /* A service that cannot take this request is not asked. */ }
+    }
+    return undefined;
+  }
   checkGeneration(providerId: string, input: StreamChatInput): void {
     // StreamChatInput includes AbortSignal only inside Main; validate its serializable request separately.
     const { signal: _signal, ...request } = input;
@@ -104,6 +122,7 @@ export class ProviderRegistry {
     const providerId = configuration.id;
     const safeTransport = this.createTransport(guard, diagnostics);
     const options = { configuration, confirmedBaseUrl: binding.baseUrl, diagnostics, streamTimeoutMs: STREAM_TIMEOUT_MS, readImage: this.options.readImage,
+      fastReplyBody: (modelId: string) => fastReplyBodyOf(catalogServiceAt(this.catalog(), configuration.baseUrl), modelId),
       resolveKey: async (id: string) => {
         guard();
         if (id !== providerId) throw new ContractError('forbidden');
@@ -165,6 +184,7 @@ export class ProviderRegistry {
   }
 }
 
+const rank = (preferred: readonly string[], id: string) => { const at = preferred.indexOf(id); return at < 0 ? preferred.length : at; };
 // Framing allowances are generous on purpose: role markers carry no message bytes, and nothing here is exact.
 const framing = { perRequestTokens: 512, perMessageTokens: 32 };
 const inputBoundMethod = `UTF-8 bytes + ${IMAGE_INPUT_TOKENS}/image + ${framing.perMessageTokens}/message + ${framing.perRequestTokens}/request`;

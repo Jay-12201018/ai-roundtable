@@ -5,6 +5,8 @@ test('three Mock members finish one discussion in one room, shown live and store
   const running = await harness.launch();
   const { page } = running;
   await page.getByRole('button', { name: '开始试玩' }).click();
+  await expect(page.getByText('想和大家聊点什么？')).toBeVisible();
+  await page.getByRole('button', { name: '自由讨论' }).click();
   await expect(page.getByText('这场讨论要解决什么？')).toBeVisible();
 
   const goal = page.getByRole('textbox', { name: '讨论目标' });
@@ -26,9 +28,9 @@ test('three Mock members finish one discussion in one room, shown live and store
   await expect(threadItems(page)).toHaveCount(3);
   const shown = await memberTexts(page).allTextContents();
   expect(shown[0]).toContain('Mock 起草');
-  expect(shown[1]).toContain('Mock 审查');
+  expect(shown[1]).toContain('Mock 起草');
   expect(shown[2]).toContain('Mock 定稿');
-  await expect(page.locator('.msg-name')).toHaveText(['起草者', '审查者', '综合者']);
+  await expect(page.locator('.msg-name')).toHaveText(['林舟', '阿哲', '小雨']);
   // What the side panel says about requests is true for demo members.
   await expect(page.locator('.run-panel')).toContainText('演示成员不联网');
   await expect(page.locator('.run-panel')).not.toContainText('DeepSeek');
@@ -41,7 +43,7 @@ test('three Mock members finish one discussion in one room, shown live and store
     'SELECT status, turn_index FROM turns ORDER BY turn_index');
   expect(runs).toHaveLength(1);
   expect(runs[0].status).toBe('completed');
-  expect(messages.map(row => row.sender_name)).toEqual(['起草者', '审查者', '综合者']);
+  expect(messages.map(row => row.sender_name)).toEqual(['林舟', '阿哲', '小雨']);
   expect(messages.map(row => row.content)).toEqual(shown);
   expect(new Set(messages.map(row => row.room_id))).toEqual(new Set([runs[0].room_id]));
   expect(turns.map(row => row.status)).toEqual(['completed', 'completed', 'completed']);
@@ -52,6 +54,7 @@ test('three Mock members finish one discussion in one room, shown live and store
 test('a discussion survives a normal quit and reads the same after reopening', async ({ harness }) => {
   let running = await harness.launch();
   await running.page.getByRole('button', { name: '开始试玩' }).click();
+  await running.page.getByRole('button', { name: '自由讨论' }).click();
   await running.page.getByRole('button', { name: '开始讨论' }).click();
   await statusHas(running.page, '已完成');
   const shown = await memberTexts(running.page).allTextContents();

@@ -60,6 +60,8 @@ export const streamChatInputSchema = z.object({
   requestId: idSchema, modelId: modelIdSchema, messages: z.array(providerMessageSchema),
   outputTokenLimit: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   agentRole: z.string().optional(), turnIndex: sequenceSchema.optional(),
+  /** D152: a short group-chat reply or a scheduling request: the service's documented way to skip thinking applies, if the catalog has one. */
+  fastReply: z.literal(true).optional(),
 }).strict();
 const identity = { requestId: idSchema };
 export const normalizedChunkSchema = z.discriminatedUnion('type', [

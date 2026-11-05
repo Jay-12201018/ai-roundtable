@@ -27,6 +27,9 @@
 .setup-line > .setup-label { line-height: 36px; }
 .setup-control { min-width: 0; }
 .setup-seg { display: flex; flex-wrap: wrap; width: fit-content; max-width: 100%; }
+.setup-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.setup-strict { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.setup-strict-label { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .setup-seg button { white-space: nowrap; }
 .setup-seg button:disabled { cursor: default; }
 .empty-room p.setup-hint { margin: 6px 0 0; }

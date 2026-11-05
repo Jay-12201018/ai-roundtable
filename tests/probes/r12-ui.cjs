@@ -51,7 +51,7 @@ async function page(stage, saved = {}) {
   }
 
   // A demo room has three legacy Mock members (Drafter, Critic, Synthesizer); no Provider or Key is involved.
-  const { roomId } = await api.room.createDemo('R12 probe room'); saved.roomId = roomId;
+  const { roomId } = await api.room.createDemo('R12 probe room'); saved.roomId = roomId; localStorage.setItem(`roundtable.mode.${roomId}`, 'free-chat');
   // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.
   await click('用量'); await clickIn('.sidebar', 'Mock 圆桌'); await clickIn('.room-page', '新讨论');
   await fill('讨论目标', 'R12 主持人探针任务'); await click('开始讨论');

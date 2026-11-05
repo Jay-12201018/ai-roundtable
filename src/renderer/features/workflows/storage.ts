@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DEFAULT_RUN_DURATION_MINUTES } from '../../../shared/schemas/workflow';
-import { turnsOf, type WorkflowDraft } from './model';
+import { turnsOf, type DiscussionMode, type WorkflowDraft } from './model';
 
 /**
  * D116 (R16 D2-B): a room's discussion mode is remembered in this browser profile. Main still checks it against the
@@ -32,6 +32,24 @@ export function writeRoomWorkflow(roomId: string, draft: WorkflowDraft | null): 
     else localStorage.removeItem(key(roomId));
     return true;
   } catch { return false; }
+}
+
+const modeKey = (roomId: string) => `roundtable.mode.${roomId}`;
+/**
+ * D149: how a room with no remembered flow talks. A room where the host once set the mode or the number of members, before 群聊 existed,
+ * chose free discussion that way, and keeps it. Everything else starts as a group chat.
+ */
+export function readRoomMode(roomId: string): DiscussionMode {
+  const remembered = readRoomWorkflow(roomId).draft?.template;
+  if (remembered) return remembered;
+  try {
+    const value = localStorage.getItem(modeKey(roomId));
+    if (value === 'group-chat' || value === 'free-chat') return value;
+    return localStorage.getItem(countKey(roomId)) === null ? 'group-chat' : 'free-chat';
+  } catch { return 'group-chat'; }
+}
+export function writeRoomMode(roomId: string, mode: DiscussionMode): boolean {
+  try { localStorage.setItem(modeKey(roomId), mode === 'group-chat' ? 'group-chat' : 'free-chat'); return true; } catch { return false; }
 }
 
 const countKey = (roomId: string) => `roundtable.participants.${roomId}`;

@@ -120,7 +120,7 @@ export function RoomPage({ api, room, providers, readiness, runs, workflow, onNe
 
     <section className="section" aria-labelledby="room-members"><h2 id="room-members"><span className="grow">成员</span>
       {!archivedRoom && <Button size="sm" icon={Plus} disabled={busy || !agents} onClick={() => { setError(''); setEditor('new'); }}>添加成员</Button>}</h2>
-      <p className="lead">按顺序轮流发言（选了讨论方式时按流程分配）。拖动或用方向键调整顺序。改动只影响之后开始的讨论。</p>
+      <p className="lead">{workflow.label === '群聊' ? '群聊里谁接话由程序判断；用严格流程时按这个顺序发言。' : '按顺序轮流发言（选了讨论方式时按流程分配）。'}拖动或用方向键调整顺序。改动只影响之后开始的讨论。</p>
       {loadFailed && <p role="alert" className="field-error">成员没有读出来。<button type="button" className="link-btn" onClick={() => void load()}>重试</button></p>}
       {!agents && !loadFailed && <p role="status" className="muted">正在读取成员…</p>}
       {agents && active.length === 0 && <div className="card"><div className="card-row"><span className="grow"><b>还没有成员</b><small>添加几位成员，选好模型，就能开始讨论。</small></span></div></div>}

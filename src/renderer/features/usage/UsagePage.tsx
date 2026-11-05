@@ -9,7 +9,7 @@ type View = 'run' | 'model' | 'date' | 'kind';
 const views: Array<{ id: View; label: string; column: string }> = [{ id: 'run', label: '按讨论', column: '讨论' }, { id: 'model', label: '按模型', column: '模型' },
   { id: 'date', label: '按日期', column: '日期' }, { id: 'kind', label: '按用途', column: '用途' }];
 /** D120: what each request was for. */
-const kindLabels = { turn: '讨论发言', summary: '讨论摘要', artifact: '产物（文档、清单、代码候选）' } as const;
+const kindLabels = { turn: '讨论发言', summary: '讨论摘要', artifact: '产物（文档、清单、代码候选）', schedule: '群聊调度（决定谁接话）' } as const;
 export type UsagePeriod = 'this-month' | 'last-month' | 'all';
 const periods: Array<{ id: UsagePeriod; label: string }> = [{ id: 'this-month', label: '本月' }, { id: 'last-month', label: '上月' }, { id: 'all', label: '全部' }];
 /** D117: a calendar month in this computer's time zone, as the half-open range the report filters by. */

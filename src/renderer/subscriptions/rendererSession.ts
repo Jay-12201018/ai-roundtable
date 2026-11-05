@@ -5,6 +5,7 @@ import { runEventSchema, runSnapshotSchema, runSubscriptionSchema } from '../../
 import type { RunEvent,InterruptedRunDecision } from '../../shared/types/run';
 import { createRendererStore,canRecover, type RendererCommand } from '../store/rendererStore';
 import { durationStopText } from '../locales/zhCN';
+import { groupChatWorkflowSnapshot } from '../../shared/schemas/groupChat';
 import { apiErrorSchema, upstreamText, type ApiError, type ErrorCode } from '../../shared/schemas/error';
 
 // Start refusals the host can act on get their own reason; anything else keeps the generic message.
@@ -183,7 +184,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
       if (ownsCommand(token, generation)) store.getState().setError('创建任务失败，请稍后重试。', generation);
     } finally { store.getState().endCommand(token); }
   }
-  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>, limits: Pick<StartRunInput, 'mode' | 'outputTokenLimit' | 'attachmentIds'> = {}) {
+  async function startRun(workflow?: Pick<StartRunInput, 'workflowConfig' | 'workflowPreviewId'>, limits: Pick<StartRunInput, 'mode' | 'outputTokenLimit' | 'attachmentIds'> & { groupChat?: boolean } = {}) {
     if (!mounted || options.requireRoom && !store.getState().roomId) return;
     const token = store.getState().beginCommand('start');
     if (token === undefined) return;
@@ -192,7 +193,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
     try {
       const selectedRoom = roomId ?? (await api.room.createDemo(task)).roomId;
       if (!ownsCommand(token, generation)) return;
-      const result = await api.run.start({ roomId: selectedRoom, task, ...(workflow?.workflowConfig ? workflow : { workflowSnapshot: { templateId: 'draft-review-finalize', version: 1 } }),
+      const result = await api.run.start({ roomId: selectedRoom, task, ...(workflow?.workflowConfig ? workflow : { workflowSnapshot: limits.groupChat ? { ...groupChatWorkflowSnapshot } : { templateId: 'draft-review-finalize', version: 1 } }),
         ...(limits.attachmentIds?.length ? { attachmentIds: limits.attachmentIds } : {}), ...(limits.mode ? { mode: limits.mode } : {}), ...(limits.outputTokenLimit === undefined ? {} : { outputTokenLimit: limits.outputTokenLimit }) });
       if (!ownsCommand(token, generation)) return;
       const parsed = runSnapshotSchema.safeParse(result);

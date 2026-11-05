@@ -31,6 +31,12 @@ import { parseArtifact } from '../../shared/schemas/artifactParse';
 import { artifactOutputTokenLimit, buildArtifactRequest } from '../artifact/prompt';
 import { continuationPreviewInputSchema, continueDiscussionInputSchema, type ContinuationPreview, type ContinuationPreviewInput,
   type ContinueDiscussionInput, type ContinueDiscussionResult, type RunContinuation } from '../../shared/schemas/continuation';
+import { GROUP_CHAT_MAX_SCHEDULES, GROUP_CHAT_MAX_TURNS, GROUP_CHAT_SCHEDULE_MAX_TOKENS, GROUP_CHAT_SCHEDULE_TIMEOUT_MS, isGroupChatSnapshot, type GroupChatRoundState, type GroupChatState } from '../../shared/schemas/groupChat';
+import { classifyHostMessage, memberHints, parseScheduleOutput, ruleSpeakers, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
+import { buildScheduleMessages } from '../groupChat/schedulePrompt';
+import type { GroupChatRound, GroupChatSpeaker } from '../database/Database';
+import type { GroupChatCue } from '../context/transcript';
+import type { ImageAttachment } from '../../shared/schemas/attachment';
 
 type RunContext = {
   runId: string;
@@ -51,6 +57,9 @@ type RunContext = {
   failureReason?: string;
   // R12: a version regeneration runs outside the schedule and leaves the Run status unchanged.
   job?: { requestId?: string };
+  // D149: a group-chat Run runs its own loop; `interrupt` says the current request was aborted by a new host message, not by a stop.
+  groupChat?: boolean;
+  interrupt?: boolean;
 };
 
 export type RequestPreparation = {
@@ -60,6 +69,8 @@ export type RequestPreparation = {
   repeat?: { messages: StreamChatInput['messages']; sourceRequestId: string; kind: 'retry' | 'continue' };
   /** R12: rebuild the existing Turn's input from current effective history before it and current host instructions. */
   regenerate?: { sourceMessageId: string };
+  /** D153: this request is a group-chat reply. */
+  groupChat?: GroupChatCue;
 };
 export type RunMessagesBuilder = (run: RunRecord, member: MemberSnapshot, turnIndex: number, preparation: RequestPreparation) => StreamChatInput['messages'];
 type RepeatAttempt = { turn: TurnRecord; messages: StreamChatInput['messages']; modelId: string; sourceRequestId: string; kind: 'retry' | 'continue' }
@@ -130,6 +141,8 @@ export class RunService {
     /** R13B: a member's context window and token counter, for summary requests and the context-pressure hint. */
     private readonly modelBudget: (member: MemberSnapshot) => ModelBudget | undefined = member => member.modelId === 'mock' ? mockModelBudget : undefined) {}
   private readonly pressureCache = new Map<string, { key: string; value?: ContextPressure }>();
+  /** D150: how long a scheduling request may take before the rules take over. */
+  scheduleTimeoutMs = GROUP_CHAT_SCHEDULE_TIMEOUT_MS;
 
   createDemoRoom(objective: string): string {
     const roomId = randomUUID();
@@ -176,7 +189,9 @@ export class RunService {
       workflow = this.compileCurrentWorkflow(input.roomId, input.workflowConfig);
       const preview = input.workflowPreviewId ? this.workflowPreviews.get(input.workflowPreviewId) : undefined;
       if (!preview || JSON.stringify(preview) !== JSON.stringify(workflow)) throw new ContractError('invalid_state');
-    } else if (input.workflowPreviewId || this.hasWorkflowPlan(input.workflowSnapshot ?? {})) {
+    } else if (input.workflowPreviewId || this.hasWorkflowPlan(input.workflowSnapshot ?? {})
+      // D149: the marker is exactly this and nothing more; it brings no plan and no roster of its own.
+      || isGroupChatSnapshot(input.workflowSnapshot) && Object.keys(input.workflowSnapshot!).sort().join() !== 'templateId,version') {
       // Caller-supplied frozen rosters/steps cannot bypass Main compilation or preview freshness.
       throw new ContractError('invalid_input');
     }
@@ -184,9 +199,10 @@ export class RunService {
       .map(({ id, roomId: _roomId, ...member }) => ({ ...member, agentId: id, modelId: member.modelId ?? 'mock' }));
     if (!members.length) throw new ContractError('invalid_state');
     const runId = randomUUID();
-    const context: RunContext = { runId, roomId: input.roomId, members,
-      mode: input.mode ?? 'automatic', // With no stated limit every member speaks once: a fourth member must not be left out in silence.
-      maxTurns: Math.min(input.maxTurns ?? workflow?.config.limits.maxTurns ?? Math.max(3, members.length), workflow?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
+    const groupChat = !workflow && isGroupChatSnapshot(input.workflowSnapshot);
+    const context: RunContext = { runId, roomId: input.roomId, members, ...(groupChat ? { groupChat: true } : {}),
+      mode: groupChat ? 'automatic' : input.mode ?? 'automatic', // With no stated limit every member speaks once: a fourth member must not be left out in silence.
+      maxTurns: groupChat ? GROUP_CHAT_MAX_TURNS : Math.min(input.maxTurns ?? workflow?.config.limits.maxTurns ?? Math.max(3, members.length), workflow?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
       maxDurationMs: Math.min(input.maxDurationMs ?? workflow?.config.limits.maxDurationMs ?? DEFAULT_RUN_DURATION_MS, workflow?.config.limits.maxDurationMs ?? Number.MAX_SAFE_INTEGER),
       outputTokenLimit: Math.min(input.outputTokenLimit ?? workflow?.config.limits.outputTokenLimit ?? DEFAULT_OUTPUT_TOKEN_LIMIT, workflow?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
       abortController: new AbortController(), stopRequested: false, timedOut: false, promise: Promise.resolve(), elapsedBefore: 0, executing: false };
@@ -194,6 +210,7 @@ export class RunService {
       this.database.insertRun({ id: runId, roomId: input.roomId, status: 'idle', workflowSnapshot: workflow ?? input.workflowSnapshot ?? {}, mode: context.mode, maxTurns: context.maxTurns, maxDurationMs: context.maxDurationMs, outputTokenLimit: context.outputTokenLimit,
         task: input.task, membersSnapshot: members, nextTurnIndex: 0, elapsedExecutionMs: 0 }, taskAttachmentIds);
       this.setRunState(runId, { status: 'running', startedAt: new Date().toISOString() }, { status: 'running' });
+      if (groupChat) this.openRound(context, input.task, undefined, runId);
     });
     if (input.workflowPreviewId) this.workflowPreviews.delete(input.workflowPreviewId);
     return this.getSnapshot(runId);
@@ -245,7 +262,17 @@ export class RunService {
           return { actionId: item.actionId, agentIds: item.agentIds, createdAt: item.createdAt, ...(message ? { messageId: message } : {}) };
         }) } : {}),
         ...this.pressureView(data),
+        ...this.groupChatView(data),
       });
+  }
+
+  /** D149: where the current group-chat round stands, for the page to show. */
+  private groupChatView(data: Snapshot): { groupChat?: GroupChatState } {
+    if (!isGroupChatSnapshot(data.run.workflowSnapshot)) return {};
+    const round = data.groupChatRound;
+    return { groupChat: { scheduleRequestIds: data.scheduleRequests.map(request => request.requestId), ...(round ? { round: { roundId: round.id, classification: round.classification, state: round.state,
+      turnsUsed: round.speakers.filter(speaker => speaker.state === 'started').length, scheduleCalls: round.scheduleCalls, scheduling: round.scheduling,
+      queue: round.speakers.filter(speaker => speaker.state === 'queued').map(({ agentId, intent, length, source }) => ({ agentId, intent, length, source })) } } : {}) } };
   }
 
   private versionView(data: Snapshot): MessageVersion[] {
@@ -422,6 +449,7 @@ export class RunService {
       this.database.transaction(() => {
         this.setRunState(runId, { status: 'cancelling' }, { status: 'cancelling' });
         this.setRunState(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentTurnId: null, currentAgentId: null }, { status: 'cancelled' });
+        this.closeOpenRound(runId, 'stopped');
       });
       return;
     }
@@ -570,6 +598,8 @@ export class RunService {
     const answering = agentId === undefined ? available : available.filter(member => member.agentId === agentId);
     const plan: Plan = { agentIds: answering.map(member => member.agentId).slice(0, 64) };
     if (run.task === null || !roster.length || run.nextTurnIndex === null || run.elapsedExecutionMs === null) return { ...plan, reason: 'unsupported' as const };
+    // D149: a group chat goes on with `interject`; it has no continuations.
+    if (isGroupChatSnapshot(run.workflowSnapshot)) return { ...plan, reason: 'unsupported' as const };
     const snapshot = this.database.readRunSnapshot(run.id);
     // Any stop with nothing left to retry can continue.
     if (!['completed', 'cancelled', 'error'].includes(run.status)) return { ...plan, reason: 'not_finished' as const };
@@ -1001,6 +1031,8 @@ export class RunService {
   assertOverrideAllowed(runId: string, agentId: string): void {
     const run = this.requireRun(runId);
     if (!['running', 'pausing', 'paused', 'error', 'cancelled', 'interrupted'].includes(run.status)) throw new ContractError('invalid_state');
+    // D149: in a group chat, naming someone is an @ in what the host says.
+    if (isGroupChatSnapshot(run.workflowSnapshot)) throw new ContractError('invalid_state');
     if (!run.membersSnapshot?.some(member => member.agentId === agentId)) throw new ContractError('not_found');
     const agent = this.database.getAgentConfiguration(agentId);
     if (!agent || agent.roomId !== run.roomId || !agent.enabled || agent.archivedAt !== null) throw new ContractError('invalid_state');
@@ -1116,6 +1148,7 @@ export class RunService {
     if (decision === 'inspect') return;
     if (decision === 'discard') {
       this.setRunState(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentTurnId: null, currentAgentId: null }, { status: 'cancelled', reason: 'discarded after interruption' });
+      this.closeOpenRound(runId, 'stopped');
       return;
     }
     const context = this.contexts.get(runId) ?? this.contextFrom(run);
@@ -1141,7 +1174,7 @@ export class RunService {
   private contextFrom(run: RunRecord): RunContext {
     if (run.task === null || run.membersSnapshot === null || !run.membersSnapshot.length || run.nextTurnIndex === null || run.elapsedExecutionMs === null) throw new ContractError('unsupported');
     const plan = this.workflowPlan(run);
-    return { runId: run.id, roomId: run.roomId, members: run.membersSnapshot,
+    return { runId: run.id, roomId: run.roomId, members: run.membersSnapshot, ...(isGroupChatSnapshot(run.workflowSnapshot) ? { groupChat: true } : {}),
       mode: run.mode, maxTurns: Math.min(run.maxTurns, plan?.config.limits.maxTurns ?? Number.MAX_SAFE_INTEGER),
       maxDurationMs: this.durationLimit({ run, continuations: this.database.listContinuations(run.id) }),
       outputTokenLimit: Math.min(run.outputTokenLimit, plan?.config.limits.outputTokenLimit ?? Number.MAX_SAFE_INTEGER),
@@ -1195,6 +1228,8 @@ export class RunService {
   private assertRequestEvidence(context: RunContext, snapshot: ReturnType<Database['readRunSnapshot']>, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, directed?: Directed): WorkflowStep | undefined {
     if (repeat?.kind === 'regenerate' && repeat.job) return this.assertJobEvidence(context, snapshot, member, repeat);
     const { run, turns, attempts, messages } = snapshot;
+    // D149: a reply the host interrupted stays as it is and the chat goes on past it; it only has to be over.
+    const ended = (turn: TurnRecord) => context.groupChat ? turn.status !== 'running' : turnSettled(snapshot, turn);
     if (this.contexts.get(context.runId) !== context || !context.executing || !this.activeRooms.has(context.roomId)
       || run.id !== context.runId || run.roomId !== context.roomId || run.status !== 'running'
       || !sameMembers(run.membersSnapshot, context.members)
@@ -1208,7 +1243,7 @@ export class RunService {
       return turn.runId !== run.id || turn.turnIndex !== index
         || !latest || latest.runId !== run.id || !message || message.runId !== run.id || message.roomId !== run.roomId || message.turnId !== turn.id
         || (repeat && index === ordered.length - 1 ? latest.requestId !== repeat.sourceRequestId || turn.id !== repeat.turn.id
-          || !canRetryTurn(turn.status as TurnStatus) || !canRetryTurn(latest.status) : !turnSettled(snapshot, turn));
+          || !canRetryTurn(turn.status as TurnStatus) || !canRetryTurn(latest.status) : !ended(turn));
     })) throw new ContractError('invalid_state');
     const stageStep = (step: WorkflowStep | undefined) => step ?? plan?.steps.at(-1);
     if (repeat) {
@@ -1268,6 +1303,12 @@ export class RunService {
 
   private assertSettled(runId: string): void {
     const snapshot = this.database.readRunSnapshot(runId);
+    // D149: earlier replies of a group chat may have been interrupted; only the last one can still need retrying.
+    if (isGroupChatSnapshot(snapshot.run.workflowSnapshot)) {
+      const last = snapshot.turns.at(-1);
+      if (last && !turnSettled(snapshot, last)) throw new ContractError('invalid_state');
+      return;
+    }
     if (snapshot.turns.some(turn => !turnSettled(snapshot, turn))) throw new ContractError('invalid_state');
   }
 
@@ -1276,7 +1317,7 @@ export class RunService {
     if (this.activeRooms.size && (!context || this.contexts.get(context.runId) !== context)) throw new Error('Another room already has an active run');
   }
 
-  private schedule(context: RunContext, change: () => void, repeat?: RepeatAttempt, runner: () => Promise<void> = () => this.runLoop(context, repeat)): void {
+  private schedule(context: RunContext, change: () => void, repeat?: RepeatAttempt, runner: () => Promise<void> = () => context.groupChat ? this.groupChatLoop(context, repeat) : this.runLoop(context, repeat)): void {
     this.assertAvailable(context);
     // Revalidate frozen references before retries/recovery, without replacing historical members.
     for (const member of context.members) {
@@ -1293,6 +1334,7 @@ export class RunService {
     void context.promise.catch(() => {});
     context.abortController = new AbortController();
     context.stopRequested = false;
+    context.interrupt = false;
     context.timedOut = false;
     context.failureReason = undefined;
     context.segmentStartedAt = performance.now();
@@ -1384,6 +1426,255 @@ export class RunService {
     return { member: plan ? context.members.find(member => member.agentId === agentId) : context.members[planIndex % context.members.length] };
   }
 
+  /** D149: whether this Run is a group chat, where the host's messages go through `sendGroupChatMessage`. */
+  isGroupChat(run: RunRecord): boolean {
+    return isGroupChatSnapshot(run.workflowSnapshot);
+  }
+
+  /**
+   * D149, D151: a host message in a group chat. It is recorded at once, whatever is going on. A reply being generated stops here, keeping its
+   * words, and whoever was queued stands down; the chat is then decided again from this message. Nothing aborted is ever sent again.
+   * `record` writes the host action in the same transaction.
+   */
+  sendGroupChatMessage<T>(runId: string, input: { content: string; attachments: readonly ImageAttachment[] }, record: (messageId: string) => T & { actionId: string }): T {
+    const run = this.requireRun(runId);
+    if (!this.isGroupChat(run) || run.task === null || !run.membersSnapshot?.length || run.nextTurnIndex === null || run.elapsedExecutionMs === null) throw new ContractError('unsupported');
+    if (run.status === 'cancelling' || run.status === 'idle') throw new ContractError('invalid_state');
+    const existing = this.contexts.get(runId);
+    // A summary or a new version on its way finishes first; the box keeps what the host wrote.
+    if (existing?.job) throw new ContractError('invalid_state');
+    const context = existing ?? this.contextFrom(run);
+    const messageId = randomUUID();
+    let result: (T & { actionId: string }) | undefined;
+    const write = () => {
+      this.database.insertMessage({ id: messageId, roomId: run.roomId, runId, senderType: 'user', senderName: hostSenderName, content: input.content, status: 'completed', ...(input.attachments.length ? { attachments: [...input.attachments] } : {}) });
+      result = record(messageId);
+      this.openRound(context, input.content, messageId, messageId);
+      this.appendEvent(runId, 'host_updated', { actionId: result.actionId, kind: 'interject' });
+      // Each message gets the full allowance again, so a long chat is not cut off by what it has already used.
+      context.maxDurationMs = this.elapsed(context) + DEFAULT_RUN_DURATION_MS;
+      context.timedOut = false;
+      this.database.updateRun(runId, { maxDurationMs: context.maxDurationMs });
+    };
+    if (context.executing) {
+      this.database.transaction(write);
+      context.interrupt = true;
+      context.abortController.abort(new ContractError('cancelled'));
+      return result!;
+    }
+    this.schedule(context, () => {
+      write();
+      this.setRunState(runId, { status: 'running', finishedAt: null, lastError: null }, { status: 'running' });
+    });
+    return result!;
+  }
+
+  /** Who can still speak: the frozen roster, without those since stopped or archived. */
+  private chatRoster(context: RunContext): MemberSnapshot[] {
+    return [...context.members].sort((a, b) => a.displayOrder - b.displayOrder).filter(member => {
+      const agent = this.database.getAgentConfiguration(member.agentId);
+      return agent && agent.roomId === context.roomId && agent.enabled && agent.archivedAt === null;
+    });
+  }
+
+  /** Opens the round for one host message. The latest message is what counts: an earlier round ends here, and whoever was queued in it stands down. */
+  private openRound(context: RunContext, text: string, messageId: string | undefined, seed: string): void {
+    const previous = this.database.openGroupChatRound(context.runId);
+    if (previous) { this.database.closeGroupChatRound(previous.id, 'superseded'); this.appendEvent(context.runId, 'group_chat_updated', { roundId: previous.id, state: 'superseded' }); }
+    const roster = this.chatRoster(context);
+    if (!roster.length) throw new ContractError('invalid_state');
+    const plan = classifyHostMessage(text, roster, seedOf(seed));
+    const roundId = randomUUID();
+    // Only a message the rules could not read may go on to the schedule.
+    this.database.insertGroupChatRound({ id: roundId, runId: context.runId, ...(messageId ? { messageId } : {}), classification: plan.classification, scheduleMore: plan.classification === 'open', speakers: plan.speakers });
+    this.appendEvent(context.runId, 'group_chat_updated', { roundId, state: 'open' });
+  }
+
+  private closeRound(runId: string, roundId: string, state: Exclude<GroupChatRoundState, 'open' | 'superseded'>): void {
+    this.database.transaction(() => {
+      this.database.closeGroupChatRound(roundId, state);
+      this.appendEvent(runId, 'group_chat_updated', { roundId, state });
+    });
+  }
+  private closeOpenRound(runId: string, state: Exclude<GroupChatRoundState, 'open' | 'superseded'>): void {
+    const round = this.database.openGroupChatRound(runId);
+    if (round) this.closeRound(runId, round.id, state);
+  }
+
+  /**
+   * D149: a group chat speaks until the round has nothing left, then waits (`completed`) for the host. One at a time, as ever. A new host
+   * message aborts what is in flight and this loop simply goes round again, from the new round.
+   */
+  private async groupChatLoop(context: RunContext, repeat?: RepeatAttempt): Promise<void> {
+    while (true) {
+      try {
+        if (context.interrupt && !context.stopRequested) { context.interrupt = false; context.abortController = new AbortController(); }
+        if (context.stopRequested) { this.finishRun(context, 'cancelled'); return; }
+        if (this.deadlineReached(context)) throw new ContractError('timeout');
+        const run = this.requireRun(context.runId);
+        if (run.status === 'pausing') { this.finishRun(context, 'paused'); return; }
+        if (repeat) {
+          const again = repeat; repeat = undefined;
+          const member = context.members.find(item => item.agentId === again.turn.agentId);
+          if (!member) throw new ContractError('invalid_state');
+          await this.executeTurn(context, member, again.turn.turnIndex, again);
+        } else {
+          const next = await this.nextChatSpeaker(context);
+          if (next === 'again') continue;
+          if (next === 'done') { this.finishRun(context, 'completed'); return; }
+          await this.executeTurn(context, next.member, this.requireRun(context.runId).nextTurnIndex!, undefined, undefined, next.speaker);
+        }
+        if (context.mode === 'step' && !context.interrupt) { this.finishRun(context, 'paused'); return; }
+      } catch (error) {
+        // The host spoke: what was in flight is already recorded as stopped, and the new message decides what happens next.
+        if (context.interrupt && !context.stopRequested && !context.timedOut) continue;
+        const code = toPublicError(error).code;
+        this.finishRun(context, context.stopRequested || code === 'cancelled' ? 'cancelled' : 'error', context.timedOut ? 'Maximum run duration reached' : undefined, context.failureReason ?? toPublicError(error).message);
+        return;
+      }
+    }
+  }
+
+  /** The next speaker of the open round, deciding the next batch if the queue is empty. */
+  private async nextChatSpeaker(context: RunContext): Promise<'done' | 'again' | { member: MemberSnapshot; speaker: GroupChatSpeaker }> {
+    const round = this.database.openGroupChatRound(context.runId);
+    if (!round) return 'done';
+    const used = round.speakers.filter(speaker => speaker.state === 'started').length;
+    const next = round.speakers.find(speaker => speaker.state === 'queued');
+    if (next) {
+      if (used >= GROUP_CHAT_MAX_TURNS) { this.closeRound(context.runId, round.id, 'limit'); return 'done'; }
+      const member = this.chatRoster(context).find(item => item.agentId === next.agentId);
+      if (member) return { member, speaker: next };
+      // Stopped or archived since the queue was made.
+      this.database.dropGroupChatSpeaker(round.id, next.position);
+      return 'again';
+    }
+    return this.planNextBatch(context, round, used);
+  }
+
+  /**
+   * D150: the queue is empty. The rules' own batch needs nothing more, unless a member @-ed someone, which is only a reason to look again.
+   * A message the rules could not read asks the model, if one can be asked; anything that goes wrong with that falls back to the rules without
+   * a word to the host. D151: the limit holds whatever anyone wants.
+   */
+  private async planNextBatch(context: RunContext, round: GroupChatRound, used: number): Promise<'done' | 'again'> {
+    const roster = this.chatRoster(context);
+    const first = round.speakers.length === 0;
+    const hinted = first ? [] : this.hintedMembers(context, round, roster);
+    if (!first && !round.scheduleMore && !hinted.length) { this.closeRound(context.runId, round.id, 'done'); return 'done'; }
+    if (used >= GROUP_CHAT_MAX_TURNS) { this.closeRound(context.runId, round.id, 'limit'); return 'done'; }
+    const target = round.scheduleCalls < GROUP_CHAT_MAX_SCHEDULES ? this.scheduleTarget(context) : undefined;
+    const answer = target ? await this.askSchedule(context, round, target, roster, hinted, used) : undefined;
+    if (context.interrupt || context.stopRequested) return 'again';
+    this.deadlineReached(context);
+    if (context.timedOut) throw new ContractError('timeout');
+    const rules = first ? ruleSpeakers(this.roundText(context, round), roster, seedOf(round.id))
+      : hinted.filter(agentId => !round.speakers.some(speaker => speaker.agentId === agentId && speaker.state === 'started')).map((agentId): PlannedSpeaker => ({ agentId, intent: 'reply', length: 'short', source: 'hint' }));
+    // Someone always answers the host: an empty first answer counts as no answer.
+    const chosen: PlannedSpeaker[] = answer && (answer.speakers.length || !first) ? answer.speakers.map(speaker => ({ ...speaker, source: 'schedule' as const })) : rules;
+    const room = GROUP_CHAT_MAX_TURNS - used;
+    if (!chosen.length) { this.closeRound(context.runId, round.id, 'done'); return 'done'; }
+    this.database.transaction(() => {
+      // More than fits means someone still wanted to speak, so the limit is what ended it, and the page says so.
+      this.database.appendGroupChatSpeakers(round.id, chosen.slice(0, room), chosen.length > room || (answer?.more ?? false));
+      this.appendEvent(context.runId, 'group_chat_updated', { roundId: round.id, state: 'open' });
+    });
+    return 'again';
+  }
+
+  /** Who the replies of the latest batch named, if they are not that batch themselves. A suggestion only. */
+  private hintedMembers(context: RunContext, round: GroupChatRound, roster: readonly MemberSnapshot[]): string[] {
+    const snapshot = this.database.readRunSnapshot(context.runId);
+    const batch = round.speakers.filter(speaker => speaker.position >= round.batchStart && speaker.turnId);
+    const hints = new Set(batch.flatMap(speaker => {
+      const turn = snapshot.turns.find(item => item.id === speaker.turnId);
+      const message = turn && turn.status === 'completed' ? activeMessageOf(snapshot, turn.id) : undefined;
+      return message ? memberHints(message.content, roster.map(({ agentId, displayName }) => ({ agentId, displayName })), speaker.agentId) : [];
+    }));
+    return [...hints].filter(agentId => !batch.some(speaker => speaker.agentId === agentId));
+  }
+
+  private roundText(context: RunContext, round: GroupChatRound): string {
+    const message = round.messageId ? this.database.getMessage(round.messageId) : undefined;
+    return message?.content ?? this.requireRun(context.runId).task ?? '';
+  }
+
+  /** D150: the demo never asks; neither does a room with nothing to ask with. Whose service it goes through only says where its usage belongs. */
+  private scheduleTarget(context: RunContext): { providerId: string; modelId: string; agentId: string } | undefined {
+    if (!this.registry) return undefined;
+    const real = context.members.filter(member => member.providerId && this.database.getProviderConfiguration(member.providerId)?.kind !== 'mock');
+    if (!real.length) return undefined;
+    const model = this.registry.scheduleModel([...new Set(real.map(member => member.providerId!))]);
+    return model ? { ...model, agentId: (real.find(member => member.providerId === model.providerId) ?? real[0]!).agentId } : undefined;
+  }
+
+  /**
+   * D150: one scheduling request. It has no Turn and no message; it has its own record and usage row. Its answer is only ever read by
+   * `parseScheduleOutput`. Undefined means no usable answer: the caller falls back to the rules. Interrupted or stopped, it just ends.
+   */
+  private async askSchedule(context: RunContext, round: GroupChatRound, target: { providerId: string; modelId: string; agentId: string }, roster: readonly MemberSnapshot[], hinted: readonly string[], used: number): Promise<ScheduleOutput | undefined> {
+    const snapshot = this.database.readRunSnapshot(context.runId);
+    const active = new Set(snapshot.versions.filter(version => version.active).map(version => version.messageId));
+    const lines = snapshot.messages.filter(message => active.has(message.id) && message.status === 'completed' && (message.senderType === 'user' || message.senderType === 'agent'))
+      .map(message => ({ speaker: message.senderName, content: message.content, images: message.attachments?.length ?? 0 }));
+    const requestId = randomUUID();
+    const name = (agentId: string) => roster.find(member => member.agentId === agentId)?.displayName ?? '';
+    const input: StreamChatInput = streamChatInputSchema.parse({ requestId, modelId: target.modelId, outputTokenLimit: GROUP_CHAT_SCHEDULE_MAX_TOKENS, agentRole: 'group-chat-schedule', fastReply: true,
+      messages: buildScheduleMessages({ task: snapshot.run.task ?? '', taskImages: snapshot.taskAttachments?.length ?? 0, members: roster, lines, turnsUsed: used, hinted: hinted.map(name).filter(Boolean) }) });
+    try { this.registry!.checkGeneration(target.providerId, input); } catch { return undefined; }
+    this.database.transaction(() => {
+      this.database.insertScheduleRequest({ requestId, runId: context.runId, roundId: round.id, agentId: target.agentId, providerId: target.providerId, modelId: target.modelId, inputSnapshot: input });
+      this.database.openUsage({ requestId, runId: context.runId, agentId: target.agentId, providerId: target.providerId, modelId: target.modelId, kind: 'schedule' });
+      this.appendEvent(context.runId, 'group_chat_updated', { roundId: round.id, state: 'open' });
+    });
+    const controller = new AbortController();
+    const parent = context.abortController.signal;
+    const relay = () => controller.abort(new ContractError('cancelled'));
+    parent.addEventListener('abort', relay, { once: true });
+    if (parent.aborted) relay();
+    const timer = setTimeout(() => controller.abort(new ContractError('timeout')), this.scheduleTimeoutMs);
+    let text = ''; let iterator: AsyncIterator<unknown> | undefined; let drained = false;
+    let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
+    let usage: { inputTokens: number; outputTokens: number } | undefined; let cacheHit: number | undefined; let dispatched = false;
+    const close = (status: Parameters<Database['finishScheduleRequest']>[1]) => this.database.transaction(() => {
+      this.database.finishScheduleRequest(requestId, status, text);
+      this.closeRequestUsage(requestId, finishReason, usage, cacheHit, dispatched);
+      this.appendEvent(context.runId, 'group_chat_updated', { roundId: round.id, state: 'open' });
+    });
+    try {
+      const provider = this.registry!.getAdapter(target.providerId, target.modelId, () => { dispatched = true; });
+      iterator = provider.streamChat({ ...input, signal: controller.signal })[Symbol.asyncIterator]();
+      // A service that ignores the signal must not hold the chat up: the abort wins this race.
+      const aborted = new Promise<never>((_, reject) => { controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true }); if (controller.signal.aborted) reject(controller.signal.reason); });
+      aborted.catch(() => {});
+      let started = false;
+      while (true) {
+        const next = await Promise.race([iterator.next(), aborted]);
+        if (next.done) { drained = true; break; }
+        const parsed = normalizedChunkSchema.safeParse(next.value);
+        if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
+        const chunk = parsed.data;
+        if (chunk.type === 'error') throw new ContractError(chunk.error.code);
+        if (chunk.type === 'start') { started = true; continue; }
+        if (!started) throw new ContractError('invalid_response');
+        if (chunk.type === 'finish') finishReason = chunk.reason;
+        else if (chunk.type === 'text_delta') text += chunk.text;
+        else if (chunk.type === 'usage') { usage = { inputTokens: chunk.inputTokens, outputTokens: chunk.outputTokens }; cacheHit = chunk.cacheHitInputTokens; }
+      }
+      if (!finishReason) throw new ContractError('invalid_response');
+      const answer = parseScheduleOutput(text, roster.map(({ agentId, displayName }) => ({ agentId, displayName })));
+      close(answer ? 'completed' : 'invalid');
+      return answer;
+    } catch {
+      close(parent.aborted ? 'aborted' : 'failed');
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+      parent.removeEventListener('abort', relay);
+      if (!drained && iterator?.return) void Promise.resolve().then(() => iterator!.return!()).catch(() => {});
+    }
+  }
+
   private elapsed(context: RunContext): number {
     return context.elapsedBefore + (context.segmentStartedAt === undefined ? 0 : Math.max(0, Math.floor(performance.now() - context.segmentStartedAt)));
   }
@@ -1404,7 +1695,7 @@ export class RunService {
     });
   }
 
-  private async executeTurn(context: RunContext, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, directed?: Directed): Promise<void> {
+  private async executeTurn(context: RunContext, member: MemberSnapshot, turnIndex: number, repeat?: RepeatAttempt, directed?: Directed, speaker?: GroupChatSpeaker): Promise<void> {
     const turnId = repeat?.turn.id ?? randomUUID();
     const messageId = randomUUID();
     const requestId = randomUUID();
@@ -1414,7 +1705,10 @@ export class RunService {
     const input:StreamChatInput = this.database.transaction(() => {
       const snapshot=this.database.readRunSnapshot(context.runId);
       const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, directed);
-      const preparation:RequestPreparation={snapshot,workflowStep,current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
+      // A repeat of a group-chat reply asks for what the first request asked for. A Turn from before this queue existed is a plain reply.
+      const chat = context.groupChat ? speaker ?? (repeat ? this.database.groupChatSpeakerOfTurn(turnId) : undefined) : undefined;
+      const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}) } : undefined;
+      const preparation:RequestPreparation={snapshot,workflowStep,...(cue?{groupChat:cue}:{}),current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
         repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}
           :extend?{messages:extend.messages,sourceRequestId:repeat!.sourceRequestId,kind:'continue'}:undefined,
         regenerate:repeat?.kind==='regenerate'&&!extend?{sourceMessageId:repeat.sourceMessageId}:undefined};
@@ -1429,7 +1723,9 @@ export class RunService {
           basis: basisBefore(snapshot.messages, snapshot.versions, turnId) }
         : { origin: repeat.kind, ...(source ? { parentMessageId: source.messageId } : {}), ...(source?.basis ? { basis: source.basis } : {}) };
       const inputSnapshot=streamChatInputSchema.parse({ requestId, modelId: repeat?.modelId ?? member.modelId ?? 'mock',
-        outputTokenLimit:this.memberOutputLimit(context.outputTokenLimit,member),agentRole:member.roleTemplateId,turnIndex,
+        outputTokenLimit:this.memberOutputLimit(context.outputTokenLimit,member),agentRole:cue?`chat:${cue.length}:${cue.intent}`:member.roleTemplateId,turnIndex,
+        // D152: only a short reply skips thinking; what the host asked to have delivered gets all of it.
+        ...(cue&&skipsThinking(cue)?{fastReply:true as const}:{}),
         messages:this.buildMessages(snapshot.run,member,turnIndex,preparation) });
       if (tracked) this.registry!.checkGeneration(member.providerId!, inputSnapshot);
       if (this.deadlineReached(context)) throw new ContractError('timeout');
@@ -1438,6 +1734,7 @@ export class RunService {
       else if (repeat) this.database.updateTurn(turnId, { status: transitionTurn(repeat.turn.status as TurnStatus, 'running'), partialContent: '' });
       else this.database.insertTurn({ id: turnId, runId: context.runId, agentId: member.agentId, status: transitionTurn('pending', 'running'), requestId, turnIndex,
         ...(directed?.kind === 'override' ? { overrideActionId: directed.actionId } : directed ? { continuationId: directed.actionId } : {}) });
+      if (speaker) this.database.startGroupChatSpeaker(speaker.roundId, speaker.position, turnId);
       this.database.insertMessage({ id: messageId, roomId: context.roomId, runId: context.runId, turnId, senderType: 'agent', senderName: member.displayName, content: extend?.prefix ?? '', status: 'streaming' }, version);
       const attemptIndex = snapshot.attempts.filter(a => a.turnId === turnId).length;
       this.database.createAttempt({ requestId, runId: context.runId, turnId, messageId, attemptIndex, status: 'pending', inputSnapshot });
@@ -1565,6 +1862,7 @@ export class RunService {
         }
       }
       this.database.updateRunProgress(context.runId, { elapsedExecutionMs: elapsed });
+      if (status === 'cancelled' && context.groupChat) this.closeOpenRound(context.runId, 'stopped');
       const pending = status === 'completed' ? this.database.getPendingOverride(context.runId) : undefined;
       if (pending) this.database.settleHostAction(pending.id, 'expired');
       this.database.afterCommit(() => {

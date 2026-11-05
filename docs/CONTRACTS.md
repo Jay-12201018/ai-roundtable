@@ -513,3 +513,22 @@ R13A 子会话（分支 `codex/r13a-real-model-enable`，基线 R12 `15e2e30`）
 - **协议与 CSP**：`rt-image://local/<sha256>`，由 Main 的 `protocol.handle` 服务；`img-src` 加 `rt-image:`。
 - **Shared**：`src/shared/schemas/attachment.ts`；`serviceCatalog.ts` 的 `imageSupportOf`。
 
+
+## 群聊第一期（2026-11-05，子会话候选，未合 main；总控授权 migration 16）
+
+决策见 D149–D153。没有新增 IPC 通道，也没有改 Preload 的白名单：主持人的消息继续走 `host.command` 的 `interject`。
+
+| 位置 | 变化 | 兼容性 |
+| --- | --- | --- |
+| `run.start` | `workflowSnapshot` 恰好是 `{templateId:'group-chat',version:1}` 时开始一场群聊；带别的字段返回 `invalid_input`。字段本身没变 | 其他值的行为不变 |
+| `RunSnapshot.groupChat`（可选） | `{round?: {roundId,classification,state,turnsUsed,scheduleCalls,scheduling,queue[]}, scheduleRequestIds[]}` | 只有群聊 Run 才有；旧 Run 没有这个字段 |
+| `RunEvent` | 新事件 `group_chat_updated {roundId,state}`，只通知页面重新读取 | 旧版应用读不了含这个事件的 Run；不支持降级，和之前的 migration 一样 |
+| `requestUsage.kind`、`usageReport.byKind` | 新值 `schedule`；`byKind` 上限改为 4 | 旧行不变 |
+| `StreamChatInput.fastReply`（可选） | `true` 时 Provider 按目录加关闭思考的参数 | 没有这个字段的旧快照照常读取和重试 |
+| `RunSummary.groupChat`（可选） | 列表用它把 `completed` 写成“等你说话” | 旧 Run 没有 |
+| `CatalogModel.fast`、`CatalogModel.fastReply`、`CatalogService.fastReplyBody` | 只在 Shared 目录里 | 自动发现的模型都没有 |
+| `setOverride`、`continueDiscussion` | 群聊 Run 上拒绝 | 其他 Run 不变 |
+
+**migration 16**：新增 `group_chat_rounds`、`group_chat_speakers`、`group_chat_schedule_requests`，都有只追加和状态只能走一次的触发器；同一 Run 只能有一个 open 的轮次（部分唯一索引）。`request_usage` 原样重建以放开 `kind` 的 CHECK，行号、内容、索引和五个触发器都保留，插入触发器多一条 `schedule` 的身份检查。没有动别的表，没有回填，没有 Run 被改成群聊。`validateDatabase` 在 v16 起检查这些表、触发器和索引，以及发言人和 Turn、调度请求和轮次是否属于同一个 Run。v13、v14、v15 的夹具升级测试在 `tests/integration/persistence/migrationV16.test.ts`。启动恢复把进行中的调度请求标为 `interrupted`，用量按已有规则变成 `unknown`。
+
+**localStorage**：新键 `roundtable.mode.<roomId>`（`group-chat` 或 `free-chat`）。**第二期**：四步流程要的轮次分类、分工卡片这一期都没有建。届时在 `planNextBatch` 这一处接入，CHECK 里的取值用新的 migration 扩展。

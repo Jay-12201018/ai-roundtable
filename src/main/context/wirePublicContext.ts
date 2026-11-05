@@ -16,7 +16,7 @@ import type { ImageSupport } from '../../shared/serviceCatalog';
 
 type BuildInput={run:RunRecord;member:MemberSnapshot;turnIndex:number;preparation:RequestPreparation;budget:ModelBudget};
 /** R13B: the R05 context for one request, with the latest confirmed summary standing in for what it covers. */
-function contextFor({run:frozen,member,turnIndex,preparation:{snapshot,current,workflowStep,regenerate},budget}:BuildInput){
+function contextFor({run:frozen,member,turnIndex,preparation:{snapshot,current,workflowStep,regenerate,groupChat},budget}:BuildInput){
     // D134: a member's request reserves what that member's model can write, never more than the Run allows.
     const run={...frozen,outputTokenLimit:outputLimitOf(frozen,budget)};
     // R12: only effective versions are public history; a regenerated Turn sees only slots positioned before it.
@@ -34,7 +34,7 @@ function contextFor({run:frozen,member,turnIndex,preparation:{snapshot,current,w
       current:{agentId:current.agentId,turnId:current.turnId,requestId:current.requestId,turnIndex,...(regenerate?{mode:'regenerate' as const}:{})},
       snapshot:{messages:snapshot.messages,turns:snapshot.turns.map(t=>({id:t.id,runId:t.runId,agentId:t.agentId,status:t.status,requestId:t.requestId,turnIndex:t.turnIndex})),attempts:snapshot.attempts.map(a=>({requestId:a.requestId,runId:a.runId,turnId:a.turnId,messageId:a.messageId,attemptIndex:a.attemptIndex,status:a.status,...(a.finishReason?{finishReason:a.finishReason}:{})})),
         ...(versions.length?{versions:versions.map(v=>({messageId:v.messageId,slotId:v.slotId,versionNumber:v.versionNumber,active:v.active,origin:v.origin,affected:(affected.get(v.messageId)?.length??0)>0}))}:{})},
-      ...(snapshot.taskAttachments?{taskImages:snapshot.taskAttachments}:{}),imagesVisible:(budget.imageSupport??'no')!=='no',
+      ...(snapshot.taskAttachments?{taskImages:snapshot.taskAttachments}:{}),imagesVisible:(budget.imageSupport??'no')!=='no',...(groupChat?{groupChat}:{}),
       visibleMessageIds:visible,applicationInstructions:workflowStep?[{id:`workflow-${workflowStep.stageId}`,content:workflowStageInstruction(workflowStep.kind)}]:[],hostInstructions,contextWindowTokens:budget.contextWindowTokens,
       ...(summary?{summary:{messageId:summary.message.id,content:summary.message.content,firstNumber:summary.firstNumber,lastNumber:summary.lastNumber,
         coveredMessageIds:summary.coveredMessageIds,editedByHost:summary.editedByHost,affected:summary.affected,
@@ -61,7 +61,7 @@ export function measureContext(run:RunRecord,member:MemberSnapshot,snapshot:Requ
 const outputLimitOf=(run:{outputTokenLimit:number},budget:ModelBudget)=>Math.min(run.outputTokenLimit,budget.maxOutputTokens??run.outputTokenLimit);
 export type ModelBudget={contextWindowTokens:number;maxOutputTokens?:number;counter:ModelTokenCounter;imageSupport?:ImageSupport};
 export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:MemberSnapshot)=>ModelBudget|undefined=id=>id==='mock'?mockModelBudget:undefined):RunMessagesBuilder{
-  return (run,member,turnIndex,{snapshot,current,repeat,workflowStep,regenerate})=>{
+  return (run,member,turnIndex,{snapshot,current,repeat,workflowStep,regenerate,groupChat})=>{
     const budget=resolve(member.modelId,member);
     if(!budget||!Number.isSafeInteger(budget.contextWindowTokens)||budget.contextWindowTokens<=0)throw new ContractError('unsupported');
     if(snapshot.run.id!==run.id||snapshot.run.roomId!==run.roomId||current.agentId!==member.agentId||current.turnIndex!==turnIndex
@@ -82,7 +82,7 @@ export function createPublicMessagesBuilder(resolve:(modelId:string|null,member:
       if(count<previous||count+outputLimitOf(run,budget)>budget.contextWindowTokens)throw new ContractError('invalid_input');
       return messages;
     }
-    const result=contextFor({run,member,turnIndex,preparation:{snapshot,current,workflowStep,regenerate},budget});
+    const result=contextFor({run,member,turnIndex,preparation:{snapshot,current,workflowStep,regenerate,groupChat},budget});
     if(!result.ok)throw new ContractError(result.reason==='token_count_unavailable'?'unsupported':'invalid_input');
     return result.messages;
   };

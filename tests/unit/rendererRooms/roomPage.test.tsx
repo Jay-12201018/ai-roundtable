@@ -112,9 +112,9 @@ describe('添加成员 (D5-A)', () => {
   it('a role template fills name, role and 设定; the default service’s usable model is preselected', async () => {
     const { onSave } = dialog();
     fireEvent.click(screen.getByRole('button', { name: /^审查/u }));
-    expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('审查者');
+    expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('老陆');
     expect((screen.getByLabelText('角色') as HTMLInputElement).value).toBe('审查');
-    expect((screen.getByLabelText('设定可选') as HTMLTextAreaElement).value).toContain('你负责审查');
+    expect((screen.getByLabelText('设定可选') as HTMLTextAreaElement).value).toContain('负责审查');
     expect(screen.getByRole('status').textContent).toBe('可以使用：Key 已保存。标“多模态”的模型能看图：讨论里附的图片会发给它。');
     fireEvent.change(screen.getByLabelText('名字'), { target: { value: '老周' } });
     fireEvent.click(screen.getByRole('button', { name: '添加' }));
@@ -139,11 +139,11 @@ describe('添加成员 (D5-A)', () => {
 });
 
 describe('新房间默认三位成员', () => {
-  it('creates 起草者, 审查者 and 综合者 on the default service’s model only when it can be used', async () => {
+  it('creates the three default colleagues on the default service’s model only when it can be used', async () => {
     const api = roomProps().api;
     await createStarterRoom(api, { name: '新房间' }, defaultModelFor([deepseek], readiness));
     expect(vi.mocked(api.createAgent).mock.calls.map(([input]) => [input.displayName, input.roleTemplateId, input.modelId, input.displayOrder]))
-      .toEqual([['起草者', '起草', 'deepseek-flash', 0], ['审查者', '审查', 'deepseek-flash', 1], ['综合者', '综合', 'deepseek-flash', 2]]);
+      .toEqual([['林舟', '产品', 'deepseek-flash', 0], ['阿哲', '工程', 'deepseek-flash', 1], ['小雨', '总结', 'deepseek-flash', 2]]);
     expect(defaultModelFor([{ ...kimi, isDefault: true }], readiness)).toBeUndefined();
     expect(defaultModelFor([deepseek], undefined)).toBeUndefined();
   });

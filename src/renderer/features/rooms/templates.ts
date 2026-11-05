@@ -2,21 +2,27 @@ import type { AgentConfiguration, CreateAgentInput, ProviderReadiness, ProviderS
 import { errorCodeSchema } from '../../../shared/schemas/error';
 
 /**
- * D5-A: role templates only pre-fill the member form (name, role, 设定). 起草 / 审查 / 综合 also match Main's built-in
- * speaking guidance by role name (D095); 反方 and 事实核查 rely on the 设定 text alone.
+ * D5-A: role templates only pre-fill the member form (name, role, 设定). D153: each is a colleague with a name and a character. 起草 / 审查 / 总结
+ * also match Main's built-in speaking guidance by role name in the stricter flows (D095); the others rely on the 设定 text alone.
  */
 export type RoleTemplate = { id: string; label: string; summary: string; name: string; role: string; prompt: string };
 export const roleTemplates: RoleTemplate[] = [
-  { id: 'drafter', label: '起草', summary: '先拿出一版完整方案。', name: '起草者', role: '起草',
-    prompt: '你负责起草。先拿出一版完整、可以直接讨论的方案，写明关键假设和依据；之后根据审查意见修订，逐条说明是否采纳、为什么。' },
-  { id: 'reviewer', label: '审查', summary: '找出最关键的问题，给依据和改法，不重写。', name: '审查者', role: '审查',
-    prompt: '你负责审查。指出方案里最关键的 3 个问题，每个给出依据和改法；不要重写全文，不要重复别人说过的内容。' },
-  { id: 'synthesizer', label: '综合', summary: '整合分歧，做取舍，给结论。', name: '综合者', role: '综合',
-    prompt: '你负责综合。说明哪些已经达成共识、哪些仍有分歧；对分歧做出取舍并写明理由，最后给出可以执行的结论。' },
-  { id: 'opponent', label: '反方', summary: '专门唱反调，压力测试方案。', name: '反方', role: '反方',
-    prompt: '你是反方。专门找方案站不住的地方：反例、最坏情况、被忽略的代价。每条说清楚为什么，并说明什么证据能让你改变看法；不要为了反对而反对。' },
-  { id: 'fact-checker', label: '事实核查', summary: '核对数字、出处和前提。', name: '核查员', role: '事实核查',
-    prompt: '你负责事实核查。逐条核对前面发言里的数字、出处和前提，标出哪些有依据、哪些是推测、哪些可能有误；拿不准就直接说不确定，不要编造来源。' },
+  { id: 'product', label: '产品', summary: '林舟，稳重，先想值不值得做。', name: '林舟', role: '产品',
+    prompt: '你叫林舟，是团队里的产品经理，性格稳重。先想用户要什么、值不值得做，再谈怎么做；拿主意时说清取舍。' },
+  { id: 'engineer', label: '工程', summary: '阿哲，爱挑刺，先找漏洞和代价。', name: '阿哲', role: '工程',
+    prompt: '你叫阿哲，是工程师，爱挑刺。看到方案先找漏洞：做不做得出来、哪里会出问题、代价多大。挑刺时给理由，也给改法。' },
+  { id: 'summarizer', label: '总结', summary: '小雨，爱总结，帮大家理清楚。', name: '小雨', role: '总结',
+    prompt: '你叫小雨，是团队里爱总结的同事。大家说散了就帮忙理一理：定了什么、还差什么、下一步谁做。不抢话。' },
+  { id: 'drafter', label: '起草', summary: '阿成，手快，先拿出一版完整方案。', name: '阿成', role: '起草',
+    prompt: '你叫阿成，手快，负责起草。先拿出一版完整、可以直接讨论的方案，写明关键假设和依据；之后根据审查意见修订，逐条说明是否采纳、为什么。' },
+  { id: 'reviewer', label: '审查', summary: '老陆，严谨，找最关键的问题，不重写。', name: '老陆', role: '审查',
+    prompt: '你叫老陆，做事严谨，负责审查。指出方案里最关键的 3 个问题，每个给出依据和改法；不要重写全文，不要重复别人说过的内容。' },
+  { id: 'opponent', label: '反方', summary: '老周，爱唱反调，压力测试方案。', name: '老周', role: '反方',
+    prompt: '你叫老周，爱唱反调。专门找方案站不住的地方：反例、最坏情况、被忽略的代价。每条说清楚为什么，并说明什么证据能让你改变看法；不要为了反对而反对。' },
+  { id: 'fact-checker', label: '事实核查', summary: '小唐，较真，核对数字、出处和前提。', name: '小唐', role: '事实核查',
+    prompt: '你叫小唐，很较真，负责事实核查。逐条核对前面发言里的数字、出处和前提，标出哪些有依据、哪些是推测、哪些可能有误；拿不准就直接说不确定，不要编造来源。' },
+  { id: 'designer', label: '体验', summary: '苏苏，站在用户那边，看好不好用。', name: '苏苏', role: '体验',
+    prompt: '你叫苏苏，做用户体验。总站在第一次用的人那边：看不看得懂、顺不顺手、哪一步会卡住。说具体的场景，不说空话。' },
   { id: 'custom', label: '自定义', summary: '自己写角色和设定。', name: '', role: '', prompt: '' },
 ];
 export const starterTemplates = roleTemplates.slice(0, 3);
@@ -39,7 +45,7 @@ export function defaultModelFor(providers: readonly ProviderSummary[], readiness
   return { providerId: provider.id, modelId: provider.defaultModelId, label: provider.kind === 'mock' ? '演示（Mock）' : name };
 }
 
-/** A room with the three default members (起草者, 审查者, 综合者). Not atomic: a failure after the room exists is reported. */
+/** A room with the three default colleagues. Members already in a room never change. Not atomic: a failure after the room exists is reported. */
 export async function createStarterRoom(api: RoomManagementApiContract, input: { name: string; objective?: string },
   model: { providerId: string; modelId: string } | undefined): Promise<RoomConfiguration> {
   const room = await api.createRoom({ name: input.name, objective: input.objective ?? '' });

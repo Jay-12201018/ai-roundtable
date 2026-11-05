@@ -2,7 +2,7 @@ import { contextInputSchema } from './types';
 import type { ContextInput, ContextReport, ContextRejection, ContextResult, ContextSource, ModelTokenCounter } from './types';
 import type { ProviderMessage } from '../providers/types';
 import { selectHistory, type HistoryCandidate } from './selectHistory';
-import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText, hasRevisionNote, withImages, type TranscriptEntry } from './transcript';
+import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText, groupChatBoundaryText, groupChatBriefText, groupChatRulesText, hasRevisionNote, withImages, type TranscriptEntry } from './transcript';
 
 /** Main-only: accepts explicit safe projections, never a Renderer draft, database handle or SDK object. */
 export function buildPublicContext(input: ContextInput, counter?: ModelTokenCounter): ContextResult {
@@ -36,13 +36,15 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
     sources.push({ kind, sourceId, runId: run.id, roomId: run.roomId, providerMessageIndex: prefix.length });
     prefix.push(message);
   };
-  append({ role: 'system', content: boundaryText }, 'boundary', contextFormatVersion);
+  const chat = input.groupChat;
+  const rulesText = chat ? groupChatRulesText : discussionRulesText;
+  append({ role: 'system', content: chat ? groupChatBoundaryText : boundaryText }, 'boundary', contextFormatVersion);
   // D112: the rules are finalized per assembly below, with the revision rule only when a sent entry carries a note.
   const rulesIndex = prefix.length;
-  append({ role: 'system', content: discussionRulesText(false) }, 'application', 'discussion-rules-v2');
+  append({ role: 'system', content: rulesText(false) }, 'application', chat ? 'group-chat-rules-v1' : 'discussion-rules-v2');
   for (const instruction of input.applicationInstructions) append({ role: 'system', content: instruction.content }, 'application', instruction.id);
   for (const instruction of input.hostInstructions) append({ role: 'system', content: instruction.content }, 'host', instruction.id);
-  append({ role: 'system', content: agentBriefText(member, run.membersSnapshot) }, 'agent', member.agentId);
+  append({ role: 'system', content: chat ? groupChatBriefText(member, run.membersSnapshot) : agentBriefText(member, run.membersSnapshot) }, 'agent', member.agentId);
   // R13B: a confirmed summary is required context, right after the task, in place of the messages it covers.
   const summary = input.summary;
   const summaryEntries: TranscriptEntry[] = summary ? [{ speaker: 'summary', summary: { firstNumber: summary.firstNumber, lastNumber: summary.lastNumber },
@@ -54,9 +56,9 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   const assemble = (selected: readonly HistoryCandidate[]) => {
     const images = withImages(input.taskImages ?? [], [...summaryEntries, ...forced.map(candidate => candidate.entry), ...selected.map(candidate => candidate.entry)], input.imagesVisible ?? false);
     const { entries } = images;
-    const discussion = assembleDiscussion(run.task!, entries, member, prefix.length, images.task);
+    const discussion = assembleDiscussion(run.task!, entries, member, prefix.length, images.task, chat);
     const head = prefix.map(message => ({ ...message }));
-    head[rulesIndex].content = discussionRulesText(entries.some(hasRevisionNote));
+    head[rulesIndex].content = rulesText(entries.some(hasRevisionNote));
     return { ...discussion, messages: [...head, ...discussion.messages] };
   };
   for (const candidate of forced) candidate.decision.reason = 'selected';

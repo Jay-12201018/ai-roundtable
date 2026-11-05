@@ -17,6 +17,8 @@ import { migration12 } from './migrations/v12';
 import { migration13 } from './migrations/v13';
 import { migration14 } from './migrations/v14';
 import { migration15 } from './migrations/v15';
+import { migration16 } from './migrations/v16';
+import type { GroupChatClassification, GroupChatIntent, GroupChatLength, GroupChatRoundState, GroupChatScheduleStatus, GroupChatSpeakerSource, GroupChatSpeakerState } from '../../shared/schemas/groupChat';
 import { attachmentIdsSchema, imageAttachmentSchema, type ImageAttachment } from '../../shared/schemas/attachment';
 import { requestUsageSchema, type RequestUsage, type UsageKind } from '../../shared/schemas/usage';
 import type { StreamChatInput as StreamChatInputRecord } from '../../shared/contracts/provider';
@@ -44,6 +46,10 @@ export type RoomRecord = {
 };
 
 export type RunRecord = StoredRun;
+
+/** D149: one place in a group-chat round's queue. */
+export type GroupChatSpeaker = { roundId: string; position: number; agentId: string; intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string; state: GroupChatSpeakerState; turnId?: string };
+export type GroupChatRound = { id: string; runId: string; messageId?: string; classification: GroupChatClassification; state: GroupChatRoundState; scheduleMore: boolean; batchStart: number; createdAt: string; speakers: GroupChatSpeaker[]; scheduleCalls: number; scheduling: boolean };
 
 export type MessageRecord = {
   id: string;
@@ -118,6 +124,9 @@ export type PersistedRunEvent = RunEventRecord & { sequence: number; timestamp: 
 type RawRoom = RoomRecord & { created_at: string; updated_at: string };
 type RawRun = { id: string; room_id: string; status: string; workflow_snapshot: string; created_at: string; updated_at: string };
 type RawMessage = { id: string; room_id: string; run_id: string; turn_id: string | null; sender_type: string; sender_name: string; content: string; status: string; created_at: string; updated_at: string };
+type RawGroupChatSpeaker = { round_id: string; position: number; agent_id: string; intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment: string | null; state: GroupChatSpeakerState; turn_id: string | null };
+const groupChatSpeakerFromRow = (row: RawGroupChatSpeaker): GroupChatSpeaker => ({ roundId: row.round_id, position: row.position, agentId: row.agent_id, intent: row.intent, length: row.length, source: row.source,
+  ...(row.assignment === null ? {} : { assignment: row.assignment }), state: row.state, ...(row.turn_id === null ? {} : { turnId: row.turn_id }) });
 type RawEvent = { run_id: string; turn_id: string | null; sequence: number; type: string; payload_json: string; timestamp: string; protocol_version: number; request_id: string | null };
 
 const migrations = [
@@ -238,6 +247,7 @@ const migrations = [
   migration13,
   migration14,
   migration15,
+  migration16,
 ];
 
 export type ModelDiscovery = { modelIds: string[]; outcome: 'listed' | 'unsupported' | 'authentication_failed' | 'failed'; checkedAt: string; listedAt: string | null };
@@ -799,6 +809,8 @@ export class Database {
       this.db.prepare("UPDATE summary_requests SET status='interrupted',updated_at=? WHERE status='generating'").run(timestamp);
       // R14: an artifact request too; its version keeps the partial output and stays unvalidated.
       this.db.prepare("UPDATE artifact_requests SET status='interrupted',updated_at=? WHERE status='generating'").run(timestamp);
+      // D149: a scheduling request too; the round stays open and a new host message or a retry carries on from its queue.
+      this.db.prepare("UPDATE group_chat_schedule_requests SET status='interrupted',updated_at=? WHERE status='generating'").run(timestamp);
       this.db.prepare("UPDATE messages SET status='aborted',updated_at=? WHERE status='streaming' AND run_id IS NOT NULL").run(timestamp);
       return ids.length;
     })();
@@ -933,6 +945,82 @@ export class Database {
     });
   }
 
+  // D149: group-chat rounds. Only RunService writes them, in the transactions that also write what they describe.
+  insertGroupChatRound(round: { id: string; runId: string; messageId?: string; classification: GroupChatClassification; scheduleMore: boolean; speakers: ReadonlyArray<Pick<GroupChatSpeaker, 'agentId' | 'intent' | 'length' | 'source' | 'assignment'>> }): void {
+    this.assertInitialized();
+    const timestamp = now();
+    this.transaction(() => {
+      this.db.prepare("INSERT INTO group_chat_rounds(id,run_id,message_id,classification,state,schedule_more,batch_start,created_at,updated_at) VALUES(?,?,?,?,'open',?,0,?,?)")
+        .run(round.id, round.runId, round.messageId ?? null, round.classification, round.scheduleMore ? 1 : 0, timestamp, timestamp);
+      this.addGroupChatSpeakers(round.id, round.speakers, 0);
+    });
+  }
+  private addGroupChatSpeakers(roundId: string, speakers: ReadonlyArray<Pick<GroupChatSpeaker, 'agentId' | 'intent' | 'length' | 'source' | 'assignment'>>, from: number): void {
+    speakers.forEach((speaker, index) => this.db.prepare("INSERT INTO group_chat_speakers(round_id,position,agent_id,intent,length,source,assignment,state) VALUES(?,?,?,?,?,?,?,'queued')")
+      .run(roundId, from + index, speaker.agentId, speaker.intent, speaker.length, speaker.source, speaker.assignment ?? null));
+  }
+  /** A new batch joins the end of the queue; `batchStart` marks where it begins. */
+  appendGroupChatSpeakers(roundId: string, speakers: ReadonlyArray<Pick<GroupChatSpeaker, 'agentId' | 'intent' | 'length' | 'source' | 'assignment'>>, scheduleMore: boolean): void {
+    this.assertInitialized();
+    this.transaction(() => {
+      const from = this.db.prepare('SELECT COUNT(*) FROM group_chat_speakers WHERE round_id=?').pluck().get(roundId) as number;
+      this.addGroupChatSpeakers(roundId, speakers, from);
+      this.db.prepare('UPDATE group_chat_rounds SET schedule_more=?,batch_start=?,updated_at=? WHERE id=?').run(scheduleMore ? 1 : 0, from, now(), roundId);
+    });
+  }
+  /** Closes a round; whoever was still waiting will not speak. */
+  closeGroupChatRound(roundId: string, state: Exclude<GroupChatRoundState, 'open'>): void {
+    this.assertInitialized();
+    this.transaction(() => {
+      this.db.prepare("UPDATE group_chat_speakers SET state='dropped' WHERE round_id=? AND state='queued'").run(roundId);
+      this.db.prepare("UPDATE group_chat_rounds SET state=?,updated_at=? WHERE id=? AND state='open'").run(state, now(), roundId);
+    });
+  }
+  dropGroupChatSpeaker(roundId: string, position: number): void {
+    this.assertInitialized();
+    this.db.prepare("UPDATE group_chat_speakers SET state='dropped' WHERE round_id=? AND position=? AND state='queued'").run(roundId, position);
+  }
+  startGroupChatSpeaker(roundId: string, position: number, turnId: string): void {
+    this.assertInitialized();
+    const changed = this.db.prepare("UPDATE group_chat_speakers SET state='started',turn_id=? WHERE round_id=? AND position=? AND state='queued'").run(turnId, roundId, position);
+    if (changed.changes !== 1) throw new ContractError('invalid_state');
+  }
+  private groupChatRound(row: { id: string; run_id: string; message_id: string | null; classification: GroupChatClassification; state: GroupChatRoundState; schedule_more: number; batch_start: number; created_at: string }): GroupChatRound {
+    const speakers = (this.db.prepare('SELECT round_id,position,agent_id,intent,length,source,assignment,state,turn_id FROM group_chat_speakers WHERE round_id=? ORDER BY position').all(row.id) as RawGroupChatSpeaker[]).map(groupChatSpeakerFromRow);
+    const statuses = this.db.prepare('SELECT status FROM group_chat_schedule_requests WHERE round_id=?').pluck().all(row.id) as string[];
+    return { id: row.id, runId: row.run_id, ...(row.message_id ? { messageId: row.message_id } : {}), classification: row.classification, state: row.state, scheduleMore: row.schedule_more === 1,
+      batchStart: row.batch_start, createdAt: row.created_at, speakers, scheduleCalls: statuses.length, scheduling: statuses.includes('generating') };
+  }
+  /** The Run's latest round, open or closed. */
+  latestGroupChatRound(runId: string): GroupChatRound | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare('SELECT id,run_id,message_id,classification,state,schedule_more,batch_start,created_at FROM group_chat_rounds WHERE run_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1').get(runId) as Parameters<Database['groupChatRound']>[0] | undefined;
+    return row ? this.groupChatRound(row) : undefined;
+  }
+  openGroupChatRound(runId: string): GroupChatRound | undefined {
+    const round = this.latestGroupChatRound(runId);
+    return round?.state === 'open' ? round : undefined;
+  }
+  groupChatSpeakerOfTurn(turnId: string): GroupChatSpeaker | undefined {
+    this.assertInitialized();
+    const row = this.db.prepare('SELECT round_id,position,agent_id,intent,length,source,assignment,state,turn_id FROM group_chat_speakers WHERE turn_id=?').get(turnId) as RawGroupChatSpeaker | undefined;
+    return row ? groupChatSpeakerFromRow(row) : undefined;
+  }
+  insertScheduleRequest(request: { requestId: string; runId: string; roundId: string; agentId: string; providerId: string; modelId: string; inputSnapshot: StreamChatInputRecord }): void {
+    this.assertInitialized();
+    const timestamp = now();
+    this.db.prepare("INSERT INTO group_chat_schedule_requests(request_id,run_id,round_id,agent_id,provider_id,model_id,status,input_snapshot,created_at,updated_at) VALUES(?,?,?,?,?,?,'generating',?,?,?)")
+      .run(request.requestId, request.runId, request.roundId, request.agentId, request.providerId, request.modelId, JSON.stringify(request.inputSnapshot), timestamp, timestamp);
+  }
+  finishScheduleRequest(requestId: string, status: Exclude<GroupChatScheduleStatus, 'generating' | 'interrupted'>, outputText: string): void {
+    this.assertInitialized();
+    this.db.prepare("UPDATE group_chat_schedule_requests SET status=?,output_text=?,updated_at=? WHERE request_id=? AND status='generating'").run(status, outputText.slice(0, 4096), now(), requestId);
+  }
+  listScheduleRequests(runId: string): Array<{ requestId: string; roundId: string; status: GroupChatScheduleStatus; outputText: string }> {
+    this.assertInitialized();
+    return this.db.prepare('SELECT request_id AS requestId,round_id AS roundId,status,output_text AS outputText FROM group_chat_schedule_requests WHERE run_id=? ORDER BY created_at,rowid').all(runId) as Array<{ requestId: string; roundId: string; status: GroupChatScheduleStatus; outputText: string }>;
+  }
+
   getPendingOverride(runId: string): HostActionRecord | undefined {
     this.requireRun(runId);
     const row = this.db.prepare(`${hostActionSelect} WHERE run_id=? AND kind='setOverride' AND status='pending'`).get(runId) as RawHostAction | undefined;
@@ -1064,7 +1152,8 @@ export class Database {
       return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),...(taskAttachments.length?{taskAttachments}:{}),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
         versions:this.listVersions(runId),hostActions:this.listHostActions(runId),instructions:this.listInstructionRevisions(runId),
         usage:this.listRunUsage(runId),summaries:this.listSummaries(runId),continuations:this.listContinuations(runId),
-        artifactRequestIds:this.db.prepare('SELECT request_id FROM artifact_requests WHERE run_id=? ORDER BY created_at,rowid').pluck().all(runId) as string[]};
+        artifactRequestIds:this.db.prepare('SELECT request_id FROM artifact_requests WHERE run_id=? ORDER BY created_at,rowid').pluck().all(runId) as string[],
+        groupChatRound:this.latestGroupChatRound(runId),scheduleRequests:this.listScheduleRequests(runId)};
     });
   }
 
@@ -1454,9 +1543,9 @@ export class Database {
         || compareHistoryPoint(cursor.after, through) > 0 || compareHistoryPoint(through, upper) > 0)) throw new ContractError('invalid_input');
       const afterSql = cursor ? 'AND (created_at,id)>(?,?)' : '';
       const args = cursor ? [roomId, throughRowId, cursor.after.createdAt, cursor.after.id, through.createdAt, through.id, limit + 1] : [roomId, throughRowId, through.createdAt, through.id, limit + 1];
-      const rows = this.db.prepare(`SELECT id,room_id AS roomId,status,task,created_at AS createdAt,updated_at AS updatedAt FROM workflow_runs WHERE room_id=? AND rowid<=? ${afterSql} AND (created_at,id)<=(?,?) ORDER BY created_at,id LIMIT ?`).all(...args) as Array<{ id: string; createdAt: string }>;
+      const rows = this.db.prepare(`SELECT id,room_id AS roomId,status,task,created_at AS createdAt,updated_at AS updatedAt,json_extract(workflow_snapshot,'$.templateId') AS templateId FROM workflow_runs WHERE room_id=? AND rowid<=? ${afterSql} AND (created_at,id)<=(?,?) ORDER BY created_at,id LIMIT ?`).all(...args) as Array<{ id: string; createdAt: string; templateId: unknown }>;
       const selected = rows.slice(0, limit); const hasMore = rows.length > limit; const last = selected.at(-1)!;
-      const items = selected.map(row => (row as { status?: string }).status === 'error' && this.stoppedAtDurationLimit(row.id) ? { ...row, durationStop: true as const } : row);
+      const items = selected.map(({ templateId, ...row }) => ({ ...row, ...((row as { status?: string }).status === 'error' && this.stoppedAtDurationLimit(row.id) ? { durationStop: true as const } : {}), ...(templateId === 'group-chat' ? { groupChat: true as const } : {}) }));
       return configurationOutput(roomRunPageSchema, { items, hasMore, nextCursor: hasMore ? { roomId, throughRowId, after: { createdAt: last.createdAt, id: last.id }, through } : null });
     });
   }

@@ -171,12 +171,14 @@ async function page(stage, saved) {
       await click('新建房间'); await fill('房间名称', name); await fill('默认目标可选', name + ' public goal'); await click('新建');
       const rooms = await wait(roomList, values => values.some(value => value.name === name), 'Room not saved: ' + name);
       await wait(roomTitle, value => value === name, 'Created room not opened');
-      return rooms.find(value => value.name === name).id;
+      const created = rooms.find(value => value.name === name).id;
+      localStorage.setItem(`roundtable.mode.${created}`, 'free-chat');
+      return created;
     }
     saved.roomId = await createRoom('Smoke Roundtable');
     // The three default members take the default service, which has a Key: replace them with explicit Mock members.
     const starters = await api.rooms.listAgentConfigurations({ roomId: saved.roomId, includeArchived: false });
-    check(starters.map(agent => agent.displayName).join() === '起草者,审查者,综合者' && starters.every(agent => agent.providerId === saved.realProviderId), 'Default members missing or silently on Mock');
+    check(starters.map(agent => agent.displayName).join() === '林舟,阿哲,小雨' && starters.every(agent => agent.providerId === saved.realProviderId), 'Default members missing or silently on Mock');
     for (const starter of starters) { await memberAction(starter.displayName, '删除…'); await clickIn('dialog[open]', '删除'); await wait(dialog, value => !value, 'Member deletion did not finish'); }
     const names = ['Smoke Drafter', 'Smoke Critic', 'Smoke Synthesizer']; const roles = ['Drafter', 'Critic', 'Synthesizer'];
     for (let index = 0; index < names.length; index++) {

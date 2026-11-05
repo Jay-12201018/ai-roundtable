@@ -117,7 +117,7 @@ async function main() {
     // Simulate a database written before D096: the pasted key sits in all three model fields.
     const Driver = require('better-sqlite3'); const seed = new Driver(join(paths.userData, 'ai-roundtable.db'));
     seed.prepare('UPDATE providers SET default_model_id=?, custom_models_json=?').run(pastedKey, JSON.stringify([{ id: 'deepseek-flash', name: 'DeepSeek Flash' }, { id: pastedKey, name: 'oops' }]));
-    check(seed.prepare('UPDATE agents SET model_id=? WHERE display_name=?').run(pastedKey, '审查者').changes === 1, 'Seeded the reviewer');
+    check(seed.prepare('UPDATE agents SET model_id=? WHERE display_name=?').run(pastedKey, '阿哲').changes === 1, 'Seeded the reviewer');
     seed.close();
     check(dbBytes().includes(Buffer.from(pastedKey)), 'Before startup the plaintext is in the database file');
     const info = console.info;
@@ -221,17 +221,17 @@ async function main() {
     // The earlier discussion, read before the room is opened (opening a room leaves the selected discussion).
     const earlier = await until(`window.roundtable.run.getSnapshot(localStorage.getItem('roundtable.runId')).then(run => run.execution.task)`, 'earlier run restored');
     await click('校园跑腿讨论', { selector: '.sb-item' });
-    await until(`document.querySelector('.room-page') && document.body.innerText.includes('审查者')`, 'room loaded');
+    await until(`document.querySelector('.room-page') && document.body.innerText.includes('阿哲')`, 'room loaded');
     const roomText = await text();
     check(roomText.includes('还没选模型，暂时不会参与讨论'), 'The member left without a model is told to choose one');
     check(!roomText.includes(pastedKey), 'The key never reaches the page');
-    await capture('purged-member', '把一串合成的 sk- 假值直接写进数据库三处模型 ID（Provider 默认模型、自定义模型、审查者的模型），模拟旧版本留下的数据后重启：启动时已全部清除，日志只记"已清除 3 处疑似 API Key 的模型 ID"，数据库文件（含 WAL/SHM）里再也找不到这串明文。房间页里审查者显示“还没选模型，暂时不会参与讨论 · 去选择”，其他成员不受影响。', '.room-page');
-    await click('「审查者」：编辑、排序、归档、删除'); await click('编辑…', { selector: '[role=menuitem]' });
+    await capture('purged-member', '把一串合成的 sk- 假值直接写进数据库三处模型 ID（Provider 默认模型、自定义模型、阿哲的模型），模拟旧版本留下的数据后重启：启动时已全部清除，日志只记"已清除 3 处疑似 API Key 的模型 ID"，数据库文件（含 WAL/SHM）里再也找不到这串明文。房间页里阿哲显示“还没选模型，暂时不会参与讨论 · 去选择”，其他成员不受影响。', '.room-page');
+    await click('「阿哲」：编辑、排序、归档、删除'); await click('编辑…', { selector: '[role=menuitem]' });
     const option = await js(`[...document.querySelectorAll('dialog[open] option')].find(o => o.value.endsWith('\\u0000deepseek-flash'))?.value`);
     check(Boolean(option), 'deepseek-flash is still offered for the member');
     await choose('模型', option); await click('保存', { scope: 'dialog[open]' });
     await until(`!document.querySelector('dialog[open]') && !document.body.innerText.includes('还没选模型')`, 'reviewer model chosen again');
-    await capture('purged-member-fixed', '在成员菜单里点“编辑…”，给审查者重新选 DeepSeek · DeepSeek Flash 并保存：提示消失，成员恢复可用。', '.room-page');
+    await capture('purged-member-fixed', '在成员菜单里点“编辑…”，给阿哲重新选 DeepSeek · DeepSeek Flash 并保存：提示消失，成员恢复可用。', '.room-page');
     await click('设置');
     await until(`document.querySelector('.svc-card') && document.body.innerText.includes('deepseek-flash')`, 'service card');
     const purged = await js(`window.roundtable.settings.listProviderSummaries().then(list => window.roundtable.settings.getProviderConfiguration({ id: list[0].id }))`);
@@ -259,7 +259,7 @@ async function main() {
 
   // Step 2: the Key is typed and saved with Enter; that is the last step, and the first discussion is right there (D136).
   await field('API Key'); await type(fakeKey); await key('Enter');
-  await until(`document.body.innerText.includes('这场讨论要解决什么？')`, 'key saved');
+  await until(`document.body.innerText.includes('想和大家聊点什么？')`, 'key saved');
   check(!(await text()).includes(fakeKey), 'The Key is never echoed in the page');
   await capture('key-saved-last-step', '按 Enter 保存：向导关闭，直接到第一场讨论，房间和三位成员已经建好。');
 
@@ -275,10 +275,12 @@ async function main() {
   await click('编辑'); await field('房间名称'); await selectAll(); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存');
   await until(`document.querySelector('.room-page h1')?.textContent === '校园跑腿讨论'`, 'room renamed');
   check((await text()).split('DeepSeek Flash · 可以使用').length === 4, 'Three members on deepseek-flash, each usable');
-  await capture('members', '连接后自动建好的房间改名为“校园跑腿讨论”（输入法组合输入）：起草者、审查者、综合者三位成员都写着“DeepSeek Flash · 可以使用”。', '.room-page');
+  await capture('members', '连接后自动建好的房间改名为“校园跑腿讨论”（输入法组合输入）：林舟、阿哲、小雨三位成员都写着“DeepSeek Flash · 可以使用”。', '.room-page');
 
   // Step 6: start, then pause without moving the pointer: 开始讨论 turns into 暂停 at the same spot.
   await click('新讨论', { scope: '.room-page' });
+  // This probe is about the stricter ways; the group chat has its own (tests/e2e/group-chat.spec.ts).
+  await click('自由讨论');
   await field('讨论目标'); await selectAll(); await ime('sheji', '设计一个校园跑腿平台');
   check(!(await js(`document.querySelector('label.chip-check input').checked`)), 'Step-by-step is off by default');
   holdNext = true;
@@ -312,7 +314,7 @@ async function main() {
   check((await snapshot()).status === 'running', 'The first click on Stop sends nothing');
   check(await js(`document.activeElement?.textContent === '不停止'`), 'Focus rests on the safe choice');
   check(await js(`!document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.disabled && document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent === '暂停'`), 'The confirmation does not cover or disable 暂停');
-  await capture('stop-confirm', '“继续”同样在原位置；审查者输出中点控制条末尾的“停止”：控制条下方出现轻量确认——“停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。”以及“停止讨论”“不停止”（焦点在“不停止”）。“暂停”仍在原处可用，运行仍是“运行中”。', '.composer');
+  await capture('stop-confirm', '“继续”同样在原位置；阿哲输出中点控制条末尾的“停止”：控制条下方出现轻量确认——“停止会立即中止当前回合，并结束本次运行。已生成的部分文字会保留；这次请求已经发出，可能已经计费，无法确认用量时按预留上限计入本次花费。”以及“停止讨论”“不停止”（焦点在“不停止”）。“暂停”仍在原处可用，运行仍是“运行中”。', '.composer');
   await click('不停止');
   check(!(await js(`Boolean(document.querySelector('[aria-label=确认停止运行]'))`)) && (await status()).includes('运行中'), '不停止 keeps the Run going');
   await click('停止'); await click('停止讨论');
@@ -323,7 +325,7 @@ async function main() {
   check(stopped.usage.find(c => c.requestId === stopped.attempts.find(a => a.messageId === stopped.messages[1].id).requestId).state === 'unknown', 'The stopped request is recorded as an unknown charge, not zero');
   // Settled: no run controls; the slot offers 新讨论 (the box still takes an interjection for a retry).
   check(await js(`document.elementFromPoint(${startAt.x}, ${startAt.y})?.closest('button')?.textContent`) === '新讨论', 'Settled, the slot offers 新讨论');
-  await capture('stopped', '点“不停止”后运行继续；再点“停止”并“停止讨论”：页头“已停止”，审查者已输出的部分文字保留并标为“已中止”，这次请求在预算栏按未知费用（预留上限）计入、不记为 0。输入区原位置变回“开始讨论”；右侧“重试当前回合”“续写部分回复”下方提示“重试和续写会重新发送请求，可能再次计费。”', '.topbar');
+  await capture('stopped', '点“不停止”后运行继续；再点“停止”并“停止讨论”：页头“已停止”，阿哲已输出的部分文字保留并标为“已中止”，这次请求在预算栏按未知费用（预留上限）计入、不记为 0。输入区原位置变回“开始讨论”；右侧“重试当前回合”“续写部分回复”下方提示“重试和续写会重新发送请求，可能再次计费。”', '.topbar');
   const reviewer = requests[1].messages;
 
   // Step 8: step-by-step from the start — pause after each turn, interject, then 下一步.
@@ -340,12 +342,12 @@ async function main() {
   await field('主持人插话'); await ime('qingzhongdian', '请重点比较按距离计价和固定价');
   await click('发送插话');
   await until(`document.querySelectorAll('.thread-item').length === 2`, 'interjection shown');
-  await capture('step-paused-interject', '开始后第一位成员（起草者）说完，运行自动暂停（页头“已暂停”），没有和模型抢时间；在右侧“插话”里用输入法输入“请重点比较按距离计价和固定价”并发送，插话出现在时间线上。输入区提示：可以在“主持人控制”里插话或点名，然后点“下一步”让下一位发言，或点“继续”自动运行。', '.topbar');
+  await capture('step-paused-interject', '开始后第一位成员（林舟）说完，运行自动暂停（页头“已暂停”），没有和模型抢时间；在右侧“插话”里用输入法输入“请重点比较按距离计价和固定价”并发送，插话出现在时间线上。输入区提示：可以在“主持人控制”里插话或点名，然后点“下一步”让下一位发言，或点“继续”自动运行。', '.topbar');
   await click('下一步');
   await until(`document.querySelectorAll('.thread-item').length === 3 && document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已暂停')`, 'stepped once');
   check(requests.length === before + 2, 'One step sends exactly one request');
   check(requests.at(-1).messages.at(-1).content.includes('【主持人插话】\n> 请重点比较按距离计价和固定价'), 'The next speaker received the interjection as a host entry');
-  await capture('step-next', '点“下一步”：只让下一位（审查者）发言一次，说完再次自动暂停；它收到的上下文里包含刚才的主持人插话（脚本核对了请求体）。右侧显示"下一位：综合者（按计划）"，输入区仍是 继续 / 下一步 / 停止。', 2);
+  await capture('step-next', '点“下一步”：只让下一位（阿哲）发言一次，说完再次自动暂停；它收到的上下文里包含刚才的主持人插话（脚本核对了请求体）。右侧显示"下一位：小雨（按计划）"，输入区仍是 继续 / 下一步 / 停止。', 2);
 
   // Step 9 (D103): finish the step-by-step Run from the same in-place control, then set the output limit, which is
   // folded under 更多设置 ; here it becomes 2048.
@@ -375,7 +377,7 @@ async function main() {
   check(finished.usage.length === 3 && finished.usage.every(c => c.state === 'reported'), 'Every request, the truncated one included, has its usage');
   check(requests[beforeTruncation + 1].messages.at(-1).content.includes('（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）'), 'The next member was told the reply is unfinished');
   check((await js(`document.querySelectorAll('.thread-item')[0].innerText`)).includes('写到单次上限停下了') && !(await text()).includes('运行失败'), 'The truncated reply is marked, never shown as a failure');
-  await capture('truncated', 'DeepSeek 夹具让起草者的回复以 finish_reason=length 结束：这条回复保留并标注"已达单次输出上限，内容可能不完整。"，下方有"续写"；运行没有失败，审查者和综合者照常发言，页头"已完成"。脚本核对了审查者收到的上下文里这条发言带有"（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）"，三次请求都按用量结算。', 0);
+  await capture('truncated', 'DeepSeek 夹具让林舟的回复以 finish_reason=length 结束：这条回复保留并标注"已达单次输出上限，内容可能不完整。"，下方有"续写"；运行没有失败，阿哲和小雨照常发言，页头"已完成"。脚本核对了阿哲收到的上下文里这条发言带有"（此发言因单次输出上限被截断，后面的内容没有写完，可能不完整。）"，三次请求都按用量结算。', 0);
 
   // Step 11 (D102): 续写 continues it as a new version with its own request and usage.
   const original = finished.messages.find(m => m.id === firstTurn.messageId).content;
@@ -392,7 +394,7 @@ async function main() {
 
   // The reviewer saw the drafter's reply as quoted discussion on the user side, never as its own assistant turn.
   check(reviewer.filter(m => m.role !== 'system').map(m => m.role).join(',') === 'user', 'The reviewer request has one user block and no assistant message');
-  check(reviewer.at(-1).content.includes('【成员「起草者」· 起草】\n> DeepSeek 夹具回复 1') && reviewer.at(-1).content.includes('现在由你（成员「审查者」· 审查）发言'), 'Labelled, quoted drafter reply and the turn cue');
+  check(reviewer.at(-1).content.includes('【成员「林舟」· 产品】\n> DeepSeek 夹具回复 1') && reviewer.at(-1).content.includes('现在由你（成员「阿哲」· 工程）发言'), 'Labelled, quoted drafter reply and the turn cue');
   check(requests.every(r => r.keyMatches && r.model === 'deepseek-flash' && r.thinking === undefined), 'Requests carried the saved Key, the approved model and thinking disabled');
   result.reviewerMessages = reviewer;
 

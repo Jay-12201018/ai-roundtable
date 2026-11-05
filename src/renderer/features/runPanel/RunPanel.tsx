@@ -8,6 +8,7 @@ import { HostTextArea } from '../host/HostTextArea';
 import { canContinueRun, canDirectRun, isContinuationTurn, nextSpeaker, nextSpeakerText, overrideCandidates, planTurnCount, scheduledNext, summaryWritable, timelineSlots, usedSummary } from '../host/model';
 import type { HostCommands } from '../host/useHostCommands';
 import { runTokenTotals } from '../usage';
+import { GROUP_CHAT_MAX_SCHEDULES, GROUP_CHAT_MAX_TURNS } from '../../../shared/schemas/groupChat';
 import { workflowProgressForFeature, workflowTemplateLabels } from '../workflows/productionAdapter';
 import { modelLabel, type ProviderNames } from '../timeline/model';
 import './runPanel.css';
@@ -49,7 +50,8 @@ function ProgressTab({ snapshot, onSummarize, onChooseSummary, onOpenWorkflow }:
             <span><span className="t">{stage.label}</span><span className="s">{stage.status} · {stage.completedTurns}/{stage.totalTurns} 回合</span></span></li>;
         })}</ol>
         <p className="small muted">下一步：{progress.nextStep}</p>
-      </> : <p className="small muted ctx-lead">成员按顺序轮流发言 · 计划 {Math.min(planTurnCount(snapshot), snapshot.execution?.maxTurns ?? 0)} / {snapshot.execution?.maxTurns ?? '—'} 回合{insertedText(snapshot)}{snapshot.execution?.elapsedExecutionMs ? ` · 用时 ${duration(snapshot.execution.elapsedExecutionMs)}` : ''}</p>}
+      </> : snapshot.groupChat ? <p className="small muted ctx-lead">群聊 · {snapshot.groupChat.round ? `最新这条消息已有 ${snapshot.groupChat.round.turnsUsed} 次发言（上限 ${GROUP_CHAT_MAX_TURNS}），问过 ${snapshot.groupChat.round.scheduleCalls} 次调度（上限 ${GROUP_CHAT_MAX_SCHEDULES}）` : '等主持人发言'}{snapshot.execution?.elapsedExecutionMs ? ` · 用时 ${duration(snapshot.execution.elapsedExecutionMs)}` : ''}</p>
+      : <p className="small muted ctx-lead">成员按顺序轮流发言 · 计划 {Math.min(planTurnCount(snapshot), snapshot.execution?.maxTurns ?? 0)} / {snapshot.execution?.maxTurns ?? '—'} 回合{insertedText(snapshot)}{snapshot.execution?.elapsedExecutionMs ? ` · 用时 ${duration(snapshot.execution.elapsedExecutionMs)}` : ''}</p>}
     </section>
     {onSummarize && <section className="ctx-sec"><h3>讨论摘要</h3>
       <p className="small muted">{used ? `之后的发言正在用摘要代替第 1–${used.lastNumber} 条原文。讨论再变长时，可以在此基础上续写摘要。`
@@ -64,7 +66,8 @@ function ProgressTab({ snapshot, onSummarize, onChooseSummary, onOpenWorkflow }:
 function MembersTab({ snapshot, commands, providers }: { snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames }) {
   const members = snapshot.execution?.membersSnapshot ?? [];
   const candidates = new Set(overrideCandidates(snapshot).map(member => member.agentId));
-  const directable = canDirectRun(snapshot);
+  const chat = Boolean(snapshot.groupChat);
+  const directable = canDirectRun(snapshot) && !chat;
   const override = snapshot.host?.override;
   const next = ['running', 'pausing', 'paused'].includes(snapshot.status) || override ? nextSpeaker(snapshot) : undefined;
   const nextText = next ? nextSpeakerText(next) : undefined;
@@ -73,20 +76,20 @@ function MembersTab({ snapshot, commands, providers }: { snapshot: RunSnapshot; 
   const scheduled = scheduledNext(snapshot);
   const disabled = !commands.available || commands.pending !== undefined;
   return <section className="ctx-sec"><h3>本场成员</h3>
-    <p className="small ctx-lead">{nextText ? `下一位：${nextText.name}（${nextText.source}）${nextText.then ? ` · ${nextText.then}` : ''}`
+    <p className="small ctx-lead">{chat ? '在下方输入框里 @ 谁，谁就回应，可以 @ 几位。' : nextText ? `下一位：${nextText.name}（${nextText.source}）${nextText.then ? ` · ${nextText.then}` : ''}`
       : canContinueRun(snapshot) ? '讨论已结束。可以在下方输入框里继续：所有成员各回应一次，或用 @ 只让一位回应。' : '下一位：暂无（运行未在进行，或计划的回合已用完）'}</p>
     {members.map(member => {
-      const state = member.agentId === speaking ? '正在发言' : override?.agentId === member.agentId ? '已点名' : next?.agentId === member.agentId ? '下一位' : undefined;
+      const state = member.agentId === speaking ? (chat ? '正在输入' : '正在发言') : override?.agentId === member.agentId ? '已点名' : next?.agentId === member.agentId ? '下一位' : undefined;
       return <div key={member.agentId} className="member-row"><Avatar name={member.displayName} />
         <div className="info"><b>{member.displayName}</b><small>角色：{member.roleTemplateId || '未记录'} · {modelLabel(member, providers)}</small></div>
-        {state && <Pill tone={state === '正在发言' ? 'live' : 'neutral'}>{state}</Pill>}
+        {state && <Pill tone={state === '正在发言' || state === '正在输入' ? 'live' : 'neutral'}>{state}</Pill>}
         {directable && candidates.has(member.agentId) && override?.agentId !== member.agentId && scheduled !== member.agentId && <Button size="sm" variant="quiet" disabled={disabled} aria-label={`点名 ${member.displayName}`}
           onClick={() => void commands.send('override', { kind: 'setOverride', agentId: member.agentId }, `已点名${member.displayName}，将在下一回合发言。`)}>点名</Button>}
       </div>;
     })}
     {override && directable && <Button size="sm" disabled={disabled} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名，恢复按计划发言。')}>取消点名</Button>}
     {directable && <p className="small muted">点名是在下一回合插入一轮：不占用计划的回合{snapshot.workflow ? '和步骤' : ''}，之后回到原计划，原计划的成员不会被跳过。按计划的下一位不用点名，直接在下方插话即可。{snapshot.workflow ? '按讨论方式进行时只能点名当前阶段的成员。' : ''}</p>}
-    <p className="small muted">成员名单在讨论开始时固定；在「房间」里改成员，只影响之后的讨论。也可以在下方输入框里输入 @ 点名。</p>
+    <p className="small muted">成员名单在讨论开始时固定；在「房间」里改成员，只影响之后的讨论。{chat ? '' : '也可以在下方输入框里输入 @ 点名。'}</p>
   </section>;
 }
 

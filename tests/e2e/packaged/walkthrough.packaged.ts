@@ -132,6 +132,8 @@ test('first launch, one demo discussion, quit and reopen in the installed form',
   await capture(running, 'first-launch', '首次启动打包后的应用：欢迎页给出“连接模型服务”和“先试玩演示”两条路，说明费用由服务商收取、数据只存在这台电脑上。');
 
   await page.getByRole('button', { name: '开始试玩' }).click();
+  await expect(page.getByText('想和大家聊点什么？')).toBeVisible();
+  await page.getByRole('button', { name: '自由讨论' }).click();
   await expect(page.getByText('这场讨论要解决什么？')).toBeVisible();
   const goal = page.getByRole('textbox', { name: '讨论目标' });
   await goal.click();

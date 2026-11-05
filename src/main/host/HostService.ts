@@ -32,6 +32,11 @@ export class HostService {
       this.database.insertHostAction({ id: randomUUID(), runId: command.runId, clientRequestId: command.clientRequestId, kind: command.kind, fingerprint, status: action.status ?? 'applied', ...action });
     switch (command.kind) {
       case 'interject': {
+        // D149: in a group chat, every host message goes the same way, whatever the Run is doing.
+        if (this.runs.isGroupChat(run)) {
+          const images = this.database.assertAttachmentIds(command.attachmentIds).map(id => this.database.getAttachment(id)!);
+          return this.runs.sendGroupChatMessage(run.id, { content: command.content, attachments: images }, messageId => this.result(record({ resultMessageId: messageId })));
+        }
         this.assertWritable(run.status, false);
         const attachments = this.database.assertAttachmentIds(command.attachmentIds).map(id => this.database.getAttachment(id)!);
         return this.runs.applyHostChange(run.id, () => {

@@ -54,7 +54,7 @@ export type MemberDialogProps = {
 /** 添加 / 编辑成员: a role template fills name, role and 设定 (D5-A); the difference between name and role is written out. */
 export function MemberDialog({ agent, roomId, order, providers, readiness, onSave, onClose, onOpenSettings }: MemberDialogProps) {
   const fallback = agent ? undefined : defaultModelFor(providers, readiness);
-  const [template, setTemplate] = useState(agent ? '' : 'drafter');
+  const [template, setTemplate] = useState(agent ? '' : roleTemplates[0].id);
   const [name, setName] = useState(agent?.displayName ?? roleTemplates[0].name);
   const [role, setRole] = useState(agent?.roleTemplateId ?? roleTemplates[0].role);
   const [prompt, setPrompt] = useState(agent?.systemPrompt ?? roleTemplates[0].prompt);
@@ -84,7 +84,7 @@ export function MemberDialog({ agent, roomId, order, providers, readiness, onSav
       {!agent && <div className="choice-grid" role="group" aria-label="角色模板">{roleTemplates.map(item => <Choice key={item.id} selected={template === item.id} title={item.label} onSelect={() => choose(item.id)}>{item.summary}</Choice>)}</div>}
       <div className="form-grid">
         <Field label="名字" help="显示在讨论里，随你取，比如“老周”或“B”。">{props => <input {...props} className="input" value={name} disabled={busy} onChange={event => setName(event.target.value)} aria-invalid={!name.trim() || undefined} />}</Field>
-        <Field label="角色" help="决定 TA 做什么。起草、审查、综合会自动带上内置的发言要求；其他角色按下面的设定发言。">{props => <input {...props} className="input" value={role} disabled={busy} onChange={event => setRole(event.target.value)} aria-invalid={!role.trim() || undefined} />}</Field>
+        <Field label="角色" help="决定 TA 做什么。起草、审查、总结在严格流程里会自动带上内置的发言要求；其他角色按下面的设定发言。">{props => <input {...props} className="input" value={role} disabled={busy} onChange={event => setRole(event.target.value)} aria-invalid={!role.trim() || undefined} />}</Field>
       </div>
       <Field label="设定" optional help="写给这位成员的长期要求，每次发言都会带上。">{props => <textarea {...props} className="textarea" rows={3} value={prompt} disabled={busy} onChange={event => setPrompt(event.target.value)} />}</Field>
       <Field label="模型">{props => <select {...props} className="select input" value={model} disabled={busy} onChange={event => { setModel(event.target.value); setError(''); }}>

@@ -41,7 +41,7 @@ async function page(stage, saved = {}) {
   // R16 batch 2: opening 设置 re-reads the services; each service is a card with its own status.
   await click('设置');
   await wait(() => document.body.innerText, text => text.includes('R10R11 fixture first') && text.includes('R10R11 fixture second'), 'Settings page did not identify the services');
-  const room = await api.rooms.createRoom({ name: 'R10R11 fixture workflows', objective: 'Finite fixture collaboration' }); saved.roomId = room.id;
+  const room = await api.rooms.createRoom({ name: 'R10R11 fixture workflows', objective: 'Finite fixture collaboration' }); saved.roomId = room.id; localStorage.setItem(`roundtable.mode.${room.id}`, 'free-chat');
   const members = [];
   for (const [index, kind] of ['first', 'second', 'first'].entries()) members.push(await api.rooms.createAgent({ roomId: room.id, displayName: 'Member ' + index, roleTemplateId: 'Role ' + index, systemPrompt: 'Owned system ' + index, providerId: saved.providers[kind], modelId: 'fixture', enabled: true, displayOrder: index }));
   // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.

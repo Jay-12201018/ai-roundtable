@@ -104,3 +104,9 @@
   .msg-body, .msg > .note, .msg-details, .msg-edit { margin-left: 0; }
   .msg-foot { margin-left: -6px; }
 }
+
+/* D149: a chat is many short lines. What a reply offers appears on the reply being looked at, in a row that keeps its place; keyboard focus shows it too. */
+.thread-item:has(> .msg.is-chat) { padding-bottom: 6px; }
+.msg.is-chat .msg-foot { margin-top: 2px; opacity: 0; transition: opacity .12s; }
+.msg.is-chat:hover .msg-foot, .msg.is-chat:focus-within .msg-foot, .msg.is-chat.is-live .msg-foot { opacity: 1; }
+.chat-stop { margin: 4px 0 0 36px; color: var(--text-3); font-size: 13px; line-height: 20px; }

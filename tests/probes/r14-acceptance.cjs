@@ -95,6 +95,7 @@ async function main() {
     const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
     await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
     const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
+    await js(`localStorage.setItem('roundtable.mode.${room.id}', 'free-chat')`);
     for (const [index, [name, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries())
       await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });
     await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded'); await ui.ensureLocator();
@@ -323,7 +324,7 @@ async function main() {
   const Sqlite = require('better-sqlite3');
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
-    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 15, 'Migration 15');
+    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 16, 'Migration 16');
     check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 8 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 7
       && db.prepare("SELECT COUNT(*) FROM request_usage WHERE kind='artifact' AND state='reported'").pluck().get() === 6 && db.prepare("SELECT COUNT(*) FROM request_usage WHERE kind='artifact' AND state='unknown'").pluck().get() === 1,
       'Eight versions; six artifact requests with usage and the stopped one unknown');

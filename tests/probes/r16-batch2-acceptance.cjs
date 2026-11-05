@@ -21,9 +21,9 @@ const fakeKey = 'r16b2-fake-deepseek-key';
 
 
 const replies = {
-  起草者: '### 试点方案（初稿）\n\n1. 范围：3 栋宿舍楼，试点 4 周。\n2. 定价：基础费 2 元/单，抽成 15%。',
-  审查者: '两处问题：抽成 15% 偏高，骑手留不住；22 点后宿舍门禁，夜间单要暂停。',
-  综合者: '综合：试点抽成 8%，22 点后暂停接单，先做一周问卷再定目标。',
+  林舟: '### 试点方案（初稿）\n\n1. 范围：3 栋宿舍楼，试点 4 周。\n2. 定价：基础费 2 元/单，抽成 15%。',
+  阿哲: '两处问题：抽成 15% 偏高，骑手留不住；22 点后宿舍门禁，夜间单要暂停。',
+  小雨: '综合：试点抽成 8%，22 点后暂停接单，先做一周问卷再定目标。',
   老周: '我唱个反调：2 元单在雨天没人接，试点数据会很难看。',
 };
 fixture.reply = body => replies[/现在由你（成员「([^」]+)」/u.exec(body.messages.at(-1).content)?.[1]] ?? '好的，补充一点。';
@@ -61,15 +61,18 @@ async function main() {
 
     // D6-A: 开始试玩 — the demo service and 演示房间, the goal in the box, nothing started.
     await click('开始试玩');
+    await has('想和大家聊点什么？');
+    // This probe is about the stricter ways; the group chat has its own (tests/e2e/group-chat.spec.ts).
+    await click('自由讨论');
     await has('这场讨论要解决什么？');
     const demoProvider = (await providers()).find(provider => provider.kind === 'mock');
     check(demoProvider && !demoProvider.isDefault, 'The demo service exists and is not the default');
     const demoRoom = (await api('rooms.listRooms')).find(room => room.name === '演示房间');
     const demoMembers = await api('rooms.listAgentConfigurations', { roomId: demoRoom.id });
-    check(demoMembers.map(member => member.displayName).join() === '起草者,审查者,综合者' && demoMembers.every(member => member.modelId === 'mock'), 'Three demo members on Mock');
+    check(demoMembers.map(member => member.displayName).join() === '林舟,阿哲,小雨' && demoMembers.every(member => member.modelId === 'mock'), 'Three demo members on Mock');
     check((await js(`document.querySelector('[aria-label="讨论目标"]').value`)).startsWith('为学校设计一个校园跑腿平台的试点方案'), 'The demo goal is in the box');
     check(fixture.requests.length === 0 && await js(`!localStorage.getItem('roundtable.runId')`), 'Nothing started');
-    await capture('demo-ready', '点“开始试玩”：建好“演示（Mock）”服务（不是默认服务）和“演示房间”，三位演示成员起草者、审查者、综合者；示例目标已填进输入框，但没有自动开始。');
+    await capture('demo-ready', '点“开始试玩”：建好“演示（Mock）”服务（不是默认服务）和“演示房间”，三位演示成员林舟、阿哲、小雨；示例目标已填进输入框，但没有自动开始。');
     await click('开始讨论');
     await statusHas('已完成', 60000);
     check((await runSnapshot()).turns.length === 3 && fixture.requests.length === 0, 'The demo discussion ran on Mock, with no network');
@@ -93,7 +96,7 @@ async function main() {
     check(fixture.requests.length === 1 && fixture.requests[0].maxTokens === 8, 'Testing sent one very short message');
     await capture('wizard-3-connected', '测试连接：发一条很短的消息，结果写在按钮旁边。');
     await click('保存', { scope: 'dialog[open] .modal-foot' });
-    await has('这场讨论要解决什么？');
+    await has('想和大家聊点什么？');
     const ds = await deepseek();
     check(ds.isDefault, 'DeepSeek is the default service');
     await until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes('我的第一场讨论')`, 'Saving opens the new room');
@@ -107,14 +110,14 @@ async function main() {
     await until(`document.querySelector('.room-page h1')?.textContent === '校园跑腿讨论'`, 'renamed');
     await click('添加成员'); await click('反方', { selector: '.choice', prefix: true });
     await field('名字'); await selectAll(); await ime('laozhou', '老周');
-    check(await js(`document.querySelector('dialog[open] textarea').value.startsWith('你是反方。')`), 'The 反方 template fills 设定');
+    check(await js(`document.querySelector('dialog[open] textarea').value.startsWith('你叫老周')`), 'The 反方 template fills 设定');
     check((await js(`document.querySelector('dialog[open]').innerText`)).includes('可以使用：Key 已保存。'), 'The default model is preselected and usable');
     await capture('member-dialog', '添加成员：六个角色模板，选“反方”自动填好名字、角色和设定；名字改成“老周”（输入法组合输入）；写明名字与角色的区别，以及“起草、审查、综合会自动带上内置的发言要求；其他角色按设定发言”；模型默认是默认服务的 DeepSeek Flash，“可以使用”。', 'dialog[open]');
     await click('添加');
     await until(`!document.querySelector('dialog[open]') && document.body.innerText.includes('老周')`, 'member added');
     await click('调整「老周」的顺序', { prefix: true }); await key('ArrowUp'); await key('ArrowUp');
     const roomId = (await api('rooms.listRooms')).find(room => room.name === '校园跑腿讨论').id;
-    await until(`window.roundtable.rooms.listAgentConfigurations({ roomId: ${JSON.stringify(roomId)} }).then(list => list.map(a => a.displayName).join() === '起草者,老周,审查者,综合者')`, 'reordered by keyboard');
+    await until(`window.roundtable.rooms.listAgentConfigurations({ roomId: ${JSON.stringify(roomId)} }).then(list => list.map(a => a.displayName).join() === '林舟,老周,阿哲,小雨')`, 'reordered by keyboard');
     await click('老周 参与讨论', { selector: '[role=switch]' });
     await until(`window.roundtable.rooms.listAgentConfigurations({ roomId: ${JSON.stringify(roomId)} }).then(list => list.find(a => a.displayName === '老周').enabled === false)`, 'switched off');
     await has('老周 暂不参与之后的讨论。');
@@ -123,10 +126,10 @@ async function main() {
     await click('更改');
     await click('审查修订链', { selector: '.choice', prefix: true });
     await until(`(document.querySelector('dialog[open] [role=status]')?.textContent ?? '').startsWith('已核对：预计 5 回合')`, 'workflow checked');
-    check((await js(`document.querySelector('dialog[open]').innerText`)).includes('综合者不在这个流程里'), 'The dialog says who is not in the flow');
-    await capture('mode-dialog', '讨论方式对话框（D2-B）：选“审查修订链”，起草和修订自动分给起草者、审查和复审分给审查者（按角色挑选）；改动即时由 Main 核对：“已核对：预计 5 回合……成员严格依次发言”；底部说明综合者不在流程里；“用于这个房间”。', 'dialog[open]');
+    check((await js(`document.querySelector('dialog[open]').innerText`)).includes('小雨不在这个流程里'), 'The dialog says who is not in the flow');
+    await capture('mode-dialog', '讨论方式对话框（D2-B）：选“审查修订链”，起草和修订自动分给林舟、审查和复审分给阿哲（按角色挑选）；改动即时由 Main 核对：“已核对：预计 5 回合……成员严格依次发言”；底部说明小雨不在流程里；“用于这个房间”。', 'dialog[open]');
     await click('用于这个房间');
-    await until(`!document.querySelector('dialog[open]') && document.body.innerText.includes('起草：起草者 → 审查：审查者')`, 'mode remembered');
+    await until(`!document.querySelector('dialog[open]') && document.body.innerText.includes('起草：林舟 → 审查：阿哲')`, 'mode remembered');
     await theme('dark'); await click('校园跑腿讨论', { selector: '.sb-item' });
     await capture('room-page-dark', '1280 深色：房间页的讨论方式卡片写着“审查修订链”和每个阶段的成员、回合与时长上限；停用的老周变灰。');
     await theme('light');
@@ -138,7 +141,7 @@ async function main() {
     fixture.chunkMs = 250;
     await click('开始讨论');
     await statusHas('第 1/5 步 · 起草', 30000);
-    await capture('run-stage', '开始讨论：开始前 Main 按当时的成员重新核对讨论方式；状态行写“第 1/5 步 · 起草 · 起草者正在发言”。');
+    await capture('run-stage', '开始讨论：开始前 Main 按当时的成员重新核对讨论方式；状态行写“第 1/5 步 · 起草 · 林舟正在发言”。');
     fixture.chunkMs = 40;
     await statusHas('已完成', 90000);
     const run = await runSnapshot();
@@ -148,7 +151,7 @@ async function main() {
     check(generated.length === 5 && generated.every(request => request.model === 'deepseek-flash'), 'Five DeepSeek requests, nothing else');
     const tags = await js(`[...document.querySelectorAll('.thread-item .msg-head .tag')].map(e => e.textContent)`);
     check(JSON.stringify(tags) === JSON.stringify(['起草', '审查', '修订', '复审', '定稿']), 'Each message carries its stage: ' + JSON.stringify(tags));
-    await capture('run-done', '讨论按审查修订链完成：每条发言头部带阶段标签（起草、审查、修订、复审、定稿）；老周已停用、综合者不在流程里，都没有发言。');
+    await capture('run-done', '讨论按审查修订链完成：每条发言头部带阶段标签（起草、审查、修订、复审、定稿）；老周已停用、小雨不在流程里，都没有发言。');
 
     // D6 companion: a room that never had a discussion can be deleted, after a red second step.
     await click('新建房间'); await field('房间名称'); await ime('linshi', '临时房间'); await click('新建');

@@ -3,8 +3,8 @@ import { idSchema, sequenceSchema, timestampSchema } from './common';
 
 const count = sequenceSchema;
 
-/** What a request was for: a discussion turn, a summary or an artifact. */
-export const usageKindValues = ['turn', 'summary', 'artifact'] as const;
+/** What a request was for: a discussion turn, a summary, an artifact, or deciding who speaks next in a group chat (D150). */
+export const usageKindValues = ['turn', 'summary', 'artifact', 'schedule'] as const;
 export const usageKindSchema = z.enum(usageKindValues);
 /**
  * D133: one real request's token usage. `in_flight` is open; `reported` holds the provider's own usage from a terminal
@@ -58,7 +58,7 @@ export const usageReportSchema = z.object({
   byRun: z.array(usageRunRowSchema).max(100000),
   byModel: z.array(usageModelRowSchema).max(10000),
   byDate: z.array(usageDateRowSchema).max(100000),
-  byKind: z.array(usageKindRowSchema).max(3),
+  byKind: z.array(usageKindRowSchema).max(4),
   unknownRequests: z.array(usageUnknownRowSchema).max(100000),
 }).strict();
 export const usageExportResultSchema = z.object({ saved: z.boolean(), fileName: z.string().max(512).optional(), rows: count }).strict();

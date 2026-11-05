@@ -25,7 +25,7 @@ const cell = (value: string | number | null | undefined) => {
   if (/^[=+\-@\t\r]/u.test(text)) text = `'${text}`;
   return /[",\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 };
-const kindLabels: Record<RequestUsage['kind'], string> = { turn: '发言', summary: '摘要', artifact: '产物' };
+const kindLabels: Record<RequestUsage['kind'], string> = { turn: '发言', summary: '摘要', artifact: '产物', schedule: '调度' };
 const stateLabels: Record<RequestUsage['state'], string> = { reported: '服务商已报告', unknown: '未拿到完整用量', in_flight: '进行中', not_sent: '未发出' };
 
 /** D108, D133: the token usage report and its CSV. Costs are the provider's to bill; nothing here prices a request. */
@@ -54,7 +54,8 @@ export class UsageService {
     const labels = this.database.listUsageLabels();
     const runs = new Map(labels.runs.map(run => [run.runId, run]));
     const providers = new Map(labels.providers.map(provider => [provider.id, provider.name]));
-    const speaker = (row: UsageRow) => runs.get(row.runId)?.members.find(member => member.agentId === row.usage.agentId)?.displayName ?? '成员已不在运行记录中';
+    // D150: a scheduling request is the app's own, spoken by nobody, whichever member's service it went through.
+    const speaker = (row: UsageRow) => row.usage.kind === 'schedule' ? '群聊调度' : runs.get(row.runId)?.members.find(member => member.agentId === row.usage.agentId)?.displayName ?? '成员已不在运行记录中';
     return { rows, runs, providers, speaker };
   }
 

@@ -14,4 +14,5 @@ export function durationText(ms: number): string {
 }
 /** D146: the discussion ran out of the time allowed; nothing is wrong with the network or the service. */
 export const durationStopText = (limitMs: number) => `这场讨论达到了时长上限（${durationText(limitMs)}）。`;
-export const runStatusLabel = (snapshot: { status: string; durationStop?: unknown }) => snapshot.durationStop ? '已到时长上限' : statusLabels[snapshot.status] ?? '未知状态';
+const groupChatLabels: Record<string, string> = { running: '聊天中', completed: '等你说话', cancelled: '已停止' };
+export const runStatusLabel = (snapshot: { status: string; durationStop?: unknown; groupChat?: unknown }) => snapshot.durationStop ? '已到时长上限' : (snapshot.groupChat ? groupChatLabels[snapshot.status] : undefined) ?? statusLabels[snapshot.status] ?? '未知状态';

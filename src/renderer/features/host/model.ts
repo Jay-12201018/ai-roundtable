@@ -98,7 +98,8 @@ function scheduled(snapshot: RunSnapshot, name: (agentId: string) => string): Sp
  * Turn is done (D110: the plan continues where it was). Main decides and the snapshot confirms.
  */
 export function nextSpeaker(snapshot: RunSnapshot | undefined): (SpeakerProjection & { then?: SpeakerProjection | 'end' }) | undefined {
-  if (!snapshot?.execution || ['completed', 'cancelling'].includes(snapshot.status)) return;
+  // D149: a group chat has no schedule to show ahead of time; its queue says who is next.
+  if (!snapshot?.execution || snapshot.groupChat || ['completed', 'cancelling'].includes(snapshot.status)) return;
   const members = snapshot.execution.membersSnapshot ?? [];
   const name = (agentId: string) => members.find(member => member.agentId === agentId)?.displayName ?? agentId;
   const after = scheduled(snapshot, name);
@@ -161,7 +162,7 @@ export function turnSettled(snapshot: RunSnapshot, turn: RunSnapshot['turns'][nu
  * D111: a finished discussion continues in place — completed, or stopped with every Turn settled (a stopped Turn is
  * retried or continued instead). Display only; Main rechecks every condition.
  */
-export const canContinueRun = (snapshot: RunSnapshot | undefined) => !!snapshot?.execution && runIdle(snapshot)
+export const canContinueRun = (snapshot: RunSnapshot | undefined) => !!snapshot?.execution && !snapshot.groupChat && runIdle(snapshot)
   && ['completed', 'cancelled', 'error'].includes(snapshot.status)
   && snapshot.turns.every(turn => turnSettled(snapshot, turn));
 /** Version edits/regenerations wait for the in-flight request; Main rechecks every condition. */

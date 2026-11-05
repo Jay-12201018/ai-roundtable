@@ -17,7 +17,8 @@ function setup(name: string) {
   const provider = new ScriptedProvider();
   const service = new RunService(db, provider, createPublicMessagesBuilder());
   window.roundtable = appApiFor(service, db);
-  service.createDemoRoom(name);
+  // These tests are about the stricter modes' controls; the group chat's are in tests/integration/groupChat.
+  localStorage.setItem(`roundtable.mode.${service.createDemoRoom(name)}`, 'free-chat');
   const runId = () => db.getAttempt(provider.inputs[0].requestId)!.runId;
   return { db, provider, service, runId, close: async () => { cleanup(); await service.shutdown(); db.close(); } };
 }

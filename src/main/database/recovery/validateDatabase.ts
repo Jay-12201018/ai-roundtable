@@ -303,7 +303,8 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         LEFT JOIN request_attempts a ON u.kind='turn' AND a.request_id=u.request_id AND a.run_id=u.run_id
         LEFT JOIN summary_requests s ON u.kind='summary' AND s.request_id=u.request_id AND s.run_id=u.run_id
         LEFT JOIN artifact_requests r ON u.kind='artifact' AND r.request_id=u.request_id AND r.run_id=u.run_id
-        WHERE a.request_id IS NULL AND s.request_id IS NULL AND r.request_id IS NULL LIMIT 1`, 'Invalid usage identity');
+        ${version >= 16 ? "LEFT JOIN group_chat_schedule_requests g ON u.kind='schedule' AND g.request_id=u.request_id AND g.run_id=u.run_id" : ''}
+        WHERE a.request_id IS NULL AND s.request_id IS NULL AND r.request_id IS NULL${version >= 16 ? ' AND g.request_id IS NULL' : ''} LIMIT 1`, 'Invalid usage identity');
       for (const row of db.prepare(`SELECT request_id AS requestId,agent_id AS agentId,provider_id AS providerId,model_id AS modelId,kind,state,input_tokens AS inputTokens,
         output_tokens AS outputTokens,cache_hit_tokens AS cacheHitTokens,created_at AS createdAt,updated_at AS updatedAt FROM request_usage`).iterate() as Iterable<Record<string, unknown>>) {
         if (!requestUsageSchema.safeParse(row).success) throw new Error('Invalid usage evidence');
@@ -315,6 +316,16 @@ export function validateDatabase(db: Sqlite.Database): DatabaseValidation {
         if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing attachment protection');
       }
       assertNoRows(db, "SELECT 1 FROM message_attachments l JOIN messages m ON m.id=l.message_id WHERE m.sender_type<>'user' LIMIT 1", 'Attachment on a message the host did not write');
+    }
+    if (version >= 16) {
+      for (const table of ['group_chat_rounds', 'group_chat_speakers', 'group_chat_schedule_requests']) if (!tables.includes(table)) throw new Error('Recovery v16 schema is incomplete');
+      for (const name of ['group_chat_round_state', 'group_chat_round_identity', 'group_chat_round_no_delete', 'group_chat_speaker_state', 'group_chat_speaker_no_delete',
+        'group_chat_schedule_identity', 'group_chat_schedule_close_once', 'group_chat_schedule_no_delete']) {
+        if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND name=?").get(name)) throw new Error('Missing group chat protection');
+      }
+      if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='index' AND name='idx_group_chat_open_round'").get()) throw new Error('Missing group chat protection');
+      assertNoRows(db, 'SELECT 1 FROM group_chat_speakers s JOIN group_chat_rounds r ON r.id=s.round_id JOIN turns t ON t.id=s.turn_id WHERE t.run_id<>r.run_id OR t.agent_id<>s.agent_id LIMIT 1', 'Group chat speaker does not match its Turn');
+      assertNoRows(db, 'SELECT 1 FROM group_chat_schedule_requests q JOIN group_chat_rounds r ON r.id=q.round_id WHERE q.run_id<>r.run_id LIMIT 1', 'Schedule request does not match its round');
     }
     hash.update(JSON.stringify(schema));
     for (const table of tables) {

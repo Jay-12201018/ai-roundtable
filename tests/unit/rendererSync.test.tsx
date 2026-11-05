@@ -44,6 +44,7 @@ describe('Renderer run synchronization', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem('roundtable.mode.room', 'free-chat');
     vi.clearAllMocks();
     subscribe.mockImplementation(async (id: string): Promise<RunSubscription> => ({ snapshot: snapshot(id), events: [], nextCursor: 0, resyncRequired: false }));
     start.mockResolvedValue(snapshot('new', 2));
@@ -158,6 +159,7 @@ describe('Renderer task identity and command feedback', () => {
   afterEach(cleanup);
   function setup(saved?: RunSnapshot) {
     localStorage.clear();
+    localStorage.setItem('roundtable.mode.room', 'free-chat');
     if (saved) localStorage.setItem('roundtable.runId', saved.runId);
     const events = new Set<(event: RunEvent) => void>();
     const subscribe = vi.fn(async () => ({ snapshot: saved!, events: [], nextCursor: saved!.sequence, resyncRequired: false }));
@@ -199,7 +201,7 @@ describe('Renderer task identity and command feedback', () => {
     await act(async () => finish(room('created', '创建目标')));
     // The new room opens on its page, with the three default members created.
     await screen.findAllByRole('heading', { name: '创建目标' });
-    expect(vi.mocked(window.roundtable.rooms.createAgent).mock.calls.map(([input]) => input.displayName)).toEqual(['起草者', '审查者', '综合者']);
+    expect(vi.mocked(window.roundtable.rooms.createAgent).mock.calls.map(([input]) => input.displayName)).toEqual(['林舟', '阿哲', '小雨']);
   });
 
   it.each(['interrupted', 'error'] as const)('preserves partial messages and disables unavailable controls for %s', async (status) => {

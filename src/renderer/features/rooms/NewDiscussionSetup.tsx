@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { CircleAlert, Image, ImageOff, Minus, Pencil, Plus } from 'lucide-react';
 import type { AgentConfiguration, AgentInput, CreateAgentInput, ProviderReadiness, ProviderSummary, RoomManagementApiContract } from '../../../shared/contracts/configuration';
 import { Avatar, IconButton, Tag } from '../../components/ui';
-import { MAX_PARTICIPANTS, MIN_PARTICIPANTS, isFixedPair, modeSummary, nextDraft, participantsFor, speakersOf, speakingOrder, templates, type WorkflowDraft, type WorkflowTemplate } from '../workflows/model';
+import { MAX_PARTICIPANTS, MIN_PARTICIPANTS, groupChatMode, isFixedPair, modeSummary, nextDraft, participantsFor, speakersOf, speakingOrder, templates, type DiscussionMode, type WorkflowDraft } from '../workflows/model';
 import { readRoomCount, writeRoomCount } from '../workflows/storage';
 import { MemberDialog, ModelOptions, modelChoice, modelOptions, modelValue } from './MemberDialog';
 import { memberLine } from './RoomPage';
@@ -14,13 +14,15 @@ export type NewDiscussionSetupProps = {
   api: Pick<RoomManagementApiContract, 'createAgent' | 'updateAgent'>; roomId: string;
   /** The room's members, without the archived ones. */
   members: readonly AgentConfiguration[];
-  /** The room's remembered discussion mode; none means free discussion with whoever takes part. */
+  /** The room's remembered flow, if it has one to remember. */
   draft: WorkflowDraft | undefined;
+  /** How this room talks: the flow's template, or 群聊 or free discussion, which have no flow. */
+  mode: DiscussionMode;
   providers: readonly ProviderSummary[]; readiness: readonly ProviderReadiness[] | undefined; readOnly?: boolean;
   /** Reads the members again; what it resolves with is what the page now shows. */
   reload: () => Promise<readonly AgentConfiguration[]>;
   /** Remembers the mode for this room; false when this profile cannot store it. */
-  onDraft: (draft: WorkflowDraft | null) => boolean;
+  onDraft: (draft: WorkflowDraft | null, mode: DiscussionMode) => boolean;
   onOpenSettings: () => void; onConnectMore: () => void; onCustomFlow: () => void;
   /** This page shows models: a moment a service's list may be looked at again. */
   onShown?: () => void;
@@ -33,7 +35,7 @@ const asWorkflowMembers = (members: readonly AgentConfiguration[]) => members.ma
  * 新讨论: how it runs, how many take part, and each one's model, right above the goal. Saved as it changes. A discussion takes
  * its members when it starts, so this applies to the next one and those after it, never to one that already ran.
  */
-export function NewDiscussionSetup({ api, roomId, members, draft, providers, readiness, readOnly, reload, onDraft, onOpenSettings, onConnectMore, onCustomFlow, onShown }: NewDiscussionSetupProps) {
+export function NewDiscussionSetup({ api, roomId, members, draft, mode, providers, readiness, readOnly, reload, onDraft, onOpenSettings, onConnectMore, onCustomFlow, onShown }: NewDiscussionSetupProps) {
   const [changing, setChanging] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState<Record<string, Partial<AgentInput>>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -42,7 +44,7 @@ export function NewDiscussionSetup({ api, roomId, members, draft, providers, rea
   useEffect(() => { if (editor) onShown?.(); }, [Boolean(editor)]);
 
   const ordered = byOrder(members);
-  const template: WorkflowTemplate = draft?.template ?? 'free-chat';
+  const template: DiscussionMode = draft?.template ?? mode;
   const fixed = isFixedPair(template);
   const shown = speakersOf(draft, ordered);
   const count = shown.length;
@@ -51,7 +53,7 @@ export function NewDiscussionSetup({ api, roomId, members, draft, providers, rea
   const disabled = changing || readOnly;
 
   /** Takes the room to this mode and number of members: only what differs is written, and members who step out keep everything. */
-  async function arrange(nextTemplate: WorkflowTemplate, nextCount: number) {
+  async function arrange(nextTemplate: DiscussionMode, nextCount: number) {
     setChanging(true); setError(''); setNotice('');
     try {
       let current = byOrder(members);
@@ -65,14 +67,14 @@ export function NewDiscussionSetup({ api, roomId, members, draft, providers, rea
       const next = byOrder(await reload());
       const plan = nextDraft({ template: nextTemplate, previous: draft, previousMembers: asWorkflowMembers(ordered), members: asWorkflowMembers(next) });
       writeRoomCount(roomId, isFixedPair(nextTemplate) ? readRoomCount(roomId) ?? 3 : wanted);
-      if (!onDraft(plan.draft)) setError('这台电脑没能记住讨论方式，这次按默认的自由讨论进行。');
+      if (!onDraft(plan.draft, nextTemplate)) setError('这台电脑没能记住讨论方式，这次按默认的群聊进行。');
       else if (plan.notice) setNotice(plan.notice);
     } catch (cause) {
       setError(`没有全部改好，下面是现在的样子。${roomErrorText(cause)}`);
       await reload().catch(() => {});
     } finally { setChanging(false); }
   }
-  function chooseMode(next: WorkflowTemplate) {
+  function chooseMode(next: DiscussionMode) {
     if (next === template) return;
     if (!fixed) writeRoomCount(roomId, count);
     void arrange(next, isFixedPair(next) ? 2 : fixed ? readRoomCount(roomId) ?? 3 : Math.max(MIN_PARTICIPANTS, count));
@@ -90,9 +92,13 @@ export function NewDiscussionSetup({ api, roomId, members, draft, providers, rea
   return <section className="setup" aria-label="这场讨论怎么进行">
     <div className="setup-line"><span className="setup-label" id="setup-mode">讨论方式</span>
       <div className="setup-control">
-        <div className="seg setup-seg" role="group" aria-labelledby="setup-mode">{templates.map(item =>
-          <button key={item.id} type="button" aria-pressed={template === item.id} disabled={disabled} onClick={() => chooseMode(item.id)}>{item.label}</button>)}</div>
-        <p className="small muted setup-hint">{modeSummary(template, draft, shown)}{!readOnly && <button type="button" className="link-btn setup-link" onClick={onCustomFlow}>自定义流程</button>}</p>
+        <div className="setup-modes" role="group" aria-labelledby="setup-mode">
+          <div className="seg setup-seg"><button type="button" aria-pressed={template === groupChatMode.id} disabled={disabled} onClick={() => chooseMode(groupChatMode.id)}>{groupChatMode.label}</button></div>
+          <span className="setup-strict"><span className="setup-strict-label" id="setup-strict">更严格的流程</span>
+            <span className="seg setup-seg" role="group" aria-labelledby="setup-strict">{templates.map(item =>
+              <button key={item.id} type="button" aria-pressed={template === item.id} disabled={disabled} onClick={() => chooseMode(item.id)}>{item.label}</button>)}</span></span>
+        </div>
+        <p className="small muted setup-hint">{modeSummary(template, draft, shown)}{!readOnly && template !== groupChatMode.id && <button type="button" className="link-btn setup-link" onClick={onCustomFlow}>自定义流程</button>}</p>
       </div></div>
     <div className="setup-line"><span className="setup-label">几位成员</span>
       <div className="setup-control">

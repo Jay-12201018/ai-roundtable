@@ -28,14 +28,14 @@ it('D6-A 开始试玩 adds the demo service and a 演示房间 with three demo m
   expect(document.body.textContent).toContain('回复是预先写好的示例，不代表真实模型的水平');
   expect(document.body.textContent).toContain('支持国内主流大模型：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。');
   fireEvent.click(screen.getByRole('button', { name: '开始试玩' }));
-  await screen.findByRole('heading', { name: '这场讨论要解决什么？' });
+  await screen.findByRole('heading', { name: '想和大家聊点什么？' });
   const [provider] = f.db.listProviderSummaries();
   expect(provider).toMatchObject({ kind: 'mock', isDefault: false });
   const [room] = f.db.listRooms();
   expect(room.name).toBe('演示房间');
   expect(f.db.listAgentConfigurations(room.id).map(agent => [agent.displayName, agent.providerId, agent.modelId])).toEqual([
-    ['起草者', provider.id, 'mock'], ['审查者', provider.id, 'mock'], ['综合者', provider.id, 'mock']]);
-  expect((screen.getByRole('textbox', { name: /讨论目标/u }) as HTMLTextAreaElement).value).toBe(DEMO_GOAL);
+    ['林舟', provider.id, 'mock'], ['阿哲', provider.id, 'mock'], ['小雨', provider.id, 'mock']]);
+  expect((screen.getByRole('textbox', { name: /第一条消息/u }) as HTMLTextAreaElement).value).toBe(DEMO_GOAL);
   expect(f.api.run.start).not.toHaveBeenCalled(); expect(f.network).not.toHaveBeenCalled();
 });
 
@@ -47,7 +47,7 @@ it('D6-A connecting the first real service creates 我的第一场讨论 on its 
   fireEvent.change(within(wizard).getByLabelText('API Key'), { target: { value: 'owned-fake-key' } });
   fireEvent.click(within(wizard).getByRole('button', { name: '保存' }));
   // Saving is the last step: the wizard closes on the new room's first discussion.
-  await screen.findByRole('heading', { name: '这场讨论要解决什么？' });
+  await screen.findByRole('heading', { name: '想和大家聊点什么？' });
   const [room] = f.db.listRooms();
   expect(f.db.listAgentConfigurations(room.id).every(agent => agent.modelId === 'deepseek-flash')).toBe(true);
   await waitFor(() => expect(screen.getByRole('status', { name: '运行状态' }).textContent).toContain('我的第一场讨论'));

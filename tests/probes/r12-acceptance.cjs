@@ -164,6 +164,7 @@ async function main() {
 
   // Setup only: a demo room with three Mock members (room management itself is R07, not under test here).
   const { roomId } = await js(`window.roundtable.room.createDemo('R12 实操验收')`);
+  await js(`localStorage.setItem('roundtable.mode.${roomId}', 'free-chat')`);
   // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.
   await click('用量'); await click('Mock 圆桌', { scope: '.sidebar' }); await click('新讨论', { scope: '.room-page' });
 
@@ -287,6 +288,8 @@ async function main() {
 
   // The 3-token mode was only for this path: back to the room's default before the next one.
   await click('新讨论', { scope: '.controls' }); await click('自定义流程'); await click('恢复默认');
+  // 恢复默认 is the group chat now (D149); this probe goes on with free discussion.
+  await click('自由讨论');
   await until(`document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent === '自由讨论' && document.querySelector('.member-count-value')?.textContent === '3'`, 'default mode restored');
   // Path 5b: Stop keeps the partial text; an explicit retry then succeeds.
   // The production Mock finishes a 3-turn Run in about 1.5 s, so Stop (now two clicks, D098) can lose the race to the

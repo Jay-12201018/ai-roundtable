@@ -65,10 +65,12 @@ export function selectTaskTitle(state: RendererState): string {
   return state.roomTask?.trim() || '新任务';
 }
 
+/** What the goal box of a stricter discussion opens with. A chat opens empty: nobody starts one with someone else's words. */
+export const initialDraft = '设计一个校园跑腿平台';
 export function createRendererStore() {
   let nextCommandId = 0;
   return createStore<RendererState>((set, get) => ({
-    generation: 0, draft: '设计一个校园跑腿平台', syncStatus: 'idle',
+    generation: 0, draft: initialDraft, syncStatus: 'idle',
     setDraft: (draft) => set({ draft }),
     selectRoom: (roomId, roomTask) => set((state) => ({
       generation: state.generation + 1, roomId, roomTask, runId: undefined,

@@ -33,7 +33,7 @@ describe('R04 + R05 + R06 live integration',()=>{
     }finally{dispose();await f.close();}
   });
   it('projects real alpha/beta/gamma to the DOM with Pause, one Step and Resume',async()=>{
-    const f=fixture();f.service.createDemoRoom('联合 Mock');window.roundtable=f.api;
+    const f=fixture();localStorage.setItem(`roundtable.mode.${f.service.createDemoRoom('联合 Mock')}`,'free-chat');window.roundtable=f.api;
     try{
       render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始讨论'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始讨论'}));
       await screen.findByText('alpha');expect(f.provider.inputs).toHaveLength(1);

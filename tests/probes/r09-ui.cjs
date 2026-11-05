@@ -80,7 +80,7 @@ async function page(stage, saved, endpoint) {
       await fill('模型',(i===1?saved.second:saved['compatible'])+'\u0000fixture');await clickIn('dialog[open]','添加');await wait(dialog,d=>!d,'Member dialog did not close');
     }
     check((await api.rooms.listAgentConfigurations({roomId:saved.roomId})).length===3,'Not three members');
-    await clickIn('.room-page','新讨论');await fill('讨论目标','R09 three Agent public context');await click('开始讨论');saved.runId=await wait(()=>localStorage.getItem('roundtable.runId'),Boolean,'Run absent');
+    await clickIn('.room-page','新讨论');await click('自由讨论');await fill('讨论目标','R09 three Agent public context');await click('开始讨论');saved.runId=await wait(()=>localStorage.getItem('roundtable.runId'),Boolean,'Run absent');
     await wait(text,ts=>ts[0]?.length>0,'No real HTTP partial');await click('暂停');snapshots.paused=await settle(saved.runId,'paused');check(snapshots.paused.turns.length===1,'Pause crossed next turn');
     check(snapshots.paused.execution.membersSnapshot.every(m=>m.modelId==='fixture'),'Frozen model mismatch');
     return {saved,snapshots,assertions};

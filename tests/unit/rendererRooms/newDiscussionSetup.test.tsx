@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NewDiscussionSetup, memberBlocked, type NewDiscussionSetupProps } from '../../../src/renderer/features/rooms';
-import { createWorkflowDraft, draftProblems, nextDraft, participantsFor, speakersOf, type WorkflowDraft } from '../../../src/renderer/features/workflows/model';
+import { createWorkflowDraft, draftProblems, nextDraft, participantsFor, speakersOf, type DiscussionMode, type WorkflowDraft } from '../../../src/renderer/features/workflows/model';
 import { readRoomCount } from '../../../src/renderer/features/workflows/storage';
 import type { AgentConfiguration, CreateAgentInput, ProviderReadiness, ProviderSummary } from '../../../src/shared/contracts/configuration';
 import { publicError } from '../../../src/shared/schemas/error';
@@ -19,15 +19,15 @@ const member = (id: string, displayName: string, role: string, order: number, ex
 const starters = () => [member('a', '起草者', '起草', 0), member('b', '审查者', '审查', 1), member('c', '综合者', '综合', 2)];
 
 /** The page with a room that really changes: what is written is what the next read returns. */
-function Room({ initial, initialDraft, fail, spy, providers, rows, onDraft }: { initial: AgentConfiguration[]; initialDraft?: WorkflowDraft; fail?: () => boolean; spy: { update: (input: unknown) => void; create: (input: unknown) => void }; providers?: ProviderSummary[]; rows?: ProviderReadiness[]; onDraft?: NewDiscussionSetupProps['onDraft'] }) {
-  const [members, setMembers] = useState(initial); const [draft, setDraft] = useState(initialDraft);
+function Room({ initial, initialDraft, initialMode = 'free-chat', fail, spy, providers, rows, onDraft }: { initial: AgentConfiguration[]; initialDraft?: WorkflowDraft; initialMode?: DiscussionMode; fail?: () => boolean; spy: { update: (input: unknown) => void; create: (input: unknown) => void }; providers?: ProviderSummary[]; rows?: ProviderReadiness[]; onDraft?: NewDiscussionSetupProps['onDraft'] }) {
+  const [members, setMembers] = useState(initial); const [draft, setDraft] = useState(initialDraft); const [discussionMode, setMode] = useState<DiscussionMode>(initialMode);
   const store = { current: members };
   const api: NewDiscussionSetupProps['api'] = {
     updateAgent: async input => { spy.update(input); if (fail?.()) throw publicError('invalid_state'); store.current = store.current.map(item => item.id === input.id ? { ...item, ...input } as AgentConfiguration : item); setMembers(store.current); return store.current.find(item => item.id === input.id)!; },
     createAgent: async (input: CreateAgentInput) => { spy.create(input); const made = { ...input, id: `new-${store.current.length}`, archivedAt: null, createdAt: at, updatedAt: at } as AgentConfiguration; store.current = [...store.current, made]; setMembers(store.current); return made; },
   };
-  return <NewDiscussionSetup api={api} roomId="r" members={members} draft={draft} providers={providers ?? [ds, km]} readiness={rows ?? readiness} reload={async () => store.current}
-    onDraft={value => { setDraft(value ?? undefined); onDraft?.(value); return true; }} onOpenSettings={vi.fn()} onConnectMore={vi.fn()} onCustomFlow={vi.fn()} />;
+  return <NewDiscussionSetup api={api} roomId="r" members={members} draft={draft} mode={discussionMode} providers={providers ?? [ds, km]} readiness={rows ?? readiness} reload={async () => store.current}
+    onDraft={(value, next) => { setDraft(value ?? undefined); setMode(next); onDraft?.(value, next); return true; }} onOpenSettings={vi.fn()} onConnectMore={vi.fn()} onCustomFlow={vi.fn()} />;
 }
 function show(props: Partial<Parameters<typeof Room>[0]> = {}) {
   const spy = { update: vi.fn(), create: vi.fn() };
@@ -67,9 +67,9 @@ describe('新讨论 › 三步', () => {
       fireEvent.click(plus());
       await waitFor(() => expect(document.querySelector('.member-count-value')?.textContent).toBe(String(count)));
     }
-    expect(rowsShown()).toEqual(['起草者', '审查者', '综合者', '反方', '核查员', '成员 6', '成员 7', '成员 8']);
+    expect(rowsShown()).toEqual(['起草者', '审查者', '综合者', '林舟', '阿哲', '小雨', '老周', '小唐']);
     expect(spy.create).toHaveBeenCalledTimes(5);
-    expect(spy.create).toHaveBeenNthCalledWith(1, expect.objectContaining({ displayName: '反方', roleTemplateId: '反方', providerId: 'ds', modelId: 'deepseek-flash', displayOrder: 3 }));
+    expect(spy.create).toHaveBeenNthCalledWith(1, expect.objectContaining({ displayName: '林舟', roleTemplateId: '产品', providerId: 'ds', modelId: 'deepseek-flash', displayOrder: 3 }));
     expect(plus().hasAttribute('disabled')).toBe(true);
   });
   it.each([['双人对话', ['起草者', '审查者']], ['审查修订链', ['起草者', '审查者']]])('%s is two: only they show, and the flow has no problems', async (name, shown) => {

@@ -15,7 +15,7 @@ describe('R12 App with the real Main services', () => {
     const provider = new ScriptedProvider();
     const service = new RunService(db, provider, createPublicMessagesBuilder());
     window.roundtable = appApiFor(service, db);
-    service.createDemoRoom('主持人联合测试');
+    localStorage.setItem(`roundtable.mode.${service.createDemoRoom('主持人联合测试')}`, 'free-chat');
     provider.hold.add(0);
     provider.answers.set(0, '开场观点 @Override 审查者');
     provider.answers.set(1, '综合者被点名发言');

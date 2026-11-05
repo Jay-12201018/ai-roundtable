@@ -3,6 +3,7 @@ import type { RunSnapshot } from '../../../shared/types/run';
 import { Button, Note, NoticeCard } from '../../components/ui';
 import { durationStopText, durationText } from '../../locales/zhCN';
 import { canContinueRun, summaryWritable } from '../host/model';
+import { GROUP_CHAT_MAX_TURNS } from '../../../shared/schemas/groupChat';
 
 /** D107: the moment to summarize is the host's call; this only says how full the context is. */
 export function ContextHint({ snapshot, onSummarize }: { snapshot: RunSnapshot; onSummarize: () => void }) {
@@ -38,10 +39,10 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, re
   const repeatable = retry.enabled || resume.enabled;
   const repeatButtons = repeatable && <>
     <div className="notice-row">
-      {retry.enabled && <Button variant="primary" onClick={retry.run}>重试当前回合</Button>}
-      {resume.enabled && <Button onClick={resume.run}>续写部分回复</Button>}
+      {retry.enabled && <Button variant="primary" onClick={retry.run}>{snapshot.groupChat ? '让 TA 重说' : '重试当前回合'}</Button>}
+      {resume.enabled && <Button onClick={resume.run}>{snapshot.groupChat ? '接着说完' : '续写部分回复'}</Button>}
     </div>
-    <p className="notice-hint">重试和续写会重新发送请求，可能再次计费。</p>
+    <p className="notice-hint">{snapshot.groupChat ? '这两个都会重新发送请求，可能再次计费。' : '重试和续写会重新发送请求，可能再次计费。'}</p>
   </>;
   return <div className="run-notices">
     {snapshot.status === 'interrupted' && <NoticeCard icon={History} title="执行已中断，部分输出已保留">
@@ -54,7 +55,7 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, re
       {repeatButtons}
     </NoticeCard>}
     {snapshot.status === 'cancelled' && <NoticeCard tone="info" icon={CircleStop} title="已停止 · 已生成的文字都保留" role="status">
-      <p>后续回合不会再进行，也不会自动继续。{canContinueRun(snapshot) ? '要接着讨论，在下方输入框写下你的话：所有成员各回应一次，或用 @ 只让一位回应。' : ''}</p>{repeatButtons}
+      <p>{snapshot.groupChat ? '大家先停下了，不会自动继续。发新消息就能接着聊。' : '后续回合不会再进行，也不会自动继续。'}{!snapshot.groupChat && canContinueRun(snapshot) ? '要接着讨论，在下方输入框写下你的话：所有成员各回应一次，或用 @ 只让一位回应。' : ''}</p>{repeatButtons}
     </NoticeCard>}
     {snapshot.durationStop && <NoticeCard tone="info" icon={Clock} title="已到时长上限" role="status">
       <p>{durationStopText(snapshot.durationStop.limitMs)}已生成的发言都保留，现在没有在发送请求。</p>
@@ -64,10 +65,12 @@ export function RunNotices({ snapshot, error, syncFailed, onRetrySync, retry, re
     {snapshot.status === 'error' && !snapshot.durationStop && <NoticeCard tone="danger" icon={TriangleAlert} title="运行失败">
       <p>{error ?? '运行失败，历史输出已保留。'}</p>
       {snapshot.lastFailure?.code === 'invalid_input' && (snapshot.taskAttachments?.length || snapshot.messages.some(message => message.attachments?.length)) ? <p>这场讨论带了图片。如果这个模型不接受图片，开始新讨论时给这位成员换一个能看图的模型。</p> : null}
+      {snapshot.groupChat && <p>也可以直接发新消息：还没说话的成员不再说，按新消息重新安排。</p>}
       {repeatButtons}
     </NoticeCard>}
     {error && snapshot.status !== 'error' && <p className="run-error" role="alert">{error}</p>}
     {!summaryOpen && <ContextHint snapshot={snapshot} onSummarize={onSummarize} />}
-    {snapshot.status === 'completed' && <div className="sys-line">讨论已完成{snapshot.workflow?.limitReason ? ` · ${snapshot.workflow.limitReason === 'max_turns' ? '回合数到限' : '累计时长到限'}` : ''} · 可以在下方继续这场讨论，或开始新讨论</div>}
+    {snapshot.groupChat?.round?.state === 'limit' && <div className="sys-line" role="status">这条消息的回复到了 {GROUP_CHAT_MAX_TURNS} 次发言的上限，大家先停下了。发新消息可以继续。</div>}
+    {snapshot.status === 'completed' && !snapshot.groupChat && <div className="sys-line">讨论已完成{snapshot.workflow?.limitReason ? ` · ${snapshot.workflow.limitReason === 'max_turns' ? '回合数到限' : '累计时长到限'}` : ''} · 可以在下方继续这场讨论，或开始新讨论</div>}
   </div>;
 }

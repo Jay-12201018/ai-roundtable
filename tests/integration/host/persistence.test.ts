@@ -78,7 +78,7 @@ describe('R12 persistence', () => {
     expect(after.host?.instructions).toEqual(before.host?.instructions);
     expect(after.host?.override).toEqual(before.host?.override);
     expect(after.versions!.find(version => version.messageId === turns[1].messageId)!.affectedBy).toEqual([turns[0].messageId]);
-    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(15);
+    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(16);
     // Nothing resends automatically; resuming is an explicit host action that consumes the queued Override.
     await restarted.run.recoverInterruptedRun(runId, 'resume');
     const resumed = restarted.run.getSnapshot(runId);
@@ -128,7 +128,7 @@ describe('R12 persistence', () => {
     expect(snapshot.turns.map(turn => turn.messageId)).toEqual(['m2', 'm4']);
     const check = new Sqlite(path, { readonly: true });
     try {
-      expect(validateDatabase(check).schemaVersion).toBe(15);
+      expect(validateDatabase(check).schemaVersion).toBe(16);
       expect(check.prepare('SELECT id,content,status FROM messages ORDER BY sort_key').all()).toEqual(contents);
       expect(check.prepare('SELECT COUNT(*) FROM message_versions WHERE basis_json IS NOT NULL').pluck().get()).toBe(0);
     } finally { check.close(); }
@@ -152,7 +152,7 @@ describe('R12 persistence', () => {
     expect(after.continuations).toEqual([{ actionId: continued.actionId, messageId: continued.messageId, agentIds: ['a', 'b', 'c'], createdAt: expect.any(String) }]);
     expect(after.turns.map(turn => [turn.agentId, turn.status])).toEqual([['a', 'completed'], ['a', 'completed'], ['b', 'interrupted']]);
     expect(restarted.provider.inputs).toEqual([]);
-    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(15);
+    expect(validateDatabase(new Sqlite(path, { readonly: true })).schemaVersion).toBe(16);
     // The interrupted answer needs an explicit retry; the rest of the round then follows, and nothing else is sent.
     await expect(restarted.run.recoverInterruptedRun(runId, 'resume')).rejects.toMatchObject({ code: 'invalid_state' });
     await restarted.run.recoverInterruptedRun(runId, 'retry');
