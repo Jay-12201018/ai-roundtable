@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join, resolve, dirname, basename } = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { execFileSync } = require('node:child_process');
 const { app, session, safeStorage, screen } = require('electron');
 
 const args = process.argv.slice(2);
@@ -94,7 +95,41 @@ async function main() {
   // not Chromium's background scheduling, so it keeps the page at full speed wherever the window ends up on screen.
   contents.setBackgroundThrottling(false);
   // Each page script has its own deadline; on expiry it names the probe step the page recorded last.
-  const lastStep = () => Promise.race([contents.executeJavaScript('window.__r78Step ?? "(none recorded)"'), new Promise(resolveStep => setTimeout(() => resolveStep('(Renderer did not answer)'), 2000))]).catch(error => '(unreadable: ' + error.message + ')');
+  const answer = (script, milliseconds) => Promise.race([contents.executeJavaScript(script), new Promise(resolveAnswer => setTimeout(() => resolveAnswer('(Renderer did not answer)'), milliseconds))]).catch(error => '(unreadable: ' + error.message + ')');
+  // Electron has no occlusion getter and isVisible() stays true for a covered window, so the window server is asked which
+  // windows lie above this one: bounds and layers need no permission. Covered means one of them contains the whole window; a minimized window is off screen, not covered.
+  const occluded = () => {
+    if (window.isMinimized()) return false;
+    const id = Number(window.getMediaSourceId().split(':')[1]);
+    const script = `ObjC.import('CoreGraphics'); ObjC.bindFunction('CFBridgingRelease', ['id', ['void *']]);
+      JSON.stringify(ObjC.deepUnwrap($.CFBridgingRelease($.CGWindowListCopyWindowInfo(2, ${id}))).map(w => ({ owner: w.kCGWindowOwnerName, layer: w.kCGWindowLayer, alpha: w.kCGWindowAlpha, bounds: w.kCGWindowBounds })))`;
+    try {
+      const { x, y, width, height } = window.getBounds();
+      const above = JSON.parse(execFileSync('osascript', ['-l', 'JavaScript', '-e', script], { encoding: 'utf8', timeout: 3000 }));
+      // The Dock keeps a clear full-screen window at its own level (20; the menu bar's are 24 and 25).
+      const covering = above.find(({ layer, alpha, bounds }) => ![20, 24, 25].includes(layer) && alpha === 1 && bounds.X <= x && bounds.Y <= y && bounds.X + bounds.Width >= x + width && bounds.Y + bounds.Height >= y + height);
+      return covering ? 'by ' + covering.owner : false;
+    } catch (error) { return '(unreadable: ' + error.message + ')'; }
+  };
+  // What was on screen when a step gave up.
+  const lastScene = async () => {
+    if (window.isDestroyed()) return { window: '(destroyed)' };
+    const flags = { visible: window.isVisible(), minimized: window.isMinimized(), focused: window.isFocused(), bounds: window.getBounds() };
+    const page = await answer(`(async () => {
+      const visible = element => !element.closest('[hidden]') && !element.closest('[inert]') && element.getClientRects().length > 0;
+      const animations = element => element.getAnimations({ subtree: true }).map(animation => ({ name: animation.animationName ?? animation.transitionProperty ?? animation.id, playState: animation.playState, currentTime: animation.currentTime, iterations: animation.effect?.getTiming().iterations }));
+      const drawer = element => element ? { present: true, visible: visible(element), animations: animations(element) } : { present: false };
+      // A timeline that stands still over this half second means the page gets no frames; timers alone do not move it.
+      const timelineBefore = document.timeline.currentTime; let frames = 0;
+      const counting = () => { frames++; requestAnimationFrame(counting); }; requestAnimationFrame(counting);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return { step: window.__r78Step ?? '(none recorded)', left: drawer(document.querySelector('.drawer.is-left')), right: drawer(document.querySelector('.drawer.is-right')),
+        visibilityState: document.visibilityState, hasFocus: document.hasFocus(), innerWidth, innerHeight, layout: document.querySelector('.app-shell')?.dataset.layout,
+        framesIn500ms: frames, timelineAdvancedMs: document.timeline.currentTime - timelineBefore, trace: window.__r78Trace ?? [] };
+    })()`, 3000);
+    return { window: { ...flags, occluded: occluded() }, page };
+  };
+  const lastStep = async () => (await answer('window.__r78Step ?? "(none recorded)"', 2000)) + '; scene: ' + JSON.stringify(await lastScene());
   const bounded = async (label, milliseconds, run) => {
     let timer;
     const expired = new Promise((_resolve, reject) => { timer = setTimeout(async () => {
@@ -190,17 +225,23 @@ async function main() {
         const named = (name, scope = document) => [...scope.querySelectorAll('button')].find(element => visible(element) && element.textContent.trim() === name);
         // Each step waits for its own condition under its own deadline and records itself, so a stall names the step.
         const item = ${JSON.stringify(item)};
+        // Each change the waits saw, and each click, in order: an error can then tell a drawer that never came from one that came and went.
+        const trail = window.__r78Trace = []; let seen;
+        const mark = text => { trail.push(Math.round(performance.now()) + ' ' + text); if (trail.length > 40) trail.shift(); };
+        const trace = () => { const shown = document.querySelector('.drawer');
+          const now = [document.querySelector('.app-shell')?.dataset.layout, shown ? shown.className + (visible(shown) ? ' visible' : ' unusable') + ' [' + shown.getAnimations({ subtree: true }).map(animation => animation.playState) + ']' : 'no drawer', document.visibilityState, document.hasFocus() ? 'focused' : 'unfocused'].join(' | ');
+          if (now !== seen) { seen = now; mark(now); } };
         const until = async (label, read, failure = 'timed out waiting for ' + label, milliseconds = 10000) => {
           window.__r78Step = item + ': ' + label; const deadline = Date.now() + milliseconds;
           for (;;) {
-            const value = read(); if (value) return value;
+            trace(); const value = read(); if (value) return value;
             if (Date.now() > deadline) throw new Error(item + ': ' + failure + ' (' + milliseconds + ' ms)');
             await new Promise(resolve => setTimeout(resolve, 16));
           }
         };
         // A drawer is usable once its slide-in has finished (the .18s ui-drawer-in animation).
         const settled = element => element && visible(element) && element.getAnimations({ subtree: true }).every(animation => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity) && element;
-        const press = async name => { const button = await until('control ' + name, () => { const element = byName(name); return element && !element.disabled && element; }, 'Layout control unavailable: ' + name); button.click(); };
+        const press = async name => { const button = await until('control ' + name, () => { const element = byName(name); return element && !element.disabled && element; }, 'Layout control unavailable: ' + name); mark('click ' + name); button.click(); };
         // The resize reaches the Renderer asynchronously; start once the layout has folded (or unfolded) for this width.
         await until('layout for width ${width}', () => innerWidth === ${width}
           && [...document.querySelectorAll('.sidebar')].some(element => visible(element) && !element.closest('.drawer')) === (${width} >= 1024), 'Layout did not follow the window width');
@@ -237,7 +278,7 @@ async function main() {
           const continuing = document.querySelector('.composer textarea[aria-label="继续讨论"]');
           if (continuing) { await reach(continuing, '继续讨论 box'); await reach(named('新讨论', document.querySelector('.composer')), '新讨论'); }
           else await reach(named('开始讨论', document.querySelector('.composer')), '开始讨论');
-          const menu = byName('打开导航'); await reach(menu, 'navigation drawer button'); menu.click();
+          const menu = byName('打开导航'); await reach(menu, 'navigation drawer button'); mark('click 打开导航'); menu.click();
           await until('navigation drawer settled', () => settled(document.querySelector('.drawer.is-left')), 'Navigation drawer did not open');
           await reach(document.querySelector('.drawer.is-left .sidebar'), 'navigation drawer');
           await reach(byName('关闭导航'), 'close navigation'); byName('关闭导航').click();
@@ -278,7 +319,10 @@ async function main() {
       result.sizes.push({ requested: [width,height], actualWindow: actualSize, workArea, constrainedByWorkArea: height > workArea.height, page, ...layout });
       if ((width === 800 && theme === 'dark' || width === 1280 && theme === 'light') && page === '模型设置') {
         const screenshot = join(directory, 'r78-' + result.phase + '-' + width + '-' + theme + '.png');
-        fs.writeFileSync(screenshot, (await contents.capturePage()).toPNG());
+        // capturePage never answers for a window that was resized while minimized. The checks above run either way; the
+        // picture needs the window back, as it would for a person.
+        if (window.isMinimized()) window.restore();
+        await bounded(item + ' screenshot', 10000, async () => fs.writeFileSync(screenshot, (await contents.capturePage()).toPNG()));
       }
       }
     }
