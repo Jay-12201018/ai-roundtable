@@ -4,9 +4,10 @@ import type { KeyReference, ProviderConfiguration } from '../../../shared/contra
 import { providerBaseUrlSchema, providerConfigurationSchema } from '../../../shared/schemas/configuration';
 import { connectionLevelSchema, streamChatInputSchema, testConnectionInputSchema } from '../../../shared/schemas/provider';
 import { idSchema, looksLikeApiKey } from '../../../shared/schemas/common';
-import type { ErrorCode } from '../../../shared/schemas/error';
+import type { ErrorCode, NetworkPhase } from '../../../shared/schemas/error';
 import type { ConnectionTestResult, NormalizedChunk, ProviderAdapter, ProviderMessage, StreamChatInput, TestConnectionInput } from '../types';
 import { readSse } from './sse';
+import { networkPhaseOf } from '../network';
 import type { DiagnosticObserver } from '../diagnostics';
 
 export interface CompatibleOptions {
@@ -116,7 +117,7 @@ export class CompatibleProvider implements ProviderAdapter {
         for await (const event of this.streamChat({ requestId: parsed.requestId, modelId: parsed.modelId!,
           messages: [{ role: 'user', content: 'Reply OK.' }], outputTokenLimit: 8, signal: scope.signal })) {
           scope.check();
-          if (event.type === 'error') throw new ContractError(event.error.code, undefined, event.error.upstream);
+          if (event.type === 'error') throw new ContractError(event.error.code, undefined, event.error.upstream, event.error.phase);
           if (event.type === 'finish') complete = event.reason === 'stop' || event.reason === 'length';
         }
         if (!complete) throw new ContractError('invalid_response');
@@ -190,7 +191,7 @@ export class CompatibleProvider implements ProviderAdapter {
       if (usage) { yield usage; scope.check(); }
       yield { type: 'finish', requestId, reason: finish };
     } catch (error) {
-      const failure = this.failure(error, scope);
+      const failure = this.failure(error, scope, parsingStream ? 'response' : undefined);
       if (failure.code === 'cancelled' || failure.code === 'timeout') this.diagnostics?.({ category: failure.code === 'timeout' ? 'request_timeout' : 'cancelled' });
       else if (failure.code === 'invalid_response' || parsingStream && failure.code === 'unsupported') this.diagnostics?.({ stage: 'stream', category: 'response_invalid' });
       else if (error instanceof ContractError && ['forbidden', 'invalid_input', 'unsupported', 'invalid_state', 'attachment_missing'].includes(error.code)) this.diagnostics?.({ category: 'policy_rejected' });
@@ -281,12 +282,14 @@ export class CompatibleProvider implements ProviderAdapter {
     throw new ContractError(statusCode(response.status), undefined, { status: response.status, ...await errorCodeOf(response, scope, key) });
   }
 
-  private failure(error: unknown, scope: RequestScope): ContractError {
+  private failure(error: unknown, scope: RequestScope, reading?: NetworkPhase): ContractError {
     if (scope.signal.aborted) return new ContractError(scope.signal.reason instanceof ContractError ? scope.signal.reason.code : 'cancelled');
-    if (error instanceof ContractError) return new ContractError(error.code, undefined, error.detail.upstream);
+    if (error instanceof ContractError) return new ContractError(error.code, undefined, error.detail.upstream, error.detail.phase ?? (error.code === 'network_error' ? reading : undefined));
+    // D155: where it failed, as one word. The body of a reply is read after the transport has handed it over.
+    const phase = networkPhaseOf(error) ?? reading;
     // The transport's own connection timeout, told apart by its cause; the text goes no further.
-    if (error instanceof TypeError && error.cause instanceof Error && /time(?:d)?\s*-?out/iu.test(error.cause.message)) return new ContractError('timeout');
-    return new ContractError(toPublicError(error, 'network_error').code);
+    if (error instanceof TypeError && error.cause instanceof Error && /time(?:d)?\s*-?out/iu.test(error.cause.message)) return new ContractError('timeout', undefined, undefined, phase);
+    return new ContractError(toPublicError(error, 'network_error').code, undefined, undefined, phase);
   }
 }
 

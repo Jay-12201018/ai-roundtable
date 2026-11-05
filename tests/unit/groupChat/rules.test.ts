@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHostMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
+import { asksEveryone, classifyHostMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
 import { fastReplyBodyOf, serviceCatalog } from '../../../src/shared/serviceCatalog';
 import { buildScheduleMessages } from '../../../src/main/groupChat/schedulePrompt';
 import { boundaryText, discussionRulesText, groupChatBoundaryText, groupChatCueText, groupChatDateText, groupChatRulesText, turnCueText } from '../../../src/main/context/transcript';
@@ -229,5 +229,26 @@ describe('D154 what the first real run showed', () => {
   it('none of this reaches the stricter ways', () => {
     for (const word of ['一律不要编', '先回应主持人最新这条']) expect(discussionRulesText(false)).not.toContain(word);
     expect(turnCueText(member)).not.toContain('先问清楚');
+  });
+});
+
+describe('D155 a question to everyone', () => {
+  it.each(['这个方向大家怎么看：做一个校园二手平台', '大家怎么看？', '你们觉得呢', '你们觉得这个方案行吗', '各位有什么想法', '大家说说', '都说说', '每个人说一句', '大家讨论一下这个方案', '大家同意吗？', '你们有意见吗'])('%s reaches everyone', text => {
+    expect(asksEveryone(text)).toBe(true);
+    const plan = classifyHostMessage(text, roster, 5);
+    expect(plan.speakers.map(item => item.agentId).sort()).toEqual(['a', 'b', 'c', 'd']);
+    expect(plan.speakers.every(item => item.length === 'medium' && item.source === 'rule')).toBe(true);
+  });
+  it.each(['大家都用手机', '大家都觉得贵', '大家的想法都一样', '你们昨天开会了', '这个方向怎么看', '大家都说这个不好', '每个人都有手机'])('%s says something, or asks nobody in particular', text => {
+    expect(asksEveryone(text)).toBe(false);
+  });
+  it('a call for everyone and an @ come first, and the order is not fixed', () => {
+    expect(classifyHostMessage('大家好', roster, 5).speakers.every(item => item.length === 'short')).toBe(true);
+    expect(classifyHostMessage('@阿哲 大家怎么看', roster, 5).speakers.map(item => item.agentId)).toEqual(['c']);
+    const order = (seed: number) => classifyHostMessage('大家怎么看', roster, seed).speakers.map(item => item.agentId).join();
+    expect(new Set([1, 2, 3, 4, 5, 6, 7, 8].map(order)).size).toBeGreaterThan(1);
+  });
+  it('1 stays one reply', () => {
+    expect(classifyHostMessage('1', roster, 5).speakers).toHaveLength(1);
   });
 });

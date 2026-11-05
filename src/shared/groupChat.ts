@@ -83,6 +83,11 @@ const stopPattern = /^(大家|各位|你们|都|先)*(停止|停下来?|停一�
 /** D154: the host telling everyone to stop, as the whole message. Words that go on (停止这个方案，换一个) are something to talk about. */
 export const isStopMessage = (text: string) => stopPattern.test(plainWords(text));
 
+const everyoneAddressed = /大家|你们|各位|诸位|每个人|每位|都说说|都讲讲|都谈谈|都聊聊|都来说/u;
+const askingViews = /怎么看|怎么想|怎么样|如何|有什么(看法|想法|意见|建议)|有(没有)?(看法|想法|意见|建议)|(看法|想法|意见|建议)[吗呢?？]|觉得(呢|行|可以|合适|好|对|怎)|说说|讲讲|谈谈|聊聊|议一议|讨论|说一下|说一句|同意吗|赞成吗|行吗|可以吗|好吗/u;
+/** D155: 大家怎么看: a question put to everyone. 大家都用手机 says something about them, and is not one. */
+export const asksEveryone = (text: string) => everyoneAddressed.test(text) && askingViews.test(text);
+
 const workWords = /写|做|实现|设计|方案|规划|计划|分析|整理|总结|列出|列个|生成|翻译|对比|比较|评估|调研|起草|重构|优化|修改|改一下|帮我|给我|出一份|出个|报告|文档|代码|清单|提纲/u;
 const openWords = /为什么|为啥|怎么看|怎么办|怎么样|怎样|如何|建议|评价|看法|觉得|你看|应该|选哪|哪个好/u;
 const questionMark = /[?？]\s*$/u;
@@ -124,6 +129,7 @@ export function classifyHostMessage(text: string, roster: readonly RosterMember[
     return { classification: 'mention', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: task ? 'medium' as const : 'short' as const, source: 'mention' as const })) };
   }
   if (isGather(text)) return { classification: 'gather', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'short' as const, source: 'gather' as const })) };
+  if (asksEveryone(text)) return { classification: 'gather', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'medium' as const, source: 'rule' as const })) };
   // D154: one answer is enough, and two the same is worse than none. An image is something to look at, however short the words with it.
   if (isSimpleQuestion(text) || !hasImages && isVeryShort(text)) return { classification: 'simple', speakers: order.slice(0, 1).map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'short' as const, source: 'rule' as const })) };
   return { classification: 'open', speakers: [] };

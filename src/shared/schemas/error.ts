@@ -45,14 +45,22 @@ export const upstreamErrorSchema = z.object({ status: z.number().int().min(100).
 export type UpstreamError = z.infer<typeof upstreamErrorSchema>;
 export const upstreamText = (upstream: UpstreamError | undefined) => !upstream ? '' : upstream.code ? `服务商返回：${upstream.code}（HTTP ${upstream.status}）` : `服务商返回：HTTP ${upstream.status}，没有错误码`;
 
+/** D155: where a connection failed. Only this word is kept: no address, no Key, nothing the other end said. */
+export const networkPhaseSchema = z.enum(['dns', 'tcp', 'tls', 'request', 'response']);
+export type NetworkPhase = z.infer<typeof networkPhaseSchema>;
+/** Failing in one of these, nothing of the request has been written: no Key, no content, nothing to bill. */
+export const failedBeforeWriting = (phase: NetworkPhase | undefined) => phase === 'dns' || phase === 'tcp' || phase === 'tls';
+const networkPhaseLabels: Record<NetworkPhase, string> = { dns: '解析服务地址', tcp: '建立连接', tls: '加密握手', request: '发送请求', response: '接收回复' };
+export const networkPhaseText = (phase: NetworkPhase | undefined) => phase ? `失败在“${networkPhaseLabels[phase]}”这一步${failedBeforeWriting(phase) ? '，请求没有发出' : ''}` : '';
+
 export const apiErrorSchema = z.object({
-  code: errorCodeSchema, message: z.string(), retryable: z.boolean(), field: errorFieldSchema.optional(), upstream: upstreamErrorSchema.optional(),
+  code: errorCodeSchema, message: z.string(), retryable: z.boolean(), field: errorFieldSchema.optional(), upstream: upstreamErrorSchema.optional(), phase: networkPhaseSchema.optional(),
 }).strict().refine((error) => error.message === errorMessages[error.code] && error.retryable === retryableCodes.includes(error.code)
   && (error.field === undefined || error.code === 'invalid_input'), 'Invalid public error');
 export type ApiError = z.infer<typeof apiErrorSchema>;
 
-export function publicError(code: ErrorCode, field?: ErrorField, upstream?: UpstreamError): ApiError {
-  return { code, message: errorMessages[code], retryable: retryableCodes.includes(code), ...(field === undefined ? {} : { field }), ...(upstream === undefined ? {} : { upstream }) };
+export function publicError(code: ErrorCode, field?: ErrorField, upstream?: UpstreamError, phase?: NetworkPhase): ApiError {
+  return { code, message: errorMessages[code], retryable: retryableCodes.includes(code), ...(field === undefined ? {} : { field }), ...(upstream === undefined ? {} : { upstream }), ...(phase === undefined ? {} : { phase }) };
 }
 
 export function inputError(error: z.ZodError): ApiError {

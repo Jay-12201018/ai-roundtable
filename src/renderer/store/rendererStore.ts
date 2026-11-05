@@ -2,7 +2,7 @@ import { createStore } from 'zustand/vanilla';
 import { runEventSchema, runSnapshotSchema } from '../../shared/schemas/run';
 import type { RunEvent, RunSnapshot,InterruptedRunDecision } from '../../shared/types/run';
 
-export type RendererCommand = 'create' | 'start' | 'pause' | 'stop' | 'step' | 'resumeRun' | 'retryTurn' | 'continueMessage' | 'recoverInterruptedRun';
+export type RendererCommand = 'create' | 'start' | 'pause' | 'stop' | 'step' | 'resumeRun' | 'retryTurn' | 'continueMessage' | 'recoverInterruptedRun' | 'retryChatTurn';
 export type SyncStatus = 'idle' | 'syncing' | 'ready' | 'error';
 
 export interface RendererState {
@@ -35,6 +35,8 @@ export function canCommand(state: RendererState, command: RendererCommand): bool
   }
   if (!state.runId || !state.snapshot) return false;
   if(command==='recoverInterruptedRun')return status==='interrupted';
+  // D155: a failed reply in a group chat can be asked again from its own place, once nobody is speaking.
+  if(command==='retryChatTurn')return Boolean(state.snapshot.groupChat)&&['completed','error','cancelled','interrupted'].includes(status!)&&!state.snapshot.currentTurnId;
   if(command==='retryTurn'||command==='continueMessage'){
     const turn=state.snapshot.turns.at(-1);
     const attempt=state.snapshot.attempts?.filter(a=>a.turnId===turn?.turnId).at(-1);
@@ -94,7 +96,7 @@ export function createRendererStore() {
         pending.command === 'pause' && snapshot.status !== 'running'
         || (pending.command === 'step' || pending.command === 'resumeRun') && snapshot.status !== 'paused'
         || pending.command === 'stop' && ['cancelling', 'cancelled', 'completed', 'error', 'interrupted'].includes(snapshot.status)
-        || ['retryTurn','continueMessage','recoverInterruptedRun'].includes(pending.command)&&snapshot.status==='running'
+        || ['retryTurn','continueMessage','recoverInterruptedRun','retryChatTurn'].includes(pending.command)&&snapshot.status==='running'
       );
       set({ snapshot, roomId: snapshot.roomId, runId: snapshot.runId, pending: acknowledged ? undefined : pending });
       return true;

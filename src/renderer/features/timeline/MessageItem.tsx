@@ -5,7 +5,8 @@ import type { RunSnapshot } from '../../../shared/types/run';
 import type { RequestUsage } from '../../../shared/schemas/usage';
 import { Avatar, Button, IconButton, Note, Tag, copyText, cx } from '../../components/ui';
 import { HostTextArea } from '../host/HostTextArea';
-import { isContinuationTurn, originLabels, type TimelineSlot } from '../host/model';
+import { isContinuationTurn, originLabels, runIdle, type TimelineSlot } from '../host/model';
+import { turnFailureText } from '../../subscriptions/rendererSession';
 import type { HostCommands } from '../host/useHostCommands';
 import { usageOfMessage } from '../usage';
 import { Markdown } from './Markdown';
@@ -16,6 +17,8 @@ import { stageOfTurn } from '../workflows/productionAdapter';
 export type SlotProps = {
   slot: TimelineSlot; snapshot: RunSnapshot; commands: HostCommands; providers?: ProviderNames;
   coveredBy?: { firstNumber: number; lastNumber: number }; revisedAfterSummary?: boolean;
+  /** D155: ask a failed group-chat reply again, in its place; absent when it cannot be asked now. */
+  onRetryTurn?: (turnId: string) => void;
 };
 
 /** Version stepping shared by members, the host and summaries; looking at an older version holds the scroll. */
@@ -97,7 +100,7 @@ function UsageButton({ usage, open, onToggle, controls }: { usage: RequestUsage 
 }
 
 /** One member reply: identity line, notes only when something needs the host, then a light footer. */
-export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, revisedAfterSummary }: SlotProps) {
+export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, revisedAfterSummary, onRetryTurn }: SlotProps) {
   const { index, shown, setViewing } = useVersions(slot);
   const [editing, setEditing] = useState(false);
   const [details, setDetails] = useState(false);
@@ -127,7 +130,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       {slot.number !== undefined && <span className="msg-num" aria-hidden>#{slot.number}</span>}
     </div>
     {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留；之后的发言会标出受影响）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
-      : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? chat ? <>{name} 正在输入… <WaitingSeconds since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /></> : <WaitingText since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /> : '（没有生成文字）'}</p>}</div>}
+      : chat && shown.message.status === 'failed' && !shown.message.content ? null : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? chat ? <>{name} 正在输入… <WaitingSeconds since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /></> : <WaitingText since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /> : '（没有生成文字）'}</p>}</div>}
     {can.truncated && !shown.message.content.trim() && <Note icon={Scissors}
       action={shown.active && can.regenerate ? <Button size="sm" disabled={disabled} onClick={regenerate}>重新生成</Button> : undefined}>
       <b>这位成员的输出额度在思考阶段就用完了</b>，没有写出正文。可以到“设置 › 模型服务”调高这个模型的最大输出，再重新生成。</Note>}
@@ -144,6 +147,10 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       <b>正在重新生成版本 {can.generating.versionNumber}</b>{can.generating.message.content ? '：' : ' · 正在思考或生成，还没有输出文字…'}{can.generating.message.content && <span className="note-stream">{can.generating.message.content}</span>}
     </Note>}
     {chat && shown.message.status === 'aborted' ? <p className="chat-stop" role="note">{chatStopText(snapshot, shown.message)}</p>
+      : chat && shown.message.status === 'failed' && shown.active ? <Note tone="danger" icon={TriangleAlert} role="note"
+        action={can.turn && <Button size="sm" disabled={!onRetryTurn || !runIdle(snapshot) || !['completed', 'error', 'cancelled', 'interrupted'].includes(snapshot.status)} title={runIdle(snapshot) ? undefined : '等大家说完后可以让 TA 重说'} onClick={() => onRetryTurn?.(can.turn!.turnId)}>让 TA 重说</Button>}>
+        {snapshot.lastFailure && snapshot.turns.filter(turn => turn.status === 'failed').at(-1)?.turnId === can.turn?.turnId ? shown.message.content ? turnFailureText(snapshot.lastFailure) : turnFailureText(snapshot.lastFailure).replace('，部分输出已保留', '') : status}
+      </Note>
       : status && !streaming && <Note tone={shown.message.status === 'failed' ? 'danger' : 'neutral'} icon={Info} role="note">{status}</Note>}
     <div className="msg-foot" role="group" aria-label={`${name} 的消息操作`}>
       {streaming ? <span className="typing"><Sparkles aria-hidden size={14} />{chat ? `${name} 正在输入…` : '正在发言'}</span> : <>

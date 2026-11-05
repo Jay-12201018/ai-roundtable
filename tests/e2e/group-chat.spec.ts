@@ -196,7 +196,7 @@ test('when the rules cannot tell, a fast model decides; bad JSON or a failing se
   const running = await harness.launch(); const { page } = running; const { fixture } = harness;
   await open(running);
   fixture.reply = body => isSchedule(body) ? JSON.stringify({ speakers: [{ name: '阿哲', intent: 'challenge', length: 'medium' }, { name: '小雨', intent: 'summarize', length: 'short' }] }) : `${memberOf(body)}的看法`;
-  await first(running, '这个方向大家怎么看');
+  await first(running, '这个方向怎么看');
   await waiting(running);
   expect(await spoke(page)).toEqual(['阿哲', '小雨']);
   const asked = fixture.requests.filter(isSchedule);
@@ -208,7 +208,7 @@ test('when the rules cannot tell, a fast model decides; bad JSON or a failing se
 
   // Invalid JSON.
   fixture.reply = body => isSchedule(body) ? '我觉得让阿哲来说' : `${memberOf(body)}照常回复`;
-  await say(running, '换个角度你们又怎么看');
+  await say(running, '换个角度又怎么看');
   await waiting(running);
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect((await spoke(page)).length).toBe(4);
@@ -216,7 +216,7 @@ test('when the rules cannot tell, a fast model decides; bad JSON or a failing se
 
   // The service fails for the scheduling request only.
   fixture.chatError = body => (body.messages as any[])[0] && textIn(body.messages[0]).includes('调度程序') ? { status: 500, body: { error: { code: 'server_error' } } } : undefined;
-  await say(running, '再换个角度你们怎么看');
+  await say(running, '再换个角度怎么看');
   await waiting(running);
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect((await spoke(page)).length).toBe(6);
@@ -260,7 +260,7 @@ test('twelve replies to one message is where it stops, it says so, and the next 
   fixture.chunks = 1; fixture.chunkMs = 1;
   const everyone = [...names.map(([name]) => name), ...others];
   fixture.reply = body => isSchedule(body) ? JSON.stringify({ speakers: everyone.map(name => ({ name, intent: 'reply', length: 'short' })), more: true }) : `${memberOf(body)}又说了一句`;
-  await first(running, '这个方向大家怎么看，都说说');
+  await first(running, '这个方向怎么样，再想想');
   await waiting(running);
   expect(await spoke(page)).toHaveLength(12);
   expect(fixture.requests.filter(isSchedule)).toHaveLength(2);
@@ -355,5 +355,47 @@ test('a word like 1 gets one short reply and no model', async ({ harness }) => {
   expect(await spoke(page)).toHaveLength(1);
   expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
   await capture(running, 'very-short');
+  await running.quit();
+});
+
+test('一位失败，其他人照常说，等大家说完再让 TA 重说，位置不变', async ({ harness }) => {
+  const running = await harness.launch(); const { page } = running; const { fixture } = harness;
+  await open(running);
+  let refusing = true;
+  fixture.chatError = body => refusing && memberOf(body as never) === '林舟' ? { status: 500, body: { error: { code: 'server_error' } } } : undefined;
+  fixture.reply = body => memberOf(body) === '林舟' ? '林舟重说了一句。' : `${memberOf(body)}照常说了一句。`;
+  await first(running, '集合开会！');
+  await waiting(running);
+  expect((await spoke(page)).sort()).toEqual(['小雨', '林舟', '阿哲']);
+  const failed = replies(page).filter({ hasText: '林舟' });
+  await expect(failed.getByRole('button', { name: '让 TA 重说' })).toBeEnabled();
+  await expect(failed).toContainText('server_error');
+  await expect(failed, 'Nothing was said, so it does not claim to keep anything').not.toContainText('部分输出已保留');
+  await expect(failed).not.toContainText('没有生成文字');
+  await expect(page.getByRole('heading', { name: '运行失败' })).toHaveCount(0);
+  await capture(running, 'one-failed');
+  const before = await spoke(page);
+  const count = fixture.requests.length;
+  refusing = false;
+  await failed.getByRole('button', { name: '让 TA 重说' }).click();
+  await expect(failed).toContainText('林舟重说了一句。');
+  await waiting(running);
+  expect(await spoke(page), 'Everyone stays where they were').toEqual(before);
+  expect(fixture.requests.length, 'One request: nobody else speaks and no model is asked').toBe(count + 1);
+  await expect(failed.getByRole('button', { name: '让 TA 重说' })).toHaveCount(0);
+  await capture(running, 'one-failed-retried');
+  await running.quit();
+});
+
+test('这个方向大家怎么看：所有人都回应，不调度', async ({ harness }) => {
+  const running = await harness.launch(); const { page } = running; const { fixture } = harness;
+  await open(running);
+  fixture.reply = body => `${memberOf(body)}说说自己的看法。`;
+  await first(running, '这个方向大家怎么看：做一个校园二手平台');
+  await waiting(running);
+  expect((await spoke(page)).sort()).toEqual(['小雨', '林舟', '阿哲']);
+  expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
+  expect(fixture.requests.every(request => request.raw.thinking === undefined), 'A few sentences keep their thinking').toBe(true);
+  await capture(running, 'everyone-asked');
   await running.quit();
 });

@@ -5,7 +5,7 @@ import { assertRunCommand, canRetryTurn, transitionRun, transitionTurn } from '.
 import type { StartRunInput } from '../../shared/contracts/run';
 import type { InterruptedRunDecision } from '../../shared/types/run';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
-import { publicError, type ErrorCode } from '../../shared/schemas/error';
+import { failedBeforeWriting, publicError, type ErrorCode } from '../../shared/schemas/error';
 import { DEFAULT_OUTPUT_TOKEN_LIMIT, interruptedRunDecisionSchema, runEventSchema, runSnapshotSchema, runSubscriptionSchema, startRunInputSchema } from '../../shared/schemas/run';
 import { compileWorkflow, nextWorkflowStep, readWorkflowSnapshot } from '../workflow';
 import type { WorkflowConfig, WorkflowSnapshot, WorkflowStep } from '../workflow';
@@ -60,6 +60,7 @@ type RunContext = {
   // D149: a group-chat Run runs its own loop; `interrupt` says the current request was aborted by a new host message, not by a stop.
   groupChat?: boolean;
   interrupt?: boolean;
+  turnFailed?: boolean;
 };
 
 export type RequestPreparation = {
@@ -516,8 +517,11 @@ export class RunService {
     const run = this.requireRun(runId);
     const context = this.contexts.get(runId) ?? this.contextFrom(run);
     if (context.executing) throw new ContractError('invalid_state');
-    assertRunCommand(suffixOf === undefined ? 'retryTurn' : 'continueMessage', run.status);
-    const turn = this.database.listTurns(runId).at(-1);
+    // D155: in a group chat a failed reply stays in its place while the others go on, so any of them can be asked again, once the chat is waiting.
+    const groupChat = this.isGroupChat(run);
+    if (!(groupChat && run.status === 'completed')) assertRunCommand(suffixOf === undefined ? 'retryTurn' : 'continueMessage', run.status);
+    const turns = this.database.listTurns(runId);
+    const turn = groupChat ? turns.find(item => item.id === turnId) : turns.at(-1);
     const requestId = this.database.getLatestAttemptRequestId(turnId);
     const attempt = requestId ? this.database.getAttempt(requestId) : undefined;
     if (!turn || turn.id !== turnId || !canRetryTurn(turn.status as TurnStatus) || !attempt
@@ -988,7 +992,7 @@ export class RunService {
           const parsed = normalizedChunkSchema.safeParse(next.value);
           if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
           const chunk = parsed.data;
-          if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, chunk.error.upstream);
+          if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, chunk.error.upstream, chunk.error.phase);
           if (chunk.type === 'start') { if (started) throw new ContractError('invalid_response'); started = true; continue; }
           if (!started) throw new ContractError('invalid_response');
           if (chunk.type === 'finish') { finishReason = chunk.reason; continue; }
@@ -1012,7 +1016,9 @@ export class RunService {
         this.persistElapsed(context);
       });
     } catch (error) {
-      const code = toPublicError(error).code;
+      const { code, phase } = toPublicError(error);
+      // D155: it failed before anything was written, so it was never sent, whatever the app tried.
+      if (failedBeforeWriting(phase)) dispatched = false;
       // A request's own timeout is a failure of that request; only the discussion's limit (timedOut) stops it from outside.
       const aborted = context.stopRequested || context.timedOut || code === 'cancelled';
       this.database.transaction(() => {
@@ -1239,16 +1245,17 @@ export class RunService {
     const planTurns = planTurnsOf(ordered);
     if (run.nextTurnIndex !== ordered.length || plan && planTurns.some((turn, index) => turn.agentId !== plan.steps[index]?.agentId) || ordered.some((turn, index) => {
       const latest = attempts.filter(attempt => attempt.turnId === turn.id).at(-1);
-      const message = repeat && index === ordered.length - 1 ? latest && messages.find(item => item.id === latest.messageId) : activeMessageOf(snapshot, turn.id);
+      const target = repeat && index === (context.groupChat ? repeat.turn.turnIndex : ordered.length - 1);
+      const message = target ? latest && messages.find(item => item.id === latest.messageId) : activeMessageOf(snapshot, turn.id);
       return turn.runId !== run.id || turn.turnIndex !== index
         || !latest || latest.runId !== run.id || !message || message.runId !== run.id || message.roomId !== run.roomId || message.turnId !== turn.id
-        || (repeat && index === ordered.length - 1 ? latest.requestId !== repeat.sourceRequestId || turn.id !== repeat.turn.id
+        || (target ? latest.requestId !== repeat.sourceRequestId || turn.id !== repeat.turn.id
           || !canRetryTurn(turn.status as TurnStatus) || !canRetryTurn(latest.status) : !ended(turn));
     })) throw new ContractError('invalid_state');
     const stageStep = (step: WorkflowStep | undefined) => step ?? plan?.steps.at(-1);
     if (repeat) {
       if (!ordered.length || repeat.turn.turnIndex !== turnIndex || repeat.turn.agentId !== member.agentId
-        || turnIndex !== ordered.length - 1 || repeat.modelId !== member.modelId) throw new ContractError('invalid_state');
+        || !context.groupChat && turnIndex !== ordered.length - 1 || repeat.modelId !== member.modelId) throw new ContractError('invalid_state');
       return this.stageOf(snapshot, plan, repeat.turn);
     }
     if (turnIndex !== run.nextTurnIndex) throw new ContractError('invalid_state');
@@ -1542,6 +1549,8 @@ export class RunService {
       } catch (error) {
         // The host spoke: what was in flight is already recorded as stopped, and the new message decides what happens next.
         if (context.interrupt && !context.stopRequested && !context.timedOut) continue;
+        // D155: that member's place shows the failure and a way to ask again; the rest of the queue goes on.
+        if (context.turnFailed && !context.stopRequested && !context.timedOut) { context.turnFailed = false; context.failureReason = undefined; continue; }
         const code = toPublicError(error).code;
         this.finishRun(context, context.stopRequested || code === 'cancelled' ? 'cancelled' : 'error', context.timedOut ? 'Maximum run duration reached' : undefined, context.failureReason ?? toPublicError(error).message);
         return;
@@ -1596,16 +1605,16 @@ export class RunService {
     return 'again';
   }
 
-  /** Who the replies of the latest batch named, if they are not that batch themselves. A suggestion only. */
+  /** Who the replies of the latest batch named, unless they are still to speak after that reply. A suggestion only. */
   private hintedMembers(context: RunContext, round: GroupChatRound, roster: readonly MemberSnapshot[]): string[] {
     const snapshot = this.database.readRunSnapshot(context.runId);
     const batch = round.speakers.filter(speaker => speaker.position >= round.batchStart && speaker.turnId);
-    const hints = new Set(batch.flatMap(speaker => {
+    return [...new Set(batch.flatMap(speaker => {
       const turn = snapshot.turns.find(item => item.id === speaker.turnId);
       const message = turn && turn.status === 'completed' ? activeMessageOf(snapshot, turn.id) : undefined;
-      return message ? memberHints(message.content, roster.map(({ agentId, displayName }) => ({ agentId, displayName })), speaker.agentId) : [];
-    }));
-    return [...hints].filter(agentId => !batch.some(speaker => speaker.agentId === agentId));
+      const named = message ? memberHints(message.content, roster.map(({ agentId, displayName }) => ({ agentId, displayName })), speaker.agentId) : [];
+      return named.filter(agentId => !batch.some(later => later.agentId === agentId && later.position > speaker.position));
+    }))];
   }
 
   private roundText(context: RunContext, round: GroupChatRound): string {
@@ -1668,7 +1677,7 @@ export class RunService {
         const parsed = normalizedChunkSchema.safeParse(next.value);
         if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
         const chunk = parsed.data;
-        if (chunk.type === 'error') throw new ContractError(chunk.error.code);
+        if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, undefined, chunk.error.phase);
         if (chunk.type === 'start') { started = true; continue; }
         if (!started) throw new ContractError('invalid_response');
         if (chunk.type === 'finish') finishReason = chunk.reason;
@@ -1679,7 +1688,8 @@ export class RunService {
       const answer = parseScheduleOutput(text, roster.map(({ agentId, displayName }) => ({ agentId, displayName })));
       close(answer ? 'completed' : 'invalid');
       return answer;
-    } catch {
+    } catch (error) {
+      if (failedBeforeWriting(toPublicError(error).phase)) dispatched = false;
       close(parent.aborted ? 'aborted' : 'failed');
       return undefined;
     } finally {
@@ -1789,7 +1799,7 @@ export class RunService {
           const parsed = normalizedChunkSchema.safeParse(next.value);
           if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
           const chunk = parsed.data;
-          if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, chunk.error.upstream);
+          if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, chunk.error.upstream, chunk.error.phase);
           if (chunk.type === 'start') {
             if (started) throw new ContractError('invalid_response');
             started = true;
@@ -1834,9 +1844,13 @@ export class RunService {
         this.appendEvent(context.runId, 'turn_completed', { turnId, messageId });
       });
     } catch (error) {
-      const code = toPublicError(error).code;
+      const { code, phase } = toPublicError(error);
+      // D155: it failed before anything was written, so it was never sent, whatever the app tried.
+      if (failedBeforeWriting(phase)) dispatched = false;
       // A request's own timeout is a failure of that request; only the discussion's limit (timedOut) stops it from outside.
       const aborted = context.stopRequested || context.timedOut || code === 'cancelled';
+      // D155: in a group chat one member failing leaves the others free to speak.
+      if (!aborted && context.groupChat) context.turnFailed = true;
       this.database.transaction(() => {
         this.database.updateMessage(messageId, content, aborted ? 'aborted' : 'failed');
         if (!job) this.database.updateTurn(turnId, { status: transitionTurn('running', aborted ? 'aborted' : 'failed'), partialContent: content });

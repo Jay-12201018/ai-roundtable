@@ -27,7 +27,7 @@ const turnFailureMessages: Partial<Record<ErrorCode, string>> = {
   invalid_input: '服务商拒绝了这次请求：可能是讨论太长放不进模型的上下文（可以生成讨论摘要后重试）、模型名或上限不对，或账户余额不足。',
 };
 
-function turnFailureText(error: ApiError) {
+export function turnFailureText(error: ApiError) {
   return `${turnFailureMessages[error.code] ?? '模型请求失败，部分输出已保留。'}${error.upstream ? `${upstreamText(error.upstream)}。` : ''}`;
 }
 
@@ -228,6 +228,7 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
     const snapshot=store.getState().snapshot;const turn=snapshot?.turns.at(-1);const attempt=snapshot?.attempts?.filter(a=>a.turnId===turn?.turnId).at(-1);
     return perform(command,id=>command==='retryTurn'?api.run.retryTurn(id,turn!.turnId):api.run.continueMessage(id,attempt!.messageId));
   }
+  function retryChatTurn(turnId:string){return perform('retryChatTurn',id=>api.run.retryTurn(id,turnId));}
   function recover(decision:InterruptedRunDecision){
     if(!canRecover(store.getState(),decision))return Promise.resolve();
     return perform('recoverInterruptedRun',id=>api.run.recoverInterruptedRun(id,decision));
@@ -258,5 +259,5 @@ export function createRendererSession(api: RunSessionApiContract, storage?: Iden
     };
     return disposeMount;
   }
-  return { store, mount, selectRun, selectRoom, synchronize, createRoom, startRun, control,repeat,recover };
+  return { store, mount, selectRun, selectRoom, synchronize, createRoom, startRun, control,repeat,recover,retryChatTurn };
 }

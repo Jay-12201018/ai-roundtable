@@ -280,6 +280,7 @@ export function App() {
     setReaderTarget(undefined); setPanelDrawer(false); setReveal({ key: slotId, nonce: Date.now() });
   }, [snapshot]);
 
+  const retryChatTurn = useCallback((turnId: string) => void session.retryChatTurn(turnId), [session]);
   const runStatus = snapshot?.status;
   // D098: while a Run is live, the start button turns into its controls in place, so the host never chases them.
   const runActive = liveStatuses.includes(runStatus ?? '') || stopEnabled;
@@ -422,6 +423,7 @@ export function App() {
   const discussionBody = (() => {
     if (snapshot) return <DiscussionTimeline snapshot={snapshot} commands={hostCommands} providers={providerNames} summaries={summaryCommands}
       onRegenerateSummary={summaryId => void summarizeNow(summaryId)} onChooseSummary={openSummary} reveal={reveal}
+      onRetryTurn={snapshot.groupChat ? retryChatTurn : undefined}
       header={snapshot.groupChat ? <><div className="sys-line">{groupChatMode.label}{runMembers?.length ? ` · ${runMembers.join('、')}` : ''}</div>
         <article className="msg is-host" aria-label="主持人的第一条消息"><div className="host-label"><span>主持人</span></div><MessageImages images={snapshot.taskAttachments} /><div className="bubble">{snapshot.execution?.task}</div></article></>
         : <><div className="goal-card"><div className="label">讨论目标</div><p>{snapshot.execution?.task?.trim() || '历史任务（目标未记录）'}</p><MessageImages images={snapshot.taskAttachments} /></div>

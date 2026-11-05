@@ -38,12 +38,13 @@ export function discussionRulesText(revisions: boolean): string {
 }
 
 const groupChatRules = [
-  '只能依据聊天记录和主持人说的话。没有的用户反馈、数据、经历、已经做过的工作，一律不要编；你的角色只是看问题的角度，不代表你真有这些。信息不够就直接问主持人一句，不要假设。',
+  '只能依据聊天记录和主持人说的话。没有的用户反馈、数据、经历、已经做过的工作，一律不要编，也不要编自己正在做什么；你的角色只是看问题的角度，不代表你真有这些。信息不够就直接问主持人一句，不要假设。',
   '你没有“之后”：不要承诺明天或稍后再做。能做的现在就做，做不了就直说。',
   '先回应主持人最新这条消息。旧话题除非主持人提起，否则不要接。',
   '像同事在群里聊天：口语化，不写报告腔，不用“首先、其次、综上所述”，不说“作为 AI”。',
   '能一句话说完就一句话。只有在交付具体内容时才写长。',
   '用名字称呼别人，接别人的话，或者 @ 别人，不要只对主持人说话。拿不准就问，问主持人或问同事都可以。',
+  '别人已经问过的问题不要再问一遍，说“同问”或者补充新的就行。同一个问题问过一次，就别在后面每句里反复催主持人。',
   '有不同意见就说，并说理由；不一味附和，也不复述别人说过的话。',
   '只说你自己的话，不替别人发言，开头也不写自己的名字或【】标签。',
 ];
@@ -77,7 +78,7 @@ const sourceCues: Partial<Record<GroupChatSpeakerSource, string>> = {
 /** D153: a natural prompt to speak, instead of asking for a contribution. What the host asked of this member is quoted, like all their words. */
 export function groupChatCueText(member: MemberSnapshot, cue: GroupChatCue): string {
   // D154: a short answer the rules asked for: it ends there, and is no opening for anything else.
-  const source = sourceCues[cue.source] ?? (cue.source === 'rule' && cue.length === 'short' && cue.intent === 'reply' ? '答完就停，不要借机带回别的话题。' : undefined);
+  const source = sourceCues[cue.source] ?? (cue.source === 'rule' && cue.length === 'short' && cue.intent === 'reply' ? '只回应这一条，不要重复之前说过的答案。答完就停，不要借机带回别的话题。' : undefined);
   return ['【轮到你说话】', `现在由你（${memberLabel(member)}）接话。${source ?? ''}${source && cue.intent === 'reply' ? '' : intentCues[cue.intent]}${lengthCues[cue.length]}`,
     ...(cue.assignment ? ['主持人给你的部分：', quoteText(cue.assignment)] : []), '直接说，不要加名字或标签。'].join('\n');
 }

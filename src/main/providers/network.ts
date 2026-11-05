@@ -4,6 +4,7 @@ import { request as httpsRequest } from 'node:https';
 import { isIP, type LookupFunction } from 'node:net';
 import type { DiagnosticEvent, DiagnosticObserver } from './diagnostics';
 import { ContractError } from '../../shared/contracts/errors';
+import { failedBeforeWriting, type NetworkPhase } from '../../shared/schemas/error';
 import { catalogHosts, serviceCatalog } from '../../shared/serviceCatalog';
 
 function publicAddress(address: string): boolean {
@@ -59,6 +60,8 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
     signal?.throwIfAborted();
     observe?.({ stage: 'dns' });
     signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
+    // Everything from here is one try at reaching the service; see the end of this function.
+    const connect = async (): Promise<Response> => {
     let stopDns!: () => void;
     const aborted = new Promise<never>((_, reject) => {
       stopDns = () => reject(abortReason());
@@ -71,6 +74,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
       addresses = await Promise.race([family ? Promise.resolve([{ address: hostname, family }]) : lookup(hostname, { all: true, verbatim: true }), aborted]);
     } catch (error) {
       observe?.({ stage: 'dns', category: signal?.aborted && nativeCode(signal.reason) !== 'timeout' ? 'cancelled' : 'dns_failed' });
+      markPhase(error, 'dns');
       throw error;
     } finally { signal?.removeEventListener('abort', stopDns); }
     signal?.throwIfAborted();
@@ -96,7 +100,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         observe?.({ stage: phase, category });
       };
       const cleanup = () => { signal?.removeEventListener('abort', abort); };
-      const fail = (error: Error) => { diagnose(error); cleanup(); reject(error); };
+      const fail = (error: Error) => { diagnose(error); markPhase(error, phase); cleanup(); reject(error); };
       const abort = () => {
         const error = abortReason();
         response?.destroy(error); request?.destroy(error); fail(error);
@@ -164,13 +168,33 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
               phase = 'request'; observe?.({ stage: 'request' });
               signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
               request!.end(init.body as string | undefined);
-            } catch (error) { diagnose(error); request?.destroy(); cleanup(); reject(error); }
+            } catch (error) { diagnose(error); markPhase(error, phase); request?.destroy(); cleanup(); reject(error); }
           });
         });
-      } catch (error) { diagnose(error); request?.destroy(); cleanup(); reject(error); }
+      } catch (error) { diagnose(error); markPhase(error, phase); request?.destroy(); cleanup(); reject(error); }
     });
+    };
+    try { return await connect(); }
+    catch (error) {
+      // D155: nothing was written, so nothing can have been billed: one more try, after everything is checked again. Once written, never.
+      if (error instanceof ContractError || signal?.aborted || !failedBeforeWriting(networkPhaseOf(error))) throw error;
+      await pause(CONNECT_RETRY_MS, signal);
+      signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
+      return await connect();
+    }
   };
 }
+
+const CONNECT_RETRY_MS = 300;
+const pause = (ms: number, signal: AbortSignal | null | undefined) => new Promise<void>(resolve => {
+  const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); };
+  const timer = setTimeout(done, ms);
+  signal?.addEventListener('abort', done, { once: true });
+});
+const failedPhases = new WeakMap<object, NetworkPhase>();
+const markPhase = (error: unknown, phase: NetworkPhase) => { if (error !== null && typeof error === 'object') failedPhases.set(error, phase); };
+/** D155: where this error from the transport happened. The word is all that leaves here. */
+export const networkPhaseOf = (error: unknown): NetworkPhase | undefined => error !== null && typeof error === 'object' ? failedPhases.get(error) : undefined;
 
 // Only native/controlled codes are inspected; exception text, causes and stacks never enter diagnostics.
 function nativeCode(error: unknown): string {

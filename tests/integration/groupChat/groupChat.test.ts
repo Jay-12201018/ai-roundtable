@@ -1,5 +1,9 @@
 // @vitest-environment node
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import type { lookup as dnsLookup } from 'node:dns/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { StartRunInput } from '../../../src/shared/contracts/run';
 import { Database } from '../../../src/main/database/Database';
 import { HostService } from '../../../src/main/host/HostService';
 import { ProviderRegistry } from '../../../src/main/providers/ProviderRegistry';
@@ -12,6 +16,8 @@ import { createPublicMessagesBuilder } from '../../../src/main/context/wirePubli
 import { groupChatWorkflowSnapshot } from '../../../src/shared/schemas/groupChat';
 import { runSnapshotSchema } from '../../../src/shared/schemas/run';
 import { boundaryText, discussionRulesText, groupChatDateText } from '../../../src/main/context/transcript';
+import { createSafeFetch } from '../../../src/main/providers/network';
+import { publicError } from '../../../src/shared/schemas/error';
 
 const backend: KeyStorageBackend = { mode: 'secure', backend: 'fixture', persistent: true,
   async encrypt(value) { return Buffer.from(value).toString('base64'); }, async decrypt(value) { return Buffer.from(value, 'base64').toString(); } };
@@ -149,7 +155,7 @@ describe('D150 who speaks', () => {
   it('what the rules cannot read asks the model once, and it does what the model says', async () => {
     const f = await fixture();
     f.setSchedule(() => sse(JSON.stringify(plan(['阿哲', 'challenge', 'medium'], ['林舟', 'reply', 'short']))));
-    const run = await f.start('这个方向你们怎么看'); const done = await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); const done = await f.idle(run.runId);
     expect(f.spoke(run.runId)).toEqual(['阿哲', '林舟']);
     expect(f.schedules()).toHaveLength(1);
     expect(f.schedules()[0]!.max_tokens).toBeLessThanOrEqual(400);
@@ -165,7 +171,7 @@ describe('D150 who speaks', () => {
   ])('%s falls back to the rules: the host gets an answer and is not told', async (_name, answer) => {
     const f = await fixture();
     f.setSchedule(answer);
-    const run = await f.start('这个方向你们怎么看'); const done = await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); const done = await f.idle(run.runId);
     expect(done.status).toBe('completed');
     expect(f.spoke(run.runId)).toHaveLength(2);
     expect(done.lastFailure).toBeUndefined();
@@ -175,7 +181,7 @@ describe('D150 who speaks', () => {
     const f = await fixture();
     f.service.scheduleTimeoutMs = 30;
     f.setSchedule(() => signal => held('{', signal, new Promise(() => {})));
-    const run = await f.start('这个方向你们怎么看'); const done = await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); const done = await f.idle(run.runId);
     expect(done.status).toBe('completed');
     expect(f.spoke(run.runId)).toHaveLength(2);
     expect(f.db.listScheduleRequests(run.runId)[0]).toMatchObject({ status: 'failed' });
@@ -183,7 +189,7 @@ describe('D150 who speaks', () => {
   it('asks at most three times for one message', async () => {
     const f = await fixture({ members: 4 });
     f.setSchedule(() => sse(JSON.stringify({ ...plan(['阿哲', 'reply', 'short']), more: true })));
-    const run = await f.start('这个方向你们怎么看'); const done = await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); const done = await f.idle(run.runId);
     expect(f.schedules()).toHaveLength(3);
     expect(done.groupChat?.round?.scheduleCalls).toBe(3);
     expect(f.spoke(run.runId)).toEqual(['阿哲', '阿哲', '阿哲']);
@@ -192,7 +198,7 @@ describe('D150 who speaks', () => {
   it('asks no more once the answer says nobody else will', async () => {
     const f = await fixture();
     f.setSchedule(() => sse(JSON.stringify(plan(['阿哲', 'reply', 'short']))));
-    const run = await f.start('这个方向你们怎么看'); await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); await f.idle(run.runId);
     expect(f.schedules()).toHaveLength(1);
   });
   it('a discussion of demo members asks nothing and still sounds like a chat', async () => {
@@ -203,13 +209,13 @@ describe('D150 who speaks', () => {
     const words = done.messages.map(message => message.content);
     expect(new Set(words).size).toBe(3);
     expect(words.every(word => word.length <= 20 && !word.includes('Mock'))).toBe(true);
-    await f.send(run.runId, '这个方向你们怎么看'); const next = await f.idle(run.runId);
+    await f.send(run.runId, '这个方向怎么看'); const next = await f.idle(run.runId);
     expect(next.turns).toHaveLength(5);
     expect(next.groupChat?.scheduleRequestIds).toEqual([]);
   });
   it('a service with no fast model and nothing else connected uses the rules', async () => {
     const f = await fixture({ baseUrl: 'https://api.moonshot.cn/v1', defaultModelId: 'kimi-k3' });
-    const run = await f.start('这个方向你们怎么看'); await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); await f.idle(run.runId);
     expect(f.schedules()).toHaveLength(0);
     expect(f.spoke(run.runId)).toHaveLength(2);
   });
@@ -231,7 +237,7 @@ describe('D151 limits and what model text cannot do', () => {
   it('stops at twelve replies to one message, says so, and the next message goes on', async () => {
     const f = await fixture({ members: 4 });
     f.setSchedule(() => sse(JSON.stringify({ ...plan(['林舟', 'reply', 'short'], ['阿哲', 'reply', 'short'], ['小雨', 'reply', 'short'], ['老周', 'reply', 'short'], ['林舟', 'reply', 'short']).speakers.slice(0, 4).reduce((all, item) => ({ speakers: [...all.speakers, item] }), { speakers: [] as unknown[] }), more: true })));
-    const run = await f.start('这个方向你们怎么看'); let done = await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); let done = await f.idle(run.runId);
     expect(done.turns).toHaveLength(12);
     expect(done.groupChat?.round).toMatchObject({ state: 'limit', turnsUsed: 12 });
     expect(done.status).toBe('completed');
@@ -302,7 +308,7 @@ describe('D151 interrupting', () => {
   it('a scheduling request in flight is aborted too, and the answer that was coming is not used', async () => {
     const f = await fixture();
     f.setSchedule(() => signal => held('{"speakers":', signal, new Promise(() => {})));
-    const run = await f.start('这个方向你们怎么看');
+    const run = await f.start('这个方向怎么看');
     await until(() => f.schedules().length === 1);
     expect(f.service.getSnapshot(run.runId).groupChat?.round?.scheduling).toBe(true);
     await f.send(run.runId, '@阿哲 算了你说');
@@ -354,30 +360,74 @@ describe('D151 interrupting', () => {
 });
 
 describe('D149 failure and recovery', () => {
-  it('a failed reply stops the chat; a retry asks no model again and the queue carries on', async () => {
+  it('one member failing does not hold up the others: the failure stays in its place, and the chat goes back to waiting', async () => {
+    const f = await fixture();
+    f.setReply(body => speakerOf(body) === '林舟' ? new Response('{}', { status: 500 }) : sse(`${speakerOf(body)}说了`));
+    const run = await f.start('@林舟 @阿哲 @小雨 都看看');
+    const done = await f.idle(run.runId);
+    expect(done.status).toBe('completed');
+    expect(f.spoke(run.runId)).toEqual(['林舟', '阿哲', '小雨']);
+    expect(done.turns.map(turn => turn.status)).toEqual(['failed', 'completed', 'completed']);
+    expect(done.groupChat?.round).toMatchObject({ state: 'done', queue: [] });
+    expect(done.lastFailure).toMatchObject({ code: 'internal_error', upstream: { status: 500 } });
+    // What failed is not given to the next speaker as if it had been said.
+    expect(JSON.stringify(f.members().at(-1)!.messages)).toContain('阿哲说了');
+  });
+  it('asking a failed member again keeps everything in its place, sends the first request again and asks no model', async () => {
     const f = await fixture();
     f.setSchedule(() => sse(JSON.stringify(plan(['林舟', 'reply', 'medium'], ['阿哲', 'reply', 'medium']))));
-    let fail = true;
-    f.setReply(body => { if (fail) { fail = false; return new Response('{}', { status: 500 }); } return sse(`${speakerOf(body)}说了`); });
-    const run = await f.start('这个方向你们怎么看');
+    f.setReply(body => speakerOf(body) === '林舟' ? new Response('{}', { status: 500 }) : sse('阿哲说了'));
+    const run = await f.start('这个方向怎么看');
     let done = await f.idle(run.runId);
-    expect(done.status).toBe('error');
-    expect(done.groupChat?.round).toMatchObject({ state: 'open', queue: [{ agentId: f.agentOf('阿哲') }] });
+    expect(done.status).toBe('completed');
+    const failed = done.turns[0]!;
     const original = f.members()[0]!;
-    await f.service.retryTurn(run.runId, done.turns[0]!.turnId);
+    const schedules = f.schedules().length; const order = done.turns.map(turn => turn.turnId);
+    f.setReply(() => sse('林舟重说了'));
+    await f.service.retryTurn(run.runId, failed.turnId);
     done = f.service.getSnapshot(run.runId);
     expect(done.status).toBe('completed');
-    expect(f.schedules()).toHaveLength(1);
-    expect(f.spoke(run.runId)).toEqual(['林舟', '阿哲']);
-    // The retry sent exactly what the first request sent.
-    expect(f.members()[1]!.messages).toEqual(original.messages);
+    expect(f.schedules()).toHaveLength(schedules);
+    expect(f.members()).toHaveLength(3);
+    expect(f.members().at(-1)!.messages).toEqual(original.messages);
+    expect(done.turns.map(turn => turn.turnId)).toEqual(order);
+    expect(done.turns.map(turn => turn.status)).toEqual(['completed', 'completed']);
+    expect(done.groupChat?.round?.state).toBe('done');
+    // The new words are in the old place, ahead of what the next member said.
+    const active = new Set(done.versions!.filter(version => version.active).map(version => version.messageId));
+    const slots = done.versions!.filter(version => version.active).map(version => done.messages.find(message => message.id === version.messageId)!.content);
+    expect(active.size).toBe(2);
+    expect(slots.sort()).toEqual(['林舟重说了', '阿哲说了'].sort());
+    const next = await f.send(run.runId, '@小雨 你说'); expect(next.duplicate).toBe(false); await f.idle(run.runId);
+    const seen = JSON.stringify(f.members().at(-1)!.messages);
+    expect(seen.indexOf('林舟重说了')).toBeGreaterThan(-1);
+    expect(seen.indexOf('林舟重说了')).toBeLessThan(seen.indexOf('阿哲说了'));
   });
-  it('after a failure the host can just say something else: the queue stands down and nothing is retried', async () => {
+  it('asking again while someone is speaking is refused; a settled reply cannot be asked this way', async () => {
+    const f = await fixture();
+    f.setReply((body, index) => index === 0 ? new Response('{}', { status: 500 }) : index === 1 ? (signal => held('说着', signal, new Promise(() => {}))) : sse('好'));
+    const run = await f.start('@林舟 @阿哲 看看');
+    await until(() => f.service.getSnapshot(run.runId).messages.some(message => message.content === '说着'));
+    const snapshot = f.service.getSnapshot(run.runId);
+    await expect(f.service.retryTurn(run.runId, snapshot.turns[0]!.turnId)).rejects.toMatchObject({ code: 'invalid_state' });
+    await f.service.stop(run.runId);
+  });
+  it('a stop, a limit and an interruption still end what they ended: a failure is the only thing that goes on', async () => {
+    const f = await fixture();
+    f.setReply((body, index) => index === 0 ? (signal => held('说着', signal, new Promise(() => {}))) : sse('不该出现'));
+    const run = await f.start('@林舟 @阿哲 看看');
+    await until(() => f.service.getSnapshot(run.runId).messages[0]?.content === '说着');
+    await f.service.stop(run.runId);
+    const done = f.service.getSnapshot(run.runId);
+    expect(done.status).toBe('cancelled');
+    expect(done.turns).toHaveLength(1);
+  });
+  it('after a failure the host can just say something else, and nothing is sent again', async () => {
     const f = await fixture();
     let fail = true;
     f.setReply(body => { if (fail) { fail = false; return new Response('{}', { status: 500 }); } return sse(`${speakerOf(body)}说了`); });
-    const run = await f.start('@林舟 @阿哲 看看');
-    expect((await f.idle(run.runId)).status).toBe('error');
+    const run = await f.start('@林舟 在吗');
+    expect((await f.idle(run.runId)).turns[0]!.status).toBe('failed');
     await f.send(run.runId, '@小雨 你来');
     const done = await f.idle(run.runId);
     expect(done.status).toBe('completed');
@@ -409,7 +459,7 @@ describe('D152 skipping thinking on the wire', () => {
   it('only a short reply, and the scheduling request, on a model the catalog says it of', async () => {
     const f = await fixture();
     f.setSchedule(() => sse(JSON.stringify(plan(['林舟', 'reply', 'short'], ['阿哲', 'challenge', 'short'], ['小雨', 'report', 'long']))));
-    const run = await f.start('这个方向你们怎么看'); await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); await f.idle(run.runId);
     expect(f.schedules()[0]!.thinking).toEqual({ type: 'disabled' });
     const [short, challenge, long] = f.members();
     expect(short!.thinking).toEqual({ type: 'disabled' });
@@ -422,6 +472,7 @@ describe('D152 skipping thinking on the wire', () => {
     f.setReply(() => { if (fail) { fail = false; return new Response('{}', { status: 500 }); } return sse('好'); });
     const run = await f.start('@林舟 在吗');
     const failed = await f.idle(run.runId);
+    expect(failed.status).toBe('completed');
     await f.service.retryTurn(run.runId, failed.turns[0]!.turnId);
     expect(f.members()[0]!.thinking).toEqual({ type: 'disabled' });
     expect(f.members()[1]!.thinking).toEqual({ type: 'disabled' });
@@ -468,7 +519,7 @@ describe('D150 which model is asked', () => {
   it('a room of demo members asks nothing even with a real service connected', async () => {
     const f = await fixture({ demo: true });
     await key(f, 'https://api.deepseek.com', 'deepseek-flash');
-    const run = await f.start('这个方向你们怎么看'); await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); await f.idle(run.runId);
     expect(f.requests).toHaveLength(0);
   });
 });
@@ -477,7 +528,7 @@ describe('D150 usage', () => {
   it('counts scheduling under its own purpose, and is never mistaken for someone speaking', async () => {
     const f = await fixture();
     f.setSchedule(() => sse(JSON.stringify(plan(['林舟', 'reply', 'short']))));
-    const run = await f.start('这个方向你们怎么看'); const done = await f.idle(run.runId);
+    const run = await f.start('这个方向怎么看'); const done = await f.idle(run.runId);
     const row = done.usage!.find(usage => usage.kind === 'schedule')!;
     expect(row).toMatchObject({ state: 'reported', inputTokens: 50, outputTokens: 5, modelId: 'deepseek-flash' });
     const usage = new UsageService(f.db);
@@ -531,7 +582,7 @@ describe('D154 a message that says stop', () => {
   it('stops a scheduling request in flight, and uses nothing it might have said', async () => {
     const f = await fixture();
     f.setSchedule(() => signal => held('{"speakers":', signal, new Promise(() => {})));
-    const run = await f.start('这个方向你们怎么看');
+    const run = await f.start('这个方向怎么看');
     await until(() => f.schedules().length === 1);
     await f.send(run.runId, '停止吧');
     const done = await f.idle(run.runId);
@@ -558,17 +609,6 @@ describe('D154 a message that says stop', () => {
     expect(f.requests).toHaveLength(0);
     expect(done.status).toBe('completed');
     expect(done.groupChat?.round?.state).toBe('stopped');
-  });
-  it('after a failure it drops the queue; nothing is retried', async () => {
-    const f = await fixture();
-    f.setReply(() => new Response('{}', { status: 500 }));
-    const run = await f.start('@林舟 @阿哲 看看');
-    expect((await f.idle(run.runId)).status).toBe('error');
-    const sent = f.requests.length;
-    await f.send(run.runId, '打住');
-    const done = await f.idle(run.runId);
-    expect(f.requests).toHaveLength(sent);
-    expect(done.groupChat?.round).toMatchObject({ state: 'stopped', queue: [] });
   });
   it('停止这个方案，换一个 is something to talk about', async () => {
     const f = await fixture();
@@ -637,5 +677,125 @@ describe('D154 what the first real run showed', () => {
     }
     expect(String(f.members()[0]!.messages[0]!.content)).toBe(boundaryText);
     expect(String(f.members()[0]!.messages[1]!.content)).toBe(discussionRulesText(false));
+  });
+});
+
+describe('D155 大家 means everyone', () => {
+  it('a question to everyone gets everyone, no schedule, each saying a few sentences', async () => {
+    const f = await fixture();
+    const run = await f.start('这个方向大家怎么看：做一个校园二手平台'); const done = await f.idle(run.runId);
+    expect(f.spoke(run.runId).sort()).toEqual(['小雨', '林舟', '阿哲']);
+    expect(f.schedules()).toHaveLength(0);
+    expect(f.members().every(body => String(body.messages.at(-1)!.content).includes('几句话'))).toBe(true);
+    expect(done.groupChat?.round?.state).toBe('done');
+  });
+  it('a member naming someone can still bring a word more, within the limit', async () => {
+    const f = await fixture();
+    f.setSchedule((_body, call) => sse(call === 1 ? JSON.stringify(plan(['林舟', 'reply', 'short'])) : '{"speakers":[]}'));
+    f.setReply(body => sse(speakerOf(body) === '林舟' ? '@阿哲 你再说说' : '@林舟 你再说说'));
+    const run = await f.start('这个方向大家怎么看'); await f.idle(run.runId);
+    // The first three answered without any model; the @ brought the schedule in, and it named 林舟; his @ made it look once more.
+    expect(f.schedules()).toHaveLength(2);
+    expect(f.spoke(run.runId)).toHaveLength(4);
+    expect(f.spoke(run.runId).at(-1)).toBe('林舟');
+    expect(String(f.schedules()[0]!.messages[1]!.content)).toContain('被成员提到');
+  });
+});
+
+describe('D155 the prompts', () => {
+  it('say not to ask again what was asked, not to keep chasing, not to invent what you are doing, and a short answer does not repeat', async () => {
+    const f = await fixture();
+    const run = await f.start('今天几号？'); await f.idle(run.runId);
+    const text = f.members()[0]!.messages.map(message => String(message.content)).join('\n');
+    for (const word of ['别人已经问过的问题不要再问一遍', '同问', '别在后面每句里反复催主持人', '也不要编自己正在做什么', '不要重复之前说过的答案']) expect(text).toContain(word);
+  });
+});
+
+describe('D155 how a connection failure is recorded', () => {
+  /** The real transport, to a server on this machine, so each failure happens where it would. */
+  async function wired(resolver: typeof dnsLookup, answer: (req: IncomingMessage, res: ServerResponse) => void) {
+    const received: string[] = [];
+    const server = createServer((req, res) => { let body = ''; req.on('data', chunk => { body += chunk; }); req.on('end', () => { received.push(body); answer(req, res); }); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    const db = new Database(':memory:'); db.initialize();
+    const keys = new KeyService(db, backend);
+    const registry = new ProviderRegistry(db, keys, { transportFactory: guard => {
+      const safe = createSafeFetch(guard, resolver, undefined, { has: () => true });
+      return (_url, init) => safe(`http://localhost:${port}/v1/chat/completions`, init);
+    } });
+    const settings = new ProviderSettingsService(db, keys, registry);
+    const provider = await settings.createProvider({ name: 'S', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'x' }] });
+    await settings.setKey({ providerId: provider.id, apiKey: 'fixture-key' });
+    db.insertRoom({ id: 'room', name: 'r', objective: '' });
+    db.createAgent({ id: 'a', roomId: 'room', displayName: '林舟', roleTemplateId: '产品', systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: 0 });
+    const modelBudget = (modelId: string | null, member: { providerId: string | null }) => member.providerId ? registry.budget(member.providerId, modelId!) : undefined;
+    const service = new RunService(db, new MockProvider({ tokenDelayMs: 0 }), createPublicMessagesBuilder(modelBudget), registry, member => modelBudget(member.modelId, member));
+    open.push(async () => { await service.shutdown().catch(() => {}); db.close(); server.closeAllConnections(); server.close(); });
+    const chat = async (task: string, options: Partial<StartRunInput> = { workflowSnapshot: { ...groupChatWorkflowSnapshot } }) => { const run = await service.start({ roomId: 'room', task, ...options }); await service.waitForIdle(run.runId); return service.getSnapshot(run.runId); };
+    return { received, chat, service, registry, provider };
+  }
+  const here = [{ address: '127.0.0.1', family: 4 }];
+  const noName = () => Object.assign(new TypeError('getaddrinfo ENOTFOUND 10.1.2.3'), { code: 'ENOTFOUND' });
+  const reply = (res: ServerResponse) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '好' }, finish_reason: 'stop' }] })}\n\ndata: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 5, completion_tokens: 1 } })}\n\ndata: [DONE]\n\n`); };
+  it('a failure before anything is written recovers by itself: one request reaches the service, its usage is normal, the host sees nothing', async () => {
+    let tries = 0;
+    const f = await wired((async () => { tries++; if (tries === 1) throw noName(); return here; }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
+    const done = await f.chat('@林舟 在吗');
+    expect(tries).toBe(2);
+    expect(f.received).toHaveLength(1);
+    expect(done.turns[0]!.status).toBe('completed');
+    expect(done.lastFailure).toBeUndefined();
+    expect(done.attempts).toHaveLength(1);
+    expect(done.usage![0]).toMatchObject({ state: 'reported', inputTokens: 5, outputTokens: 1 });
+  });
+  it('the app counts one dispatch, however many tries it took to connect', async () => {
+    let tries = 0; let dispatches = 0;
+    const f = await wired((async () => { tries++; if (tries === 1) throw noName(); return here; }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
+    const adapter = f.registry.getAdapter(f.provider.id, 'deepseek-flash', () => { dispatches++; });
+    for await (const _chunk of adapter.streamChat({ requestId: 'r1', modelId: 'deepseek-flash', messages: [{ role: 'user', content: 'x' }], outputTokenLimit: 8 })) { /* read to the end */ }
+    expect(tries).toBe(2); expect(dispatches).toBe(1);
+  });
+  it('failing twice names the step in the failure and the event, keeps nothing else, and was not sent', async () => {
+    let tries = 0;
+    const f = await wired((async () => { tries++; throw noName(); }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
+    const done = await f.chat('@林舟 在吗');
+    expect(tries).toBe(2);
+    expect(done.lastFailure).toEqual(publicError('network_error', undefined, undefined, 'dns'));
+    expect(JSON.stringify(done.lastFailure)).not.toContain('10.1.2.3');
+    expect(done.usage![0]!.state).toBe('not_sent');
+    expect(f.service.subscribe(done.runId, 0).events.find(event => event.type === 'turn_failed')?.payload).toMatchObject({ error: { code: 'network_error', phase: 'dns' } });
+  });
+  it('a failure after the request is written is never sent again, and its usage stays unknown', async () => {
+    let tries = 0;
+    const f = await wired((async () => { tries++; return here; }) as unknown as typeof dnsLookup, (_req, res) => { res.socket?.destroy(); });
+    const done = await f.chat('@林舟 在吗');
+    expect(tries).toBe(1);
+    expect(f.received).toHaveLength(1);
+    expect(done.lastFailure).toEqual(publicError('network_error', undefined, undefined, 'request'));
+    expect(done.usage![0]!.state).toBe('unknown');
+  });
+  it('a reply cut off part way says so, and is not sent again', async () => {
+    let tries = 0;
+    const f = await wired((async () => { tries++; return here; }) as unknown as typeof dnsLookup, (_req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '说到' }, finish_reason: null }] })}\n\n`); setTimeout(() => res.socket?.destroy(), 20); });
+    const done = await f.chat('@林舟 在吗');
+    expect(tries).toBe(1);
+    expect(f.received).toHaveLength(1);
+    expect(done.lastFailure?.phase).toBe('response');
+    expect(done.messages[0]).toMatchObject({ content: '说到', status: 'failed' });
+  });
+  it('the stricter ways recover the same way, and still stop at a failure', async () => {
+    let tries = 0;
+    const f = await wired((async () => { tries++; if (tries === 1) throw noName(); return here; }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
+    const done = await f.chat('讨论', {});
+    expect(tries).toBeGreaterThanOrEqual(2);
+    expect(done.status).toBe('completed');
+    let always = 0;
+    const g = await wired((async () => { always++; throw noName(); }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
+    const stopped = await g.chat('讨论', {});
+    expect(always).toBe(2);
+    expect(stopped.status).toBe('error');
+    expect(stopped.turns).toHaveLength(1);
+    expect(stopped.lastFailure?.phase).toBe('dns');
   });
 });

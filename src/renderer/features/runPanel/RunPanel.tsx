@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Check, X } from 'lucide-react';
-import { upstreamText } from '../../../shared/schemas/error';
+import { networkPhaseText, upstreamText } from '../../../shared/schemas/error';
 import type { RunSnapshot } from '../../../shared/types/run';
 import { Avatar, Button, IconButton, Pill, Tabs, cx } from '../../components/ui';
 import { durationStopText, runStatusLabel } from '../../locales/zhCN';
@@ -156,7 +156,7 @@ export function RunPanel({ snapshot, commands, providers, tab, onTab, onClose, o
         <dt>回合</dt><dd>{snapshot?.turns.length ?? 0}{snapshot?.execution ? ` / ${snapshot.execution.maxTurns}` : ''}</dd>
         <dt>运行状态</dt><dd>{snapshot ? runStatusLabel(snapshot) : '—'}</dd><dt>状态来源</dt><dd>{syncLabel}</dd>
         {snapshot?.durationStop && <><dt>停止原因</dt><dd>{durationStopText(snapshot.durationStop.limitMs)}</dd></>}
-        {snapshot?.lastFailure && !snapshot.durationStop && <><dt>最近一次失败</dt><dd>{upstreamText(snapshot.lastFailure.upstream) || '请求没有到达服务商，或者服务商没有说明'}</dd></>}</dl>
+        {snapshot?.lastFailure && !snapshot.durationStop && <><dt>最近一次失败</dt><dd>{upstreamText(snapshot.lastFailure.upstream) || networkPhaseText(snapshot.lastFailure.phase) || '请求没有到达服务商，或者服务商没有说明'}</dd></>}</dl>
     </details>
   </aside>;
 }

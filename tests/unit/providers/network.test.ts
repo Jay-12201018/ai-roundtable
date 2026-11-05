@@ -1,12 +1,14 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import { createServer, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import * as https from 'node:https';
 import { PassThrough } from 'node:stream';
 import type { lookup as dnsLookup } from 'node:dns/promises';
 import type { RequestOptions } from 'node:https';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSafeFetch as catalogFetch } from '../../../src/main/providers/network';
+import { createSafeFetch as catalogFetch, networkPhaseOf } from '../../../src/main/providers/network';
+import { ContractError } from '../../../src/shared/contracts/errors';
 import { catalogServiceAt, serviceCatalog } from '../../../src/shared/serviceCatalog';
 
 vi.mock('node:https', async importOriginal => ({ ...await importOriginal<typeof import('node:https')>(), request: vi.fn() }));
@@ -328,3 +330,81 @@ describe('Main safe Provider transport', () => {
     });
   });
 });
+
+describe('D155 one more try, only when nothing was written', () => {
+  const local = (lookupFn: typeof dnsLookup, guard?: () => void) => catalogFetch(guard, lookupFn, undefined, { has: () => true });
+  const closedPort = async () => { const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done)); const { port } = server.address() as AddressInfo; await new Promise(done => server.close(done)); return port; };
+  const dnsFailure = () => Object.assign(new TypeError('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' });
+  const here = [{ address: '127.0.0.1', family: 4 }];
+  it('a name that does not resolve is tried once more, and the second try can succeed', async () => {
+    const server = createServer((_req, res) => res.end('ok'));
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    let tries = 0;
+    const resolver = (async () => { tries++; if (tries === 1) throw dnsFailure(); return here; }) as unknown as typeof dnsLookup;
+    try {
+      const answer = await local(resolver)(`http://localhost:${port}/v1/x`);
+      expect(await answer.text()).toBe('ok');
+      expect(tries).toBe(2);
+    } finally { server.close(); }
+  });
+  it('a refused connection is tried once more, and only once; the failure says where', async () => {
+    const port = await closedPort(); let tries = 0;
+    const resolver = (async () => { tries++; return here; }) as unknown as typeof dnsLookup;
+    const failure = await local(resolver)(`http://localhost:${port}/v1/x`, { method: 'POST', body: '{}' }).catch(error => error);
+    expect(tries).toBe(2);
+    expect(networkPhaseOf(failure)).toBe('tcp');
+  });
+  it('a connection refused and then accepted goes through', async () => {
+    const port = await closedPort(); let tries = 0; const server = createServer((_req, res) => res.end('second'));
+    const resolver = (async () => { tries++; if (tries === 2) await new Promise<void>(done => server.listen(port, '127.0.0.1', done)); return here; }) as unknown as typeof dnsLookup;
+    try { expect(await (await local(resolver)(`http://localhost:${port}/`)).text()).toBe('second'); expect(tries).toBe(2); } finally { server.close(); }
+  });
+  it('once the request is written, a failure is never tried again', async () => {
+    let received = 0;
+    const server = createServer((req, res) => { req.resume(); received++; res.socket?.destroy(); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo; let tries = 0;
+    const resolver = (async () => { tries++; return here; }) as unknown as typeof dnsLookup;
+    try {
+      const failure = await local(resolver)(`http://localhost:${port}/`, { method: 'POST', body: '{"secret":1}' }).catch(error => error);
+      expect(networkPhaseOf(failure)).toBe('request');
+      expect(tries).toBe(1); expect(received).toBe(1);
+    } finally { server.close(); }
+  });
+  it('a reply cut off after it started is never tried again', async () => {
+    let received = 0;
+    const server = createServer((req, res) => { req.resume(); received++; res.writeHead(200); res.write('part'); setTimeout(() => res.socket?.destroy(), 10); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const answer = await local((async () => here) as unknown as typeof dnsLookup)(`http://localhost:${port}/`);
+      await expect(answer.text()).rejects.toThrow();
+      expect(received).toBe(1);
+    } finally { server.close(); }
+  });
+  it('an abort ends it, before the second try and during the pause', async () => {
+    const before = new AbortController(); let tries = 0;
+    const resolver = (async () => { tries++; before.abort(); throw dnsFailure(); }) as unknown as typeof dnsLookup;
+    await expect(local(resolver)('http://localhost:1/', { signal: before.signal })).rejects.toThrow();
+    expect(tries).toBe(1);
+    const during = new AbortController(); let again = 0;
+    const slow = (async () => { again++; setTimeout(() => during.abort(), 20); throw dnsFailure(); }) as unknown as typeof dnsLookup;
+    await expect(local(slow)('http://localhost:1/', { signal: during.signal })).rejects.toThrow();
+    expect(again).toBe(1);
+  });
+  it('the guard is asked again first, and what it refuses is not tried', async () => {
+    let tries = 0; let checks = 0; let refuse = false;
+    const resolver = (async () => { tries++; refuse = true; throw dnsFailure(); }) as unknown as typeof dnsLookup;
+    const guard = () => { checks++; if (refuse) throw new ContractError('forbidden'); };
+    await expect(local(resolver, guard)('http://localhost:1/')).rejects.toMatchObject({ code: 'forbidden' });
+    expect(tries).toBe(1); expect(checks).toBeGreaterThan(1);
+  });
+  it('a target the app refuses is not tried again', async () => {
+    let tries = 0;
+    const resolver = (async () => { tries++; return [{ address: '10.0.0.1', family: 4 }]; }) as unknown as typeof dnsLookup;
+    await expect(catalogFetch(undefined, resolver, undefined, { has: () => true })('https://provider.example/')).rejects.toMatchObject({ code: 'target_rejected' });
+    expect(tries).toBe(1);
+  });
+});
+

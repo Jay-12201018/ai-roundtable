@@ -1,9 +1,9 @@
-import { apiErrorSchema, publicError, type ApiError, type ErrorCode, type ErrorField, type UpstreamError } from '../schemas/error';
+import { apiErrorSchema, publicError, type ApiError, type ErrorCode, type ErrorField, type NetworkPhase, type UpstreamError } from '../schemas/error';
 
 export class ContractError extends Error {
   readonly detail: ApiError;
-  constructor(code: ErrorCode, field?: ErrorField, upstream?: UpstreamError) {
-    const detail = publicError(code, field, upstream);
+  constructor(code: ErrorCode, field?: ErrorField, upstream?: UpstreamError, phase?: NetworkPhase) {
+    const detail = publicError(code, field, upstream, phase);
     super(detail.message);
     this.name = 'ContractError';
     this.detail = detail;
