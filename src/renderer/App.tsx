@@ -149,8 +149,10 @@ export function App() {
   useEffect(() => { alive.current = true; void reloadProviders(); return () => { alive.current = false; providerRequest.current++; }; }, [reloadProviders]);
   useEffect(() => remember('roundtable.stepMode', stepMode), [stepMode]);
   useEffect(() => { setWorkflowNotice(undefined); }, [generation]);
-  // Drawers belong to a layout: leaving it closes them.
-  useEffect(() => { setNavOpen(false); setPanelDrawer(false); }, [layout]);
+  // Drawers belong to a layout: leaving it closes them. This happens while rendering, not in an effect: an effect runs a
+  // task after the new layout is on screen and would cancel a click on its menu button that landed in between.
+  const [drawersLayout, setDrawersLayout] = useState(layout);
+  if (drawersLayout !== layout) { setDrawersLayout(layout); setNavOpen(false); setPanelDrawer(false); }
 
   // The room's current members: the new-discussion screen and title show them; the discussion mode is checked against them.
   const roomMembersNeeded = Boolean(roomId) && (page === 'rooms' || workflowOpen || page === 'discussion' && !snapshot);
