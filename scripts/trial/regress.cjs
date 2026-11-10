@@ -47,7 +47,7 @@ const conversations = [
     { say: '你觉得你们三个人谁的模型更强大', expect: step => step.speakers.length === step.roster.length || `问“你们三个”应该每个人都回应，实际 ${step.speakers.join()}` },
     { say: '今天星期几', expect: step => few(2, 120)(step) || '随口一问一两个人短答' },
     { say: '林舟怎么不说话', expect: step => step.speakers.includes('林舟') && step.replies.every(text => !/抱歉|不好意思|刚(才)?在(想|整理|看|忙)|掉链子|第一时间/u.test(text)) || `叫到名字的人要回应，且不为没说话编理由，实际 ${step.speakers.join()}` },
-    { say: '好吧', expect: step => step.speakers.length <= 1 && step.replies.every(text => text.length <= 60 && !/主持人/u.test(text)) || '“好吧”最多一句短的，不用第三人称说主持人' }] },
+    { say: '好吧', rules: true, expect: step => step.speakers.length <= 1 && step.replies.every(text => text.length <= 60 && !/主持人/u.test(text)) || '“好吧”最多一句短的，不用第三人称说主持人' }] },
   { name: 'what-a-member-knows', steps: [
     { say: '国内有哪些做大模型的公司', expect: step => step.replies.some(text => /百度|阿里|腾讯|字节|智谱|月之暗面|科大讯飞|文心|通义|豆包|混元|Kimi|DeepSeek/iu.test(text)) || '常识问题应该照知道的回答，不能都以“没有依据”拒绝' }] },
   { name: 'answer-then-stop', steps: [
