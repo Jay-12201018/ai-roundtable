@@ -15,7 +15,8 @@ export const GROUP_CHAT_MAX_TURNS = 12;
 /** D150: one host message gets at most this many scheduling requests. */
 export const GROUP_CHAT_MAX_SCHEDULES = 3;
 export const GROUP_CHAT_SCHEDULE_MAX_TOKENS = 400;
-export const GROUP_CHAT_SCHEDULE_TIMEOUT_MS = 20_000;
+/** D160: the reading answers in a second or two. When it cannot be reached, the rules take over after this long, and the host is not kept waiting. */
+export const GROUP_CHAT_SCHEDULE_TIMEOUT_MS = 10_000;
 export const GROUP_CHAT_SCHEDULE_MESSAGES = 6;
 export const GROUP_CHAT_SCHEDULE_MESSAGE_CHARS = 400;
 
