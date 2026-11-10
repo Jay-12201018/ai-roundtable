@@ -22,6 +22,8 @@ async function capture(running: RunningApp, name: string) {
 }
 const names: Array<[string, string]> = [['林舟', '产品'], ['阿哲', '工程'], ['小雨', '总结']];
 const isSchedule = (body: { messages: any[] }) => textIn(body.messages[0]).includes('调度程序');
+/** D160: every message but a call for everyone and a stop is read once first; these are the members' own requests. */
+const memberRequests = (fixture: { requests: any[] }) => fixture.requests.filter(request => !isSchedule(request));
 const replies = (page: RunningApp['page']) => page.locator('.thread-item article.msg:not(.is-host)');
 const spoke = (page: RunningApp['page']) => page.locator('.thread-item article.msg:not(.is-host) .msg-name').allTextContents();
 const open = async (running: RunningApp) => {
@@ -117,10 +119,11 @@ test('@A 写前端，@B 写后端: only they act, with an IME, and the box says 
   await page.keyboard.press('Enter');
   await waiting(running);
   expect(await spoke(page)).toEqual(['林舟', '阿哲']);
-  expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
-  expect(textIn(fixture.requests[0]!.messages.at(-1))).toContain('> 写前端');
-  expect(textIn(fixture.requests[1]!.messages.at(-1))).toContain('> 写后端');
-  expect(fixture.requests.every(request => request.raw.thinking === undefined), 'A delivery keeps its thinking').toBe(true);
+  expect(fixture.requests.filter(isSchedule), 'The message is read once').toHaveLength(1);
+  expect(textIn(fixture.requests.find(isSchedule)!.messages[1])).toContain('主持人这条消息 @ 了：林舟、阿哲');
+  expect(textIn(memberRequests(fixture)[0]!.messages.at(-1))).toContain('> 写前端');
+  expect(textIn(memberRequests(fixture)[1]!.messages.at(-1))).toContain('> 写后端');
+  expect(memberRequests(fixture).every(request => request.raw.thinking === undefined), 'A delivery keeps its thinking').toBe(true);
   await capture(running, 'mention-done');
 
   // In the chat box too: a name after Chinese words, chosen by mouse.
@@ -143,11 +146,12 @@ test('a simple question: one, briefly', async ({ harness }) => {
   await first(running, '今天星期几？');
   await waiting(running);
   expect(await spoke(page)).toHaveLength(1);
-  expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
-  expect(textIn(fixture.requests[0]!.messages.at(-1))).toContain('答完就停');
+  expect(fixture.requests.filter(isSchedule), 'The message is read once').toHaveLength(1);
+  const asked = memberRequests(fixture)[0]!;
+  expect(textIn(asked.messages.at(-1))).toContain('答完就停');
   const week = ['日', '一', '二', '三', '四', '五', '六'][new Date().getDay()]!;
-  expect(textIn(fixture.requests[0]!.messages.find(message => textIn(message).startsWith('今天是')))).toContain(`星期${week}`);
-  expect(fixture.requests[0]!.messages.some(message => message.role === 'system' && textIn(message).includes('只说有依据的事'))).toBe(true);
+  expect(textIn(asked.messages.find((message: any) => textIn(message).startsWith('今天是')))).toContain(`星期${week}`);
+  expect(asked.messages.some((message: any) => message.role === 'system' && textIn(message).includes('只说有依据的事'))).toBe(true);
   await capture(running, 'simple-question');
   await running.quit();
 });
@@ -175,7 +179,8 @@ test('a new message stops the reply being generated at once, keeps its words and
 test('stop is one click, nothing is lost, and the next message goes on', async ({ harness }) => {
   const running = await harness.launch(); const { page } = running; const { fixture } = harness;
   await open(running);
-  fixture.mode = () => 'hang';
+  // D160: the reading of the message is answered; it is the member's reply that hangs.
+  fixture.mode = body => isSchedule(body) ? 'ok' : 'hang';
   fixture.reply = () => '这段话会被停在这里，后面的内容不会发出来';
   await first(running, '@林舟 说说');
   await expect(replies(page).first()).toContainText('这段话');
@@ -295,7 +300,8 @@ test('a group chat reads the same after a restart, and the next message goes on'
 test('a crash in the middle of a reply: its words stay, nothing is sent again, and the next message goes on', async ({ harness }) => {
   let running = await harness.launch(); const { fixture } = harness;
   await open(running);
-  fixture.mode = () => 'hang';
+  // D160: the reading of the message is answered; it is the member's reply that hangs.
+  fixture.mode = body => isSchedule(body) ? 'ok' : 'hang';
   fixture.reply = () => '这句话说到一半应用就崩了，后面没有了';
   await first(running, '@林舟 @阿哲 看看');
   await expect(replies(running.page).first()).toContainText('这句话');
@@ -318,7 +324,8 @@ test('a crash in the middle of a reply: its words stay, nothing is sent again, a
 test('typing 停止 stops everything, nobody answers, and it says so; 停止这个方案 is just talk', async ({ harness }) => {
   const running = await harness.launch(); const { page } = running; const { fixture } = harness;
   await open(running);
-  fixture.mode = () => 'hang';
+  // D160: the reading of the message is answered; it is the member's reply that hangs.
+  fixture.mode = body => isSchedule(body) ? 'ok' : 'hang';
   fixture.reply = () => '这段话说到一半，后面还有两位排着';
   await first(running, '@林舟 @阿哲 @小雨 都看看');
   await expect(replies(page).first()).toContainText('这段话');
@@ -346,14 +353,14 @@ test('typing 停止 stops everything, nobody answers, and it says so; 停止这�
   await running.quit();
 });
 
-test('a word like 1 gets one short reply and no model', async ({ harness }) => {
+test('a word like 1 is read once and gets one short reply', async ({ harness }) => {
   const running = await harness.launch(); const { page } = running; const { fixture } = harness;
   await open(running);
   fixture.reply = () => '嗯，我在。';
   await first(running, '1');
   await waiting(running);
   expect(await spoke(page)).toHaveLength(1);
-  expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
+  expect(fixture.requests.filter(isSchedule), 'The message is read once').toHaveLength(1);
   await capture(running, 'very-short');
   await running.quit();
 });
@@ -387,16 +394,16 @@ test('一位失败，其他人照常说，等大家说完再让 TA 重说，位�
   await running.quit();
 });
 
-test('这个方向大家怎么看：所有人都回应，不调度', async ({ harness }) => {
+test('这个方向大家怎么看：所有人都回应', async ({ harness }) => {
   const running = await harness.launch(); const { page } = running; const { fixture } = harness;
   await open(running);
   fixture.reply = body => `${memberOf(body)}说说自己的看法。`;
   await first(running, '这个方向大家怎么看：做一个校园二手平台');
   await waiting(running);
   expect((await spoke(page)).sort()).toEqual(['小雨', '林舟', '阿哲']);
-  expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
+  expect(fixture.requests.filter(isSchedule), 'The message is read once').toHaveLength(1);
   // D156: a few sentences of plain reply are talk too, and skip thinking like a quick word.
-  expect(fixture.requests.every(request => request.raw.thinking?.type === 'disabled'), 'A few sentences of plain reply skip thinking').toBe(true);
+  expect(memberRequests(fixture).every(request => request.raw.thinking?.type === 'disabled'), 'A few sentences of plain reply skip thinking').toBe(true);
   await capture(running, 'everyone-asked');
   await running.quit();
 });

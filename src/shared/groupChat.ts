@@ -1,4 +1,4 @@
-import { groupChatScheduleOutputSchema, type GroupChatClassification, type GroupChatIntent, type GroupChatLength, type GroupChatSpeakerSource } from './schemas/groupChat';
+import { GROUP_CHAT_NOTE_CHARS, groupChatScheduleOutputSchema, type GroupChatClassification, type GroupChatIntent, type GroupChatLength, type GroupChatRelation, type GroupChatSpeakerSource } from './schemas/groupChat';
 
 /**
  * D150: the rules that decide who speaks without asking any model. Pure, so Main decides with them and the page can show the
@@ -154,7 +154,9 @@ export function memberHints(text: string, roster: readonly RosterMember[], selfI
   return parseMentions(text, roster).mentions.map(mention => mention.agentId).filter(agentId => agentId !== selfId);
 }
 
-export type ScheduleOutput = { speakers: Array<{ agentId: string; intent: GroupChatIntent; length: GroupChatLength }>; more: boolean };
+export type ScheduleOutput = { relation?: GroupChatRelation; topic?: string; speakers: Array<{ agentId: string; intent: GroupChatIntent; length: GroupChatLength; brief?: string }>; more: boolean };
+/** One line of a model's own words, cut short. It is shown to members as material, quoted, and never as anyone's instruction. */
+const note = (value: string | undefined) => { const flat = (value ?? '').replace(/\s+/gu, ' ').trim(); return flat ? flat.slice(0, GROUP_CHAT_NOTE_CHARS) : undefined; };
 /**
  * Reads the scheduling model's answer: one JSON object, in a code fence or not. Every name must be someone in this room, once. Anything
  * else makes the whole answer invalid, so nothing a model writes can name a stranger or reach further than a place in the queue.
@@ -170,7 +172,26 @@ export function parseScheduleOutput(text: string, roster: readonly RosterMember[
   for (const speaker of parsed.data.speakers) {
     const member = roster.find(item => item.displayName === speaker.name);
     if (!member || speakers.some(item => item.agentId === member.agentId)) return undefined;
-    speakers.push({ agentId: member.agentId, intent: speaker.intent, length: speaker.length });
+    const brief = note(speaker.brief);
+    speakers.push({ agentId: member.agentId, intent: speaker.intent, length: speaker.length, ...(brief ? { brief } : {}) });
   }
-  return { speakers, more: parsed.data.more === true };
+  const topic = note(parsed.data.topic);
+  return { ...(parsed.data.relation ? { relation: parsed.data.relation } : {}), ...(topic ? { topic } : {}), speakers, more: parsed.data.more === true };
+}
+
+/**
+ * D160: who answers a host message first. The model's reading decides what the program has no way to know: who fits, what each is asked for
+ * and how long. The program keeps what must not go wrong whatever the model says: whoever the host @-ed speaks, and nobody else; asked
+ * what everyone thinks, everyone answers. With no reading, or one that names nobody, the rules decide as they did before there was one.
+ */
+export function firstBatch(text: string, roster: readonly RosterMember[], seed: number, hasImages: boolean, answer: ScheduleOutput | undefined): { speakers: PlannedSpeaker[]; more: boolean } {
+  const plan = classifyHostMessage(text, roster, seed, hasImages);
+  const fallback = plan.speakers.length ? plan.speakers : ruleSpeakers(text, roster, seed);
+  if (!answer) return { speakers: fallback, more: false };
+  const said = new Map(answer.speakers.map(speaker => [speaker.agentId, speaker]));
+  if (plan.classification === 'mention') return { speakers: plan.speakers.map(speaker => { const read = said.get(speaker.agentId); return read ? { ...speaker, intent: read.intent, length: read.length } : speaker; }), more: false };
+  if (!answer.speakers.length) return { speakers: fallback, more: false };
+  const chosen: PlannedSpeaker[] = answer.speakers.map(({ agentId, intent, length, brief }) => ({ agentId, intent, length, source: 'schedule', ...(brief ? { assignment: brief } : {}) }));
+  if (asksEveryone(text)) for (const member of shuffled(roster, seed)) if (!said.has(member.agentId)) chosen.push({ agentId: member.agentId, intent: 'reply', length: 'medium', source: 'rule' });
+  return { speakers: chosen, more: answer.more };
 }

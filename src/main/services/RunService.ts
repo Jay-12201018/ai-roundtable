@@ -32,8 +32,8 @@ import { artifactOutputTokenLimit, buildArtifactRequest } from '../artifact/prom
 import { continuationPreviewInputSchema, continueDiscussionInputSchema, type ContinuationPreview, type ContinuationPreviewInput,
   type ContinueDiscussionInput, type ContinueDiscussionResult, type RunContinuation } from '../../shared/schemas/continuation';
 import { GROUP_CHAT_MAX_SCHEDULES, GROUP_CHAT_MAX_TURNS, GROUP_CHAT_SCHEDULE_MAX_TOKENS, GROUP_CHAT_SCHEDULE_TIMEOUT_MS, isGroupChatSnapshot, type GroupChatRoundState, type GroupChatState } from '../../shared/schemas/groupChat';
-import { classifyHostMessage, isContinueMessage, isStopMessage, memberHints, parseScheduleOutput, ruleSpeakers, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
-import { buildScheduleMessages } from '../groupChat/schedulePrompt';
+import { classifyHostMessage, firstBatch, isContinueMessage, isGather, isStopMessage, memberHints, parseMentions, parseScheduleOutput, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
+import { buildScheduleMessages, type ScheduleState } from '../groupChat/schedulePrompt';
 import type { GroupChatRound, GroupChatSpeaker } from '../database/Database';
 import type { GroupChatCue } from '../context/transcript';
 import type { ImageAttachment } from '../../shared/schemas/attachment';
@@ -1514,8 +1514,10 @@ export class RunService {
       return;
     }
     const plan = classifyHostMessage(text, roster, seedOf(seed), hasImages);
-    // Only a message the rules could not read may go on to the schedule.
-    this.database.insertGroupChatRound({ ...identity, classification: plan.classification, scheduleMore: plan.classification === 'open', speakers: plan.speakers });
+    // D160: a call for everyone is answered at once. Anything else is read by the scheduling model first, where there is one to ask; the round
+    // starts with nobody in it and `planNextBatch` fills it, from that reading or, without one, from these same rules.
+    const read = !(plan.classification === 'gather' && isGather(text)) && this.scheduleTarget(context) !== undefined;
+    this.database.insertGroupChatRound({ ...identity, classification: plan.classification, scheduleMore: read || plan.classification === 'open', speakers: read ? [] : plan.speakers });
     this.appendEvent(context.runId, 'group_chat_updated', { roundId, state: 'open' });
   }
 
@@ -1599,15 +1601,23 @@ export class RunService {
     if (context.interrupt || context.stopRequested) return 'again';
     this.deadlineReached(context);
     if (context.timedOut) throw new ContractError('timeout');
-    const rules = first ? ruleSpeakers(this.roundText(context, round), roster, seedOf(round.id))
-      : hinted.filter(agentId => !round.speakers.some(speaker => speaker.agentId === agentId && speaker.state === 'started')).map((agentId): PlannedSpeaker => ({ agentId, intent: 'reply', length: 'short', source: 'hint' }));
-    // Someone always answers the host: an empty first answer counts as no answer.
-    const chosen: PlannedSpeaker[] = answer && (answer.speakers.length || !first) ? answer.speakers.map(speaker => ({ ...speaker, source: 'schedule' as const })) : rules;
+    let chosen: PlannedSpeaker[]; let more = answer?.more ?? false;
+    if (first) {
+      // D160: the model's reading, inside what the program guarantees. Someone always answers the host: no reading, or an empty one, is the rules.
+      const batch = firstBatch(this.roundText(context, round), roster, seedOf(round.id), this.roundHasImages(context, round), answer);
+      // A reading of "carry on" after a stop is the same as the word itself (D159): whoever was cut off, in their order.
+      const interrupted = answer?.relation === 'resume' ? this.database.interruptedGroupChatRound(context.runId, round.id)?.speakers.filter(speaker => roster.some(member => member.agentId === speaker.agentId)) : undefined;
+      chosen = interrupted?.length ? interrupted.map(({ agentId, intent, length, source, assignment }) => ({ agentId, intent, length, source, ...(assignment ? { assignment } : {}) })) : batch.speakers;
+      more = interrupted?.length ? false : batch.more;
+    } else {
+      chosen = answer ? answer.speakers.map(({ agentId, intent, length, brief }) => ({ agentId, intent, length, source: 'schedule' as const, ...(brief ? { assignment: brief } : {}) }))
+        : hinted.filter(agentId => !round.speakers.some(speaker => speaker.agentId === agentId && speaker.state === 'started')).map((agentId): PlannedSpeaker => ({ agentId, intent: 'reply', length: 'short', source: 'hint' }));
+    }
     const room = GROUP_CHAT_MAX_TURNS - used;
     if (!chosen.length) { this.closeRound(context.runId, round.id, 'done'); return 'done'; }
     this.database.transaction(() => {
       // More than fits means someone still wanted to speak, so the limit is what ended it, and the page says so.
-      this.database.appendGroupChatSpeakers(round.id, chosen.slice(0, room), chosen.length > room || (answer?.more ?? false));
+      this.database.appendGroupChatSpeakers(round.id, chosen.slice(0, room), chosen.length > room || more);
       this.appendEvent(context.runId, 'group_chat_updated', { roundId: round.id, state: 'open' });
     });
     return 'again';
@@ -1628,14 +1638,35 @@ export class RunService {
   /** D159: whether this speaker is picking up what a stop cut off, and if so whether they had started. Read from the rounds, so a repeat says the same. */
   private resumedSpeaker(context: RunContext, speaker: GroupChatSpeaker): 'cut_off' | 'not_started' | undefined {
     const round = this.database.latestGroupChatRound(context.runId);
-    if (!round || round.id !== speaker.roundId || !isContinueMessage(this.roundText(context, round))) return undefined;
+    if (!round || round.id !== speaker.roundId || !(isContinueMessage(this.roundText(context, round)) || this.roundReading(context, round)?.relation === 'resume')) return undefined;
     const before = this.database.interruptedGroupChatRound(context.runId, round.id)?.speakers.find(item => item.agentId === speaker.agentId && item.intent === speaker.intent);
     return before ? before.cutOff ? 'cut_off' : 'not_started' : undefined;
+  }
+
+  /** D160: the scheduling model's reading of this round's host message, if it gave one. Read back from its recorded answer, so a repeat says the same. */
+  private roundReading(context: RunContext, round: Pick<GroupChatRound, 'id'>): Pick<ScheduleOutput, 'relation' | 'topic'> | undefined {
+    const text = this.database.firstScheduleOutput(round.id);
+    return text ? parseScheduleOutput(text, context.members.map(({ agentId, displayName }) => ({ agentId, displayName }))) : undefined;
+  }
+  private roundHasImages(context: RunContext, round: GroupChatRound): boolean {
+    const message = round.messageId ? this.database.getMessage(round.messageId) : undefined;
+    return message ? (message.attachments?.length ?? 0) > 0 : (this.database.readRunSnapshot(context.runId).taskAttachments?.length ?? 0) > 0;
   }
 
   private roundText(context: RunContext, round: GroupChatRound): string {
     const message = round.messageId ? this.database.getMessage(round.messageId) : undefined;
     return message?.content ?? this.requireRun(context.runId).task ?? '';
+  }
+
+  /** D160: what the program already knows about this message, told to the scheduling model in the program's own words. */
+  private scheduleState(context: RunContext, round: GroupChatRound, roster: readonly MemberSnapshot[]): ScheduleState {
+    const plain = roster.map(({ agentId, displayName }) => ({ agentId, displayName }));
+    const name = (agentId: string) => roster.find(member => member.agentId === agentId)?.displayName;
+    const text = this.roundText(context, round);
+    const plan = classifyHostMessage(text, plain, seedOf(round.id), this.roundHasImages(context, round));
+    const mentioned = plan.classification === 'mention' ? plan.speakers.map(speaker => name(speaker.agentId)).filter((value): value is string => !!value) : [];
+    const interrupted = (this.database.interruptedGroupChatRound(context.runId, round.id)?.speakers ?? []).flatMap(speaker => { const value = name(speaker.agentId); return value ? [{ name: value, cutOff: speaker.cutOff }] : []; });
+    return { ...(mentioned.length ? { mentioned } : {}), ...(interrupted.length ? { interrupted } : {}) };
   }
 
   /** D150: the demo never asks; neither does a room with nothing to ask with. Whose service it goes through only says where its usage belongs. */
@@ -1659,7 +1690,9 @@ export class RunService {
     const requestId = randomUUID();
     const name = (agentId: string) => roster.find(member => member.agentId === agentId)?.displayName ?? '';
     const input: StreamChatInput = streamChatInputSchema.parse({ requestId, modelId: target.modelId, outputTokenLimit: GROUP_CHAT_SCHEDULE_MAX_TOKENS, agentRole: 'group-chat-schedule', fastReply: true,
-      messages: buildScheduleMessages({ task: snapshot.run.task ?? '', taskImages: snapshot.taskAttachments?.length ?? 0, members: roster, lines, turnsUsed: used, hinted: hinted.map(name).filter(Boolean) }) });
+      messages: buildScheduleMessages({ task: snapshot.run.task ?? '', taskImages: snapshot.taskAttachments?.length ?? 0, members: roster, lines, turnsUsed: used, hinted: hinted.map(name).filter(Boolean),
+        // D160: only the first request of a round reads the host's message; later ones only decide who goes on.
+        ...(round.speakers.length === 0 ? this.scheduleState(context, round, roster) : {}) }) });
     try { this.registry!.checkGeneration(target.providerId, input); } catch { return undefined; }
     this.database.transaction(() => {
       this.database.insertScheduleRequest({ requestId, runId: context.runId, roundId: round.id, agentId: target.agentId, providerId: target.providerId, modelId: target.modelId, inputSnapshot: input });
@@ -1748,7 +1781,9 @@ export class RunService {
       // A repeat of a group-chat reply asks for what the first request asked for. A Turn from before this queue existed is a plain reply.
       const chat = context.groupChat ? speaker ?? (repeat ? this.database.groupChatSpeakerOfTurn(turnId) : undefined) : undefined;
       const resumed = chat ? this.resumedSpeaker(context, chat) : undefined;
-      const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}), ...(resumed ? { resumed } : {}) } : undefined;
+      const reading = chat ? this.roundReading(context, { id: chat.roundId }) : undefined;
+      const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}), ...(resumed ? { resumed } : {}),
+        ...(reading?.relation && reading.relation !== 'resume' && !resumed ? { relation: reading.relation } : {}), ...(reading?.topic ? { topic: reading.topic } : {}) } : undefined;
       const preparation:RequestPreparation={snapshot,workflowStep,...(cue?{groupChat:cue}:{}),current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
         repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}
           :extend?{messages:extend.messages,sourceRequestId:repeat!.sourceRequestId,kind:'continue'}:undefined,

@@ -3,7 +3,7 @@ import type { MemberSnapshot } from '../../shared/schemas/persistence';
 import { summaryLabel } from '../../shared/schemas/summary';
 import { MAX_REQUEST_IMAGE_BYTES, type ProviderContentPart, type ProviderImagePart } from '../../shared/schemas/provider';
 import type { ImageAttachment } from '../../shared/schemas/attachment';
-import type { GroupChatIntent, GroupChatLength, GroupChatSpeakerSource } from '../../shared/schemas/groupChat';
+import type { GroupChatIntent, GroupChatLength, GroupChatRelation, GroupChatSpeakerSource } from '../../shared/schemas/groupChat';
 
 /**
  * Model-facing discussion format (D095). Only the current member's own unedited replies are `assistant`; everyone
@@ -73,7 +73,14 @@ export function groupChatBriefText(member: MemberSnapshot, members: readonly Mem
   const prompt = member.systemPrompt.trim();
   return [`你是${memberLabel(member)}。`, roster ? `群里还有：${roster}。` : '群里只有你和主持人。', ...(prompt ? [`你的设定：\n${prompt}`] : [])].join('\n');
 }
-export type GroupChatCue = { intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string; resumed?: 'cut_off' | 'not_started' };
+export type GroupChatCue = { intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string; resumed?: 'cut_off' | 'not_started'; relation?: Exclude<GroupChatRelation, 'resume'>; topic?: string };
+/** D160: how the host's message relates to the chat, as the scheduling model read it, said to the member as what a good turn is here. */
+const relationCues: Record<Exclude<GroupChatRelation, 'resume'>, string> = {
+  new_topic: '主持人换了话题：只聊这个新话题，之前的先放下。',
+  follow_up: '主持人在接着刚才的事往下说：结合前面已经说过的来回应，不用从头讲。',
+  correction: '主持人觉得刚才的说法有问题：先看清他指的是哪里，认真复核；错了就直接改正，没错就讲清依据，不要绕开，也不要换话题。',
+  chitchat: '这是闲聊，轻松回一句就好，不用往工作上引。',
+};
 /** D157: one short brief per occasion, each saying what a good turn looks like here, instead of one long list for every occasion. */
 const intentCues: Record<GroupChatIntent, string> = {
   reply: '接着聊就好。',
@@ -101,8 +108,10 @@ export function groupChatCueText(member: MemberSnapshot, cue: GroupChatCue): str
     : cue.resumed === 'not_started' ? '刚才轮到你时主持人叫停了，现在他让继续：把你当时要说的说出来，接的还是叫停之前的那件事。' : '';
   // D159: asked what they think, a member whose part is to sum up summed up twice and had no view. A few sentences of reply are for a view.
   const view = cue.intent === 'reply' && cue.length === 'medium' ? '主持人想听的是你自己的看法：说你的判断和理由，哪怕你平时负责总结，也别只是把别人说过的理一遍。' : '';
-  return ['【轮到你说话】', `现在由你（${memberLabel(member)}）接话。${resumed}${source ?? ''}${source && cue.intent === 'reply' ? '' : intentCues[cue.intent]}${view}${lengthCues[cue.length]}`,
-    ...(cue.assignment ? ['主持人给你的部分：', quoteText(cue.assignment)] : []), '直接说，不要加名字或标签。'].join('\n');
+  return ['【轮到你说话】', `现在由你（${memberLabel(member)}）接话。${resumed}${cue.relation ? relationCues[cue.relation] : ''}${source ?? ''}${source && cue.intent === 'reply' ? '' : intentCues[cue.intent]}${cue.relation === 'chitchat' ? '' : view}${lengthCues[cue.length]}`,
+    // What the scheduling model wrote is material, quoted like everything a model writes, and says so.
+    ...(cue.topic ? ['这一轮在聊什么（程序整理，仅供参考）：', quoteText(cue.topic)] : []),
+    ...(cue.assignment ? [cue.source === 'mention' ? '主持人给你的部分：' : '这次建议你说的重点（程序整理，仅供参考）：', quoteText(cue.assignment)] : []), '直接说，不要加名字或标签。'].join('\n');
 }
 const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
 /** D154: today, by this computer's clock, from the application. Without it a model guesses, and says so as a fact. */

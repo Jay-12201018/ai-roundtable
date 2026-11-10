@@ -3,7 +3,7 @@ import { idSchema, sequenceSchema } from '../../shared/schemas/common';
 import { storedRunSchema, requestAttemptSchema } from '../../shared/schemas/persistence';
 import type { ProviderMessage } from '../providers/types';
 import { imageAttachmentsSchema } from '../../shared/schemas/attachment';
-import { groupChatIntentSchema, groupChatLengthSchema, groupChatSpeakerSourceValues } from '../../shared/schemas/groupChat';
+import { GROUP_CHAT_NOTE_CHARS, groupChatIntentSchema, groupChatLengthSchema, groupChatRelationValues, groupChatSpeakerSourceValues } from '../../shared/schemas/groupChat';
 
 const instructionSchema = z.object({ id: idSchema, content: z.string().min(1) }).strict();
 const runSchema = storedRunSchema.pick({
@@ -39,7 +39,8 @@ export const contextInputSchema = z.object({
   // D147: the goal's images, and whether this member's model gets images at all. Without a word on it, it does not.
   taskImages: imageAttachmentsSchema.optional(), imagesVisible: z.boolean().optional(),
   // D153: this request is a group-chat reply, and what the program asks of it.
-  groupChat: z.object({ intent: groupChatIntentSchema, length: groupChatLengthSchema, source: z.enum(groupChatSpeakerSourceValues), assignment: z.string().optional(), resumed: z.enum(['cut_off', 'not_started']).optional() }).strict().optional(),
+  groupChat: z.object({ intent: groupChatIntentSchema, length: groupChatLengthSchema, source: z.enum(groupChatSpeakerSourceValues), assignment: z.string().optional(), resumed: z.enum(['cut_off', 'not_started']).optional(),
+    relation: z.enum(groupChatRelationValues).exclude(['resume']).optional(), topic: z.string().max(GROUP_CHAT_NOTE_CHARS).optional() }).strict().optional(),
   // R13B (D107): a host-confirmed summary that stands in for every version of the slots it covers.
   summary: z.object({
     messageId: idSchema, content: z.string().min(1), firstNumber: z.number().int().min(1), lastNumber: z.number().int().min(1),

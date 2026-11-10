@@ -1028,6 +1028,11 @@ export class Database {
     const row = this.db.prepare('SELECT round_id,position,agent_id,intent,length,source,assignment,state,turn_id FROM group_chat_speakers WHERE turn_id=?').get(turnId) as RawGroupChatSpeaker | undefined;
     return row ? groupChatSpeakerFromRow(row) : undefined;
   }
+  /** D160: what the scheduling model answered first for this round: its reading of the host's message. Only ever read by `parseScheduleOutput`. */
+  firstScheduleOutput(roundId: string): string | undefined {
+    this.assertInitialized();
+    return this.db.prepare("SELECT output_text FROM group_chat_schedule_requests WHERE round_id=? AND status='completed' ORDER BY created_at ASC,rowid ASC LIMIT 1").pluck().get(roundId) as string | undefined;
+  }
   insertScheduleRequest(request: { requestId: string; runId: string; roundId: string; agentId: string; providerId: string; modelId: string; inputSnapshot: StreamChatInputRecord }): void {
     this.assertInitialized();
     const timestamp = now();

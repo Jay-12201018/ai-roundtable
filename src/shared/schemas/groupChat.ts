@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { idSchema, sequenceSchema } from './common';
 
 /**
- * D149: 群聊. A group-chat Run is marked by its workflow snapshot; it has no plan of steps. Each host message opens a round, and
- * the program decides who speaks: by rule where it can, by one small model request where it cannot.
+ * D149: 群聊. A group-chat Run is marked by its workflow snapshot; it has no plan of steps. Each host message opens a round.
+ * D160: a small model request reads the message first and says how it relates to the chat, who should answer and how; the program
+ * keeps what must not go wrong (a stop, who was @-ed, everyone when everyone is asked, the limits) and falls back to its rules.
  */
 export const GROUP_CHAT_TEMPLATE_ID = 'group-chat';
 export const groupChatWorkflowSnapshot = { templateId: GROUP_CHAT_TEMPLATE_ID, version: 1 } as const;
@@ -24,6 +25,10 @@ export const groupChatClassificationValues = ['mention', 'gather', 'simple', 'op
 export const groupChatRoundStateValues = ['open', 'done', 'superseded', 'stopped', 'limit'] as const;
 /** Where a place in the queue came from. Only `mention` and `gather` come from the host's own words; `hint` is a member's @, which is only a suggestion. */
 export const groupChatSpeakerSourceValues = ['mention', 'gather', 'rule', 'schedule', 'hint'] as const;
+/** D160: how the host's message relates to what came before, as the scheduling model read it. `resume` picks up what a stop cut off. */
+export const groupChatRelationValues = ['new_topic', 'follow_up', 'correction', 'chitchat', 'resume'] as const;
+export type GroupChatRelation = (typeof groupChatRelationValues)[number];
+export const GROUP_CHAT_NOTE_CHARS = 80;
 export const groupChatSpeakerStateValues = ['queued', 'started', 'dropped'] as const;
 export const groupChatScheduleStatusValues = ['generating', 'completed', 'invalid', 'failed', 'aborted', 'interrupted'] as const;
 
@@ -37,12 +42,18 @@ export type GroupChatSpeakerSource = (typeof groupChatSpeakerSourceValues)[numbe
 export type GroupChatSpeakerState = (typeof groupChatSpeakerStateValues)[number];
 export type GroupChatScheduleStatus = (typeof groupChatScheduleStatusValues)[number];
 
-/** What the scheduling model may answer. Names are checked against the roster afterwards; anything else is thrown away whole. */
+/**
+ * What the scheduling model may answer. Names are checked against the roster afterwards; a wrong name, intent or length throws the answer
+ * away whole. D160: the reading of the message (`relation`, `topic`) and a note for each speaker (`brief`) are extras: one that is malformed
+ * is dropped by itself, and a key nobody asked for is ignored, so a model that says a little too much still gets its speakers heard.
+ */
 export const groupChatScheduleOutputSchema = z.object({
-  speakers: z.array(z.object({ name: z.string().min(1).max(64), intent: groupChatIntentSchema, length: groupChatLengthSchema }).strict()).max(8),
+  relation: z.enum(groupChatRelationValues).optional().catch(undefined),
+  topic: z.string().optional().catch(undefined),
+  speakers: z.array(z.object({ name: z.string().min(1).max(64), intent: groupChatIntentSchema, length: groupChatLengthSchema, brief: z.string().optional().catch(undefined) })).max(8),
   /** Whether someone may still want to speak after these; absent means no. */
-  more: z.boolean().optional(),
-}).strict();
+  more: z.boolean().optional().catch(undefined),
+});
 
 /** The current round as the page shows it. Main decides; this only says what it decided. */
 export const groupChatStateSchema = z.object({
