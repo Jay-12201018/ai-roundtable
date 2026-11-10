@@ -136,7 +136,7 @@ describe('D153 the words of a group chat', () => {
   });
   it('asks for talk, not a contribution or a report', () => {
     const rules = groupChatRulesText(false);
-    for (const word of ['口语化', '不说“作为 AI”', '一句话', '用名字', '不一味附和', '不替别人发言']) expect(rules).toContain(word);
+    for (const word of ['口语', '“作为 AI”', '一句话', '叫别人的名字', '有不同意见就直说', '不替别人发言']) expect(rules).toContain(word);
     expect(turnCueText(member)).toContain('贡献');
     const cue = groupChatCueText(member, { intent: 'reply', length: 'short', source: 'gather' });
     expect(cue).not.toContain('贡献');
@@ -199,9 +199,15 @@ describe('D154 what the first real run showed', () => {
     expect(classifyHostMessage('好', roster, 3, true).classification).toBe('open');
     expect(classifyHostMessage('大家好', roster, 3, true).classification).toBe('gather');
   });
+  it('D157: each of the three that always hold says why, and the examples say they are not to be copied', () => {
+    const rules = groupChatRulesText(false);
+    for (const word of ['主持人会把你说的话当真', '是会真的去等的', '只做分给你的那部分', '只是让你感受一下语气，不要照抄']) expect(rules).toContain(word);
+    expect(rules).not.toContain('主持人改过的发言');
+    expect(groupChatRulesText(true)).toContain('主持人改过的发言');
+  });
   it('the rules say not to invent, not to promise later, to answer the latest, and to ask', () => {
     const rules = groupChatRulesText(false);
-    for (const word of ['只能依据聊天记录和主持人说的话', '一律不要编', '事实不知道就问主持人，不要猜', '按最常见的做法定下来', '这种工期', '不要承诺明天或稍后', '先回应主持人最新这条', '旧话题除非主持人提起', '拿不准就问']) expect(rules).toContain(word);
+    for (const word of ['聊天记录和主持人的话里没有的东西', '只说有依据的事', '事实不知道，就说不知道，或者问主持人', '按最常见的做法定下来', '也不报工期', '不许诺以后', '先回应主持人最新这条', '他没再提的旧话题就放下', '一次只问一个问题']) expect(rules).toContain(word);
   });
   const member = { agentId: 'a', displayName: '小林', roleTemplateId: '产品', systemPrompt: '', providerId: 'p', modelId: 'm', displayOrder: 0 };
   it('a call for everyone brings no new subject, and a simple answer ends there', () => {
@@ -229,7 +235,7 @@ describe('D154 what the first real run showed', () => {
     expect(roleTemplates.find(template => template.id === 'custom')!.prompt).toBe('');
   });
   it('none of this reaches the stricter ways', () => {
-    for (const word of ['一律不要编', '先回应主持人最新这条']) expect(discussionRulesText(false)).not.toContain(word);
+    for (const word of ['只说有依据的事', '先回应主持人最新这条']) expect(discussionRulesText(false)).not.toContain(word);
     expect(turnCueText(member)).not.toContain('先问清楚');
   });
 });

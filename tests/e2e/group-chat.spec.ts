@@ -147,7 +147,7 @@ test('a simple question: one, briefly', async ({ harness }) => {
   expect(textIn(fixture.requests[0]!.messages.at(-1))).toContain('答完就停');
   const week = ['日', '一', '二', '三', '四', '五', '六'][new Date().getDay()]!;
   expect(textIn(fixture.requests[0]!.messages.find(message => textIn(message).startsWith('今天是')))).toContain(`星期${week}`);
-  expect(fixture.requests[0]!.messages.some(message => message.role === 'system' && textIn(message).includes('一律不要编'))).toBe(true);
+  expect(fixture.requests[0]!.messages.some(message => message.role === 'system' && textIn(message).includes('只说有依据的事'))).toBe(true);
   await capture(running, 'simple-question');
   await running.quit();
 });

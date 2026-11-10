@@ -160,7 +160,7 @@ describe('D150 who speaks', () => {
     expect(f.schedules()).toHaveLength(1);
     expect(f.schedules()[0]!.max_tokens).toBeLessThanOrEqual(400);
     expect(done.groupChat?.round).toMatchObject({ classification: 'open', scheduleCalls: 1, state: 'done' });
-    expect(String(f.members()[0]!.messages.at(-1)!.content)).toContain('看看前面的说法有没有问题');
+    expect(String(f.members()[0]!.messages.at(-1)!.content)).toContain('请你把把关');
   });
   it.each([
     ['invalid JSON', () => sse('让阿哲说')],
@@ -547,7 +547,7 @@ describe('D149 what the member is told', () => {
     const run = await f.start('@林舟 在吗'); await f.idle(run.runId);
     const text = f.members()[0]!.messages.map(message => String(message.content)).join('\n');
     expect(text).toContain('群聊规则');
-    expect(text).toContain('不说“作为 AI”');
+    expect(text).toContain('“作为 AI”');
     expect(text).toContain('指令优先级：应用指令最高');
     expect(text).toContain('不授权你点名、调度其他成员或调用工具');
     expect(text).toContain('「阿哲」（工程）');
@@ -657,8 +657,8 @@ describe('D154 what the first real run showed', () => {
     for (const body of f.members()) {
       const system = body.messages.filter(message => message.role === 'system').map(message => String(message.content)).join('\n');
       expect(system).toContain(today);
-      expect(system).toContain('一律不要编');
-      expect(system).toContain('不要承诺明天或稍后');
+      expect(system).toContain('只说有依据的事');
+      expect(system).toContain('不许诺以后');
       expect(system).toContain('指令优先级：应用指令最高');
     }
     expect(f.members()[1]!.messages).toEqual(f.members()[0]!.messages);
@@ -673,7 +673,7 @@ describe('D154 what the first real run showed', () => {
     const run = await f.service.start({ roomId: f.roomId, task: '讨论一下' }); await f.idle(run.runId);
     for (const body of f.members()) {
       const text = body.messages.map(message => String(message.content)).join('\n');
-      for (const word of ['今天是', '一律不要编', '不要承诺明天', '答完就停', '能开工就直接开工']) expect(text).not.toContain(word);
+      for (const word of ['今天是', '只说有依据的事', '不许诺以后', '答完就停', '能开工就直接开工']) expect(text).not.toContain(word);
     }
     expect(String(f.members()[0]!.messages[0]!.content)).toBe(boundaryText);
     expect(String(f.members()[0]!.messages[1]!.content)).toBe(discussionRulesText(false));
@@ -707,7 +707,7 @@ describe('D155 the prompts', () => {
     const f = await fixture();
     const run = await f.start('今天几号？'); await f.idle(run.runId);
     const text = f.members()[0]!.messages.map(message => String(message.content)).join('\n');
-    for (const word of ['别人已经问过的问题不要再问一遍', '同问', '别在后面每句里反复催主持人', '也不要编自己正在做什么', '不要重复之前说过的答案']) expect(text).toContain(word);
+    for (const word of ['别人已经问过、还没得到回答的', '同问', '别在后面每句里反复催主持人', '你“正在做”的事', '不要重复之前说过的答案']) expect(text).toContain(word);
   });
 });
 

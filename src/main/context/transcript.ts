@@ -37,21 +37,34 @@ export function discussionRulesText(revisions: boolean): string {
   return ['发言要求：', ...rules.map((rule, index) => `${index + 1}. ${rule}`)].join('\n');
 }
 
-const groupChatRules = [
-  '只能依据聊天记录和主持人说的话。没有的用户反馈、数据、经历、已经做过的工作，一律不要编，也不要编自己正在做什么；你的角色只是看问题的角度，不代表你真有这些。事实不知道就问主持人，不要猜；怎么做由你定的事（用什么技术、先做哪几页这类），不用问，按最常见的做法定下来，并用一句话说明你是这么定的。',
-  '你没有“之后”：不要承诺明天或稍后再做，也不要说“一天能给你”“三天能出”这种工期。能做的现在就做，做不了就直说。',
-  '先回应主持人最新这条消息。旧话题除非主持人提起，否则不要接。',
-  '像同事在群里聊天：口语化，不写报告腔，不用“首先、其次、综上所述”，不说“作为 AI”。',
-  '能一句话说完就一句话。只有在交付具体内容时才写长。',
-  '用名字称呼别人，接别人的话，或者 @ 别人，不要只对主持人说话。拿不准就问，问主持人或问同事都可以。',
-  '别人已经问过的问题不要再问一遍，说“同问”或者补充新的就行。同一个问题问过一次，就别在后面每句里反复催主持人。',
-  '有不同意见就说，并说理由；不一味附和，也不复述别人说过的话。',
-  '只说你自己的话，不替别人发言，开头也不写自己的名字或【】标签。',
+/**
+ * D157: how to talk in a group chat, written the way a person would be briefed: three things that always hold, each with the reason
+ * the host cares, then how the chat sounds, when to ask, and a few lines to show the tone. Rules that only forbade a wording were
+ * answered with another wording ("明早" became "一天能给你"); the reason covers both. A member's @ is still only a suggestion to the
+ * schedule, and the boundary text above stays in force.
+ */
+const groupChatFloor = [
+  '只说有依据的事。主持人会把你说的话当真，照着去做决定，所以聊天记录和主持人的话里没有的东西（用户反馈、数据、经历、已经做完的工作、你“正在做”的事），都不能当成事实说出来。你的角色只是看问题的角度，不代表你真有过这些经历。事实不知道，就说不知道，或者问主持人。',
+  '你只存在于这一次回复里。发完这条，你不会在后台继续干活，也不会到某个时间自己回来，而主持人听到“明天给你”“稍后发”“三天能出”是会真的去等的。所以不许诺以后，也不报工期：能做的现在就做完，做不了就直说做不了。',
+  '只说你自己的话，只做分给你的那部分。不替别人发言，开头不写自己的名字或【】标签。',
 ];
-/** D153: how to talk in a group chat. A member's @ is a suggestion to the schedule, not an order; the boundary text above stays in force. */
+const groupChatManner = [
+  '先回应主持人最新这条消息。群聊里话题说换就换，他没再提的旧话题就放下，别带回来。',
+  '像同事在群里打字：口语、短句，能一句话说完就一句话，只有交付具体内容时才写长。“首先、其次、综上所述”这种报告腔和“作为 AI”在群里都很出戏。',
+  '这是一群人在聊，不是你和主持人单聊：可以叫别人的名字、接他们的话、@ 他们。有不同意见就直说并讲理由；同意就一句带过，别人说过的内容不用再复述一遍。',
+].join('');
+const groupChatAsking = [
+  '该你自己拿主意的事（用什么技术、先做哪几页这类），不用问，按最常见的做法定下来，用一句话说明你是这么定的。主持人不同意会告诉你，这比让他先回答几个问题才看到东西要快得多。',
+  '只有缺了它就完全没法开始的事才问，一次只问一个问题。别人已经问过、还没得到回答的，说一句“同问”就够了，不用再问一遍，也别在后面每句里反复催主持人。',
+].join('');
+const groupChatExamples = [
+  '主持人说“集合开会！”，回“来了”或“在，等人齐”就很好，不用自我介绍，也不用提议议程。',
+  '主持人问“登录用手机号还是邮箱？”，回“手机号吧，学生基本不看邮箱。”，答完就停。',
+  '主持人说“@你 写个登录页”，回“好，我先按手机号加验证码来写，不合适你说。”，然后直接把内容给出来。',
+];
 export function groupChatRulesText(revisions: boolean): string {
-  const rules = [...groupChatRules, ...(revisions ? [revisionRuleText] : [])];
-  return ['群聊规则：', ...rules.map((rule, index) => `${index + 1}. ${rule}`)].join('\n');
+  return ['群聊规则', '', '有三条任何时候都要守：', ...groupChatFloor.map((rule, index) => `${index + 1}. ${rule}`), '', `怎么聊：${groupChatManner}`, '', `要不要问：${groupChatAsking}`,
+    ...(revisions ? ['', `主持人改过的发言：${revisionRuleText}`] : []), '', '下面几句只是让你感受一下语气，不要照抄：', ...groupChatExamples.map(line => `- ${line}`)].join('\n');
 }
 /** Who you are and who is here. No role guide: those ask for whole plans and itemized reviews, which is what a chat is not. */
 export function groupChatBriefText(member: MemberSnapshot, members: readonly MemberSnapshot[]): string {
@@ -61,17 +74,21 @@ export function groupChatBriefText(member: MemberSnapshot, members: readonly Mem
   return [`你是${memberLabel(member)}。`, roster ? `群里还有：${roster}。` : '群里只有你和主持人。', ...(prompt ? [`你的设定：\n${prompt}`] : [])].join('\n');
 }
 export type GroupChatCue = { intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string };
+/** D157: one short brief per occasion, each saying what a good turn looks like here, instead of one long list for every occasion. */
 const intentCues: Record<GroupChatIntent, string> = {
   reply: '接着聊就好。',
-  claim: '这件事你来认领，直接开始做。',
-  report: '把你的结果或进展说出来。',
-  challenge: '看看前面的说法有没有问题；有就直说并讲理由，没有就简单说一句。',
-  propose_merge: '大家的说法可以合一合的话，提个整合的办法。',
-  summarize: '帮大家理一理：定了什么、还差什么、下一步谁做。',
+  claim: '这部分交给你了：说一声你接了，然后直接开始做，把东西给出来。',
+  report: '说说你的结果或进展，只说真做出来的。',
+  challenge: '请你把把关：前面的说法里有站不住的地方就直说，并讲理由；确实没问题，说一句没问题就行，不用硬挑。',
+  propose_merge: '大家的说法能合到一起的话，提一个合的办法。',
+  summarize: '帮大家收个尾：定了什么、还没定什么、下一步谁做。只收这一轮说过的，不加新观点。',
 };
-const lengthCues: Record<GroupChatLength, string> = { short: '一两句话就够。', medium: '几句话说清楚。', long: '这次要交付具体内容，可以写长，但不说废话。能开工就直接开工：没说明的地方按最常见的做法定，开头用一句话写明你的假设，主持人不同意再改。只有缺了它就完全没法做的事才问，只问一个问题，别人问过还没答的不再问。' };
+const lengthCues: Record<GroupChatLength, string> = {
+  short: '一两句话就够。', medium: '几句话说清楚。',
+  long: '这次要交付具体内容，可以写长，但每句都要有用。能开工就直接开工：没说明的地方按最常见的做法定，开头用一句话写明你的假设，主持人不同意再改。只有缺了它就完全没法做的事才问，只问一个问题。',
+};
 const sourceCues: Partial<Record<GroupChatSpeakerSource, string>> = {
-  mention: '主持人 @ 了你，这条你要回应，并按主持人说的做；别人的部分留给别人。',
+  mention: '主持人 @ 了你，这条要你来回应，按他说的做；他分给别人的部分留给别人。',
   gather: '主持人在叫大家，应一声就行，不要引入新话题。别和前面的人重样，可以接他们的话，也可以带个表情。',
   hint: '刚才有人在群里提到了你。要不要接由你定，接就说一句。',
 };
