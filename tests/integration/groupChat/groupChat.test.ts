@@ -666,14 +666,14 @@ describe('D154 what the first real run showed', () => {
   it('a job with too little to go on is told to ask first', async () => {
     const f = await fixture();
     const run = await f.start('@林舟 写前端，@阿哲 写后端'); await f.idle(run.runId);
-    for (const body of f.members()) expect(String(body.messages.at(-1)!.content)).toContain('先问清楚，不要开写');
+    for (const body of f.members()) expect(String(body.messages.at(-1)!.content)).toContain('能开工就直接开工');
   });
   it('the other four ways get no date and none of these rules: their requests are as they were', async () => {
     const f = await fixture();
     const run = await f.service.start({ roomId: f.roomId, task: '讨论一下' }); await f.idle(run.runId);
     for (const body of f.members()) {
       const text = body.messages.map(message => String(message.content)).join('\n');
-      for (const word of ['今天是', '一律不要编', '不要承诺明天', '答完就停', '先问清楚']) expect(text).not.toContain(word);
+      for (const word of ['今天是', '一律不要编', '不要承诺明天', '答完就停', '能开工就直接开工']) expect(text).not.toContain(word);
     }
     expect(String(f.members()[0]!.messages[0]!.content)).toBe(boundaryText);
     expect(String(f.members()[0]!.messages[1]!.content)).toBe(discussionRulesText(false));

@@ -152,9 +152,10 @@ describe('D153 the words of a group chat', () => {
 
 describe('D152 skipping thinking', () => {
   const service = (id: string) => serviceCatalog.find(item => item.id === id);
-  it('is for a quick word only', () => {
+  it('is for talk: a quick word, or a few sentences of plain reply', () => {
     expect(skipsThinking({ intent: 'reply', length: 'short' })).toBe(true);
-    expect(skipsThinking({ intent: 'reply', length: 'medium' })).toBe(false);
+    expect(skipsThinking({ intent: 'reply', length: 'medium' })).toBe(true);
+    for (const intent of ['challenge', 'report', 'claim', 'summarize', 'propose_merge'] as const) expect(skipsThinking({ intent, length: 'medium' })).toBe(false);
     expect(skipsThinking({ intent: 'reply', length: 'long' })).toBe(false);
     expect(skipsThinking({ intent: 'challenge', length: 'short' })).toBe(false);
     expect(skipsThinking({ intent: 'report', length: 'short' })).toBe(false);
@@ -200,7 +201,7 @@ describe('D154 what the first real run showed', () => {
   });
   it('the rules say not to invent, not to promise later, to answer the latest, and to ask', () => {
     const rules = groupChatRulesText(false);
-    for (const word of ['只能依据聊天记录和主持人说的话', '一律不要编', '信息不够就直接问主持人', '不要承诺明天或稍后', '先回应主持人最新这条', '旧话题除非主持人提起', '拿不准就问']) expect(rules).toContain(word);
+    for (const word of ['只能依据聊天记录和主持人说的话', '一律不要编', '事实不知道就问主持人，不要猜', '按最常见的做法定下来', '这种工期', '不要承诺明天或稍后', '先回应主持人最新这条', '旧话题除非主持人提起', '拿不准就问']) expect(rules).toContain(word);
   });
   const member = { agentId: 'a', displayName: '小林', roleTemplateId: '产品', systemPrompt: '', providerId: 'p', modelId: 'm', displayOrder: 0 };
   it('a call for everyone brings no new subject, and a simple answer ends there', () => {
@@ -208,11 +209,12 @@ describe('D154 what the first real run showed', () => {
     expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'rule' })).toContain('答完就停，不要借机带回别的话题');
     expect(groupChatCueText(member, { intent: 'report', length: 'long', source: 'rule' })).not.toContain('答完就停');
   });
-  it('a delivery with too little to go on asks first', () => {
+  it('a delivery starts on stated assumptions, and asks only what it cannot start without', () => {
     const cue = groupChatCueText(member, { intent: 'claim', length: 'long', source: 'mention', assignment: '写前端' });
-    expect(cue).toContain('先问清楚，不要开写');
+    expect(cue).toContain('能开工就直接开工');
+    expect(cue).toContain('只问一个问题');
     expect(cue).toContain('> 写前端');
-    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'mention' })).not.toContain('先问清楚');
+    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'mention' })).not.toContain('能开工就直接开工');
   });
   it('today is said plainly, by this computer\'s calendar', () => {
     expect(groupChatDateText(new Date(2026, 10, 5))).toBe('今天是 2026 年 11 月 5 日，星期四（这台电脑的日期）。');

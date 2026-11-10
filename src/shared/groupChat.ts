@@ -135,8 +135,12 @@ export function classifyHostMessage(text: string, roster: readonly RosterMember[
   return { classification: 'open', speakers: [] };
 }
 
-/** D152: a quick word skips thinking where the catalog knows how. Doubting something or delivering it never does, however short. */
-export const skipsThinking = (speaker: { intent: GroupChatIntent; length: GroupChatLength }) => speaker.length === 'short' && !['challenge', 'report', 'claim'].includes(speaker.intent);
+/**
+ * D152, widened by D156: talk skips thinking where the catalog knows how: a quick word, and a few sentences of plain reply, which waited
+ * ten seconds each when they thought. Doubting something, delivering it or summing it up always thinks, and so does anything long.
+ */
+export const skipsThinking = (speaker: { intent: GroupChatIntent; length: GroupChatLength }) =>
+  speaker.length === 'short' ? !['challenge', 'report', 'claim'].includes(speaker.intent) : speaker.length === 'medium' && speaker.intent === 'reply';
 
 /** Who a member's reply names. Only a suggestion for the schedule: it gives no place in the queue, and it is never the host speaking. */
 export function memberHints(text: string, roster: readonly RosterMember[], selfId: string): string[] {
