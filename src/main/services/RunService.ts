@@ -273,6 +273,8 @@ export class RunService {
     const round = data.groupChatRound;
     return { groupChat: { scheduleRequestIds: data.scheduleRequests.map(request => request.requestId), ...(round ? { round: { roundId: round.id, classification: round.classification, state: round.state,
       turnsUsed: round.speakers.filter(speaker => speaker.state === 'started').length, scheduleCalls: round.scheduleCalls, scheduling: round.scheduling,
+      spoke: [...new Set(round.speakers.filter(speaker => speaker.state === 'started').map(speaker => speaker.agentId))],
+      readFailed: !round.scheduling && data.scheduleRequests.some(request => request.roundId === round.id) && !data.scheduleRequests.some(request => request.roundId === round.id && (request.status === 'completed' || request.status === 'aborted')),
       queue: round.speakers.filter(speaker => speaker.state === 'queued').map(({ agentId, intent, length, source }) => ({ agentId, intent, length, source })) } } : {}) } };
   }
 

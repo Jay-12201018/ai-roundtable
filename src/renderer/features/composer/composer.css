@@ -7,6 +7,7 @@
 .next-strip > span { flex: 1 1 0; min-width: 0; }
 .next-strip b { color: var(--text); font-weight: 600; }
 .next-strip .strip-warn { display: block; color: var(--warn); }
+.next-strip .strip-note { display: block; color: var(--text-3, var(--muted)); }
 .composer-feedback { margin: 0 6px 8px; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 .composer-feedback p { margin: 0; }
 .composer-alerts { display: grid; gap: 6px; margin: 0 6px 8px; font-size: 13px; line-height: 20px; }

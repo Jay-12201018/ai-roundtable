@@ -365,6 +365,35 @@ test('a word like 1 is read once and gets one short reply', async ({ harness }) 
   await running.quit();
 });
 
+test('D163: when not everyone answers, the page says whose turn it was not and how to hear from them', async ({ harness }) => {
+  const running = await harness.launch(); const { page } = running; const { fixture } = harness;
+  await open(running);
+  fixture.reply = body => isSchedule(body) ? JSON.stringify({ relation: 'new_topic', topic: '今天星期几', speakers: [{ name: '阿哲', intent: 'reply', length: 'short' }] }) : '周三。';
+  await first(running, '今天星期几？');
+  await waiting(running);
+  expect(await spoke(page)).toEqual(['阿哲']);
+  const strip = page.getByRole('status', { name: '这条消息由谁回应' });
+  await expect(strip).toContainText('这条由 阿哲 回应');
+  await expect(strip).toContainText('林舟、小雨没被安排发言');
+  await expect(strip).toContainText('@林舟');
+  await expect(strip).not.toContainText('没能用模型读懂');
+  await capture(running, 'who-answered');
+  // Named without an @, a member answers; then everyone has spoken to their message and nothing needs saying.
+  fixture.reply = body => isSchedule(body) ? JSON.stringify({ relation: 'follow_up', speakers: [{ name: '阿哲', intent: 'reply', length: 'short' }] }) : `${memberOf(body)}在。`;
+  await say(running, '林舟和小雨你们怎么不说话');
+  await waiting(running);
+  expect((await spoke(page)).slice(1).sort()).toEqual(['小雨', '林舟', '阿哲'].sort());
+  await expect(page.getByRole('status', { name: '这条消息由谁回应' })).toHaveCount(0);
+  // No model could read the message: the rules answer, and the page says so quietly.
+  fixture.chatError = body => isSchedule(body as { messages: any[] }) ? { status: 500, body: { error: { code: 'server_error' } } } : undefined;
+  fixture.reply = () => '周四。';
+  await say(running, '明天星期几？');
+  await waiting(running);
+  await expect(page.getByRole('status', { name: '这条消息由谁回应' })).toContainText('没能用模型读懂');
+  await capture(running, 'read-failed');
+  await running.quit();
+});
+
 test('一位失败，其他人照常说，等大家说完再让 TA 重说，位置不变', async ({ harness }) => {
   const running = await harness.launch(); const { page } = running; const { fixture } = harness;
   await open(running);

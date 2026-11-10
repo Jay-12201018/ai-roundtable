@@ -239,7 +239,16 @@ function ChatStatus({ snapshot }: { snapshot: RunSnapshot }) {
   const turn = snapshot.turns.find(item => item.turnId === snapshot.currentTurnId);
   const since = snapshot.attempts?.filter(attempt => attempt.turnId === turn?.turnId).at(-1);
   const queue = round?.state === 'open' ? round.queue : [];
-  if (!turn && !round?.scheduling && !(queue.length && ['running', 'pausing'].includes(snapshot.status))) return null;
+  if (!turn && !round?.scheduling && !(queue.length && ['running', 'pausing'].includes(snapshot.status))) {
+    // D163: a member who says nothing looks broken unless the page says it was not their turn, and how to hear from them.
+    const quiet = round && (round.state === 'done' || round.state === 'limit') && round.spoke.length > 0 ? members.filter(member => !round.spoke.includes(member.agentId)) : [];
+    if (!quiet.length && !round?.readFailed) return null;
+    return <div className="next-strip chat-status" role="status" aria-label="这条消息由谁回应">
+      <AtSign aria-hidden size={14} />
+      <span>{quiet.length > 0 && <>这条由 <b>{round!.spoke.map(name).join('、')}</b> 回应，{quiet.map(member => member.displayName).join('、')}没被安排发言。想听 TA 的，发 <b>@{quiet[0]!.displayName}</b> 就行。</>}
+        {round?.readFailed && <span className="strip-note">这条消息没能用模型读懂（调度用的模型暂时没有回应），已按内置规则安排回应。</span>}</span>
+    </div>;
+  }
   return <div className="next-strip chat-status" role="status" aria-label="谁在说话">
     <Clock aria-hidden size={14} />
     <span>{turn ? <><b>{name(turn.agentId)}</b> 正在输入… <WaitingSeconds key={turn.turnId} since={since?.startedAt ?? since?.createdAt} /></> : round?.scheduling ? '在看谁来接话…' : <><b>{name(queue[0]?.agentId)}</b> 马上接话…</>}

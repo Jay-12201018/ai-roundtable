@@ -61,6 +61,10 @@ export const groupChatStateSchema = z.object({
   round: z.object({
     roundId: idSchema, classification: z.enum(groupChatClassificationValues), state: z.enum(groupChatRoundStateValues),
     turnsUsed: sequenceSchema, scheduleCalls: sequenceSchema, scheduling: z.boolean(),
+    /** D163: who has answered this message, in order, so the page can say whose turn it was not. */
+    spoke: z.array(idSchema).max(64),
+    /** D163: a model was asked to read this message and none could; the rules arranged the answers. */
+    readFailed: z.boolean(),
     /** Who is still to speak, in order. */
     queue: z.array(z.object({ agentId: idSchema, intent: groupChatIntentSchema, length: groupChatLengthSchema, source: z.enum(groupChatSpeakerSourceValues) }).strict()).max(64),
   }).strict().optional(),
