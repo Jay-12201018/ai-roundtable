@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream';
 import type { lookup as dnsLookup } from 'node:dns/promises';
 import type { RequestOptions } from 'node:https';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSafeFetch as catalogFetch, networkPhaseOf } from '../../../src/main/providers/network';
+import { CONNECT_RETRY_DELAYS_MS, createSafeFetch as catalogFetch, networkPhaseOf } from '../../../src/main/providers/network';
 import { ContractError } from '../../../src/shared/contracts/errors';
 import { catalogServiceAt, serviceCatalog } from '../../../src/shared/serviceCatalog';
 
@@ -331,7 +331,7 @@ describe('Main safe Provider transport', () => {
   });
 });
 
-describe('D155 one more try, only when nothing was written', () => {
+describe('D155, D158 more tries, only when nothing was written', () => {
   const local = (lookupFn: typeof dnsLookup, guard?: () => void) => catalogFetch(guard, lookupFn, undefined, { has: () => true });
   const closedPort = async () => { const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done)); const { port } = server.address() as AddressInfo; await new Promise(done => server.close(done)); return port; };
   const dnsFailure = () => Object.assign(new TypeError('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' });
@@ -348,13 +348,21 @@ describe('D155 one more try, only when nothing was written', () => {
       expect(tries).toBe(2);
     } finally { server.close(); }
   });
-  it('a refused connection is tried once more, and only once; the failure says where', async () => {
+  it('a refused connection is tried four times in all, and no more; the failure says where', async () => {
     const port = await closedPort(); let tries = 0;
     const resolver = (async () => { tries++; return here; }) as unknown as typeof dnsLookup;
     const failure = await local(resolver)(`http://localhost:${port}/v1/x`, { method: 'POST', body: '{}' }).catch(error => error);
-    expect(tries).toBe(2);
+    expect(CONNECT_RETRY_DELAYS_MS).toEqual([300, 1000, 2000]);
+    expect(tries).toBe(4);
     expect(networkPhaseOf(failure)).toBe('tcp');
-  });
+  }, 15000);
+  it('D158: a burst of three failures is ridden out, and the fourth try goes through', async () => {
+    const server = createServer((_req, res) => res.end('fourth'));
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo; let tries = 0;
+    const resolver = (async () => { tries++; if (tries <= 3) throw dnsFailure(); return here; }) as unknown as typeof dnsLookup;
+    try { expect(await (await local(resolver)(`http://localhost:${port}/`)).text()).toBe('fourth'); expect(tries).toBe(4); } finally { server.close(); }
+  }, 15000);
   it('a connection refused and then accepted goes through', async () => {
     const port = await closedPort(); let tries = 0; const server = createServer((_req, res) => res.end('second'));
     const resolver = (async () => { tries++; if (tries === 2) await new Promise<void>(done => server.listen(port, '127.0.0.1', done)); return here; }) as unknown as typeof dnsLookup;

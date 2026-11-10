@@ -756,16 +756,16 @@ describe('D155 how a connection failure is recorded', () => {
     for await (const _chunk of adapter.streamChat({ requestId: 'r1', modelId: 'deepseek-flash', messages: [{ role: 'user', content: 'x' }], outputTokenLimit: 8 })) { /* read to the end */ }
     expect(tries).toBe(2); expect(dispatches).toBe(1);
   });
-  it('failing twice names the step in the failure and the event, keeps nothing else, and was not sent', async () => {
+  it('failing every try names the step in the failure and the event, keeps nothing else, and was not sent', async () => {
     let tries = 0;
     const f = await wired((async () => { tries++; throw noName(); }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
     const done = await f.chat('@林舟 在吗');
-    expect(tries).toBe(2);
+    expect(tries).toBe(4);
     expect(done.lastFailure).toEqual(publicError('network_error', undefined, undefined, 'dns'));
     expect(JSON.stringify(done.lastFailure)).not.toContain('10.1.2.3');
     expect(done.usage![0]!.state).toBe('not_sent');
     expect(f.service.subscribe(done.runId, 0).events.find(event => event.type === 'turn_failed')?.payload).toMatchObject({ error: { code: 'network_error', phase: 'dns' } });
-  });
+  }, 15000);
   it('a failure after the request is written is never sent again, and its usage stays unknown', async () => {
     let tries = 0;
     const f = await wired((async () => { tries++; return here; }) as unknown as typeof dnsLookup, (_req, res) => { res.socket?.destroy(); });
@@ -793,7 +793,7 @@ describe('D155 how a connection failure is recorded', () => {
     let always = 0;
     const g = await wired((async () => { always++; throw noName(); }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
     const stopped = await g.chat('讨论', {});
-    expect(always).toBe(2);
+    expect(always).toBe(4);
     expect(stopped.status).toBe('error');
     expect(stopped.turns).toHaveLength(1);
     expect(stopped.lastFailure?.phase).toBe('dns');

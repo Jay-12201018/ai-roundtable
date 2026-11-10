@@ -174,18 +174,22 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
       } catch (error) { diagnose(error); markPhase(error, phase); request?.destroy(); cleanup(); reject(error); }
     });
     };
-    try { return await connect(); }
-    catch (error) {
-      // D155: nothing was written, so nothing can have been billed: one more try, after everything is checked again. Once written, never.
-      if (error instanceof ContractError || signal?.aborted || !failedBeforeWriting(networkPhaseOf(error))) throw error;
-      await pause(CONNECT_RETRY_MS, signal);
-      signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
-      return await connect();
+    // D155, widened by D158: nothing was written, so nothing can have been billed: try again, each time after everything is checked
+    // again and a longer wait. A burst of failed handshakes lasted longer than one retry could cover. Once written, never.
+    for (let attempt = 0; ; attempt++) {
+      try { return await connect(); }
+      catch (error) {
+        const wait = CONNECT_RETRY_DELAYS_MS[attempt];
+        if (wait === undefined || error instanceof ContractError || signal?.aborted || !failedBeforeWriting(networkPhaseOf(error))) throw error;
+        await pause(wait, signal);
+        signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
+      }
     }
   };
 }
 
-const CONNECT_RETRY_MS = 300;
+/** D158: the waits before the second, third and fourth try at connecting. Four tries in all, and about three seconds of waiting at most. */
+export const CONNECT_RETRY_DELAYS_MS: readonly number[] = [300, 1000, 2000];
 const pause = (ms: number, signal: AbortSignal | null | undefined) => new Promise<void>(resolve => {
   const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); };
   const timer = setTimeout(done, ms);
