@@ -395,7 +395,8 @@ test('这个方向大家怎么看：所有人都回应，不调度', async ({ ha
   await waiting(running);
   expect((await spoke(page)).sort()).toEqual(['小雨', '林舟', '阿哲']);
   expect(fixture.requests.filter(isSchedule)).toHaveLength(0);
-  expect(fixture.requests.every(request => request.raw.thinking === undefined), 'A few sentences keep their thinking').toBe(true);
+  // D156: a few sentences of plain reply are talk too, and skip thinking like a quick word.
+  expect(fixture.requests.every(request => request.raw.thinking?.type === 'disabled'), 'A few sentences of plain reply skip thinking').toBe(true);
   await capture(running, 'everyone-asked');
   await running.quit();
 });
