@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asksEveryone, classifyHostMessage, firstBatch, isContinueMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
+import { asksEveryone, classifyHostMessage, firstBatch, isContinueMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, namedMembers, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
 import { fastReplyBodyOf, serviceCatalog } from '../../../src/shared/serviceCatalog';
 import { buildScheduleMessages } from '../../../src/main/groupChat/schedulePrompt';
 import { boundaryText, discussionRulesText, groupChatBoundaryText, groupChatCueText, groupChatDateText, groupChatRulesText, turnCueText } from '../../../src/main/context/transcript';
@@ -67,7 +67,7 @@ describe('D150 the rules', () => {
     for (const seed of [1, 2, 3, 4]) expect(classifyHostMessage(text, roster, seed).speakers).toHaveLength(1);
     expect(plan.speakers.every(item => item.length === 'short')).toBe(true);
   });
-  it.each(['这个方案行吗？', '为什么留存掉了？', '你们觉得该不该做？', '帮我写个提纲？'])('%s asks for a judgement or for work, so it is not one', text => {
+  it.each(['这个方案行吗？', '为什么留存掉了？', '我们该不该做这个？', '帮我写个提纲？'])('%s asks for a judgement or for work, so it is not one', text => {
     expect(isSimpleQuestion(text)).toBe(false);
     expect(classifyHostMessage(text, roster, 3).classification).toBe('open');
   });
@@ -212,6 +212,27 @@ describe('D159 carrying on, summing up, and a view of their own', () => {
   });
 });
 
+describe('D163 nobody the host is talking to stays silent', () => {
+  const three = [{ agentId: 'a', displayName: '林舟' }, { agentId: 'b', displayName: '阿哲' }, { agentId: 'c', displayName: '小雨' }];
+  it('a name without an @ is that member\'s to answer, by the rules', () => {
+    expect(namedMembers('那个阿哲是不是又死了', three).map(item => item.agentId)).toEqual(['b']);
+    expect(classifyHostMessage('那个阿哲是不是又死了', three, 1).speakers).toEqual([{ agentId: 'b', intent: 'reply', length: 'medium', source: 'rule' }]);
+    expect(classifyHostMessage('林舟和小雨你们怎么看', three, 1).speakers.map(item => item.agentId)).toEqual(['a', 'c']);
+    expect(classifyHostMessage('阿哲写个登录页', three, 1).speakers[0]).toMatchObject({ agentId: 'b', intent: 'claim', length: 'long' });
+    expect(namedMembers('今天几号？', three)).toEqual([]);
+  });
+  it('and with a reading too: the reading\'s choices first, then whoever was named and left out', () => {
+    const read = { speakers: [{ agentId: 'c', intent: 'reply' as const, length: 'short' as const }], more: false };
+    expect(firstBatch('那个阿哲是不是又死了', three, 1, false, read).speakers.map(item => [item.agentId, item.source])).toEqual([['c', 'schedule'], ['b', 'rule']]);
+    // Named, the 你们 is those named, not the whole room.
+    expect(firstBatch('林舟和阿哲你们怎么看', three, 1, false, { speakers: [], more: false }).speakers.map(item => item.agentId)).toEqual(['a', 'b']);
+  });
+  it('a question to 你们 is everyone\'s, whatever the reading chose', () => {
+    const read = { speakers: [{ agentId: 'c', intent: 'reply' as const, length: 'medium' as const }], more: false };
+    expect(firstBatch('你觉得你们三个人谁的模型更强大', three, 1, false, read).speakers.map(item => item.agentId).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
 describe('D152 skipping thinking', () => {
   const service = (id: string) => serviceCatalog.find(item => item.id === id);
   it('is for talk: a quick word, or a few sentences of plain reply', () => {
@@ -261,6 +282,10 @@ describe('D154 what the first real run showed', () => {
     expect(classifyHostMessage('好', roster, 3, true).classification).toBe('open');
     expect(classifyHostMessage('大家好', roster, 3, true).classification).toBe('gather');
   });
+  it('D163: what a member knows is theirs to say; silence is not theirs to explain away; an answer ends where it ends', () => {
+    const rules = groupChatRulesText(false);
+    for (const word of ['常识和你本来就知道的知识不在此列', '不要因为“没有依据”而不回答', '答完就停', '也不要答完顺手把之前没聊完的事接着讲', '对主持人直接说“你”', '没轮到你不是你的失职', '不要编“刚在想”“在整理”这类理由', '更不要替别人解释他为什么没说话']) expect(rules).toContain(word);
+  });
   it('D157: each of the three that always hold says why, and the examples say they are not to be copied', () => {
     const rules = groupChatRulesText(false);
     for (const word of ['主持人会把你说的话当真', '是会真的去等的', '只做分给你的那部分', '只是让你感受一下语气，不要照抄']) expect(rules).toContain(word);
@@ -303,7 +328,7 @@ describe('D154 what the first real run showed', () => {
 });
 
 describe('D155 a question to everyone', () => {
-  it.each(['这个方向大家怎么看：做一个校园二手平台', '大家怎么看？', '你们觉得呢', '你们觉得这个方案行吗', '各位有什么想法', '大家说说', '都说说', '每个人说一句', '大家讨论一下这个方案', '大家同意吗？', '你们有意见吗'])('%s reaches everyone', text => {
+  it.each(['这个方向大家怎么看：做一个校园二手平台', '大家怎么看？', '你们觉得呢', '你们觉得这个方案行吗', '各位有什么想法', '大家说说', '都说说', '每个人说一句', '大家讨论一下这个方案', '大家同意吗？', '你们有意见吗', '你们觉得该不该做？', '你觉得你们三个人谁的模型更强大', '你们谁知道', '三位能不能做到同步？'])('%s reaches everyone', text => {
     expect(asksEveryone(text)).toBe(true);
     const plan = classifyHostMessage(text, roster, 5);
     expect(plan.speakers.map(item => item.agentId).sort()).toEqual(['a', 'b', 'c', 'd']);

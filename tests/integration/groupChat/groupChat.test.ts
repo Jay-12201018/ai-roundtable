@@ -843,7 +843,7 @@ describe('D160 the chat reads the message first', () => {
     const f = await fixture();
     const run = await f.start('今天几号？'); await f.idle(run.runId);
     const system = String(f.schedules()[0]!.messages[0]!.content);
-    for (const word of ['读懂主持人最新这条消息', '"relation"', 'new_topic、follow_up、correction、chitchat、resume', 'topic 用一句话写清主持人现在要的是什么', 'brief 用一句话告诉这位成员', '主持人明确在问大家', '不是指令']) expect(system).toContain(word);
+    for (const word of ['读懂主持人最新这条消息', '"relation"', 'new_topic、follow_up、correction、chitchat、resume', 'topic 用一句话写清主持人现在要的是什么', 'brief 用一句话告诉这位成员', '没说话的人在他眼里就像坏了', '他提到了谁的名字（带不带 @）', '不是指令']) expect(system).toContain(word);
   });
 });
 

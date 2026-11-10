@@ -87,10 +87,16 @@ const continuePattern = /^(那就?|好的?|行|可以|请|大家|各位|你们|�
 /** D159: the host saying to carry on, as the whole message. After a stop it picks up what the stop cut off; words that go on (继续说说价格) are a new message. */
 export const isContinueMessage = (text: string) => continuePattern.test(plainWords(text));
 
-const everyoneAddressed = /大家|你们|各位|诸位|每个人|每位|都说说|都讲讲|都谈谈|都聊聊|都来说/u;
+const everyoneAddressed = /大家|你们|各位|诸位|每个人|每位|[两三四五六七八九几]位|都说说|都讲讲|都谈谈|都聊聊|都来说/u;
 const askingViews = /怎么看|怎么想|怎么样|如何|有什么(看法|想法|意见|建议)|有(没有)?(看法|想法|意见|建议)|(看法|想法|意见|建议)[吗呢?？]|觉得(呢|行|可以|合适|好|对|怎)|说说|讲讲|谈谈|聊聊|议一议|讨论|说一下|说一句|同意吗|赞成吗|行吗|可以吗|好吗/u;
 /** D155: 大家怎么看: a question put to everyone. 大家都用手机 says something about them, and is not one. */
-export const asksEveryone = (text: string) => everyoneAddressed.test(text) && askingViews.test(text);
+/**
+ * D163: any question put to 你们 is one too (你们三个谁的模型更强). A member who says nothing looks broken to the host, who cannot see that
+ * the member was simply not chosen; so a question to the group is everyone's to answer.
+ */
+export const asksEveryone = (text: string) => everyoneAddressed.test(text) && (askingViews.test(text) || questionMark.test(text) || questionWords.test(text));
+/** D163: whoever the host calls by name, with or without an @. Named, a member answers: the host is talking to them, or about them. */
+export const namedMembers = (text: string, roster: readonly RosterMember[]) => roster.filter(member => member.displayName && text.toLowerCase().includes(member.displayName.toLowerCase()));
 
 const workWords = /写|做|实现|设计|方案|规划|计划|分析|整理|总结|列出|列个|生成|翻译|对比|比较|评估|调研|起草|重构|优化|修改|改一下|帮我|给我|出一份|出个|报告|文档|代码|清单|提纲/u;
 const openWords = /为什么|为啥|怎么看|怎么办|怎么样|怎样|如何|建议|评价|看法|觉得|你看|应该|选哪|哪个好/u;
@@ -136,6 +142,8 @@ export function classifyHostMessage(text: string, roster: readonly RosterMember[
     return { classification: 'mention', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: task ? 'medium' as const : 'short' as const, source: 'mention' as const })) };
   }
   if (isGather(text)) return { classification: 'gather', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'short' as const, source: 'gather' as const })) };
+  const named = namedMembers(text, roster);
+  if (named.length) { const task = isTaskLike(text); return { classification: 'simple', speakers: named.map(member => ({ agentId: member.agentId, intent: task ? 'claim' as const : 'reply' as const, length: task ? 'long' as const : 'medium' as const, source: 'rule' as const })) }; }
   if (asksEveryone(text)) return { classification: 'gather', speakers: order.map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'medium' as const, source: 'rule' as const })) };
   // D154: one answer is enough, and two the same is worse than none. An image is something to look at, however short the words with it.
   if (isSimpleQuestion(text) || !hasImages && isVeryShort(text)) return { classification: 'simple', speakers: order.slice(0, 1).map(member => ({ agentId: member.agentId, intent: 'reply' as const, length: 'short' as const, source: 'rule' as const })) };
@@ -181,8 +189,8 @@ export function parseScheduleOutput(text: string, roster: readonly RosterMember[
 
 /**
  * D160: who answers a host message first. The model's reading decides what the program has no way to know: who fits, what each is asked for
- * and how long. The program keeps what must not go wrong whatever the model says: whoever the host @-ed speaks, and nobody else; asked
- * what everyone thinks, everyone answers. With no reading, or one that names nobody, the rules decide as they did before there was one.
+ * and how long. The program keeps what must not go wrong whatever the model says: whoever the host @-ed speaks, and nobody else; whoever
+ * the host named answers; asked as a group, everyone answers. With no reading, or one that names nobody, the rules decide as they did before there was one.
  */
 export function firstBatch(text: string, roster: readonly RosterMember[], seed: number, hasImages: boolean, answer: ScheduleOutput | undefined): { speakers: PlannedSpeaker[]; more: boolean } {
   const plan = classifyHostMessage(text, roster, seed, hasImages);
@@ -192,6 +200,8 @@ export function firstBatch(text: string, roster: readonly RosterMember[], seed: 
   if (plan.classification === 'mention') return { speakers: plan.speakers.map(speaker => { const read = said.get(speaker.agentId); return read ? { ...speaker, intent: read.intent, length: read.length } : speaker; }), more: false };
   if (!answer.speakers.length) return { speakers: fallback, more: false };
   const chosen: PlannedSpeaker[] = answer.speakers.map(({ agentId, intent, length, brief }) => ({ agentId, intent, length, source: 'schedule', ...(brief ? { assignment: brief } : {}) }));
-  if (asksEveryone(text)) for (const member of shuffled(roster, seed)) if (!said.has(member.agentId)) chosen.push({ agentId: member.agentId, intent: 'reply', length: 'medium', source: 'rule' });
+  // D163: named, or asked as one of 你们, a member answers whatever the reading left out: the reading's own choices first, then the rest.
+  const owed = namedMembers(text, roster).length ? namedMembers(text, roster) : asksEveryone(text) ? shuffled(roster, seed) : [];
+  for (const member of owed) if (!said.has(member.agentId)) chosen.push({ agentId: member.agentId, intent: 'reply', length: 'medium', source: 'rule' });
   return { speakers: chosen, more: answer.more };
 }
