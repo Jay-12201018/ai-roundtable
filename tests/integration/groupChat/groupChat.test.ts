@@ -507,17 +507,44 @@ describe('D150 which model is asked', () => {
     if (withKey) await f.settings.setKey({ providerId: provider.id, apiKey: 'fixture-key' });
     return provider;
   };
-  it('the discussion\'s own service first, then another connected one; never one with no Key; never the demo', async () => {
+  it('D162: a model a member uses first, then any connected fast one; never one with no Key; never the demo', async () => {
     const f = await fixture({ baseUrl: 'https://api.moonshot.cn/v1', defaultModelId: 'kimi-k3' });
-    expect(f.registry.scheduleModel([f.provider.id]), 'Kimi has no model marked fast').toBeUndefined();
+    const kimi = [{ providerId: f.provider.id, modelId: 'kimi-k3' }];
+    expect(f.registry.scheduleCandidates(kimi), 'Kimi has no model that is fast or skips thinking').toEqual([]);
     await key(f, 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.8-flash', false);
-    expect(f.registry.scheduleModel([f.provider.id]), 'No Key, not asked').toBeUndefined();
+    expect(f.registry.scheduleCandidates(kimi), 'No Key, not asked').toEqual([]);
     await f.settings.createProvider({ name: '演示', kind: 'mock', enabled: true, isDefault: false, defaultModelId: 'mock', customModels: [] });
-    expect(f.registry.scheduleModel([f.provider.id])).toBeUndefined();
+    expect(f.registry.scheduleCandidates(kimi)).toEqual([]);
     const deepseek = await key(f, 'https://api.deepseek.com', 'deepseek-flash');
-    expect(f.registry.scheduleModel([f.provider.id])).toEqual({ providerId: deepseek.id, modelId: 'deepseek-flash' });
-    const doubao = await key(f, 'https://ark.cn-beijing.volces.com/api/v3', 'doubao-seed-2-1-turbo-260628');
-    expect(f.registry.scheduleModel([doubao.id, deepseek.id])).toEqual({ providerId: doubao.id, modelId: 'doubao-seed-2-1-turbo-260628' });
+    expect(f.registry.scheduleCandidates(kimi)).toEqual([{ providerId: deepseek.id, modelId: 'deepseek-flash' }]);
+    const doubao = await key(f, 'https://ark.cn-beijing.volces.com/api/v3', 'doubao-seed-evolving');
+    // What the host tried on 2026-11-10: the first member on a service whose fast model was listed but never switched on.
+    const room = [{ providerId: doubao.id, modelId: 'doubao-seed-evolving' }, { providerId: deepseek.id, modelId: 'deepseek-flash' }, { providerId: deepseek.id, modelId: 'deepseek-v4-pro' }];
+    expect(f.registry.scheduleCandidates(room)).toEqual([
+      { providerId: deepseek.id, modelId: 'deepseek-flash' }, { providerId: doubao.id, modelId: 'doubao-seed-evolving' }, { providerId: deepseek.id, modelId: 'deepseek-v4-pro' },
+      { providerId: doubao.id, modelId: 'doubao-seed-2-1-turbo-260628' }]);
+  });
+  it('D162: a model that refuses gives way to the next at once, its refusal is kept, and it waits behind the others from then on', async () => {
+    const f = await fixture({ defaultModelId: 'deepseek-v4-pro', customModels: [{ id: 'deepseek-v4-pro', name: 'x' }, { id: 'deepseek-flash', name: 'y' }] });
+    const reading = JSON.stringify({ relation: 'new_topic', topic: '今天几号', speakers: [{ name: '阿哲', intent: 'reply', length: 'short' }] });
+    f.setSchedule(body => body.model === 'deepseek-v4-pro' ? new Response(JSON.stringify({ error: { code: 'ModelNotOpen' } }), { status: 404 }) : sse(reading));
+    const run = await f.start('今天几号？'); const done = await f.idle(run.runId);
+    expect(f.schedules().map(body => body.model)).toEqual(['deepseek-v4-pro', 'deepseek-flash']);
+    expect(f.spoke(run.runId)).toEqual(['阿哲']);
+    expect(done.lastFailure).toBeUndefined();
+    const rows = f.db.listScheduleRequests(run.runId);
+    expect(rows.map(row => row.status)).toEqual(['failed', 'completed']);
+    expect(rows[0]!.outputText).toMatch(/^\[error:[a-z_]+.*404/u);
+    await f.send(run.runId, '明天呢？'); await f.idle(run.runId);
+    expect(f.schedules().map(body => body.model)).toEqual(['deepseek-v4-pro', 'deepseek-flash', 'deepseek-flash']);
+  });
+  it('D162: when no model can read the message, the rules answer it and the host sees a reply', async () => {
+    const f = await fixture({ defaultModelId: 'deepseek-v4-pro', customModels: [{ id: 'deepseek-v4-pro', name: 'x' }, { id: 'deepseek-flash', name: 'y' }] });
+    f.setSchedule(() => new Response('no', { status: 500 }));
+    const run = await f.start('今天几号？'); const done = await f.idle(run.runId);
+    expect(f.schedules()).toHaveLength(2);
+    expect(f.spoke(run.runId)).toHaveLength(1);
+    expect(done.status).toBe('completed');
   });
   it('a room of demo members asks nothing even with a real service connected', async () => {
     const f = await fixture({ demo: true });

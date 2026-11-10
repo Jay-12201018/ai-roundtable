@@ -1516,7 +1516,7 @@ export class RunService {
     const plan = classifyHostMessage(text, roster, seedOf(seed), hasImages);
     // D160: a call for everyone is answered at once. Anything else is read by the scheduling model first, where there is one to ask; the round
     // starts with nobody in it and `planNextBatch` fills it, from that reading or, without one, from these same rules.
-    const read = !(plan.classification === 'gather' && isGather(text)) && this.scheduleTarget(context) !== undefined;
+    const read = !(plan.classification === 'gather' && isGather(text)) && this.scheduleTargets(context).length > 0;
     this.database.insertGroupChatRound({ ...identity, classification: plan.classification, scheduleMore: read || plan.classification === 'open', speakers: read ? [] : plan.speakers });
     this.appendEvent(context.runId, 'group_chat_updated', { roundId, state: 'open' });
   }
@@ -1596,8 +1596,14 @@ export class RunService {
     const hinted = first ? [] : this.hintedMembers(context, round, roster);
     if (!first && !round.scheduleMore && !hinted.length) { this.closeRound(context.runId, round.id, 'done'); return 'done'; }
     if (used >= GROUP_CHAT_MAX_TURNS) { this.closeRound(context.runId, round.id, 'limit'); return 'done'; }
-    const target = round.scheduleCalls < GROUP_CHAT_MAX_SCHEDULES ? this.scheduleTarget(context) : undefined;
-    const answer = target ? await this.askSchedule(context, round, target, roster, hinted, used) : undefined;
+    // D162: a model that cannot be reached or refuses is not the end of it: the next one is asked at once, within the round's allowance.
+    let answer: ScheduleOutput | undefined;
+    for (const [index, target] of this.scheduleTargets(context).slice(0, Math.max(0, Math.min(2, GROUP_CHAT_MAX_SCHEDULES - round.scheduleCalls))).entries()) {
+      void index;
+      const asked = await this.askSchedule(context, round, target, roster, hinted, used);
+      answer = asked.answer;
+      if (!asked.failed || context.interrupt || context.stopRequested) break;
+    }
     if (context.interrupt || context.stopRequested) return 'again';
     this.deadlineReached(context);
     if (context.timedOut) throw new ContractError('timeout');
@@ -1672,20 +1678,24 @@ export class RunService {
     return { ...(mentioned.length ? { mentioned } : {}), ...(interrupted.length ? { interrupted } : {}) };
   }
 
-  /** D150: the demo never asks; neither does a room with nothing to ask with. Whose service it goes through only says where its usage belongs. */
-  private scheduleTarget(context: RunContext): { providerId: string; modelId: string; agentId: string } | undefined {
-    if (!this.registry) return undefined;
+  /**
+   * D150: the demo never asks; neither does a room with nothing to ask with. Whose service it goes through only says where its usage belongs.
+   * D162: in the registry's order, except that a model its service refused last time waits behind the others.
+   */
+  private scheduleTargets(context: RunContext): Array<{ providerId: string; modelId: string; agentId: string }> {
+    if (!this.registry) return [];
     const real = context.members.filter(member => member.providerId && this.database.getProviderConfiguration(member.providerId)?.kind !== 'mock');
-    if (!real.length) return undefined;
-    const model = this.registry.scheduleModel([...new Set(real.map(member => member.providerId!))]);
-    return model ? { ...model, agentId: (real.find(member => member.providerId === model.providerId) ?? real[0]!).agentId } : undefined;
+    if (!real.length) return [];
+    const models = this.registry.scheduleCandidates(real).map(model => ({ ...model, agentId: (real.find(member => member.providerId === model.providerId) ?? real[0]!).agentId }));
+    const refused = (model: { providerId: string; modelId: string }) => this.database.scheduleModelRefused(model.providerId, model.modelId);
+    return [...models.filter(model => !refused(model)), ...models.filter(refused)];
   }
 
   /**
    * D150: one scheduling request. It has no Turn and no message; it has its own record and usage row. Its answer is only ever read by
    * `parseScheduleOutput`. Undefined means no usable answer: the caller falls back to the rules. Interrupted or stopped, it just ends.
    */
-  private async askSchedule(context: RunContext, round: GroupChatRound, target: { providerId: string; modelId: string; agentId: string }, roster: readonly MemberSnapshot[], hinted: readonly string[], used: number): Promise<ScheduleOutput | undefined> {
+  private async askSchedule(context: RunContext, round: GroupChatRound, target: { providerId: string; modelId: string; agentId: string }, roster: readonly MemberSnapshot[], hinted: readonly string[], used: number): Promise<{ answer?: ScheduleOutput; failed: boolean }> {
     const snapshot = this.database.readRunSnapshot(context.runId);
     const active = new Set(snapshot.versions.filter(version => version.active).map(version => version.messageId));
     const lines = snapshot.messages.filter(message => active.has(message.id) && message.status === 'completed' && (message.senderType === 'user' || message.senderType === 'agent'))
@@ -1696,7 +1706,7 @@ export class RunService {
       messages: buildScheduleMessages({ task: snapshot.run.task ?? '', taskImages: snapshot.taskAttachments?.length ?? 0, members: roster, lines, turnsUsed: used, hinted: hinted.map(name).filter(Boolean),
         // D160: only the first request of a round reads the host's message; later ones only decide who goes on.
         ...(round.speakers.length === 0 ? this.scheduleState(context, round, roster) : {}) }) });
-    try { this.registry!.checkGeneration(target.providerId, input); } catch { return undefined; }
+    try { this.registry!.checkGeneration(target.providerId, input); } catch { return { failed: true }; }
     this.database.transaction(() => {
       this.database.insertScheduleRequest({ requestId, runId: context.runId, roundId: round.id, agentId: target.agentId, providerId: target.providerId, modelId: target.modelId, inputSnapshot: input });
       this.database.openUsage({ requestId, runId: context.runId, agentId: target.agentId, providerId: target.providerId, modelId: target.modelId, kind: 'schedule' });
@@ -1711,8 +1721,10 @@ export class RunService {
     let text = ''; let iterator: AsyncIterator<unknown> | undefined; let drained = false;
     let finishReason: 'stop' | 'length' | 'content_filter' | undefined;
     let usage: { inputTokens: number; outputTokens: number } | undefined; let cacheHit: number | undefined; let dispatched = false;
-    const close = (status: Parameters<Database['finishScheduleRequest']>[1]) => this.database.transaction(() => {
-      this.database.finishScheduleRequest(requestId, status, text);
+    // D162: a request that failed keeps the code of its failure where its answer would be, so the next choice of model can tell a refusal from
+    // a connection that dropped. Only a completed request's text is ever read as an answer.
+    const close = (status: Parameters<Database['finishScheduleRequest']>[1], failure?: string) => this.database.transaction(() => {
+      this.database.finishScheduleRequest(requestId, status, status === 'failed' && failure ? `[error:${failure}]` : text);
       this.closeRequestUsage(requestId, finishReason, usage, cacheHit, dispatched);
       this.appendEvent(context.runId, 'group_chat_updated', { roundId: round.id, state: 'open' });
     });
@@ -1729,7 +1741,7 @@ export class RunService {
         const parsed = normalizedChunkSchema.safeParse(next.value);
         if (!parsed.success || parsed.data.requestId !== requestId || finishReason) throw new ContractError('invalid_response');
         const chunk = parsed.data;
-        if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, undefined, chunk.error.phase);
+        if (chunk.type === 'error') throw new ContractError(chunk.error.code, undefined, chunk.error.upstream, chunk.error.phase);
         if (chunk.type === 'start') { started = true; continue; }
         if (!started) throw new ContractError('invalid_response');
         if (chunk.type === 'finish') finishReason = chunk.reason;
@@ -1739,11 +1751,12 @@ export class RunService {
       if (!finishReason) throw new ContractError('invalid_response');
       const answer = parseScheduleOutput(text, roster.map(({ agentId, displayName }) => ({ agentId, displayName })));
       close(answer ? 'completed' : 'invalid');
-      return answer;
+      return { ...(answer ? { answer } : {}), failed: false };
     } catch (error) {
-      if (failedBeforeWriting(toPublicError(error).phase)) dispatched = false;
-      close(parent.aborted ? 'aborted' : 'failed');
-      return undefined;
+      const failure = toPublicError(error);
+      if (failedBeforeWriting(failure.phase)) dispatched = false;
+      close(parent.aborted ? 'aborted' : 'failed', [controller.signal.aborted && !parent.aborted ? 'timeout' : failure.code, failure.phase, failure.upstream?.status, failure.upstream?.code].filter(Boolean).join(':'));
+      return { failed: !parent.aborted };
     } finally {
       clearTimeout(timer);
       parent.removeEventListener('abort', relay);

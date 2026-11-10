@@ -87,22 +87,29 @@ export class ProviderRegistry {
       imageSupport: imageSupportOf(catalogServiceAt(this.catalog(), configuration.baseUrl), modelId) };
   }
   /**
-   * D150: the model a group chat asks who speaks next: one the catalog marks fast, on a service with a Key saved, the discussion's own
-   * services first. Nothing qualifies, nothing is asked. The demo service is never one.
+   * D150, D162: the models a group chat may ask to read a message, best first. A model a member of this discussion uses comes before any
+   * other: the host chose it, so it is known to answer on this account, which a model that is merely listed is not (a listed model can still
+   * need switching on, and then fails every time). Among those, one the catalog marks fast, then one that can skip thinking. After them, the
+   * fast model of each connected service, the discussion's own services first. A service with no Key is never asked; the demo is never one.
    */
-  scheduleModel(preferred: readonly string[]): { providerId: string; modelId: string } | undefined {
+  scheduleCandidates(members: ReadonlyArray<{ providerId: string | null; modelId: string | null }>): Array<{ providerId: string; modelId: string }> {
     const connected = this.database.listProviderSummaries().filter(provider => provider.enabled && provider.configurationValid && provider.hasStoredKey && provider.kind !== 'mock');
-    const ordered = [...connected].sort((a, b) => rank(preferred, a.id) - rank(preferred, b.id));
-    for (const provider of ordered) {
-      try {
-        const service = catalogServiceAt(this.catalog(), this.configuration(provider.id).baseUrl);
-        const model = service?.models.find(item => item.fast);
-        if (!model) continue;
-        this.assertSelection(provider.id, model.id);
-        return { providerId: provider.id, modelId: model.id };
-      } catch { /* A service that cannot take this request is not asked. */ }
+    const service = (providerId: string) => { try { return catalogServiceAt(this.catalog(), this.configuration(providerId).baseUrl); } catch { return undefined; } };
+    const found: Array<{ providerId: string; modelId: string }> = [];
+    const add = (providerId: string, modelId: string) => {
+      if (!connected.some(provider => provider.id === providerId) || found.some(item => item.providerId === providerId && item.modelId === modelId)) return;
+      try { this.assertSelection(providerId, modelId); found.push({ providerId, modelId }); } catch { /* A service that cannot take this request is not asked. */ }
+    };
+    const used = members.flatMap(member => member.providerId && member.modelId ? [{ providerId: member.providerId, modelId: member.modelId }] : []);
+    const flag = (member: { providerId: string; modelId: string }) => service(member.providerId)?.models.find(model => model.id === member.modelId);
+    for (const member of used) if (flag(member)?.fast) add(member.providerId, member.modelId);
+    for (const member of used) if (flag(member)?.fastReply) add(member.providerId, member.modelId);
+    const preferred = [...new Set(used.map(member => member.providerId))];
+    for (const provider of [...connected].sort((a, b) => rank(preferred, a.id) - rank(preferred, b.id))) {
+      const model = service(provider.id)?.models.find(item => item.fast);
+      if (model) add(provider.id, model.id);
     }
-    return undefined;
+    return found;
   }
   checkGeneration(providerId: string, input: StreamChatInput): void {
     // StreamChatInput includes AbortSignal only inside Main; validate its serializable request separately.

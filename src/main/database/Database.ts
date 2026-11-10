@@ -1037,6 +1037,15 @@ export class Database {
     this.assertInitialized();
     return this.db.prepare("SELECT output_text FROM group_chat_schedule_requests WHERE round_id=? AND status='completed' ORDER BY created_at ASC,rowid ASC LIMIT 1").pluck().get(roundId) as string | undefined;
   }
+  /**
+   * D162: whether the last scheduling request this model finished was refused by its service (not a connection that failed, not a stop).
+   * Such a model goes to the back of the queue until it answers again.
+   */
+  scheduleModelRefused(providerId: string, modelId: string): boolean {
+    this.assertInitialized();
+    const last = this.db.prepare("SELECT status,output_text FROM group_chat_schedule_requests WHERE provider_id=? AND model_id=? AND status IN ('completed','invalid','failed') ORDER BY created_at DESC,rowid DESC LIMIT 1").get(providerId, modelId) as { status: string; output_text: string | null } | undefined;
+    return last?.status === 'failed' && /^\[error:(?!network_error|timeout|cancelled)/u.test(last.output_text ?? '');
+  }
   insertScheduleRequest(request: { requestId: string; runId: string; roundId: string; agentId: string; providerId: string; modelId: string; inputSnapshot: StreamChatInputRecord }): void {
     this.assertInitialized();
     const timestamp = now();
