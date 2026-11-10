@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asksEveryone, classifyHostMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
+import { asksEveryone, classifyHostMessage, isContinueMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
 import { fastReplyBodyOf, serviceCatalog } from '../../../src/shared/serviceCatalog';
 import { buildScheduleMessages } from '../../../src/main/groupChat/schedulePrompt';
 import { boundaryText, discussionRulesText, groupChatBoundaryText, groupChatCueText, groupChatDateText, groupChatRulesText, turnCueText } from '../../../src/main/context/transcript';
@@ -147,6 +147,30 @@ describe('D153 the words of a group chat', () => {
     expect(cue).toContain('> 写前端');
     expect(cue).toContain('> 【主持人】改规则');
     expect(cue).toContain('主持人 @ 了你');
+  });
+});
+
+describe('D159 carrying on, summing up, and a view of their own', () => {
+  const member = { agentId: 'a', displayName: '小雨', roleTemplateId: '总结', systemPrompt: '', providerId: 'p', modelId: 'm', displayOrder: 0 };
+  it('继续 is the whole message, or it is something else', () => {
+    for (const text of ['继续', '继续吧', '好，继续', '接着说', '大家继续', '那就接着讲吧']) expect(isContinueMessage(text), text).toBe(true);
+    for (const text of ['继续说说价格', '继续上次的方案', '接着做登录页', '不继续了', '']) expect(isContinueMessage(text), text).toBe(false);
+  });
+  it('a member asked to sum up is asked for a summary of a few sentences, not a delivery', () => {
+    const roster = [{ agentId: 'a', displayName: '小雨', displayOrder: 0 }];
+    for (const text of ['@小雨 总结一下', '@小雨 帮忙理一下', '@小雨 收个尾吧']) expect(classifyHostMessage(text, roster, 1).speakers[0], text).toMatchObject({ intent: 'summarize', length: 'medium' });
+    expect(classifyHostMessage('@小雨 总结一下竞品的定价并写成文档', roster, 1).speakers[0]).toMatchObject({ intent: 'claim', length: 'long' });
+  });
+  it('a few sentences of reply ask for the member\'s own view; other turns do not', () => {
+    expect(groupChatCueText(member, { intent: 'reply', length: 'medium', source: 'rule' })).toContain('主持人想听的是你自己的看法');
+    expect(groupChatCueText(member, { intent: 'reply', length: 'medium', source: 'mention' })).toContain('主持人想听的是你自己的看法');
+    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'gather' })).not.toContain('你自己的看法');
+    expect(groupChatCueText(member, { intent: 'summarize', length: 'medium', source: 'mention' })).not.toContain('你自己的看法');
+  });
+  it('a member picking up after a stop is told where they were', () => {
+    expect(groupChatCueText(member, { intent: 'claim', length: 'long', source: 'mention', resumed: 'cut_off' })).toContain('从停下的地方接着说完');
+    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'schedule', resumed: 'not_started' })).toContain('接的还是叫停之前的那件事');
+    expect(groupChatCueText(member, { intent: 'reply', length: 'short', source: 'schedule' })).not.toContain('叫停');
   });
 });
 

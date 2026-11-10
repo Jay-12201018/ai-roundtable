@@ -32,7 +32,7 @@ import { artifactOutputTokenLimit, buildArtifactRequest } from '../artifact/prom
 import { continuationPreviewInputSchema, continueDiscussionInputSchema, type ContinuationPreview, type ContinuationPreviewInput,
   type ContinueDiscussionInput, type ContinueDiscussionResult, type RunContinuation } from '../../shared/schemas/continuation';
 import { GROUP_CHAT_MAX_SCHEDULES, GROUP_CHAT_MAX_TURNS, GROUP_CHAT_SCHEDULE_MAX_TOKENS, GROUP_CHAT_SCHEDULE_TIMEOUT_MS, isGroupChatSnapshot, type GroupChatRoundState, type GroupChatState } from '../../shared/schemas/groupChat';
-import { classifyHostMessage, isStopMessage, memberHints, parseScheduleOutput, ruleSpeakers, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
+import { classifyHostMessage, isContinueMessage, isStopMessage, memberHints, parseScheduleOutput, ruleSpeakers, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
 import { buildScheduleMessages } from '../groupChat/schedulePrompt';
 import type { GroupChatRound, GroupChatSpeaker } from '../database/Database';
 import type { GroupChatCue } from '../context/transcript';
@@ -1505,6 +1505,14 @@ export class RunService {
     }
     const roster = this.chatRoster(context);
     if (!roster.length) throw new ContractError('invalid_state');
+    // D159: after a stop, "继续" means what was cut off: the same members, asked for the same thing, in the same order. Nothing is asked of a model.
+    const interrupted = !hasImages && isContinueMessage(text) ? this.database.interruptedGroupChatRound(context.runId) : undefined;
+    const resumed = interrupted?.speakers.filter(speaker => roster.some(member => member.agentId === speaker.agentId)) ?? [];
+    if (interrupted && resumed.length) {
+      this.database.insertGroupChatRound({ ...identity, classification: interrupted.classification, scheduleMore: false, speakers: resumed });
+      this.appendEvent(context.runId, 'group_chat_updated', { roundId, state: 'open' });
+      return;
+    }
     const plan = classifyHostMessage(text, roster, seedOf(seed), hasImages);
     // Only a message the rules could not read may go on to the schedule.
     this.database.insertGroupChatRound({ ...identity, classification: plan.classification, scheduleMore: plan.classification === 'open', speakers: plan.speakers });
@@ -1615,6 +1623,14 @@ export class RunService {
       const named = message ? memberHints(message.content, roster.map(({ agentId, displayName }) => ({ agentId, displayName })), speaker.agentId) : [];
       return named.filter(agentId => !batch.some(later => later.agentId === agentId && later.position > speaker.position));
     }))];
+  }
+
+  /** D159: whether this speaker is picking up what a stop cut off, and if so whether they had started. Read from the rounds, so a repeat says the same. */
+  private resumedSpeaker(context: RunContext, speaker: GroupChatSpeaker): 'cut_off' | 'not_started' | undefined {
+    const round = this.database.latestGroupChatRound(context.runId);
+    if (!round || round.id !== speaker.roundId || !isContinueMessage(this.roundText(context, round))) return undefined;
+    const before = this.database.interruptedGroupChatRound(context.runId, round.id)?.speakers.find(item => item.agentId === speaker.agentId && item.intent === speaker.intent);
+    return before ? before.cutOff ? 'cut_off' : 'not_started' : undefined;
   }
 
   private roundText(context: RunContext, round: GroupChatRound): string {
@@ -1731,7 +1747,8 @@ export class RunService {
       const workflowStep = this.assertRequestEvidence(context, snapshot, member, turnIndex, repeat, directed);
       // A repeat of a group-chat reply asks for what the first request asked for. A Turn from before this queue existed is a plain reply.
       const chat = context.groupChat ? speaker ?? (repeat ? this.database.groupChatSpeakerOfTurn(turnId) : undefined) : undefined;
-      const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}) } : undefined;
+      const resumed = chat ? this.resumedSpeaker(context, chat) : undefined;
+      const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}), ...(resumed ? { resumed } : {}) } : undefined;
       const preparation:RequestPreparation={snapshot,workflowStep,...(cue?{groupChat:cue}:{}),current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
         repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}
           :extend?{messages:extend.messages,sourceRequestId:repeat!.sourceRequestId,kind:'continue'}:undefined,

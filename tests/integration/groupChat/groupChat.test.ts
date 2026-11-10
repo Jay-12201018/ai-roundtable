@@ -579,6 +579,35 @@ describe('D154 a message that says stop', () => {
     expect(f.spoke(run.runId)).toEqual(['林舟', '小雨']);
     expect(JSON.stringify(f.members().at(-1)!.messages)).toContain('> 停止');
   });
+  it('D159: 继续 after a stop picks up what was cut off: the same members in order, told to go on, with no model asked who', async () => {
+    const f = await fixture();
+    f.setReply((_body, index) => index === 0 ? (signal => held('说到一半', signal, new Promise(() => {}))) : sse('不该出现'));
+    const run = await f.start('@林舟 @阿哲 @小雨 都看看');
+    await until(() => f.service.getSnapshot(run.runId).messages[0]?.content === '说到一半');
+    await f.send(run.runId, '停止'); await f.idle(run.runId);
+    const sent = f.requests.length;
+    f.setReply(() => sse('接着说'));
+    await f.send(run.runId, '继续'); const done = await f.idle(run.runId);
+    expect(f.requests.filter(isSchedule)).toHaveLength(0);
+    expect(f.requests).toHaveLength(sent + 3);
+    expect(f.spoke(run.runId)).toEqual(['林舟', '林舟', '阿哲', '小雨']);
+    const cues = f.members().slice(-3).map(body => String(body.messages.at(-1)!.content));
+    expect(cues[0]).toContain('说到一半被主持人叫停了');
+    expect(cues[0]).toContain('前面已经说出来的不要重复');
+    expect(cues[1]).toContain('刚才轮到你时主持人叫停了');
+    expect(cues[2]).toContain('刚才轮到你时主持人叫停了');
+    expect(done.groupChat?.round).toMatchObject({ state: 'done', classification: 'mention' });
+    // Said again with nothing cut off, it is only a short message.
+    await f.send(run.runId, '继续'); await f.idle(run.runId);
+    expect(String(f.members().at(-1)!.messages.at(-1)!.content)).not.toContain('叫停');
+  });
+  it('D159: 继续 means nothing special when the last round ended by itself, or was replaced by a new message', async () => {
+    const f = await fixture();
+    f.setReply(() => sse('好'));
+    const run = await f.start('@林舟 在吗'); await f.idle(run.runId);
+    await f.send(run.runId, '继续'); await f.idle(run.runId);
+    for (const body of f.members()) expect(String(body.messages.at(-1)!.content)).not.toContain('叫停');
+  });
   it('stops a scheduling request in flight, and uses nothing it might have said', async () => {
     const f = await fixture();
     f.setSchedule(() => signal => held('{"speakers":', signal, new Promise(() => {})));

@@ -83,6 +83,10 @@ const stopPattern = /^(大家|各位|你们|都|先)*(停止|停下来?|停一�
 /** D154: the host telling everyone to stop, as the whole message. Words that go on (停止这个方案，换一个) are something to talk about. */
 export const isStopMessage = (text: string) => stopPattern.test(plainWords(text));
 
+const continuePattern = /^(那就?|好的?|行|可以|请|大家|各位|你们|都)*(继续|接着(说|讲|聊|来|做|写)?|往下(说|讲)|goon|continue)(吧|啊|呀|哈|说|讲|聊|做|写)*$/iu;
+/** D159: the host saying to carry on, as the whole message. After a stop it picks up what the stop cut off; words that go on (继续说说价格) are a new message. */
+export const isContinueMessage = (text: string) => continuePattern.test(plainWords(text));
+
 const everyoneAddressed = /大家|你们|各位|诸位|每个人|每位|都说说|都讲讲|都谈谈|都聊聊|都来说/u;
 const askingViews = /怎么看|怎么想|怎么样|如何|有什么(看法|想法|意见|建议)|有(没有)?(看法|想法|意见|建议)|(看法|想法|意见|建议)[吗呢?？]|觉得(呢|行|可以|合适|好|对|怎)|说说|讲讲|谈谈|聊聊|议一议|讨论|说一下|说一句|同意吗|赞成吗|行吗|可以吗|好吗/u;
 /** D155: 大家怎么看: a question put to everyone. 大家都用手机 says something about them, and is not one. */
@@ -99,7 +103,10 @@ export const isVeryShort = (text: string) => { const words = plainWords(text); r
 /** A short question with one plain answer: 今天几号？ Anything that asks for a judgement or for work is not one. */
 export const isSimpleQuestion = (text: string) => text.trim().length > 0 && text.trim().length <= 30 && !isTaskLike(text) && !openWords.test(text) && (questionMark.test(text) || questionWords.test(text));
 
+const summaryRequest = /^(帮忙|帮我们?|麻烦|请|你|来|给大家|再)*(总结|小结|汇总|归纳|理一理|理一下|收个尾|收尾)(一下|下)?(吧|呗|啊|哈)?$/u;
 function mentionLength(assignment: string): { intent: GroupChatIntent; length: GroupChatLength } {
+  // D159: asked to sum up, a member sums up: what is settled and what is not, in a few sentences, and not a document to deliver.
+  if (summaryRequest.test(plainWords(assignment))) return { intent: 'summarize', length: 'medium' };
   if (!assignment || isGather(assignment) || isSimpleQuestion(assignment)) return { intent: 'reply', length: 'short' };
   return isTaskLike(assignment) ? { intent: 'claim', length: 'long' } : { intent: 'reply', length: 'medium' };
 }

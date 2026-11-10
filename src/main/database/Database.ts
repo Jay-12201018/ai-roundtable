@@ -997,6 +997,28 @@ export class Database {
     const row = this.db.prepare('SELECT id,run_id,message_id,classification,state,schedule_more,batch_start,created_at FROM group_chat_rounds WHERE run_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1').get(runId) as Parameters<Database['groupChatRound']>[0] | undefined;
     return row ? this.groupChatRound(row) : undefined;
   }
+  /**
+   * D159: what the host's stop cut off, for a message that says to carry on. Rounds a stop message leaves behind have nobody in them and are
+   * looked past; the round before them must itself have been stopped. Whoever was speaking then (`cutOff` says whether anything of theirs
+   * is on the page) and whoever was still waiting are returned in their order. `before` leaves out that round and everything after it.
+   */
+  interruptedGroupChatRound(runId: string, before?: string): { classification: GroupChatClassification; speakers: Array<GroupChatSpeaker & { cutOff: boolean }> } | undefined {
+    this.assertInitialized();
+    const rows = this.db.prepare('SELECT id,run_id,message_id,classification,state,schedule_more,batch_start,created_at FROM group_chat_rounds WHERE run_id=? ORDER BY created_at DESC,rowid DESC').all(runId) as Array<Parameters<Database['groupChatRound']>[0]>;
+    const from = before ? rows.findIndex(row => row.id === before) + 1 : 0;
+    for (const row of rows.slice(from)) {
+      const round = this.groupChatRound(row);
+      if (round.state === 'stopped' && round.speakers.length === 0) continue;
+      if (round.state !== 'stopped') return undefined;
+      const speakers = round.speakers.flatMap(speaker => {
+        if (speaker.state === 'dropped') return [{ ...speaker, cutOff: false }];
+        const turn = speaker.turnId ? this.db.prepare('SELECT status,partial_content FROM turns WHERE id=?').get(speaker.turnId) as { status: string; partial_content: string | null } | undefined : undefined;
+        return turn?.status === 'aborted' ? [{ ...speaker, cutOff: (turn.partial_content ?? '').trim().length > 0 }] : [];
+      });
+      return speakers.length ? { classification: round.classification, speakers } : undefined;
+    }
+    return undefined;
+  }
   openGroupChatRound(runId: string): GroupChatRound | undefined {
     const round = this.latestGroupChatRound(runId);
     return round?.state === 'open' ? round : undefined;

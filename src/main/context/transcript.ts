@@ -73,7 +73,7 @@ export function groupChatBriefText(member: MemberSnapshot, members: readonly Mem
   const prompt = member.systemPrompt.trim();
   return [`你是${memberLabel(member)}。`, roster ? `群里还有：${roster}。` : '群里只有你和主持人。', ...(prompt ? [`你的设定：\n${prompt}`] : [])].join('\n');
 }
-export type GroupChatCue = { intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string };
+export type GroupChatCue = { intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string; resumed?: 'cut_off' | 'not_started' };
 /** D157: one short brief per occasion, each saying what a good turn looks like here, instead of one long list for every occasion. */
 const intentCues: Record<GroupChatIntent, string> = {
   reply: '接着聊就好。',
@@ -96,7 +96,12 @@ const sourceCues: Partial<Record<GroupChatSpeakerSource, string>> = {
 export function groupChatCueText(member: MemberSnapshot, cue: GroupChatCue): string {
   // D154: a short answer the rules asked for: it ends there, and is no opening for anything else.
   const source = sourceCues[cue.source] ?? (cue.source === 'rule' && cue.length === 'short' && cue.intent === 'reply' ? '只回应这一条，不要重复之前说过的答案。答完就停，不要借机带回别的话题。' : undefined);
-  return ['【轮到你说话】', `现在由你（${memberLabel(member)}）接话。${source ?? ''}${source && cue.intent === 'reply' ? '' : intentCues[cue.intent]}${lengthCues[cue.length]}`,
+  // D159: the host stopped everyone and then said to carry on. The page still shows what was said before the stop, so it is not said again.
+  const resumed = cue.resumed === 'cut_off' ? '刚才你说到一半被主持人叫停了，现在他让继续：从停下的地方接着说完，前面已经说出来的不要重复。'
+    : cue.resumed === 'not_started' ? '刚才轮到你时主持人叫停了，现在他让继续：把你当时要说的说出来，接的还是叫停之前的那件事。' : '';
+  // D159: asked what they think, a member whose part is to sum up summed up twice and had no view. A few sentences of reply are for a view.
+  const view = cue.intent === 'reply' && cue.length === 'medium' ? '主持人想听的是你自己的看法：说你的判断和理由，哪怕你平时负责总结，也别只是把别人说过的理一遍。' : '';
+  return ['【轮到你说话】', `现在由你（${memberLabel(member)}）接话。${resumed}${source ?? ''}${source && cue.intent === 'reply' ? '' : intentCues[cue.intent]}${view}${lengthCues[cue.length]}`,
     ...(cue.assignment ? ['主持人给你的部分：', quoteText(cue.assignment)] : []), '直接说，不要加名字或标签。'].join('\n');
 }
 const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
