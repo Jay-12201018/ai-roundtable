@@ -1648,6 +1648,9 @@ export class RunService {
     const text = this.database.firstScheduleOutput(round.id);
     return text ? parseScheduleOutput(text, context.members.map(({ agentId, displayName }) => ({ agentId, displayName }))) : undefined;
   }
+  private firstRoundOf(context: RunContext, roundId: string): boolean {
+    return this.database.firstGroupChatRoundId(context.runId) === roundId;
+  }
   private roundHasImages(context: RunContext, round: GroupChatRound): boolean {
     const message = round.messageId ? this.database.getMessage(round.messageId) : undefined;
     return message ? (message.attachments?.length ?? 0) > 0 : (this.database.readRunSnapshot(context.runId).taskAttachments?.length ?? 0) > 0;
@@ -1783,7 +1786,8 @@ export class RunService {
       const resumed = chat ? this.resumedSpeaker(context, chat) : undefined;
       const reading = chat ? this.roundReading(context, { id: chat.roundId }) : undefined;
       const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}), ...(resumed ? { resumed } : {}),
-        ...(reading?.relation && reading.relation !== 'resume' && !resumed ? { relation: reading.relation } : {}), ...(reading?.topic ? { topic: reading.topic } : {}) } : undefined;
+        // The first message of a chat relates to nothing: whatever the reading called it, nothing is said about what came before.
+        ...(reading?.relation && reading.relation !== 'resume' && !resumed && !this.firstRoundOf(context, chat!.roundId) ? { relation: reading.relation } : {}), ...(reading?.topic ? { topic: reading.topic } : {}) } : undefined;
       const preparation:RequestPreparation={snapshot,workflowStep,...(cue?{groupChat:cue}:{}),current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},
         repeat:repeat && repeat.kind!=='regenerate'?{messages:repeat.messages,sourceRequestId:repeat.sourceRequestId,kind:repeat.kind}
           :extend?{messages:extend.messages,sourceRequestId:repeat!.sourceRequestId,kind:'continue'}:undefined,

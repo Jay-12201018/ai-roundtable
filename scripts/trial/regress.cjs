@@ -41,7 +41,7 @@ const conversations = [
     { say: '@林舟 @阿哲 @小雨 各用两三句话介绍一下自己的分工', stopAfterFirstWords: true, expect: step => step.stopped || '应该被停止打断' },
     { say: '刚才说到哪了，你们接着来', expect: step => step.relation === 'resume' && step.speakers.length >= 2 || `应读成 resume 并把没说完的人接上，实际 ${step.relation} ${step.speakers.join()}` }] },
   { name: 'nothing-to-go-on', steps: [
-    { say: '上周用户调研的结论是什么', expect: step => step.replies.every(text => /没有|没看到|不知道|没见过|不清楚|没提|哪份|哪个|未提供|没发/u.test(text) && !/\d+\s*%/u.test(text)) || '没有依据的事应该说不知道，不能编数字' }] },
+    { say: '上周用户调研的结论是什么', expect: step => step.replies.every(text => /没有|没看到|不知道|没见过|不清楚|没提|哪份|哪个|未提供|没发/u.test(text) && !/\d+\s*%/u.test(text) && !/我(去|来|回头)(问|要|找|查|看|确认)/u.test(text)) || '没有依据的事应该说不知道，不能编数字，也不能说“我去要来看”' }] },
   { name: 'how-long', steps: [
     { say: '@阿哲 后端这块什么时候能给我', expect: step => step.replies.every(text => !promise.test(text)) || '不应该许诺时间或报工期' }] },
 ];
@@ -94,7 +94,7 @@ async function main() {
         if (step.stopAfterFirstWords) {
           for (let tries = 0; tries < 300 && !stopped; tries++) {
             const now = await snapshotOf(runId);
-            if (now.messages.some(message => message.senderType === 'agent' && now.turns.slice(seenTurns).some(turn => turn.id === message.turnId) && message.content.length > 0)) {
+            if (now.turns.slice(seenTurns).some(turn => (now.messages.find(message => message.id === turn.messageId)?.content ?? turn.outputText ?? '').length > 0)) {
               unwrap(await call(contents, 'host.command', { kind: 'interject', runId, clientRequestId: `regress-${Date.now()}-${++counter}`, content: '停止' })); stopped = true;
             } else await sleep(150);
           }
@@ -103,8 +103,7 @@ async function main() {
         const members = snapshot.execution?.membersSnapshot ?? [];
         const turns = snapshot.turns.slice(seenTurns); seenTurns = snapshot.turns.length;
         const name = agentId => members.find(member => member.agentId === agentId)?.displayName ?? '?';
-        const active = new Set((snapshot.versions ?? []).filter(version => version.active).map(version => version.messageId));
-        const replyOf = turn => snapshot.messages.filter(message => message.turnId === turn.id && (!active.size || active.has(message.id))).at(-1)?.content ?? '';
+        const replyOf = turn => snapshot.messages.find(message => message.id === turn.messageId)?.content ?? turn.outputText ?? '';
         const facts = { roster: members.map(member => member.displayName), speakers: turns.map(turn => name(turn.agentId)), statuses: turns.map(turn => turn.status), replies: turns.map(replyOf), stopped,
           failed: turns.filter(turn => turn.status === 'failed').length, seconds: Math.round((Date.now() - started) / 1000), runId, scheduleFrom: seenSchedules };
         seenSchedules = snapshot.groupChat?.scheduleRequestIds?.length ?? seenSchedules;

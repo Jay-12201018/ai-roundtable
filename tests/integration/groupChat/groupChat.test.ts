@@ -741,9 +741,12 @@ describe('D160 the chat reads the message first', () => {
   it('what it read reaches the member as one brief: how the message relates, what the round is about, what to say, all as quoted material', async () => {
     const f = await fixture();
     f.setSchedule(() => sse(read({ relation: 'correction', topic: '复核第一题的候选键' }, ['阿哲', 'challenge', 'medium', '重算一遍闭包'])));
-    const run = await f.start('感觉不太对'); await f.idle(run.runId);
-    expect(f.spoke(run.runId)).toEqual(['阿哲']);
-    const cue = cueOf(f.members()[0]!);
+    const run = await f.start('@林舟 在吗'); await f.idle(run.runId);
+    // The first message of a chat relates to nothing, whatever the reading called it.
+    expect(cueOf(f.members()[0]!)).not.toContain('主持人觉得刚才的说法有问题');
+    await f.send(run.runId, '感觉不太对'); await f.idle(run.runId);
+    expect(f.spoke(run.runId)).toEqual(['林舟', '阿哲']);
+    const cue = cueOf(f.members()[1]!);
     expect(cue).toContain('主持人觉得刚才的说法有问题');
     expect(cue).toContain('这一轮在聊什么（程序整理，仅供参考）：\n> 复核第一题的候选键');
     expect(cue).toContain('这次建议你说的重点（程序整理，仅供参考）：\n> 重算一遍闭包');
@@ -762,8 +765,9 @@ describe('D160 the chat reads the message first', () => {
     for (const [relation, word] of [['new_topic', '主持人换了话题'], ['follow_up', '结合前面已经说过的来回应'], ['chitchat', '这是闲聊']] as const) {
       const f = await fixture();
       f.setSchedule(() => sse(read({ relation }, ['小雨', 'reply', 'medium'])));
-      const run = await f.start('随便说点什么吧各位'); await f.idle(run.runId);
-      const cue = cueOf(f.members()[0]!);
+      const run = await f.start('集合'); await f.idle(run.runId);
+      await f.send(run.runId, '随便说点什么吧各位'); await f.idle(run.runId);
+      const cue = cueOf(f.members().at(-1)!);
       expect(cue, relation).toContain(word);
       expect(cue.includes('主持人想听的是你自己的看法'), relation).toBe(relation !== 'chitchat');
     }
