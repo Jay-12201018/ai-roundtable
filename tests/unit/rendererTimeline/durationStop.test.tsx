@@ -51,7 +51,7 @@ describe('the duration limit, in words', () => {
   });
   it('a request timing out says the model never answered, and blames no network; the limit says the limit', () => {
     const own = requestFailureText({ status: 'failed', errorCode: 'timeout' });
-    expect(own).toContain('模型一直没有返回完整的回复');
+    expect(own).toContain('模型中途停了下来，没有再返回内容');
     expect(own).not.toContain('网络');
     expect(requestFailureText({ status: 'aborted', errorCode: 'timeout' })).toContain('达到了时长上限');
   });

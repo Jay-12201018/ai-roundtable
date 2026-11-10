@@ -75,7 +75,7 @@ export function groupChatBriefText(member: MemberSnapshot, members: readonly Mem
   const prompt = member.systemPrompt.trim();
   return [`你是${memberLabel(member)}。`, roster ? `群里还有：${roster}。` : '群里只有你和主持人。', ...(prompt ? [`你的设定：\n${prompt}`] : [])].join('\n');
 }
-export type GroupChatCue = { intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string; resumed?: 'cut_off' | 'not_started'; relation?: Exclude<GroupChatRelation, 'resume'>; topic?: string };
+export type GroupChatCue = { intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string; resumed?: 'cut_off' | 'not_started'; ack?: true; relation?: Exclude<GroupChatRelation, 'resume'>; topic?: string };
 /** D160: how the host's message relates to the chat, as the scheduling model read it, said to the member as what a good turn is here. */
 const relationCues: Record<Exclude<GroupChatRelation, 'resume'>, string> = {
   new_topic: '主持人换了话题：只聊这个新话题，之前的先放下。',
@@ -110,6 +110,8 @@ export function groupChatCueText(member: MemberSnapshot, cue: GroupChatCue): str
     : cue.resumed === 'not_started' ? '刚才轮到你时主持人叫停了，现在他让继续：把你当时要说的说出来，接的还是叫停之前的那件事。' : '';
   // D159: asked what they think, a member whose part is to sum up summed up twice and had no view. A few sentences of reply are for a view.
   const view = cue.intent === 'reply' && cue.length === 'medium' ? '主持人想听的是你自己的看法：说你的判断和理由，哪怕你平时负责总结，也别只是把别人说过的理一遍。' : '';
+  // D165: the host only said yes. A reminder, a summary or one more question after that is the chat not letting go.
+  if (cue.ack) return ['【轮到你说话】', `现在由你（${memberLabel(member)}）接话。主持人只是应了一声，表示知道了或同意了：回一句短的就好（比如“好”“收到”“那就开工”），不要再提醒、总结、追问，也不要重复已经说过的话。`, '直接说，不要加名字或标签。'].join('\n');
   return ['【轮到你说话】', `现在由你（${memberLabel(member)}）接话。${resumed}${cue.relation ? relationCues[cue.relation] : ''}${source ?? ''}${source && cue.intent === 'reply' ? '' : intentCues[cue.intent]}${cue.relation === 'chitchat' ? '' : view}${lengthCues[cue.length]}`,
     // What the scheduling model wrote is material, quoted like everything a model writes, and says so.
     ...(cue.topic ? ['这一轮在聊什么（程序整理，仅供参考）：', quoteText(cue.topic)] : []),

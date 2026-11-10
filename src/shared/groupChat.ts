@@ -94,7 +94,12 @@ const askingViews = /怎么看|怎么想|怎么样|如何|有什么(看法|想�
  * D163: any question put to 你们 is one too (你们三个谁的模型更强). A member who says nothing looks broken to the host, who cannot see that
  * the member was simply not chosen; so a question to the group is everyone's to answer.
  */
-export const asksEveryone = (text: string) => everyoneAddressed.test(text) && (askingViews.test(text) || questionMark.test(text) || questionWords.test(text));
+export const asksEveryone = (text: string) => everyoneAddressed.test(text) && !asksForOne.test(text) && (askingViews.test(text) || questionMark.test(text) || questionWords.test(text));
+/** D165: 你们谁来写 looks for one person to do something; it is not a question for each of them. Who that is, the reading says. */
+const asksForOne = /(你们|大家|各位|[两三四五六七八九几]位)(当中|里面?|之中|中间)?(有)?(谁|哪位|哪个|哪一位)(来|能|可以|去|帮|给|负责|愿意|最终|最后|有空|出)/u;
+const acknowledgement = /^(那|那就|好的?|行|嗯+|哦+|噢|ok(ay)?|可以|收到|知道了?|明白了?|了解了?|没问题|就这样|就这么办|就按这个来?|按这个来|辛苦了?|谢谢|多谢|thanks?)+(吧|了|啦|呀|啊|哈|的)*$/iu;
+/** D165: the host only saying yes, fine, got it, as the whole message. One short word back is enough, and nothing is to be added to it. */
+export const isAcknowledgement = (text: string) => { const words = plainWords(text); return words.length > 0 && words.length <= 12 && acknowledgement.test(words); };
 /** D163: whoever the host calls by name, with or without an @. Named, a member answers: the host is talking to them, or about them. */
 export const namedMembers = (text: string, roster: readonly RosterMember[]) => roster.filter(member => member.displayName && text.toLowerCase().includes(member.displayName.toLowerCase()));
 
@@ -200,6 +205,14 @@ export function firstBatch(text: string, roster: readonly RosterMember[], seed: 
   if (plan.classification === 'mention') return { speakers: plan.speakers.map(speaker => { const read = said.get(speaker.agentId); return read ? { ...speaker, intent: read.intent, length: read.length } : speaker; }), more: false };
   if (!answer.speakers.length) return { speakers: fallback, more: false };
   const chosen: PlannedSpeaker[] = answer.speakers.map(({ agentId, intent, length, brief }) => ({ agentId, intent, length, source: 'schedule', ...(brief ? { assignment: brief } : {}) }));
+  // D165: one thing asked for is one thing delivered. Where the host did not hand out the parts, only the first long turn stays long; a
+  // second one becomes a word or two on it. Two members each writing the whole thing is two things to read and neither is the answer.
+  let delivering = false;
+  for (const speaker of chosen) {
+    if (speaker.length !== 'long') continue;
+    if (delivering) { speaker.length = 'short'; speaker.intent = speaker.intent === 'challenge' ? 'challenge' : 'reply'; delete speaker.assignment; }
+    delivering = true;
+  }
   // D163: named, or asked as one of 你们, a member answers whatever the reading left out: the reading's own choices first, then the rest.
   const owed = namedMembers(text, roster).length ? namedMembers(text, roster) : asksEveryone(text) ? shuffled(roster, seed) : [];
   for (const member of owed) if (!said.has(member.agentId)) chosen.push({ agentId: member.agentId, intent: 'reply', length: 'medium', source: 'rule' });

@@ -1028,6 +1028,11 @@ export class Database {
     const row = this.db.prepare('SELECT round_id,position,agent_id,intent,length,source,assignment,state,turn_id FROM group_chat_speakers WHERE turn_id=?').get(turnId) as RawGroupChatSpeaker | undefined;
     return row ? groupChatSpeakerFromRow(row) : undefined;
   }
+  /** D165: the member who spoke most recently in this chat, if anyone has. */
+  lastGroupChatSpeaker(runId: string): string | undefined {
+    this.assertInitialized();
+    return this.db.prepare("SELECT s.agent_id FROM group_chat_speakers s JOIN group_chat_rounds r ON r.id=s.round_id JOIN turns t ON t.id=s.turn_id WHERE r.run_id=? AND s.state='started' ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1").pluck().get(runId) as string | undefined;
+  }
   firstGroupChatRoundId(runId: string): string | undefined {
     this.assertInitialized();
     return this.db.prepare('SELECT id FROM group_chat_rounds WHERE run_id=? ORDER BY created_at ASC,rowid ASC LIMIT 1').pluck().get(runId) as string | undefined;

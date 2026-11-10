@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asksEveryone, classifyHostMessage, firstBatch, isContinueMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, namedMembers, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
+import { asksEveryone, classifyHostMessage, firstBatch, isAcknowledgement, isContinueMessage, isGather, isSimpleQuestion, isStopMessage, isVeryShort, memberHints, namedMembers, parseMentions, parseScheduleOutput, ruleSpeakers, skipsThinking } from '../../../src/shared/groupChat';
 import { fastReplyBodyOf, serviceCatalog } from '../../../src/shared/serviceCatalog';
 import { buildScheduleMessages } from '../../../src/main/groupChat/schedulePrompt';
 import { boundaryText, discussionRulesText, groupChatBoundaryText, groupChatCueText, groupChatDateText, groupChatRulesText, turnCueText } from '../../../src/main/context/transcript';
@@ -230,6 +230,36 @@ describe('D163 nobody the host is talking to stays silent', () => {
   it('a question to 你们 is everyone\'s, whatever the reading chose', () => {
     const read = { speakers: [{ agentId: 'c', intent: 'reply' as const, length: 'medium' as const }], more: false };
     expect(firstBatch('你觉得你们三个人谁的模型更强大', three, 1, false, read).speakers.map(item => item.agentId).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('D165 one thing asked for, one thing delivered; a yes is only a yes', () => {
+  const three = [{ agentId: 'a', displayName: '林舟' }, { agentId: 'b', displayName: '阿哲' }, { agentId: 'c', displayName: '小雨' }];
+  it('where the host did not hand out the parts, only the first long turn stays long', () => {
+    const read = { speakers: [{ agentId: 'a', intent: 'claim' as const, length: 'long' as const, brief: '给出七天计划' }, { agentId: 'b', intent: 'claim' as const, length: 'long' as const, brief: '补充工程练习' }, { agentId: 'c', intent: 'challenge' as const, length: 'long' as const }], more: false };
+    expect(firstBatch('给我策划一下一周学完C语言的全部内容', three, 1, false, read).speakers).toEqual([
+      { agentId: 'a', intent: 'claim', length: 'long', source: 'schedule', assignment: '给出七天计划' },
+      { agentId: 'b', intent: 'reply', length: 'short', source: 'schedule' }, { agentId: 'c', intent: 'challenge', length: 'short', source: 'schedule' }]);
+  });
+  it('where the host did, each part is its own and stays long', () => {
+    expect(firstBatch('@林舟 写前端，@阿哲 写后端', three, 1, false, undefined).speakers.map(item => item.length)).toEqual(['long', 'long']);
+  });
+  it('你们谁来 looks for one person, and is not a question for each of them', () => {
+    for (const text of ['你们谁最终给我设计一个学习计划，一定要全面完整', '你们谁来写一下', '哪位能帮我看看', '各位哪位有空出个方案']) expect(asksEveryone(text), text).toBe(false);
+    const read = { speakers: [{ agentId: 'a', intent: 'claim' as const, length: 'long' as const }], more: false };
+    expect(firstBatch('你们谁最终给我设计一个学习计划，一定要全面完整', three, 1, false, read).speakers.map(item => item.agentId)).toEqual(['a']);
+    expect(asksEveryone('你觉得你们三个人谁的模型更强大')).toBe(true);
+  });
+  it('a yes is the whole message, or it is something else', () => {
+    for (const text of ['ok', 'OK', 'OKOK', '好', '好的', '好吧', '行', '嗯嗯', '可以', '收到', '知道了', '明白了', '没问题', '就这样吧', '好的，谢谢', '行，就这么办']) expect(isAcknowledgement(text), text).toBe(true);
+    for (const text of ['好不好', '可以吗', 'OKOK就按照这个计划来', '行不行', '好的，那先做登录', '谢谢你们的方案，我再想想', '1', '？', '']) expect(isAcknowledgement(text), text).toBe(false);
+  });
+  it('and whoever answers it is told to add nothing', () => {
+    const member = { agentId: 'c', displayName: '小雨', roleTemplateId: '总结', systemPrompt: '', providerId: 'p', modelId: 'm', displayOrder: 0 };
+    const cue = groupChatCueText(member, { intent: 'reply', length: 'short', source: 'rule', ack: true });
+    expect(cue).toContain('主持人只是应了一声');
+    expect(cue).toContain('不要再提醒、总结、追问');
+    expect(cue).not.toContain('只回应这一条');
   });
 });
 

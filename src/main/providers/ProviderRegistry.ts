@@ -27,6 +27,8 @@ export type ModelBudget = { contextWindowTokens: number; maxOutputTokens: number
 type Binding = { kind: string; baseUrl: string; revision: string };
 /** D135: a long reply from a slow model must not be cut off; the Run's duration limit is what bounds a discussion. */
 const STREAM_TIMEOUT_MS = 600_000;
+/** D164: a reply that has started and then sends nothing for this long is taken as cut off. Services stream their thinking, so a minute of nothing is not thought. */
+const STREAM_IDLE_TIMEOUT_MS = 60_000;
 
 // D136: saving a service is what lets its Key go to its address; Renderer and model names cannot change where it goes.
 export class ProviderRegistry {
@@ -128,7 +130,7 @@ export class ProviderRegistry {
     onDispatch?: () => void): CompatibleProvider {
     const providerId = configuration.id;
     const safeTransport = this.createTransport(guard, diagnostics);
-    const options = { configuration, confirmedBaseUrl: binding.baseUrl, diagnostics, streamTimeoutMs: STREAM_TIMEOUT_MS, readImage: this.options.readImage,
+    const options = { configuration, confirmedBaseUrl: binding.baseUrl, diagnostics, streamTimeoutMs: STREAM_TIMEOUT_MS, streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS, readImage: this.options.readImage,
       fastReplyBody: (modelId: string) => fastReplyBodyOf(catalogServiceAt(this.catalog(), configuration.baseUrl), modelId),
       resolveKey: async (id: string) => {
         guard();

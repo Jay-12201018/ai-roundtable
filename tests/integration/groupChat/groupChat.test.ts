@@ -690,7 +690,18 @@ describe('D154 a message that says stop', () => {
 });
 
 describe('D154 what the first real run showed', () => {
-  it.each(['1', '好', '嗯', 'ok', '？'])('%s is read once, and with nothing from the reading gets one short reply', async text => {
+  it.each(['好', '嗯', 'ok', '好的，谢谢'])('D165: %s is only a yes: whoever spoke last says a word back, nothing is read, and nothing is added', async text => {
+    const f = await fixture();
+    const run = await f.start('@阿哲 在吗'); await f.idle(run.runId);
+    const read = f.schedules().length;
+    await f.send(run.runId, text); await f.idle(run.runId);
+    expect(f.spoke(run.runId)).toEqual(['阿哲', '阿哲']);
+    expect(f.schedules()).toHaveLength(read);
+    const cue = String(f.members().at(-1)!.messages.at(-1)!.content);
+    expect(cue).toContain('主持人只是应了一声');
+    expect(cue).toContain('不要再提醒、总结、追问');
+  });
+  it.each(['1', '？'])('%s is read once, and with nothing from the reading gets one short reply', async text => {
     const f = await fixture();
     const run = await f.start('集合'); await f.idle(run.runId);
     const before = f.members().length;

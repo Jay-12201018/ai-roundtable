@@ -53,6 +53,12 @@ const conversations = [
   { name: 'answer-then-stop', steps: [
     { say: '这个方向大家怎么看：做一个校园二手平台', expect: step => step.speakers.length === step.roster.length || '问大家应该每个人都回应' },
     { say: '对了，今天天气怎么样', expect: step => step.replies.every(text => !/二手|平台|校园/u.test(text)) || '答完天气就停，不能拉回二手平台' }] },
+  // D165: the host's second trial. One thing asked for is one thing delivered; a yes is only a yes.
+  { name: 'one-deliverable', steps: [
+    { say: '给我策划一下三天入门 Python 的学习安排，简短一点', expect: step => step.lengths.filter(length => length === 'long').length === 1 && step.replies.filter(text => text.length > 400).length <= 1 || `要一份安排应只有一位写长的，实际 ${step.speakers.join()} ${step.lengths.join()}` },
+    { say: '你们谁最终给我一份完整的，别的人不用重复', expect: step => step.lengths.filter(length => length === 'long').length === 1 && step.replies.filter(text => text.length > 400).length <= 1 || `“你们谁”是找一个人，实际 ${step.speakers.join()} ${step.lengths.join()}` },
+    { say: 'OKOK就按照这个来', expect: step => step.speakers.length <= 1 && step.replies.every(text => text.length <= 80) || `表示同意后最多一句短的，实际 ${step.speakers.join()}` },
+    { say: 'ok', rules: true, expect: step => step.speakers.length === 1 && step.replies.every(text => text.length <= 40 && !/前提|确认|提醒|别忘|记得/u.test(text)) || '“ok”只回一句短的，不再提醒或追问' }] },
   { name: 'how-long', steps: [
     { say: '@阿哲 后端这块什么时候能给我', expect: step => step.replies.every(text => !promise.test(text)) || '不应该许诺时间或报工期' }] },
 ];

@@ -19,7 +19,7 @@ const startFailures: Partial<Record<string, string>> = {
 // What the service or the network said, in plain words; nothing from its response body ever reaches here.
 const turnFailureMessages: Partial<Record<ErrorCode, string>> = {
   attachment_missing: '有一张图片的文件读不出来了，这次请求没有发出。历史都保留。',
-  invalid_response: '模型未完整完成响应，部分输出已保留。', timeout: '这次请求超时：模型一直没有返回完整的回复（单次请求最长 10 分钟）。已生成的文字保留，可以重试。', cancelled: '请求已停止，部分输出已保留。',
+  invalid_response: '模型未完整完成响应，部分输出已保留。', timeout: '这次请求超时：模型中途停了下来，没有再返回内容（超过 1 分钟没有新内容，或整次请求超过 10 分钟）。已生成的文字保留，可以重试。', cancelled: '请求已停止，部分输出已保留。',
   authentication_failed: '服务商拒绝了这把 Key：可能无效或已过期，请到“设置 › 模型服务”检查。', forbidden: '服务商拒绝了这次访问，请到“设置 › 模型服务”检查。',
   rate_limited: '服务商限流（请求太频繁），稍等一会儿再重试。', not_found: '服务商找不到这个模型，或者它还没在服务商那里开通，请到服务商控制台检查。', network_error: '连接不上，请检查网络。',
   target_rejected: '这个服务的地址解析到了内网或保留地址，请求没有发出。请检查网络后再试。',

@@ -32,7 +32,7 @@ import { artifactOutputTokenLimit, buildArtifactRequest } from '../artifact/prom
 import { continuationPreviewInputSchema, continueDiscussionInputSchema, type ContinuationPreview, type ContinuationPreviewInput,
   type ContinueDiscussionInput, type ContinueDiscussionResult, type RunContinuation } from '../../shared/schemas/continuation';
 import { GROUP_CHAT_MAX_SCHEDULES, GROUP_CHAT_MAX_TURNS, GROUP_CHAT_SCHEDULE_MAX_TOKENS, GROUP_CHAT_SCHEDULE_TIMEOUT_MS, isGroupChatSnapshot, type GroupChatRoundState, type GroupChatState } from '../../shared/schemas/groupChat';
-import { classifyHostMessage, firstBatch, isContinueMessage, isGather, isStopMessage, memberHints, parseMentions, parseScheduleOutput, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
+import { classifyHostMessage, firstBatch, isAcknowledgement, isContinueMessage, isGather, isStopMessage, memberHints, parseMentions, parseScheduleOutput, seedOf, skipsThinking, type PlannedSpeaker, type ScheduleOutput } from '../../shared/groupChat';
 import { buildScheduleMessages, type ScheduleState } from '../groupChat/schedulePrompt';
 import type { GroupChatRound, GroupChatSpeaker } from '../database/Database';
 import type { GroupChatCue } from '../context/transcript';
@@ -1515,6 +1515,14 @@ export class RunService {
       this.appendEvent(context.runId, 'group_chat_updated', { roundId, state: 'open' });
       return;
     }
+    // D165: the host only said yes. Whoever spoke last says a word back; nothing is read, and nothing more is arranged.
+    if (!hasImages && isAcknowledgement(text)) {
+      const last = this.database.lastGroupChatSpeaker(context.runId);
+      const answering = roster.find(member => member.agentId === last) ?? roster[0]!;
+      this.database.insertGroupChatRound({ ...identity, classification: 'simple', scheduleMore: false, speakers: [{ agentId: answering.agentId, intent: 'reply', length: 'short', source: 'rule' }] });
+      this.appendEvent(context.runId, 'group_chat_updated', { roundId, state: 'open' });
+      return;
+    }
     const plan = classifyHostMessage(text, roster, seedOf(seed), hasImages);
     // D160: a call for everyone is answered at once. Anything else is read by the scheduling model first, where there is one to ask; the round
     // starts with nobody in it and `planNextBatch` fills it, from that reading or, without one, from these same rules.
@@ -1655,6 +1663,11 @@ export class RunService {
   private roundReading(context: RunContext, round: Pick<GroupChatRound, 'id'>): Pick<ScheduleOutput, 'relation' | 'topic'> | undefined {
     const text = this.database.firstScheduleOutput(round.id);
     return text ? parseScheduleOutput(text, context.members.map(({ agentId, displayName }) => ({ agentId, displayName }))) : undefined;
+  }
+  /** D165: whether this speaker is answering a host message that only said yes. Read from the round's message, so a repeat says the same. */
+  private acknowledged(context: RunContext, speaker: GroupChatSpeaker): boolean {
+    const round = this.database.latestGroupChatRound(context.runId);
+    return !!round && round.id === speaker.roundId && speaker.source === 'rule' && !this.roundHasImages(context, round) && isAcknowledgement(this.roundText(context, round));
   }
   private firstRoundOf(context: RunContext, roundId: string): boolean {
     return this.database.firstGroupChatRoundId(context.runId) === roundId;
@@ -1800,7 +1813,7 @@ export class RunService {
       const chat = context.groupChat ? speaker ?? (repeat ? this.database.groupChatSpeakerOfTurn(turnId) : undefined) : undefined;
       const resumed = chat ? this.resumedSpeaker(context, chat) : undefined;
       const reading = chat ? this.roundReading(context, { id: chat.roundId }) : undefined;
-      const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}), ...(resumed ? { resumed } : {}),
+      const cue: GroupChatCue | undefined = context.groupChat ? { intent: chat?.intent ?? 'reply', length: chat?.length ?? 'medium', source: chat?.source ?? 'rule', ...(chat?.assignment ? { assignment: chat.assignment } : {}), ...(resumed ? { resumed } : {}), ...(chat && this.acknowledged(context, chat) ? { ack: true as const } : {}),
         // The first message of a chat relates to nothing: whatever the reading called it, nothing is said about what came before.
         ...(reading?.relation && reading.relation !== 'resume' && !resumed && !this.firstRoundOf(context, chat!.roundId) ? { relation: reading.relation } : {}), ...(reading?.topic ? { topic: reading.topic } : {}) } : undefined;
       const preparation:RequestPreparation={snapshot,workflowStep,...(cue?{groupChat:cue}:{}),current:{turnId,requestId,messageId,agentId:member.agentId,turnIndex},

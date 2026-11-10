@@ -18,6 +18,8 @@ export interface CompatibleOptions {
   timeoutMs?: number;
   /** D135: the total for a generation stream. */
   streamTimeoutMs?: number;
+  /** D164: how long a reply that has started may go without anything new arriving before it is taken as cut off. Unset, there is no such limit. */
+  streamIdleTimeoutMs?: number;
   fetch?: typeof fetch;
   diagnostics?: DiagnosticObserver;
   /** D147: a stored image's bytes, read only when the request is written. */
@@ -83,6 +85,7 @@ export class CompatibleProvider implements ProviderAdapter {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly streamTimeoutMs: number;
+  private readonly streamIdleTimeoutMs: number | undefined;
   private readonly resolveKey: CompatibleOptions['resolveKey'];
   private readonly fetcher: typeof fetch;
   private readonly diagnostics?: DiagnosticObserver;
@@ -98,6 +101,7 @@ export class CompatibleProvider implements ProviderAdapter {
       if (normalizeBase(options.confirmedBaseUrl) !== this.baseUrl) throw new ContractError('invalid_input');
       this.timeoutMs = z.number().int().min(1).max(2147483647).parse(options.timeoutMs ?? 60000);
       this.streamTimeoutMs = z.number().int().min(1).max(2147483647).parse(options.streamTimeoutMs ?? this.timeoutMs);
+      this.streamIdleTimeoutMs = z.number().int().min(1).max(2147483647).optional().parse(options.streamIdleTimeoutMs);
       this.resolveKey = options.resolveKey;
       this.fetcher = options.fetch ?? globalThis.fetch;
       this.diagnostics = options.diagnostics;
@@ -146,12 +150,17 @@ export class CompatibleProvider implements ProviderAdapter {
       parsingStream = true;
       this.diagnostics?.({ stage: 'stream' });
       yield { type: 'start', requestId };
+      // D164: a connection can die without saying so, and then nothing more ever arrives. Anything the service sends counts as life, thinking
+      // included; a silence this long does not, and what has arrived is kept like any reply that was cut off.
+      if (this.streamIdleTimeoutMs !== undefined) scope.idle(this.streamIdleTimeoutMs);
       let finish: 'stop' | 'length' | 'content_filter' | undefined;
       // D135: compatible services may repeat usage or send it before finish_reason; the last one before the end counts.
       let usage: Extract<NormalizedChunk, { type: 'usage' }> | undefined;
       const think = new LeadingThink();
       try {
-        for await (const data of readSse(response, scope.signal, () => scope.check())) {
+        // Every read that brings bytes counts, a heartbeat comment as much as a word: a dead connection brings none.
+        const alive = () => { scope.check(); if (this.streamIdleTimeoutMs !== undefined) scope.idle(this.streamIdleTimeoutMs); };
+        for await (const data of readSse(response, scope.signal, alive)) {
           scope.check();
           if (data === '[DONE]') break;
           let value: unknown;
@@ -345,6 +354,12 @@ class RequestScope {
     parent?.addEventListener('abort', this.abort, { once: true });
     if (parent?.aborted) this.abort();
   }
+  private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** D164: starts, or starts again, the wait for the next thing to arrive. */
+  idle(ms: number) {
+    clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => this.controller.abort(new ContractError('timeout')), ms);
+  }
   check() {
     if (!this.signal.aborted && performance.now() >= this.deadline) this.controller.abort(new ContractError('timeout'));
     if (this.signal.aborted) throw this.signal.reason;
@@ -360,5 +375,5 @@ class RequestScope {
       }, error => { this.signal.removeEventListener('abort', abort); reject(error); });
     });
   }
-  close() { clearTimeout(this.timer); this.parent?.removeEventListener('abort', this.abort); this.controller.abort(new ContractError('cancelled')); }
+  close() { clearTimeout(this.timer); clearTimeout(this.idleTimer); this.parent?.removeEventListener('abort', this.abort); this.controller.abort(new ContractError('cancelled')); }
 }
