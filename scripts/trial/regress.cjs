@@ -21,7 +21,7 @@ const few = (max, chars) => step => step.speakers.length >= 1 && step.speakers.l
 /** Each conversation: host messages in order; `expect` returns true, or a string saying what was wrong. `stopAfterFirstWords` sends 停止 mid-reply. */
 const conversations = [
   { name: 'gather-then-chat', steps: [
-    { say: '集合开会！', expect: step => step.speakers.length === step.roster.length && step.replies.every(text => text.length <= 60) || '集合应该每人一句短的' },
+    { say: '集合开会！', rules: true, expect: step => step.speakers.length === step.roster.length && step.replies.every(text => text.length <= 60) || '集合应该每人一句短的' },
     { say: '今天有点累', expect: step => few(2, 120)(step) || '闲聊应该一两个人轻松回一句' },
     { say: '？', expect: step => few(1, 80)(step) || '一个问号最多一个人短回' }] },
   { name: 'simple-question', steps: [
@@ -42,6 +42,17 @@ const conversations = [
     { say: '刚才说到哪了，你们接着来', expect: step => step.relation === 'resume' && step.speakers.length >= 2 || `应读成 resume 并把没说完的人接上，实际 ${step.relation} ${step.speakers.join()}` }] },
   { name: 'nothing-to-go-on', steps: [
     { say: '上周用户调研的结论是什么', expect: step => step.replies.every(text => /没有|没看到|不知道|没见过|不清楚|没提|哪份|哪个|未提供|没发/u.test(text) && !/\d+\s*%/u.test(text) && !/我(去|来|回头)(问|要|找|查|看|确认)/u.test(text)) || '没有依据的事应该说不知道，不能编数字，也不能说“我去要来看”' }] },
+  // D163: what the host's own trial on 2026-11-10 showed.
+  { name: 'asked-as-a-group-then-named', steps: [
+    { say: '你觉得你们三个人谁的模型更强大', expect: step => step.speakers.length === step.roster.length || `问“你们三个”应该每个人都回应，实际 ${step.speakers.join()}` },
+    { say: '今天星期几', expect: step => few(2, 120)(step) || '随口一问一两个人短答' },
+    { say: '林舟怎么不说话', expect: step => step.speakers.includes('林舟') && step.replies.every(text => !/抱歉|不好意思|刚(才)?在(想|整理|看|忙)|掉链子|第一时间/u.test(text)) || `叫到名字的人要回应，且不为没说话编理由，实际 ${step.speakers.join()}` },
+    { say: '好吧', expect: step => step.speakers.length <= 1 && step.replies.every(text => text.length <= 60 && !/主持人/u.test(text)) || '“好吧”最多一句短的，不用第三人称说主持人' }] },
+  { name: 'what-a-member-knows', steps: [
+    { say: '国内有哪些做大模型的公司', expect: step => step.replies.some(text => /百度|阿里|腾讯|字节|智谱|月之暗面|科大讯飞|文心|通义|豆包|混元|Kimi|DeepSeek/iu.test(text)) || '常识问题应该照知道的回答，不能都以“没有依据”拒绝' }] },
+  { name: 'answer-then-stop', steps: [
+    { say: '这个方向大家怎么看：做一个校园二手平台', expect: step => step.speakers.length === step.roster.length || '问大家应该每个人都回应' },
+    { say: '对了，今天天气怎么样', expect: step => step.replies.every(text => !/二手|平台|校园/u.test(text)) || '答完天气就停，不能拉回二手平台' }] },
   { name: 'how-long', steps: [
     { say: '@阿哲 后端这块什么时候能给我', expect: step => step.replies.every(text => !promise.test(text)) || '不应该许诺时间或报工期' }] },
 ];
@@ -128,10 +139,12 @@ async function main() {
     const speakers = roundId ? db.prepare("SELECT s.intent,s.length,s.source FROM group_chat_speakers s WHERE s.round_id=? AND s.state='started' ORDER BY s.position").all(roundId) : [];
     const facts = { ...result.facts, relation: reading.relation, topic: reading.topic, read: output !== undefined, intents: speakers.map(item => item.intent), lengths: speakers.map(item => item.length) };
     let verdict; try { verdict = result.step.expect(facts); } catch (error) { verdict = `检查出错：${error.message}`; }
-    const passed = verdict === true && facts.failed === 0;
+    // D162: a message that should have been read by a model and was not is a failure of its own: the chat fell back to the rules.
+    const unread = !facts.read && !result.step.rules && !result.step.stopAfterFirstWords;
+    const passed = verdict === true && facts.failed === 0 && !unread;
     if (!passed) failures++;
     const said = facts.speakers.map((speaker, index) => `${speaker}(${facts.intents[index] ?? '?'}/${facts.lengths[index] ?? '?'}/${facts.replies[index].length}字)`).join('、') || '无人';
-    lines.push(`| ${result.conversation} | ${result.say} | ${passed ? '通过' : '**不符**'} | 读解：${facts.read ? `${facts.relation ?? '无关系'}｜${facts.topic ?? '无话题'}` : '没有（走规则）'}；发言：${said}；${facts.seconds} 秒${facts.failed ? `；${facts.failed} 次失败` : ''}${passed ? '' : `；${verdict === true ? '有发言失败' : verdict}`} |`);
+    lines.push(`| ${result.conversation} | ${result.say} | ${passed ? '通过' : '**不符**'} | 读解：${facts.read ? `${facts.relation ?? '无关系'}｜${facts.topic ?? '无话题'}` : '没有（走规则）'}；发言：${said}；${facts.seconds} 秒${facts.failed ? `；${facts.failed} 次失败` : ''}${passed ? '' : `；${verdict !== true ? verdict : unread ? '这条消息没有被模型读懂，走了规则' : '有发言失败'}`} |`);
     for (const [index, text] of facts.replies.entries()) lines.push(`| | | | ${facts.speakers[index]}：${text.replace(/\s+/gu, ' ').replace(/\|/gu, '｜').slice(0, 160)} |`);
   }
   db.close();
