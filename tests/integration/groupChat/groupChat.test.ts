@@ -538,6 +538,16 @@ describe('D150 which model is asked', () => {
     await f.send(run.runId, '明天呢？'); await f.idle(run.runId);
     expect(f.schedules().map(body => body.model)).toEqual(['deepseek-v4-pro', 'deepseek-flash', 'deepseek-flash']);
   });
+  it('D166: a model that could not be reached, or did not answer in time, is not followed by another: the rules answer at once', async () => {
+    const f = await fixture({ defaultModelId: 'deepseek-v4-pro', customModels: [{ id: 'deepseek-v4-pro', name: 'x' }, { id: 'deepseek-flash', name: 'y' }] });
+    f.service.scheduleTimeoutMs = 30;
+    f.setSchedule(() => signal => held('{"speakers":', signal, new Promise(() => {})));
+    const run = await f.start('今天几号？'); const done = await f.idle(run.runId);
+    expect(f.schedules()).toHaveLength(1);
+    expect(f.db.listScheduleRequests(run.runId)[0]).toMatchObject({ status: 'failed', outputText: '[error:timeout]' });
+    expect(f.spoke(run.runId)).toHaveLength(1);
+    expect(done.status).toBe('completed');
+  });
   it('D162: when no model can read the message, the rules answer it and the host sees a reply', async () => {
     const f = await fixture({ defaultModelId: 'deepseek-v4-pro', customModels: [{ id: 'deepseek-v4-pro', name: 'x' }, { id: 'deepseek-flash', name: 'y' }] });
     f.setSchedule(() => new Response('no', { status: 500 }));
@@ -916,18 +926,18 @@ describe('D155 how a connection failure is recorded', () => {
     let tries = 0;
     const f = await wired((async () => { tries++; throw noName(); }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
     const done = await f.chat('都在吗');
-    expect(tries).toBe(4);
+    expect(tries).toBe(3);
     expect(done.lastFailure).toEqual(publicError('network_error', undefined, undefined, 'dns'));
     expect(JSON.stringify(done.lastFailure)).not.toContain('10.1.2.3');
     expect(done.usage![0]!.state).toBe('not_sent');
     expect(f.service.subscribe(done.runId, 0).events.find(event => event.type === 'turn_failed')?.payload).toMatchObject({ error: { code: 'network_error', phase: 'dns' } });
   }, 15000);
-  it('a failure after the request is written is never sent again, and its usage stays unknown', async () => {
+  it('D166: a request that went and got no answer at all is made again; when none of the tries is answered, its usage stays unknown', async () => {
     let tries = 0;
     const f = await wired((async () => { tries++; return here; }) as unknown as typeof dnsLookup, (_req, res) => { res.socket?.destroy(); });
     const done = await f.chat('都在吗');
-    expect(tries).toBe(1);
-    expect(f.received).toHaveLength(1);
+    expect(tries).toBe(3);
+    expect(f.received).toHaveLength(3);
     expect(done.lastFailure).toEqual(publicError('network_error', undefined, undefined, 'request'));
     expect(done.usage![0]!.state).toBe('unknown');
   });
@@ -949,7 +959,7 @@ describe('D155 how a connection failure is recorded', () => {
     let always = 0;
     const g = await wired((async () => { always++; throw noName(); }) as unknown as typeof dnsLookup, (_req, res) => reply(res));
     const stopped = await g.chat('讨论', {});
-    expect(always).toBe(4);
+    expect(always).toBe(3);
     expect(stopped.status).toBe('error');
     expect(stopped.turns).toHaveLength(1);
     expect(stopped.lastFailure?.phase).toBe('dns');

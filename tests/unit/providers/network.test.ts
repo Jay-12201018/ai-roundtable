@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream';
 import type { lookup as dnsLookup } from 'node:dns/promises';
 import type { RequestOptions } from 'node:https';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CONNECT_RETRY_DELAYS_MS, createSafeFetch as catalogFetch, networkPhaseOf } from '../../../src/main/providers/network';
+import { NETWORK_CONNECT_TIMEOUT_MS, NETWORK_MAX_RETRIES, createSafeFetch as catalogFetch, networkPhaseOf, retryDelayMs } from '../../../src/main/providers/network';
 import { ContractError } from '../../../src/shared/contracts/errors';
 import { catalogServiceAt, serviceCatalog } from '../../../src/shared/serviceCatalog';
 
@@ -331,7 +331,7 @@ describe('Main safe Provider transport', () => {
   });
 });
 
-describe('D155, D158 more tries, only when nothing was written', () => {
+describe('D166 a try that got no answer is made again, twice at most; a reply that has begun never is', () => {
   const local = (lookupFn: typeof dnsLookup, guard?: () => void) => catalogFetch(guard, lookupFn, undefined, { has: () => true });
   const closedPort = async () => { const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done)); const { port } = server.address() as AddressInfo; await new Promise(done => server.close(done)); return port; };
   const dnsFailure = () => Object.assign(new TypeError('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' });
@@ -348,38 +348,87 @@ describe('D155, D158 more tries, only when nothing was written', () => {
       expect(tries).toBe(2);
     } finally { server.close(); }
   });
-  it('a refused connection is tried four times in all, and no more; the failure says where', async () => {
+  it('the policy: two more tries, half a second then one, less up to a quarter at random, eight seconds at most; five seconds to connect', () => {
+    expect(NETWORK_MAX_RETRIES).toBe(2);
+    expect(NETWORK_CONNECT_TIMEOUT_MS).toBe(5000);
+    expect([0, 1, 2, 5, 9].map(attempt => retryDelayMs(attempt, () => 0))).toEqual([500, 1000, 2000, 8000, 8000]);
+    expect(retryDelayMs(1, () => 1)).toBe(750);
+  });
+  it('a refused connection is tried three times in all, and no more; the failure says where', async () => {
     const port = await closedPort(); let tries = 0;
     const resolver = (async () => { tries++; return here; }) as unknown as typeof dnsLookup;
     const failure = await local(resolver)(`http://localhost:${port}/v1/x`, { method: 'POST', body: '{}' }).catch(error => error);
-    expect(CONNECT_RETRY_DELAYS_MS).toEqual([300, 1000, 2000]);
-    expect(tries).toBe(4);
+    expect(tries).toBe(3);
     expect(networkPhaseOf(failure)).toBe('tcp');
   }, 15000);
-  it('D158: a burst of three failures is ridden out, and the fourth try goes through', async () => {
-    const server = createServer((_req, res) => res.end('fourth'));
+  it('two failures are ridden out, and the third try goes through', async () => {
+    const server = createServer((_req, res) => res.end('third'));
     await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
     const { port } = server.address() as AddressInfo; let tries = 0;
-    const resolver = (async () => { tries++; if (tries <= 3) throw dnsFailure(); return here; }) as unknown as typeof dnsLookup;
-    try { expect(await (await local(resolver)(`http://localhost:${port}/`)).text()).toBe('fourth'); expect(tries).toBe(4); } finally { server.close(); }
+    const resolver = (async () => { tries++; if (tries <= 2) throw dnsFailure(); return here; }) as unknown as typeof dnsLookup;
+    try { expect(await (await local(resolver)(`http://localhost:${port}/`)).text()).toBe('third'); expect(tries).toBe(3); } finally { server.close(); }
   }, 15000);
   it('a connection refused and then accepted goes through', async () => {
     const port = await closedPort(); let tries = 0; const server = createServer((_req, res) => res.end('second'));
     const resolver = (async () => { tries++; if (tries === 2) await new Promise<void>(done => server.listen(port, '127.0.0.1', done)); return here; }) as unknown as typeof dnsLookup;
     try { expect(await (await local(resolver)(`http://localhost:${port}/`)).text()).toBe('second'); expect(tries).toBe(2); } finally { server.close(); }
   });
-  it('once the request is written, a failure is never tried again', async () => {
+  it('a request that went and got no answer at all is made again, and the answer to the second counts', async () => {
+    let received = 0;
+    const server = createServer((req, res) => { req.resume(); received++; if (received === 1) res.socket?.destroy(); else res.end('second'); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const answer = await local((async () => here) as unknown as typeof dnsLookup)(`http://localhost:${port}/`, { method: 'POST', body: '{"n":1}' });
+      expect(await answer.text()).toBe('second');
+      expect(received).toBe(2);
+    } finally { server.close(); }
+  }, 15000);
+  it('and when no try gets an answer, the failure says the request had gone', async () => {
     let received = 0;
     const server = createServer((req, res) => { req.resume(); received++; res.socket?.destroy(); });
     await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
-    const { port } = server.address() as AddressInfo; let tries = 0;
-    const resolver = (async () => { tries++; return here; }) as unknown as typeof dnsLookup;
+    const { port } = server.address() as AddressInfo;
     try {
-      const failure = await local(resolver)(`http://localhost:${port}/`, { method: 'POST', body: '{"secret":1}' }).catch(error => error);
+      const failure = await local((async () => here) as unknown as typeof dnsLookup)(`http://localhost:${port}/`, { method: 'POST', body: '{"n":1}' }).catch(error => error);
       expect(networkPhaseOf(failure)).toBe('request');
-      expect(tries).toBe(1); expect(received).toBe(1);
+      expect(received).toBe(3);
+    } finally { server.close(); }
+  }, 15000);
+  it.each([429, 500, 503, 408, 409])('an answer of %i means not now: it is asked again, and the next answer is the one returned', async status => {
+    let received = 0;
+    const server = createServer((req, res) => { req.resume(); received++; if (received === 1) { res.writeHead(status); res.end('busy'); } else res.end('fine'); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const answer = await local((async () => here) as unknown as typeof dnsLookup)(`http://localhost:${port}/`, { method: 'POST', body: '{}' });
+      expect(answer.status).toBe(200); expect(await answer.text()).toBe('fine'); expect(received).toBe(2);
+    } finally { server.close(); }
+  }, 15000);
+  it('the service\'s own retry-after is the wait, when it asks for one', async () => {
+    let received = 0; const times: number[] = [];
+    const server = createServer((req, res) => { req.resume(); received++; times.push(Date.now()); if (received === 1) { res.writeHead(429, { 'retry-after': '0.05' }); res.end(); } else res.end('fine'); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    try {
+      expect(await (await local((async () => here) as unknown as typeof dnsLookup)(`http://localhost:${port}/`)).text()).toBe('fine');
+      expect(times[1]! - times[0]!).toBeLessThan(350);
     } finally { server.close(); }
   });
+  it('an answer that says no for good (400, 401, 404) is returned as it is, at once; a still-busy service is returned after the last try', async () => {
+    for (const status of [400, 401, 404]) {
+      let received = 0;
+      const server = createServer((req, res) => { req.resume(); received++; res.writeHead(status); res.end('no'); });
+      await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+      const { port } = server.address() as AddressInfo;
+      try { expect((await local((async () => here) as unknown as typeof dnsLookup)(`http://localhost:${port}/`)).status).toBe(status); expect(received).toBe(1); } finally { server.close(); }
+    }
+    let busy = 0;
+    const server = createServer((req, res) => { req.resume(); busy++; res.writeHead(503); res.end('busy'); });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    try { expect((await local((async () => here) as unknown as typeof dnsLookup)(`http://localhost:${port}/`)).status).toBe(503); expect(busy).toBe(3); } finally { server.close(); }
+  }, 15000);
   it('a reply cut off after it started is never tried again', async () => {
     let received = 0;
     const server = createServer((req, res) => { req.resume(); received++; res.writeHead(200); res.write('part'); setTimeout(() => res.socket?.destroy(), 10); });

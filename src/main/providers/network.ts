@@ -99,7 +99,14 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         else category = 'network_unknown';
         observe?.({ stage: phase, category });
       };
-      const cleanup = () => { signal?.removeEventListener('abort', abort); };
+      // D166: reaching the service has its own limit, apart from the request's. A handshake that hangs is given up on and tried again,
+      // instead of holding the reply for as long as the connection stays half open.
+      let connecting: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+        const error = Object.assign(new Error('Connecting took too long'), { code: 'ETIMEDOUT' });
+        request?.destroy(error); fail(error);
+      }, NETWORK_CONNECT_TIMEOUT_MS);
+      const connected = () => { clearTimeout(connecting); connecting = undefined; };
+      const cleanup = () => { connected(); signal?.removeEventListener('abort', abort); };
       const fail = (error: Error) => { diagnose(error); markPhase(error, phase); cleanup(); reject(error); };
       const abort = () => {
         const error = abortReason();
@@ -163,6 +170,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         request.once('socket', socket => {
           if (!local) socket.once('connect', () => { phase = 'tls'; observe?.({ stage: 'tls' }); });
           socket.once(local ? 'connect' : 'secureConnect', () => {
+            connected();
             try {
               signal?.throwIfAborted(); guard?.();
               phase = 'request'; observe?.({ stage: 'request' });
@@ -174,22 +182,48 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
       } catch (error) { diagnose(error); markPhase(error, phase); request?.destroy(); cleanup(); reject(error); }
     });
     };
-    // D155, widened by D158: nothing was written, so nothing can have been billed: try again, each time after everything is checked
-    // again and a longer wait. A burst of failed handshakes lasted longer than one retry could cover. Once written, never.
+    // D166: the retry policy of the SDKs this application is modelled on. A try that did not get an answer, or got one that says "not now"
+    // (408, 409, 429, any 5xx), is made again: twice more at most, after a wait that doubles from half a second, shortened a little at
+    // random so that many clients do not come back together, or after the wait the service itself asks for. A reply that has begun is
+    // never asked for again: its words are on the page. Each new try is checked again first, and a stop ends it at once.
     for (let attempt = 0; ; attempt++) {
-      try { return await connect(); }
+      let answer: Response;
+      try { answer = await connect(); }
       catch (error) {
-        const wait = CONNECT_RETRY_DELAYS_MS[attempt];
-        if (wait === undefined || error instanceof ContractError || signal?.aborted || !failedBeforeWriting(networkPhaseOf(error))) throw error;
-        await pause(wait, signal);
+        if (attempt >= NETWORK_MAX_RETRIES || error instanceof ContractError || signal?.aborted || !beforeAnyAnswer(networkPhaseOf(error))) throw error;
+        await pause(retryDelayMs(attempt), signal);
         signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
+        continue;
       }
+      if (attempt >= NETWORK_MAX_RETRIES || signal?.aborted || !retryableStatus(answer.status)) return answer;
+      const asked = retryAfterMs(answer.headers);
+      await answer.body?.cancel().catch(() => {});
+      await pause(asked ?? retryDelayMs(attempt), signal);
+      signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
     }
   };
 }
 
-/** D158: the waits before the second, third and fourth try at connecting. Four tries in all, and about three seconds of waiting at most. */
-export const CONNECT_RETRY_DELAYS_MS: readonly number[] = [300, 1000, 2000];
+/** D166: how many more times a request is tried, after the first. */
+export const NETWORK_MAX_RETRIES = 2;
+/** D166: how long one try may take to reach the service and finish the handshake. */
+export const NETWORK_CONNECT_TIMEOUT_MS = 5_000;
+const RETRY_FIRST_MS = 500;
+const RETRY_LONGEST_MS = 8_000;
+const RETRY_AFTER_LONGEST_MS = 60_000;
+/** The wait before retry number `attempt + 1`: 0.5 s, 1 s, 2 s … up to 8 s, less up to a quarter at random. */
+export const retryDelayMs = (attempt: number, random: () => number = Math.random) => Math.min(RETRY_FIRST_MS * 2 ** attempt, RETRY_LONGEST_MS) * (1 - random() * 0.25);
+const retryableStatus = (status: number) => status === 408 || status === 409 || status === 429 || status >= 500;
+/** What the service asked for in `retry-after`, in seconds or as a date, when it is a wait worth honouring: more than nothing, a minute at most. */
+function retryAfterMs(headers: Headers): number | undefined {
+  const value = headers.get('retry-after');
+  if (!value) return undefined;
+  const seconds = Number(value);
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - Date.now();
+  return Number.isFinite(ms) && ms > 0 && ms <= RETRY_AFTER_LONGEST_MS ? ms : undefined;
+}
+/** Nothing of the answer has arrived: the name did not resolve, the connection or the handshake failed, or the request went and no status came back. */
+const beforeAnyAnswer = (phase: NetworkPhase | undefined) => failedBeforeWriting(phase) || phase === 'request';
 const pause = (ms: number, signal: AbortSignal | null | undefined) => new Promise<void>(resolve => {
   const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); };
   const timer = setTimeout(done, ms);

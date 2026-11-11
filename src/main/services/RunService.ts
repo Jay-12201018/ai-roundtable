@@ -1606,13 +1606,14 @@ export class RunService {
     const hinted = first ? [] : this.hintedMembers(context, round, roster);
     if (!first && !round.scheduleMore && !hinted.length) { this.closeRound(context.runId, round.id, 'done'); return 'done'; }
     if (used >= GROUP_CHAT_MAX_TURNS) { this.closeRound(context.runId, round.id, 'limit'); return 'done'; }
-    // D162: a model that cannot be reached or refuses is not the end of it: the next one is asked at once, within the round's allowance.
+    // D162: a model its service refuses is not the end of it: the next one is asked at once, within the round's allowance. D166: one that
+    // could not be reached, or did not answer in time, is: another model on the same network is as far away, and the host is waiting.
     let answer: ScheduleOutput | undefined;
     for (const [index, target] of this.scheduleTargets(context).slice(0, Math.max(0, Math.min(2, GROUP_CHAT_MAX_SCHEDULES - round.scheduleCalls))).entries()) {
       void index;
       const asked = await this.askSchedule(context, round, target, roster, hinted, used);
       answer = asked.answer;
-      if (!asked.failed || context.interrupt || context.stopRequested) break;
+      if (!asked.refused || context.interrupt || context.stopRequested) break;
     }
     if (context.interrupt || context.stopRequested) return 'again';
     this.deadlineReached(context);
@@ -1710,7 +1711,7 @@ export class RunService {
    * D150: one scheduling request. It has no Turn and no message; it has its own record and usage row. Its answer is only ever read by
    * `parseScheduleOutput`. Undefined means no usable answer: the caller falls back to the rules. Interrupted or stopped, it just ends.
    */
-  private async askSchedule(context: RunContext, round: GroupChatRound, target: { providerId: string; modelId: string; agentId: string }, roster: readonly MemberSnapshot[], hinted: readonly string[], used: number): Promise<{ answer?: ScheduleOutput; failed: boolean }> {
+  private async askSchedule(context: RunContext, round: GroupChatRound, target: { providerId: string; modelId: string; agentId: string }, roster: readonly MemberSnapshot[], hinted: readonly string[], used: number): Promise<{ answer?: ScheduleOutput; refused: boolean }> {
     const snapshot = this.database.readRunSnapshot(context.runId);
     const active = new Set(snapshot.versions.filter(version => version.active).map(version => version.messageId));
     const lines = snapshot.messages.filter(message => active.has(message.id) && message.status === 'completed' && (message.senderType === 'user' || message.senderType === 'agent'))
@@ -1721,7 +1722,7 @@ export class RunService {
       messages: buildScheduleMessages({ task: snapshot.run.task ?? '', taskImages: snapshot.taskAttachments?.length ?? 0, members: roster, lines, turnsUsed: used, hinted: hinted.map(name).filter(Boolean),
         // D160: only the first request of a round reads the host's message; later ones only decide who goes on.
         ...(round.speakers.length === 0 ? this.scheduleState(context, round, roster) : {}) }) });
-    try { this.registry!.checkGeneration(target.providerId, input); } catch { return { failed: true }; }
+    try { this.registry!.checkGeneration(target.providerId, input); } catch { return { refused: true }; }
     this.database.transaction(() => {
       this.database.insertScheduleRequest({ requestId, runId: context.runId, roundId: round.id, agentId: target.agentId, providerId: target.providerId, modelId: target.modelId, inputSnapshot: input });
       this.database.openUsage({ requestId, runId: context.runId, agentId: target.agentId, providerId: target.providerId, modelId: target.modelId, kind: 'schedule' });
@@ -1766,12 +1767,12 @@ export class RunService {
       if (!finishReason) throw new ContractError('invalid_response');
       const answer = parseScheduleOutput(text, roster.map(({ agentId, displayName }) => ({ agentId, displayName })));
       close(answer ? 'completed' : 'invalid');
-      return { ...(answer ? { answer } : {}), failed: false };
+      return { ...(answer ? { answer } : {}), refused: false };
     } catch (error) {
       const failure = toPublicError(error);
       if (failedBeforeWriting(failure.phase)) dispatched = false;
       close(parent.aborted ? 'aborted' : 'failed', [controller.signal.aborted && !parent.aborted ? 'timeout' : failure.code, failure.phase, failure.upstream?.status, failure.upstream?.code].filter(Boolean).join(':'));
-      return { failed: !parent.aborted };
+      return { refused: !parent.aborted && !controller.signal.aborted && failure.code !== 'network_error' && failure.code !== 'timeout' };
     } finally {
       clearTimeout(timer);
       parent.removeEventListener('abort', relay);
