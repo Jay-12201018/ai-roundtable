@@ -5,7 +5,7 @@ import { Avatar, Button, IconButton, cx, useDismiss } from '../../components/ui'
 import type { RunApiContract } from '../../../shared/contracts/run';
 import { canContinueRun, canDirectRun, nextSpeaker, nextSpeakerText, scheduledNext } from '../host/model';
 import { parseMentions } from '../../../shared/groupChat';
-import { WaitingSeconds } from '../timeline/MessageItem';
+import { Logo } from '../shell/Logo';
 import type { HostCommands } from '../host/useHostCommands';
 import { sendInterjection } from './interject';
 import { chatMentionQuery, mentionedMembers, mentionOptions, mentionQuery, type MentionOption } from './mention';
@@ -249,10 +249,12 @@ function ChatStatus({ snapshot }: { snapshot: RunSnapshot }) {
         {round?.readFailed && <span className="strip-note">这条消息没能用模型读懂（调度用的模型暂时没有回应），已按内置规则安排回应。</span>}</span>
     </div>;
   }
+  // Whoever is typing says so in their own message, once. Here is only what the thread cannot show: who comes after them, and the moment
+  // before anyone has started.
+  if (turn && !queue.length) return null;
   return <div className="next-strip chat-status" role="status" aria-label="谁在说话">
-    <Clock aria-hidden size={14} />
-    <span>{turn ? <><b>{name(turn.agentId)}</b> 正在输入… <WaitingSeconds key={turn.turnId} since={since?.startedAt ?? since?.createdAt} /></> : round?.scheduling ? '在看谁来接话…' : <><b>{name(queue[0]?.agentId)}</b> 马上接话…</>}
-      {turn && queue.length > 0 && <> · 接着：{queue.map(item => name(item.agentId)).join('、')}</>}</span>
+    {turn ? <Clock aria-hidden size={14} /> : <span className="strip-mark"><Logo size={14} /></span>}
+    <span>{turn ? <>接着：<b>{queue.map(item => name(item.agentId)).join('、')}</b></> : round?.scheduling ? '在看谁来接话…' : <><b>{name(queue[0]?.agentId)}</b> 马上接话…</>}</span>
   </div>;
 }
 

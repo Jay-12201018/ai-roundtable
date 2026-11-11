@@ -379,7 +379,7 @@ export function App() {
   const flowStage = flow ? flow.stages.find(stage => stage.id === flow.currentStage) : undefined;
   const flowStep = flow ? Math.min(flow.totalTurns, flow.completedTurns + (activeTurn && !activeTurn.overrideActionId ? 1 : 0)) : 0;
   const statusDetail = [
-    snapshot?.groupChat ? (activeTurn && speaker ? `${speaker}正在输入` : undefined) : flow ? `第 ${Math.max(1, flowStep)}/${flow.totalTurns} 步${flowStage ? ` · ${stageLabels[flowStage.kind]}` : ''}${activeTurn && speaker ? ` · ${speaker}正在发言` : ''}`
+    snapshot?.groupChat ? undefined : flow ? `第 ${Math.max(1, flowStep)}/${flow.totalTurns} 步${flowStage ? ` · ${stageLabels[flowStage.kind]}` : ''}${activeTurn && speaker ? ` · ${speaker}正在发言` : ''}`
       : activeTurn && snapshot ? `第 ${snapshot.turns.indexOf(activeTurn) + 1} 回合${speaker ? ` · ${speaker}正在发言` : ''}` : undefined,
     flow ? workflowTemplateLabels[flow.templateId] : snapshot?.groupChat ? groupChatMode.label : undefined,
     syncStatus === 'syncing' ? '正在同步运行状态' : undefined,

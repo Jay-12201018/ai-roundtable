@@ -78,8 +78,11 @@ test('集合开会！: everyone answers, briefly, differently, and the box stays
   fixture.chunkMs = 60;
   await first(running, '集合开会！');
   await expect(firstBox(running)).toHaveCount(0);
-  await expect(page.getByRole('status', { name: '谁在说话' })).toContainText('正在输入');
-  await expect(page.getByRole('status', { name: '谁在说话' })).toContainText('已等待');
+  // Who is typing is said once, in their own message, by the application's mark; the strip above the box only says who comes after.
+  await expect(page.locator('.msg.is-live').locator('.typing-line, .typing-mark')).toHaveCount(1);
+  await expect(page.locator('.msg.is-live .msg-foot')).not.toContainText('正在输入');
+  await expect(page.getByRole('status', { name: '谁在说话' })).toContainText('接着');
+  await expect(page.getByRole('status', { name: '谁在说话' })).not.toContainText('正在输入');
   await expect(chatBox(running)).toBeEnabled();
   await capture(running, 'gather-typing');
   await waiting(running);

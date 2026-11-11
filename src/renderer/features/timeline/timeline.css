@@ -1,7 +1,8 @@
 /* The reading column: centred, at most 760px, members read like prose and the host speaks from the right. */
 .timeline-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .timeline-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overflow-anchor: auto; outline: none; }
-.thread { max-width: var(--reading-width); margin: 0 auto; padding: 28px 32px 40px; }
+/* The column and the input dock under it share their edges: the same width, the same 24px gutter. */
+.thread { max-width: calc(var(--reading-width) + 48px); margin: 0 auto; padding: 28px 24px 40px; }
 .thread-item { padding-bottom: 30px; }
 .jump-latest { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5; display: inline-flex; gap: 6px; align-items: center; height: 32px; padding: 0 12px;
   border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-pop); font-size: 13px; color: var(--text); }
@@ -13,14 +14,17 @@
 
 .msg { position: relative; }
 .msg-head { display: flex; align-items: center; gap: 8px; min-height: 28px; flex-wrap: wrap; }
+.msg-head .avatar { width: 24px; height: 24px; font-size: 12px; }
 .msg-name { font-weight: 600; }
 .msg-meta { color: var(--text-3); font-size: 13px; }
 .msg-num { margin-left: auto; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
-.msg-body { margin: 6px 0 0 36px; }
+/* A reply starts under its speaker's name: indented by the avatar and the gap after it, so the name and the words share one edge. */
+.msg { --msg-indent: 32px; }
+.msg-body { margin: 6px 0 0 var(--msg-indent); }
 .msg.is-covered .msg-body, .msg.is-covered .bubble { color: var(--text-2); }
-.msg > .note { margin: 12px 0 0 36px; }
+.msg > .note { margin: 12px 0 0 var(--msg-indent); }
 .note-stream { display: block; margin-top: 4px; white-space: pre-wrap; color: var(--text-2); }
-.msg-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; margin: 8px 0 0 30px; color: var(--text-3); font-size: 13px; line-height: 20px; }
+.msg-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; margin: 8px 0 0 calc(var(--msg-indent) - 6px); color: var(--text-3); font-size: 13px; line-height: 20px; }
 .msg-foot .grow { flex: 1; }
 .msg-foot .icon-btn { color: var(--text-3); }
 .msg-foot .icon-btn:hover:enabled { color: var(--text); }
@@ -28,14 +32,19 @@
 .usage-tag { padding: 0 2px; border: 0; border-bottom: 1px dotted var(--text-3); background: none; color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; border-radius: 0; }
 .usage-tag:hover { color: var(--text); }
 .usage-tag.is-warn { color: var(--warn); border-bottom-color: var(--warn); }
-.typing { display: inline-flex; gap: 6px; align-items: center; color: var(--text-3); font-size: 13px; }
-.typing svg { animation: ui-pulse 1.6s ease-in-out infinite; }
-.msg-details { margin: 8px 0 0 36px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: 13px; line-height: 20px; display: grid; gap: 8px; justify-items: start; }
+/* The one sign that a reply is on its way: the application's mark, turning slowly. */
+.typing-line { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-3); font-size: 14px; line-height: 24px; }
+.typing-mark { display: flex; margin-top: 8px; }
+.typing-line .logo, .typing-mark .logo, .strip-mark .logo { color: var(--accent); animation: mark-turn 2.4s linear infinite; }
+.strip-mark { display: inline-flex; align-self: flex-start; }
+@keyframes mark-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .typing-line .logo, .typing-mark .logo, .strip-mark .logo { animation: ui-pulse 1.6s ease-in-out infinite; } }
+.msg-details { margin: 8px 0 0 var(--msg-indent); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: 13px; line-height: 20px; display: grid; gap: 8px; justify-items: start; }
 .msg-details dl { margin: 0; display: grid; gap: 4px; width: 100%; }
 .msg-details dl > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
 .msg-details dt { color: var(--text-3); }
 .msg-details dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.msg-edit { display: grid; gap: 8px; margin: 8px 0 0 36px; }
+.msg-edit { display: grid; gap: 8px; margin: 8px 0 0 var(--msg-indent); }
 .msg.is-host .msg-edit { margin-left: 0; width: min(100%, 560px); }
 .msg-edit .textarea { min-height: 120px; font-size: 15px; line-height: 24px; }
 .msg-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
@@ -101,12 +110,13 @@
 
 @media (max-width: 1023px) {
   .thread { padding: 20px 20px 32px; }
-  .msg-body, .msg > .note, .msg-details, .msg-edit { margin-left: 0; }
-  .msg-foot { margin-left: -6px; }
 }
 
 /* D149: a chat is many short lines. What a reply offers appears on the reply being looked at, in a row that keeps its place; keyboard focus shows it too. */
-.thread-item:has(> .msg.is-chat) { padding-bottom: 6px; }
-.msg.is-chat .msg-foot { margin-top: 2px; opacity: 0; transition: opacity .12s; }
-.msg.is-chat:hover .msg-foot, .msg.is-chat:focus-within .msg-foot, .msg.is-chat.is-live .msg-foot { opacity: 1; }
-.chat-stop { margin: 4px 0 0 36px; color: var(--text-3); font-size: 13px; line-height: 20px; }
+.thread-item:has(> .msg.is-chat) { padding-bottom: 20px; }
+/* The row sits over the reply's own first line, at its right, so it takes no room of its own between two replies. */
+.msg.is-chat .msg-foot { position: absolute; top: 0; right: 0; margin: 0; min-height: 28px; padding-left: 12px; background: var(--bg); opacity: 0; pointer-events: none; transition: opacity .12s; }
+.msg.is-chat .msg-foot .grow { display: none; }
+.msg.is-chat:hover .msg-foot, .msg.is-chat:focus-within .msg-foot { pointer-events: auto; }
+.msg.is-chat:hover .msg-foot, .msg.is-chat:focus-within .msg-foot { opacity: 1; }
+.chat-stop { margin: 4px 0 0 var(--msg-indent); color: var(--text-3); font-size: 13px; line-height: 20px; }

@@ -1,3 +1,4 @@
+import { Logo } from '../shell/Logo';
 import { MessageImages } from '../attachments/images';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Ellipsis, Info, Pencil, RefreshCw, Scissors, Sparkles, Square, TriangleAlert } from 'lucide-react';
@@ -130,7 +131,12 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       {slot.number !== undefined && <span className="msg-num" aria-hidden>#{slot.number}</span>}
     </div>
     {editing ? <EditForm label="修改消息内容" help="修改为新版本（原文保留；之后的发言会标出受影响）" initial={shown.message.content} disabled={disabled} onSave={save} onCancel={() => setEditing(false)} />
-      : chat && shown.message.status === 'failed' && !shown.message.content ? null : <div className="msg-body">{shown.message.content ? <Markdown text={shown.message.content} /> : <p className="muted small">{streaming ? chat ? <>{name} 正在输入… <WaitingSeconds since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /></> : <WaitingText since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /> : '（没有生成文字）'}</p>}</div>}
+      : chat && shown.message.status === 'failed' && !shown.message.content ? null : <div className="msg-body">{shown.message.content
+        // One sign that a reply is on its way, in the place where its words appear: the application's mark, turning. Before the first word it
+        // says how long the wait has been; once words are arriving they speak for themselves and the mark alone follows them.
+        ? <><Markdown text={shown.message.content} />{streaming && <span className="typing-mark" role="status" aria-label={chat ? `${name} 正在输入` : `${name} 正在发言`}><Logo size={16} /></span>}</>
+        : streaming ? <p className="typing-line" role="status"><Logo size={16} /><span>{chat ? <>正在输入… <WaitingSeconds since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} /></> : <WaitingText since={snapshot.attempts?.find(attempt => attempt.messageId === shown.messageId)?.startedAt} />}</span></p>
+          : <p className="muted small">（没有生成文字）</p>}</div>}
     {can.truncated && !shown.message.content.trim() && <Note icon={Scissors}
       action={shown.active && can.regenerate ? <Button size="sm" disabled={disabled} onClick={regenerate}>重新生成</Button> : undefined}>
       <b>这位成员的输出额度在思考阶段就用完了</b>，没有写出正文。可以到“设置 › 模型服务”调高这个模型的最大输出，再重新生成。</Note>}
@@ -153,7 +159,7 @@ export function AgentMessage({ slot, snapshot, commands, providers, coveredBy, r
       </Note>
       : status && !streaming && <Note tone={shown.message.status === 'failed' ? 'danger' : 'neutral'} icon={Info} role="note">{status}</Note>}
     <div className="msg-foot" role="group" aria-label={`${name} 的消息操作`}>
-      {streaming ? <span className="typing"><Sparkles aria-hidden size={14} />{chat ? `${name} 正在输入…` : '正在发言'}</span> : <>
+      {streaming ? null : <>
         <VersionSwitch slot={slot} index={index} onView={setViewing} />
         {slot.versions.length > 1 && <span>{originLabels[shown.origin]}{shown.active ? (shown.message.status === 'completed' || streaming ? '' : ' · 当前版本（未完成）') : ' · 未生效的历史版本'}</span>}
         <UsageButton usage={usage} open={details} onToggle={() => setDetails(value => !value)} controls={detailsId} />
