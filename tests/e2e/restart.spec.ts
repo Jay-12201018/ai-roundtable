@@ -1,5 +1,5 @@
 import { memberOf } from './support/fixture';
-import { expect, memberTexts, newDiscussion, seedDeepSeekRoom, statusHas, streamed, test } from './support/app';
+import { expect, memberTexts, newDiscussion, seedDeepSeekRoom, statusHas, streamed, test, projectRuns } from './support/app';
 
 const REPLY = '这是一段写到一半就会被意外退出打断的回复，后面的字不应该出现。';
 
@@ -21,7 +21,7 @@ test('after a crash mid-reply the data reads back, the run is interrupted and no
 
   running = await harness.launch();
   const { page } = running;
-  await page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await statusHas(page, '已中断');
   await expect(page.getByText('执行已中断，部分输出已保留')).toBeVisible();
   await expect(page.getByText('为避免重复计费，不会自动重发')).toBeVisible();
@@ -63,7 +63,7 @@ test('a second discussion killed mid-run is interrupted, and the earlier finishe
   const { page } = running;
   const statuses = harness.sql('SELECT status FROM workflow_runs ORDER BY created_at')[0].map(row => row.status);
   expect(statuses).toEqual(['completed', 'interrupted']);
-  await page.locator('.sb-runs .sb-item', { hasText: '第一场' }).click();
+  await (await projectRuns(running)).filter({ hasText: '第一场' }).click();
   await expect(memberTexts(page)).toHaveText(finished);
   await statusHas(page, '已完成');
   await page.waitForTimeout(1000);

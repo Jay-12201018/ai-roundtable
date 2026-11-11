@@ -107,15 +107,15 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed
   const roomItem = (room: RoomConfiguration) => {
     const current = room.id === roomId; const count = counts?.get(room.id); const open = current && !room.archivedAt;
     const Icon = open ? FolderOpen : Folder;
-    return <li key={room.id}>
+    return <li key={room.id} className={cx('sb-project', open && onNewInRoom && 'has-act')}>
       <button type="button" className="sb-item" aria-current={current && page === 'rooms' ? 'page' : undefined} aria-expanded={!room.archivedAt ? current : undefined}
         aria-label={room.name} aria-describedby={count !== undefined ? `sb-count-${room.id}` : undefined}
         disabled={!ready} onClick={() => onOpenRoom(room.id)} title={room.name}>
         <Icon aria-hidden size={16} /><span className="t">{room.name}</span>{count !== undefined && <span className="meta" id={`sb-count-${room.id}`} title={`${count} 位成员参与讨论（不含暂停参与的）`}>{count} 人</span>}</button>
+      {open && onNewInRoom && <IconButton size="sm" className="sb-row-act is-shown" icon={Plus} label={`在「${room.name}」里开新讨论`} disabled={!ready} onClick={() => onNewInRoom(room.id)} />}
       {open && <ul className="sb-runs" aria-label={`${room.name} 的讨论`}>
-        {onNewInRoom && <li><button type="button" className="sb-item sb-new-in" disabled={!ready} onClick={() => onNewInRoom(room.id)} aria-label={`在「${room.name}」里开新讨论`}><Plus aria-hidden size={14} /><span className="t">在项目里开新讨论</span></button></li>}
         {runsFailed && <li className="sb-empty small" role="alert">讨论记录没有读完。<button type="button" className="link-btn" onClick={onRetry}>重试</button></li>}
-        {runs.length === 0 && !runsFailed && <li className="sb-empty small">这个项目还没有讨论。</li>}
+        {runs.length === 0 && !runsFailed && <li className="sb-empty small">这个项目还没有讨论，点右边的「+」开第一场。</li>}
         {shown.map(runItem)}
         {runs.length > RUNS_SHOWN && <li><button type="button" className="sb-more" onClick={() => setShowAll(value => !value)}>{showAll ? '收起' : `显示全部 ${runs.length} 场`}</button></li>}
       </ul>}
@@ -127,7 +127,7 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed
       <button type="button" className="sb-item" aria-current={run.id === runId && page === 'discussion' ? 'page' : undefined} onClick={() => onSelectRun(run.id)}
         title={`${title} · ${members.length ? members.join('、') : '成员未记录'} · ${runStatusLabel(run)}`}>
         <Faces names={members} /><span className="t">{title}</span>
-        {(live || run.status === 'error') && <span className={cx('run-dot', live ? 'is-live' : 'is-warn')} aria-hidden />}
+        {(live || run.status === 'error' || run.status === 'interrupted') && <span className={cx('run-dot', live ? 'is-live' : 'is-warn')} aria-hidden />}
         <span className="sr-only">（{members.length ? `成员：${members.join('、')}；` : ''}{runStatusLabel(run)}）</span></button>
       {onArchiveDiscussion && (archivedRow
         ? <IconButton size="sm" className="sb-row-act" icon={ArchiveRestore} label={`恢复「${title}」`} onClick={() => onArchiveDiscussion(room.id, false)} />

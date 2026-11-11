@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
-import { RunningApp, clean, memberTexts, root, statusHas, threadItems } from '../support/app';
+import { RunningApp, clean, memberTexts, root, statusHas, threadItems, projectRuns } from '../support/app';
 
 // Hands-on acceptance of the built package: a first launch, one demo discussion, a normal quit and a reopen, with a
 // screenshot per step. Nothing is sent over the network (the demo members are local), and the Key store is the mock
@@ -157,7 +157,7 @@ test('first launch, one demo discussion, quit and reopen in the installed form',
   await page.getByRole('button', { name: '外观' }).click();
   await page.locator('.choice', { hasText: '深色' }).click();
   await expect.poll(() => theme(page)).toBe('dark');
-  await page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await capture(running, 'completed-dark', '切到深色主题后的同一场讨论。');
   await page.locator('.sidebar .sb-item', { hasText: '设置' }).click();
   await page.getByRole('button', { name: '外观' }).click();
@@ -170,7 +170,7 @@ test('first launch, one demo discussion, quit and reopen in the installed form',
   page = running.page;
   await expect(page.locator('.welcome'), 'Not first use any more').toHaveCount(0);
   await capture(running, 'reopened', '关闭后重新打开：不再显示欢迎页，直接回到上次那场讨论，侧栏里有演示项目，没有发出任何请求。');
-  await page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await expect(memberTexts(page)).toHaveText(shown);
   await statusHas(page, '已完成');
   await capture(running, 'reopened-discussion', '再从侧栏点开那场讨论：三条发言和状态与关闭前完全一致，没有重新生成。');

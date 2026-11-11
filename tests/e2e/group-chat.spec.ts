@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, root, seedDeepSeekRoom, statusHas, test, type RunningApp } from './support/app';
+import { expect, root, seedDeepSeekRoom, statusHas, test, type RunningApp, projectRuns } from './support/app';
 import { memberOf, textIn } from './support/fixture';
 
 // D149–D153, in the real build on an isolated profile, with the loopback service. A fixture proves the flow, not how the chat feels.
@@ -291,7 +291,7 @@ test('a group chat reads the same after a restart, and the next message goes on'
   await waiting(running);
   await running.quit();
   running = await harness.launch();
-  await running.page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await waiting(running);
   expect(await spoke(running.page)).toEqual(['林舟', '阿哲']);
   await say(running, '@小雨 你也说说');
@@ -312,7 +312,7 @@ test('a crash in the middle of a reply: its words stay, nothing is sent again, a
   const sent = fixture.requests.length;
   fixture.mode = () => 'ok'; fixture.reply = body => `${memberOf(body)}回来了`;
   running = await harness.launch();
-  await running.page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await statusHas(running.page, '已中断');
   await expect(replies(running.page).first()).toContainText('这句话');
   await running.page.waitForTimeout(500);

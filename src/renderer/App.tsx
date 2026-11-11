@@ -276,7 +276,9 @@ export function App() {
   const openRoom = (id: string) => { if (id !== roomId || snapshot) session.selectRoom(id); setPage('rooms'); setNavOpen(false); };
   /** D167: a 独立讨论 on its own copy of the 常用阵容 (or of the people in `fromRoomId`). Members with no model get the default one. */
   const newStandalone = async (fromRoomId?: string, model?: { providerId: string; modelId: string }) => {
-    setLandingFailed(false);
+    // One at a time: a second click, or the app's own opening move, while one is being made would make two.
+    if (landing.current) return undefined;
+    landing.current = true; setLandingFailed(false);
     try {
       let fallback = model;
       if (!fallback) {
@@ -290,6 +292,7 @@ export function App() {
       void directory.reload();
       return made;
     } catch { setLandingFailed(true); setPage('discussion'); return undefined; }
+    finally { landing.current = false; }
   };
   const archiveDiscussion = (id: string, archived: boolean) => { void Promise.resolve().then(() => api.rooms.archiveRoom({ id, archived })).catch(() => {}).then(() => directory.reload()); };
   const newDiscussion = (id = roomId, knownObjective?: string) => {
@@ -417,9 +420,7 @@ export function App() {
   const landingDue = bootReady && !runId && !roomId && page === 'discussion' && !connectOpen && !landingFailed && providerLoadState === 'ready'
     && Boolean(directory.rooms) && Boolean(directory.recent) && !firstUse;
   useEffect(() => {
-    if (!landingDue || landing.current) return;
-    landing.current = true;
-    void newStandalone().finally(() => { landing.current = false; });
+    if (landingDue) void newStandalone();
   }, [landingDue]);
   const roomName = standalone ? '独立讨论' : room?.name;
   const roomMembers = roomId && workflowMembers && workflowMembers.roomId === roomId ? workflowMembers.members.filter(member => !member.archivedAt) : undefined;

@@ -1,4 +1,4 @@
-import { expect, memberTexts, statusHas, statusLine, test, threadItems } from './support/app';
+import { expect, memberTexts, statusHas, statusLine, test, threadItems, projectRuns } from './support/app';
 
 // SPEC: three Mock Agents finish a discussion in one room, shown live and stored in SQLite. First use, real clicks.
 test('three Mock members finish one discussion in one room, shown live and stored in SQLite', async ({ harness }) => {
@@ -62,7 +62,7 @@ test('a discussion survives a normal quit and reads the same after reopening', a
 
   running = await harness.launch();
   await expect(running.page.locator('.welcome'), 'Not first use any more').toHaveCount(0);
-  await running.page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await expect(memberTexts(running.page)).toHaveText(shown);
   await expect(statusLine(running.page)).toContainText('已完成');
   await running.quit();

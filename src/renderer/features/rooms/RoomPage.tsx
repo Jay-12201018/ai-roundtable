@@ -181,7 +181,7 @@ export function RoomPage({ api, room, providers, readiness, runs, mode, variant 
           {!archivedRoom && mode.value !== groupChatMode.id && <button type="button" className="link-btn setup-link" onClick={mode.onCustomize}>自定义流程</button>}</p>
       </div></section>}
 
-    {!lineup && <section className="section" aria-labelledby="room-runs"><h2 id="room-runs"><span className="grow">讨论</span>{!archivedRoom && runs.length > 0 && <Button size="sm" icon={Plus} disabled={busy} onClick={onNewDiscussion}>新讨论</Button>}</h2>
+    {!lineup && <section className="section" aria-labelledby="room-runs"><h2 id="room-runs"><span className="grow">讨论</span></h2>
       {runs.length === 0 ? <p className="muted small">这个项目还没有讨论。点右上角的「新讨论」开始第一场。</p>
         : <ul className="card run-list">{runs.map(run => <li key={run.id} className="card-row">
           <span className={cx('run-dot', liveStatuses.includes(run.status) && 'is-live', run.status === 'error' && 'is-warn')} aria-hidden />

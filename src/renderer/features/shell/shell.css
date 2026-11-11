@@ -29,9 +29,10 @@
 .sb-runs .sb-item[aria-current] { color: var(--text); }
 /* 最近讨论: who took part comes first, as faces; the row's one action shows when the row is pointed at or focused. */
 .sb-label-next { margin-top: 12px; padding-right: 8px; min-height: 28px; }
-.sb-new-in { color: var(--text-3) !important; }
-.sb-new-in:hover:enabled { color: var(--text) !important; }
-.sb-recent { position: relative; }
+.sb-recent, .sb-project { position: relative; }
+.sb-project.has-act > .sb-item { padding-right: 36px; }
+.sb-row-act.is-shown { opacity: 1; background: transparent; top: 3px; }
+.sb-row-act.is-shown:hover:enabled { background: var(--surface-2); }
 .sb-recent .sb-item { min-height: 36px; font-size: 13px; }
 .sb-faces { flex: none; min-width: 22px; }
 .sb-faces .avatar { box-shadow: 0 0 0 2px var(--sidebar); }
@@ -41,7 +42,7 @@
 .sb-row-act { position: absolute; right: 3px; top: 4px; opacity: 0; background: var(--surface-3); }
 .sb-recent:hover .sb-row-act, .sb-recent:focus-within .sb-row-act { opacity: 1; }
 .sb-recent:hover .sb-item, .sb-recent:focus-within .sb-item { padding-right: 36px; }
-.sb-row-act:disabled { opacity: 0; }
+.sb-row-act:not(.is-shown):disabled { opacity: 0; }
 .sb-recent:hover .sb-row-act:disabled, .sb-recent:focus-within .sb-row-act:disabled { opacity: .5; }
 .sb-more { padding: 4px 8px; border: 0; background: transparent; color: var(--text-3); font-size: 12px; }
 .sb-more:hover { color: var(--text); }

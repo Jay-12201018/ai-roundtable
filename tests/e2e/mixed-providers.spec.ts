@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { artifactOf, memberOf } from './support/fixture';
-import { FAKE_KEY, expect, generateArtifact, memberTexts, newDiscussion, openArtifacts, root, seedDeepSeekRoom, statusHas, test, threadItems, type RunningApp } from './support/app';
+import { FAKE_KEY, expect, generateArtifact, memberTexts, newDiscussion, openArtifacts, root, seedDeepSeekRoom, statusHas, test, threadItems, type RunningApp, starterProject, projectRuns } from './support/app';
 
 // D134/D143: one discussion across several catalog services, connected through the real wizard, each member on its own
 // model. With ROUNDTABLE_E2E_SCREENS set it also keeps the screenshots named in
@@ -161,8 +161,7 @@ test('paste a Key, start a discussion, then mix several services: name, pause, s
   await expect(card).toContainText('上下文 200,000 · 最大输出 8,192');
 
   // The wizard made the first room, every member on DeepSeek. Give the others their own service.
-  const rooms = await running.api<{ name: string }[]>('rooms.listRooms');
-  const roomName = rooms[0]!.name;
+  const roomName = (await starterProject(running)).name;
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
   await changeMember(running, '阿哲', { service: 'Kimi', id: 'kimi-k3.1-pro' });
   await changeMember(running, '小雨', { service: '智谱 GLM', id: 'glm-5.3' });
@@ -389,7 +388,7 @@ test('D143 the host picks the model: every model of a service is offered, nothin
   // The three members made for this service use what was picked, and the page says so.
   for (const name of ['林舟', '阿哲', '小雨']) await expect(page.getByRole('combobox', { name: `${name} 的模型` }).locator('option:checked')).toContainText('Qwen3.8 Flash');
   await capture(running, 'picked-discussion', '第一场讨论：三位成员的模型下拉框都显示 Qwen3.8 Flash，就在目标上方。');
-  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  const roomName = (await starterProject(running)).name;
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
   await expect(page.locator('.room-page').getByText('Qwen3.8 Flash · 可以使用')).toHaveCount(3);
   await capture(running, 'picked-members', '房间：三位成员都显示 Qwen3.8 Flash。');
@@ -489,7 +488,7 @@ test('new discussion: choose how it runs and how many, give each one a model, an
   expect(new Set(sent.map(request => `${memberOf(request as never)}|${request.service}|${request.raw.model}`))).toEqual(new Set(['林舟|deepseek|deepseek-v4-pro', '阿哲|kimi|kimi-k3']));
 
   // Free discussion with five: two more members are made from the role templates.
-  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  const roomName = (await starterProject(running)).name;
   await newDiscussion(running, roomName, '第二场：五个人讨论');
   await mode('自由讨论').click();
   await expect(count).toHaveText('3');
@@ -611,7 +610,7 @@ test('D146 a discussion that reaches its duration limit says so and carries on i
   await theme(running, 'light');
   await page.getByRole('button', { name: '连接…' }).click();
   await connect(running, /^DeepSeek/u);
-  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  const roomName = (await starterProject(running)).name;
   await newDiscussion(running, roomName, '试点方案。');
   await page.getByRole('button', { name: '自定义流程' }).click();
   const dialog = page.getByRole('dialog', { name: '讨论方式' });
@@ -687,7 +686,7 @@ test('when a service refuses: the page says what the service said in its own cod
   await theme(running, 'light');
 
   // The same in a discussion, and in 运行详情.
-  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  const roomName = (await starterProject(running)).name;
   await newDiscussion(running, roomName, '试点方案。');
   await page.getByRole('button', { name: '开始讨论' }).click();
   await expect(page.getByText('运行失败').first()).toBeVisible();
@@ -709,7 +708,7 @@ test('when a service refuses: the page says what the service said in its own cod
   // Still there after a reload, read from Main.
   await page.reload();
   await page.waitForSelector('.sidebar');
-  await page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await expect(page.getByText('服务商返回：InvalidEndpointOrModel.NotFound（HTTP 404）').first()).toBeVisible();
 
   // A test that passes brings the green label back.
@@ -771,7 +770,7 @@ test('D143 a model that can read images takes part with text, and the page says 
   await capture(running, 'multimodal-wizard', '多模态模型可以选，说明里写明多模态；下面写清附的图片会发给它。');
   await dialog.getByRole('button', { name: '保存' }).click();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
-  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  const roomName = (await starterProject(running)).name;
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
   await page.getByRole('button', { name: '「阿哲」：编辑、排序、归档、删除' }).click();
   await page.getByRole('menuitem', { name: /编辑/u }).click();
@@ -820,7 +819,7 @@ test('D143 a service\'s own list adds its new model: only its own, picked by the
   }
 
   await expect(page.getByRole('combobox', { name: '林舟 的模型' }).locator('option:checked')).toHaveText('deepseek-v9');
-  const roomName = (await running.api<{ name: string }[]>('rooms.listRooms'))[0]!.name;
+  const roomName = (await starterProject(running)).name;
   await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
   await expect(page.locator('.room-page').getByText('deepseek-v9 · 可以使用')).toHaveCount(3);
   await capture(running, 'discover-members', '三位成员用的就是选中的新模型。');
@@ -911,7 +910,7 @@ test('a member that thinks: the block stays out of the discussion, the wait says
   await card.getByLabel('最大输出（token）').fill('16000');
   await card.getByRole('button', { name: '保存' }).click();
   await expect(card).toContainText('最大输出 16,000');
-  await page.locator('.sb-runs .sb-item').first().click();
+  await (await projectRuns(running)).first().click();
   await note.getByRole('button', { name: '重新生成' }).click();
   await expect(page.getByText('综合者的结论。')).toBeVisible();
   expect(fixture.requests.at(-1)!.maxTokens).toBe(16000);

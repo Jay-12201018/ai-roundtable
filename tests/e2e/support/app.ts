@@ -153,8 +153,11 @@ export const statusLine = (page: Page) => page.getByRole('status', { name: '运�
 export const threadItems = (page: Page) => page.locator('.thread-item');
 export const memberTexts = (page: Page) => page.locator('.thread-item .msg-body .md');
 
-/** Makes this room remember free discussion, as a room does where the host chose it. */
-export const strictRoom = (running: RunningApp, roomId: string) => running.page.evaluate(id => localStorage.setItem(`roundtable.mode.${id}`, 'free-chat'), roomId);
+/** Makes free discussion this project's default way, as a project is where the host chose it (D169: Main keeps it on the project). */
+export const strictRoom = async (running: RunningApp, roomId: string) => {
+  const room = await running.api('rooms.getRoomConfiguration', { id: roomId });
+  await running.api('rooms.updateRoom', { id: roomId, name: room.name, objective: room.objective, defaultMode: 'free-chat' });
+};
 
 /** A DeepSeek service with the fake Key, and a room of three members (the UI path is covered in key-safety.spec). */
 export async function seedDeepSeekRoom(running: RunningApp, roomName = 'E2E 讨论', options: { chat?: boolean; names?: Array<[string, string]> } = {}) {
@@ -200,4 +203,37 @@ export async function newDiscussion(running: RunningApp, roomName: string, goal:
   await box.click();
   await page.keyboard.press('Meta+A');
   await running.ime('mubiao', goal);
+}
+
+/**
+ * D167: connecting the first service opens a new 独立讨论 and makes no project. Specs about a project's members and discussions
+ * make one the way 新建项目 does (a name and the three default members on the default service's model), and get it back if it exists.
+ */
+export async function starterProject(running: RunningApp, name = '我的第一场讨论'): Promise<{ id: string; name: string }> {
+  const existing = (await running.api<{ id: string; name: string }[]>('rooms.listRooms'))[0];
+  if (existing) return existing;
+  const providers = await running.api<{ id: string; isDefault: boolean; enabled: boolean; defaultModelId: string | null }[]>('settings.listProviderSummaries');
+  const service = providers.find(provider => provider.isDefault && provider.enabled) ?? providers[0];
+  const room = await running.api<{ id: string; name: string }>('rooms.createRoom', { name, objective: '' });
+  const members = await running.api<{ displayName: string; roleTemplateId: string; systemPrompt: string }[]>('rooms.listAgentConfigurations', { roomId: (await running.api<{ id: string }>('rooms.getLineup')).id });
+  for (const [index, member] of members.entries()) await running.api('rooms.createAgent', { roomId: room.id, displayName: member.displayName, roleTemplateId: member.roleTemplateId, systemPrompt: member.systemPrompt,
+    providerId: service?.id ?? null, modelId: service?.defaultModelId ?? null, enabled: true, displayOrder: index });
+  await running.page.reload();
+  await running.page.waitForSelector('.sidebar');
+  return room;
+}
+
+/** After a restart the app opens on a new discussion; a project's discussions show once the project is opened from the sidebar. */
+export async function openFirstProject(running: RunningApp) {
+  await running.page.getByRole('list', { name: '项目' }).locator(':scope > li > .sb-item').first().click();
+  await expect(running.page.locator('.room-page')).toBeVisible();
+}
+
+/** The discussions of the open project in the sidebar; opens the first project when none is open (after a restart or a reload). */
+export async function projectRuns(running: RunningApp) {
+  const { page } = running;
+  await expect(page.getByRole('list', { name: '项目' }).locator(':scope > li').first()).toBeVisible();
+  if (!(await page.locator('.sb-runs').count())) await openFirstProject(running);
+  await expect(page.locator('.sb-runs .sb-item').first()).toBeVisible();
+  return page.locator('.sb-runs .sb-item');
 }

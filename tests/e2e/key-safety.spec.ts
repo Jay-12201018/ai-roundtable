@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { artifactOf, memberOf } from './support/fixture';
-import { FAKE_KEY, expect, generateArtifact, newDiscussion, openArtifacts, statusHas, test } from './support/app';
+import { FAKE_KEY, expect, generateArtifact, newDiscussion, openArtifacts, statusHas, test, starterProject } from './support/app';
 
 const forms = (key: string) => [key, Buffer.from(key).toString('base64'), Buffer.from(key).toString('hex'), Buffer.from(key, 'utf16le').toString('latin1')];
 const walk = (dir: string): string[] => readdirSync(dir).flatMap(name => { const path = join(dir, name); return statSync(path).isDirectory() ? walk(path) : [path]; });
@@ -29,9 +29,8 @@ test('the Key is used for requests but never appears in the database, logs, expo
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 
   // The wizard made the first room. A full discussion, an artifact, its export and the usage export.
-  const rooms = await running.api<{ name: string }[]>('rooms.listRooms');
-  expect(rooms).toHaveLength(1);
-  await newDiscussion(running, rooms[0]!.name, 'Key 安全的目标。');
+  expect(await running.api<{ name: string }[]>('rooms.listRooms'), 'D167: the wizard opens a new discussion and makes no project').toHaveLength(0);
+  await newDiscussion(running, (await starterProject(running)).name, 'Key 安全的目标。');
   await page.getByRole('button', { name: '开始讨论' }).click();
   await statusHas(page, '已完成');
   expect(fixture.requests.find(request => request.path?.endsWith('/chat/completions'))!.headers.authorization).toBe(`Bearer ${FAKE_KEY}`);
@@ -56,7 +55,7 @@ test('the Key is used for requests but never appears in the database, logs, expo
   expect(state.ipc.leaks).toEqual([]);
   expect(state.fakeSafeStorage.encrypt, 'The Key went through the protected backend').toBeGreaterThan(0);
   // The check itself works: looking for a word that is in an answer finds it.
-  await running.app.evaluate((_e, word) => { (globalThis as any).__e2e.secret = word; }, rooms[0]!.name);
+  await running.app.evaluate((_e, word) => { (globalThis as any).__e2e.secret = word; }, (await starterProject(running)).name);
   await running.api('rooms.listRooms');
   expect((await running.state()).ipc.leaks.length, 'The IPC check detects what it looks for').toBeGreaterThan(0);
 
