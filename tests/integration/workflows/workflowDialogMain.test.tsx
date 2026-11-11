@@ -21,12 +21,12 @@ it.each([['自由讨论', 3], ['双人对话', 4], ['审查修订链', 5], ['深
   await screen.findByText(new RegExp(`^已核对：预计 ${turns} 回合`, 'u'), undefined, { timeout: 2000 });
 });
 
-it('shows the compiler refusal of an under-bounded plan and keeps 用于这个房间 unavailable', async () => {
+it('shows the compiler refusal of an under-bounded plan and keeps 用这个流程 unavailable', async () => {
   render(<WorkflowDialog roomName="房间" members={members} onCheck={check} onSave={() => true} onClose={() => {}} />);
   fireEvent.click(screen.getByRole('button', { name: /^深度辩论/u }));
   fireEvent.change(screen.getByLabelText('最多回合'), { target: { value: '4' } });
   await screen.findByText('按现在的成员和限制排不出这个流程。', undefined, { timeout: 2000 });
-  expect((screen.getByRole('button', { name: '用于这个房间' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '用这个流程' }) as HTMLButtonElement).disabled).toBe(true);
   // Ending after the opening stage fits: three turns.
   fireEvent.click(within(screen.getByRole('list', { name: '阶段与成员' })).getAllByRole('button', { name: '在此结束' })[0]);
   await screen.findByText(/^已核对：预计 3 回合（立论后结束）/u, undefined, { timeout: 2000 });

@@ -24,7 +24,7 @@ function Harness({ api }: { api: RoomManagementApiContract }) {
   return <Sidebar rooms={directory.rooms} archived={directory.archived} counts={directory.counts} runs={directory.runs} failed={directory.failed} runsFailed={directory.runsFailed}
     onRetry={() => void directory.reload()} roomId="room" page="discussion" ready onOpenRoom={() => {}} onSelectRun={() => {}} onNewDiscussion={() => {}} onNewRoom={() => {}} onOpenUsage={() => {}} onOpenSettings={() => {}} />;
 }
-const firstRun = () => within(screen.getByRole('list', { name: '房间 的讨论记录' })).getAllByRole('button')[0];
+const firstRun = () => within(screen.getByRole('list', { name: '房间 的讨论' })).getAllByRole('button')[0];
 
 it('reads every page, so with more than 500 discussions the newest is at the top', async () => {
   const { api, listRoomRuns } = fakeApi(); render(<Harness api={api} />);

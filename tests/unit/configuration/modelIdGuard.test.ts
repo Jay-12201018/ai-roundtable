@@ -108,7 +108,7 @@ describe('D096 stored key-like model IDs are cleared at startup', () => {
     expect(reopened.purgeKeyLikeModelIds()).toBe(0);
     const rows = (reopened as unknown as { db: import('better-sqlite3').Database }).db;
     expect(rows.prepare('SELECT default_model_id, custom_models_json FROM providers').get()).toEqual({ default_model_id: null, custom_models_json: JSON.stringify([{ id: 'deepseek-flash', name: 'flash' }]) });
-    expect(rows.prepare('SELECT id, model_id FROM agents ORDER BY id').all()).toEqual([{ id: 'a', model_id: null }, { id: 'b', model_id: 'deepseek-flash' }]);
+    expect(rows.prepare("SELECT id, model_id FROM agents WHERE room_id <> 'roundtable-lineup' ORDER BY id").all()).toEqual([{ id: 'a', model_id: null }, { id: 'b', model_id: 'deepseek-flash' }]);
     // The configuration stays readable: no withheld flag is needed any more, and the member just lacks a model.
     expect(reopened.getProviderConfiguration('p')).not.toHaveProperty('withheldModelIds');
     expect(reopened.getAgentConfiguration('a')).toMatchObject({ providerId: 'p', modelId: null });

@@ -291,12 +291,12 @@ async function main() {
           actions.push('navigation and 本场信息 drawers opened, reached, closed');
         }
         if (${width} === 800 && ${JSON.stringify(page)} === '房间与成员') {
-          for (const action of ['新建房间','添加成员']) {
-            if (action === '新建房间') await openNavigation();
+          for (const action of ['新建项目','添加成员']) {
+            if (action === '新建项目') await openNavigation();
             const open = await until(action + ' button', () => byName(action), 'Unreachable control: ' + action); await reach(open, action);
             if (open.disabled) throw new Error('Editor unavailable'); open.click();
             const dialog = await until(action + ' modal open', () => document.querySelector('dialog[open]'), 'Real modal not opened');
-            await reach(named(action === '新建房间' ? '新建' : '添加', dialog), 'modal save');
+            await reach(named(action === '新建项目' ? '新建' : '添加', dialog), 'modal save');
             const cancel = named('取消', dialog); await reach(cancel, 'modal cancel'); cancel.click();
             await until(action + ' modal closed', () => !document.querySelector('dialog[open]'), 'Modal did not close on 取消');
             actions.push(action + ' modal save/cancel reachable');

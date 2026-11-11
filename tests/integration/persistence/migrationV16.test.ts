@@ -78,7 +78,7 @@ describe('migration 16 (D149)', () => {
     db.close();
     const raw = new Sqlite(path);
     try {
-      expect(validateDatabase(raw).schemaVersion).toBe(16);
+      expect(validateDatabase(raw).schemaVersion).toBe(17);
       expect(raw.prepare('SELECT version FROM schema_backups').pluck().all()).toEqual([version]);
       expect(rows(raw, 'messages')).toBe(messages); expect(rows(raw, 'turns')).toBe(turns);
       if (kept) expect(rows(raw, 'request_usage')).toBe(kept);

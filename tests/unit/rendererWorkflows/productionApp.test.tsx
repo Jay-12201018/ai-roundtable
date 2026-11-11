@@ -12,14 +12,19 @@ const agents: AgentConfiguration[] = [['a', '起草者', '起草'], ['b', '审�
   enabled: true, displayOrder, archivedAt: null, createdAt: time, updatedAt: time,
 }));
 const members = agents.map(agent => ({ id: agent.id, name: agent.displayName, enabled: true, role: agent.roleTemplateId }));
-function fixture(runs: Array<{ id: string; task: string }> = []) {
-  // These tests are about the remembered flows. A room where free discussion was once chosen keeps it (D149).
+function fixture(runs: Array<{ id: string; task: string }> = [], options: { mode?: string } = {}) {
+  // These tests are about the remembered flows. A room where free discussion was once chosen keeps it (D149): the profile's old note is handed to Main once.
   localStorage.setItem('roundtable.mode.room', 'free-chat');
   const fake = bridge();
   const previewWorkflow = vi.fn(async (input: { roomId: string; config: unknown }) => ({ previewId: `main-preview-${previewWorkflow.mock.calls.length}`, snapshot: compileWorkflow(input.config, input.roomId, agents) }));
+  // D169: the mode is the room's own, kept by Main: this fake keeps it the way Main does. The app opens on a new discussion; here that is
+  // the project itself, so these tests read the page a project's new discussion shows.
+  const state = { id: 'room', name: '生产房间', objective: '', kind: 'project' as const, brief: '', defaultMode: options.mode ?? 'free-chat', archivedAt: null, createdAt: time, updatedAt: time };
   const rooms = {
-    listRooms: vi.fn(async () => [{ id: 'room', name: '生产房间', objective: '', archivedAt: null, createdAt: time, updatedAt: time }]),
-    getRoomConfiguration: vi.fn(async () => ({ id: 'room', name: '生产房间', objective: '', archivedAt: null, createdAt: time, updatedAt: time })),
+    listRooms: vi.fn(async () => [{ ...state }]),
+    getRoomConfiguration: vi.fn(async () => ({ ...state })),
+    updateRoom: vi.fn(async (input: { defaultMode?: string }) => { state.defaultMode = input.defaultMode ?? state.defaultMode; return { ...state }; }),
+    createStandalone: vi.fn(async () => ({ ...state })), listStandalone: vi.fn(async () => []),
     listAgentConfigurations: vi.fn(async (input: { roomId: string }) => agents.map(agent => ({ ...agent, roomId: input.roomId }))),
     listRoomRuns: vi.fn(async () => ({ items: runs.map(run => ({ ...run, roomId: 'room', status: 'completed', createdAt: time, updatedAt: time })), nextCursor: null, hasMore: false })),
   };
@@ -46,7 +51,7 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
     fireEvent.click(within(dialog).getByRole('button', { name: new RegExp(`^${label}`, 'u') }));
     await within(dialog).findByText(/^已核对：预计 \d+ 回合/u, undefined, { timeout: 3000 });
     expect(f.api.run.start).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button', { name: '用于这个房间' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '用这个流程' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '讨论方式' })).toBeNull());
     expect(mode()).toBe(label);
     expect(JSON.parse(localStorage.getItem('roundtable.workflow.room')!)).toMatchObject({ version: 2, draft: { template } });
@@ -66,7 +71,7 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
     const f = fixture(); render(<App />); await ready();
     expect(mode()).toBe('审查修订链');
     fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
-    await screen.findByText(/讨论方式「审查修订链」需要调整：有一位成员已经不在这个房间里/u);
+    await screen.findByText(/讨论方式「审查修订链」需要调整：有一位成员已经不在成员里/u);
     expect(f.previewWorkflow).not.toHaveBeenCalled(); expect(f.api.run.start).not.toHaveBeenCalled();
   });
 
@@ -107,16 +112,18 @@ describe('D116 the room remembers its discussion mode; Main checks it at every s
   it('falls back to the default and says so when the saved mode is damaged or was lost', async () => {
     localStorage.setItem('roundtable.workflow.room', '{not json');
     fixture(); const view = render(<App />); await ready();
-    await screen.findByText(/这个房间保存的讨论方式读不出来，这次按「自由讨论 · 3 回合」进行/u);
+    await screen.findByText(/这台电脑上保存的流程细节读不出来，这次按「自由讨论 · 3 回合」的默认流程进行/u);
     view.unmount(); localStorage.clear();
-    const f = fixture([{ id: 'last', task: '上一场' }]);
-    // Nothing remembered at all now: the room is back on the default, and the page says what it was.
+    // D169: nothing remembered in this profile at all (another computer, cleared storage): Main still knows the mode, and the
+    // flow is its default plan for the members as they are now. Nothing was lost, so nothing is said.
+    const f = fixture([{ id: 'last', task: '上一场' }], { mode: 'review-revision' });
     localStorage.clear();
-    const last = snapshot('last'); last.roomId = 'room'; last.status = 'completed';
-    last.workflow = { templateId: 'review-revision', completedTurns: 5, totalTurns: 5, elapsedMs: 1, stages: [] as never };
-    vi.mocked(f.api.run.getSnapshot).mockResolvedValue(last);
-    render(<App />);
-    await screen.findByText(/这台电脑上没有找到这个房间的讨论方式.*已退回「群聊」.*上次用的是「审查修订链」/u);
+    render(<App />); await ready();
+    expect(mode()).toBe('审查修订链');
+    expect(document.body.textContent).not.toContain('读不出来');
+    fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
+    await waitFor(() => expect(f.api.run.start).toHaveBeenCalledOnce());
+    expect(vi.mocked(f.api.run.start).mock.calls[0][0]).toMatchObject({ roomId: 'room', workflowConfig: { templateId: 'review-revision' } });
   });
 
   it('closing the dialog without saving changes nothing; a late check after closing is ignored', async () => {
@@ -157,7 +164,7 @@ describe('D149 群聊 is how a room talks unless it chose otherwise', () => {
   const chosen = () => document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent;
   const open = async () => { render(<App />); await waitFor(() => expect(chosen()).toBeTruthy()); };
   it('a room with nothing remembered opens on it; the first message starts one, with no plan', async () => {
-    const f = fixture(); localStorage.clear(); await open();
+    const f = fixture([], { mode: 'group-chat' }); localStorage.clear(); await open();
     expect(chosen()).toBe('群聊');
     expect(screen.queryByRole('button', { name: '自定义流程' })).toBeNull();
     expect(screen.queryByLabelText('每回合后暂停')).toBeNull();
@@ -170,14 +177,14 @@ describe('D149 群聊 is how a room talks unless it chose otherwise', () => {
     expect(f.previewWorkflow).not.toHaveBeenCalled();
   });
   it('the four stricter ways are one click away under their own label, and go on working', async () => {
-    const f = fixture(); localStorage.clear(); await open();
+    const f = fixture([], { mode: 'group-chat' }); localStorage.clear(); await open();
     expect(document.querySelector('.setup-strict-label')?.textContent).toBe('更严格的流程');
     for (const name of ['自由讨论', '双人对话', '审查修订链', '深度辩论']) expect(screen.getByRole('button', { name })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '自由讨论' }));
     await waitFor(() => expect(chosen()).toBe('自由讨论'));
     fireEvent.change(screen.getByRole('textbox', { name: '讨论目标' }), { target: { value: '比较两个方案' } });
     await waitFor(() => expect((screen.getByRole('button', { name: '开始讨论' }) as HTMLButtonElement).disabled).toBe(false));
-    expect(localStorage.getItem('roundtable.mode.room')).toBe('free-chat');
+    expect(f.rooms.updateRoom).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'room', defaultMode: 'free-chat' }));
     fireEvent.click(screen.getByRole('button', { name: '开始讨论' }));
     await waitFor(() => expect(f.api.run.start).toHaveBeenCalledTimes(1));
     expect(vi.mocked(f.api.run.start).mock.calls[0]![0].workflowSnapshot).toEqual({ templateId: 'draft-review-finalize', version: 1 });
@@ -185,14 +192,14 @@ describe('D149 群聊 is how a room talks unless it chose otherwise', () => {
   it.each([['a flow', () => localStorage.setItem('roundtable.workflow.room', JSON.stringify({ version: 2, draft: createWorkflowDraft('deep-debate', members) })), '深度辩论'],
     ['free discussion', () => localStorage.setItem('roundtable.mode.room', 'free-chat'), '自由讨论'],
     ['a number of members, set before 群聊 existed', () => localStorage.setItem('roundtable.participants.room', '3'), '自由讨论']] as const)('a room that remembers %s keeps it', async (_name, remember, label) => {
-    fixture(); localStorage.clear(); remember(); await open();
-    expect(chosen()).toBe(label);
+    fixture([], { mode: 'group-chat' }); localStorage.clear(); remember(); await open();
+    await waitFor(() => expect(chosen()).toBe(label));
   });
   it('going back to 群聊 is remembered', async () => {
-    fixture(); await open();
-    expect(chosen()).toBe('自由讨论');
+    const f = fixture(); await open();
+    await waitFor(() => expect(chosen()).toBe('自由讨论'));
     fireEvent.click(screen.getByRole('button', { name: '群聊' }));
     await waitFor(() => expect(chosen()).toBe('群聊'));
-    expect(localStorage.getItem('roundtable.mode.room')).toBe('group-chat');
+    expect(f.rooms.updateRoom).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'room', defaultMode: 'group-chat' }));
   });
 });

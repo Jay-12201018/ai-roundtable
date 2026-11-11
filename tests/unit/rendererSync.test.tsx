@@ -19,7 +19,9 @@ function delta(runId: string, sequence: number, text: string): RunEvent {
 
 function configurationApis() {
   const rooms = roomProps().api;
-  vi.mocked(rooms.listRooms).mockResolvedValue([room('room', '现有房间')]);
+  // The app opens on a new discussion; here that is the project's own, on free discussion, which is what these tests start.
+  const project = { ...room('room', '现有房间'), defaultMode: 'free-chat' as const };
+  vi.mocked(rooms.listRooms).mockResolvedValue([project]); vi.mocked(rooms.createStandalone).mockResolvedValue(project);
   return { rooms, host: { command: vi.fn() }, summary: { preview: vi.fn(), generate: vi.fn(), confirm: vi.fn(), revoke: vi.fn() }, usage: { getReport: vi.fn(), writeOff: vi.fn(), exportCsv: vi.fn() }, settings: { confirmTarget: vi.fn(),
     createProvider: vi.fn(), updateProvider: vi.fn(), getProviderConfiguration: vi.fn(),
     listProviderSummaries: vi.fn().mockResolvedValue([]), deleteProvider: vi.fn(), setKey: vi.fn(), deleteKey: vi.fn(),
@@ -134,7 +136,7 @@ describe('Renderer run synchronization', () => {
     subscribe.mockReturnValue(new Promise(() => {}));
     render(<App />);
     expect((screen.getByText('开始讨论') as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: '新建房间' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '新建项目' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('开始讨论'));
     expect(start).not.toHaveBeenCalled();
     await act(async () => {});
@@ -190,8 +192,8 @@ describe('Renderer task identity and command feedback', () => {
     let finish!: (value: ReturnType<typeof room>) => void;
     vi.mocked(window.roundtable.rooms.createRoom).mockReturnValue(new Promise(resolve => { finish = resolve; }));
     render(<App />);
-    fireEvent.click((await screen.findAllByRole('button', { name: '新建房间' }))[0]);
-    fireEvent.change(screen.getByLabelText('房间名称'), { target: { value: '创建目标' } });
+    fireEvent.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '创建目标' } });
     fireEvent.click(screen.getByRole('button', { name: '新建' }));
     fireEvent.click(screen.getByRole('button', { name: '正在保存…' }));
     expect(window.roundtable.rooms.createRoom).toHaveBeenCalledTimes(1);

@@ -15,7 +15,7 @@ function schema(name: string): z.ZodType {
 }
 
 const timestamp = '2026-10-16T00:00:00.000Z';
-const room = { id: 'room-1', name: 'Room', objective: '', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
+const room = { id: 'room-1', name: 'Room', objective: '', kind: 'project', brief: '', defaultMode: 'group-chat', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const agent = {
   id: 'agent-1', roomId: 'room-1', displayName: 'Agent', roleTemplateId: 'critic', systemPrompt: '',
   providerId: null, modelId: null, enabled: true, displayOrder: 0,
@@ -214,6 +214,10 @@ it('maps every candidate room and provider operation to executable input and out
     ['deleteAgent', { id: 'agent-1' }, undefined],
     ['listRoomMessages', { roomId: 'room-1' }, { items: [historyMessage], nextCursor: null, hasMore: false }],
     ['listRoomRuns', { roomId: 'room-1' }, { items: [run], nextCursor: null, hasMore: false }],
+    // D167: the lineup, a new 独立讨论, and the list of them.
+    ['getLineup', undefined, { ...room, id: 'roundtable-lineup', kind: 'lineup' }],
+    ['createStandalone', { fromRoomId: 'room-2', fallbackModel: { providerId: 'p', modelId: 'm' } }, { ...room, kind: 'standalone' }],
+    ['listStandalone', { includeArchived: true }, [{ room: { ...room, kind: 'standalone' }, run, members: ['林舟', '阿哲'] }]],
   ] as const) {
     expect(rooms[method].input.safeParse(input).success, `${method} input`).toBe(true);
     expect(rooms[method].output.safeParse(output).success, `${method} output`).toBe(true);

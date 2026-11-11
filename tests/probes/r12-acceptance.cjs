@@ -263,11 +263,11 @@ async function main() {
   // Path 5a (D102): a tiny output limit no longer fails the Run. Each reply is kept and marked as truncated, the Run
   // goes on to the next member, and once it has finished a truncated reply can be continued as a new version.
   await click('新讨论', { scope: '.controls' });
-  // R16 batch 2 (D116): 讨论方式 is a dialog that Main checks as you edit; 用于这个房间 remembers it for the room.
+  // R16 batch 2 (D116): 讨论方式 is a dialog that Main checks as you edit; 用这个流程 remembers it for the room.
   await click('自定义流程');
   await field('单次发言上限'); await selectAll(); await send('Input.insertText', { text: '3' });
   await until(`document.body.innerText.includes('已核对：预计 3 回合')`, 'workflow checked');
-  await click('用于这个房间');
+  await click('用这个流程');
   await field('讨论目标'); await selectAll(); await ime('jieduan', '演示截断与续写'); await click('开始讨论');
   await until(`document.querySelector('[role=status][aria-label=运行状态]').textContent.includes('已完成')`, 'run completed despite truncation');
   const truncated = await snapshot();

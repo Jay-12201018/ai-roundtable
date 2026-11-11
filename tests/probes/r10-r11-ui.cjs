@@ -57,7 +57,7 @@ async function page(stage, saved = {}) {
     await fill('最多回合', '32'); await fill('时长上限', '1'); await fill('单次发言上限', '128');
     await wait(() => document.querySelector('dialog[open]')?.textContent, text => text?.includes('已核对：预计'), 'Main check did not appear');
     check(saved.runIds.length === runs.length, 'The check unexpectedly created a Run');
-    await clickIn('dialog[open]', '用于这个房间'); await wait(() => document.querySelector('dialog[open]'), value => !value, 'Dialog did not close');
+    await clickIn('dialog[open]', '用这个流程'); await wait(() => document.querySelector('dialog[open]'), value => !value, 'Dialog did not close');
     await wait(() => document.querySelector('.setup-seg [aria-pressed="true"]')?.textContent, value => value === labels[template], 'Mode not remembered for the room');
     await fill('讨论目标', 'Fixture workflow ' + template); await click('开始讨论');
     const runId = await wait(() => localStorage.getItem('roundtable.runId'), id => id && !saved.runIds.includes(id), 'New Run absent'); saved.runIds.push(runId);

@@ -95,7 +95,7 @@ export function ConnectWizard({ api, providers, rekey, onClose, onConnected, onS
       const firstReal = provider.kind !== 'mock' && !existingReal.current && !rekey;
       let room: ConnectedRoom | undefined;
       if (!rekey && onConnected) {
-        // A room that could not be made is a small thing: 新建房间 is one click away, and the service is saved.
+        // A room that could not be made is a small thing: 新讨论 is one click away, and the service is saved.
         try { room = await onConnected({ provider, firstReal, readiness: current }); } catch { /* the sidebar still offers it */ }
       }
       if (!alive.current) return;

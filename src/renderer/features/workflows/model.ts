@@ -114,7 +114,7 @@ export function draftProblems(draft: WorkflowDraft, members: readonly WorkflowMe
   const named = (id: string) => members.find(member => member.id === id);
   const missing = [...new Set(draft.phases.flatMap(phase => phase.participants))].filter(id => !named(id)?.enabled);
   if (draft.phases.some(phase => phase.participants.length === 0 || phase.participants.includes(''))) problems.push('每个阶段都要有成员发言。');
-  for (const id of missing.filter(Boolean)) problems.push(named(id) ? `「${named(id)!.name}」已停用或归档，请换一位成员。` : '有一位成员已经不在这个房间里，请换一位成员。');
+  for (const id of missing.filter(Boolean)) problems.push(named(id) ? `「${named(id)!.name}」已停用或归档，请换一位成员。` : '有一位成员已经不在成员里，请换一位成员。');
   if (draft.template === 'two-model-dialogue' && new Set(draft.phases[0]?.participants).size !== 2) problems.push('双人对话需要两位不同的成员。');
   if (!positive(draft.turnLimit, 256)) problems.push('最多回合是 1–256 之间的整数。');
   if (!positive(draft.durationMinutes, 1440)) problems.push('时长上限是 1–1440 之间的整数分钟。');

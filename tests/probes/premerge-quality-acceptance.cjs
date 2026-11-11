@@ -272,7 +272,7 @@ async function main() {
   // Step 5: the room made for the first service (D6-A), renamed; three DeepSeek members.
   await click('我的第一场讨论', { selector: '.sb-item' });
   await until(`document.querySelector('.room-page')`, 'room page');
-  await click('编辑'); await field('房间名称'); await selectAll(); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存');
+  await click('编辑'); await field('项目名称'); await selectAll(); await ime('xiaoyuan', '校园跑腿讨论'); await click('保存');
   await until(`document.querySelector('.room-page h1')?.textContent === '校园跑腿讨论'`, 'room renamed');
   check((await text()).split('DeepSeek Flash · 可以使用').length === 4, 'Three members on deepseek-flash, each usable');
   await capture('members', '连接后自动建好的房间改名为“校园跑腿讨论”（输入法组合输入）：林舟、阿哲、小雨三位成员都写着“DeepSeek Flash · 可以使用”。', '.room-page');

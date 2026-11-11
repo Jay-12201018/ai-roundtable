@@ -16,7 +16,7 @@ export type WorkflowDialogProps = {
 
 /**
  * 讨论方式 (R16 D2-B / D116): choose a template, assign members to its stages and set limits. Every change is checked by
- * Main against the current members at once; 用于这个房间 remembers it, and each start checks it again.
+ * Main against the current members at once; 用这个流程 remembers it, and each start checks it again.
  */
 export function WorkflowDialog({ roomName, members, initial, onCheck, onSave, onClose }: WorkflowDialogProps) {
   const [draft, setDraft] = useState<WorkflowDraft>(() => initial ?? createWorkflowDraft('free-chat', members));
@@ -38,7 +38,7 @@ export function WorkflowDialog({ roomName, members, initial, onCheck, onSave, on
     return () => clearTimeout(timer);
   }, [key]);
 
-  const name = (id: string) => members.find(member => member.id === id)?.name ?? '已不在房间';
+  const name = (id: string) => members.find(member => member.id === id)?.name ?? '已不在成员里';
   const edit = (next: Partial<WorkflowDraft>) => { setSaveFailed(false); setDraft(previous => ({ ...previous, ...next })); };
   const phase = (index: number, patch: Partial<WorkflowDraft['phases'][number]>) => edit({ phases: draft.phases.map((item, i) => i === index ? { ...item, ...patch } : item) });
   const toggle = (index: number, id: string) => {
@@ -58,7 +58,7 @@ export function WorkflowDialog({ roomName, members, initial, onCheck, onSave, on
     <span className="is-left">{idle.length ? `${idle.join('、')}不在这个流程里，这次不会发言${idle.some(item => /综合|总结/u.test(item)) ? '；需要时可以在讨论中生成摘要' : ''}。` : '成员按顺序依次发言，不会同时生成。'}</span>
     {initial && <Button variant="quiet" onClick={() => save(null)}>恢复默认</Button>}
     <Button onClick={onClose}>取消</Button>
-    <Button variant="primary" disabled={!ok} onClick={() => save(draft)}>用于这个房间</Button>
+    <Button variant="primary" disabled={!ok} onClick={() => save(draft)}>用这个流程</Button>
   </>;
   return <Modal wide title="讨论方式" description={`决定谁在什么时候发言。「${roomName}」会记住你的选择，每次开始时按当时的成员自动核对，不用重复应用。`} onClose={onClose} footer={footer} className="wf-dialog">
     <div className="choice-grid is-4" role="group" aria-label="讨论方式模板">

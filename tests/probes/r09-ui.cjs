@@ -71,7 +71,7 @@ async function page(stage, saved, endpoint) {
     }
     // D6-A: the first real service got a room; it becomes the fixture room with three explicitly configured members.
     await clickIn('.sidebar','我的第一场讨论');await wait(roomTitle,t=>t==='我的第一场讨论','Starter room absent');
-    await click('编辑');await fill('房间名称','R09 fixture Room');await fill('默认目标可选','Local HTTP public collaboration');await clickIn('dialog[open]','保存');
+    await click('编辑');await fill('项目名称','R09 fixture Room');await fill('默认目标可选','Local HTTP public collaboration');await clickIn('dialog[open]','保存');
     await wait(roomTitle,t=>t==='R09 fixture Room','Room not renamed');
     saved.roomId=(await api.rooms.listRooms()).find(r=>r.name==='R09 fixture Room').id;
     for(const starter of await api.rooms.listAgentConfigurations({roomId:saved.roomId})){await memberAction(starter.displayName,'删除…');await clickIn('dialog[open]','删除');await wait(dialog,d=>!d,'Member deletion did not finish');}

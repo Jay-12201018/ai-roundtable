@@ -139,7 +139,7 @@ test('first launch, one demo discussion, quit and reopen in the installed form',
   await goal.click();
   await page.keyboard.press('Meta+A');
   await running.ime('xiaoyuan', '为学校设计一个校园跑腿平台的试点方案。', { enterWhileComposing: true });
-  await capture(running, 'demo-room', '点“开始试玩”：建好演示房间和三位成员。讨论目标用模拟输入法写入中文，确认候选的回车没有误触发开始。');
+  await capture(running, 'demo-room', '点“开始试玩”：建好演示项目和三位成员。讨论目标用模拟输入法写入中文，确认候选的回车没有误触发开始。');
 
   await page.getByRole('button', { name: '开始讨论' }).click();
   await expect(memberTexts(page).first()).toContainText('Mock');
@@ -169,7 +169,7 @@ test('first launch, one demo discussion, quit and reopen in the installed form',
   running = await launch();
   page = running.page;
   await expect(page.locator('.welcome'), 'Not first use any more').toHaveCount(0);
-  await capture(running, 'reopened', '关闭后重新打开：不再显示欢迎页，直接回到上次那场讨论，侧栏里有演示房间，没有发出任何请求。');
+  await capture(running, 'reopened', '关闭后重新打开：不再显示欢迎页，直接回到上次那场讨论，侧栏里有演示项目，没有发出任何请求。');
   await page.locator('.sb-runs .sb-item').first().click();
   await expect(memberTexts(page)).toHaveText(shown);
   await statusHas(page, '已完成');

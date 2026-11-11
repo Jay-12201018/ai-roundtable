@@ -22,7 +22,7 @@ function fixture() {
   return { db, network, ...fake };
 }
 
-it('D6-A 开始试玩 adds the demo service and a 演示房间 with three demo members, the goal in the box and nothing started', async () => {
+it('D6-A 开始试玩 adds the demo service and a 演示项目 with three demo members, the goal in the box and nothing started', async () => {
   const f = fixture(); render(<App />);
   await screen.findByRole('heading', { name: '让几位 AI 围坐一桌，替你把问题讨论透' });
   expect(document.body.textContent).toContain('回复是预先写好的示例，不代表真实模型的水平');
@@ -32,25 +32,29 @@ it('D6-A 开始试玩 adds the demo service and a 演示房间 with three demo m
   const [provider] = f.db.listProviderSummaries();
   expect(provider).toMatchObject({ kind: 'mock', isDefault: false });
   const [room] = f.db.listRooms();
-  expect(room.name).toBe('演示房间');
+  expect(room.name).toBe('演示项目');
   expect(f.db.listAgentConfigurations(room.id).map(agent => [agent.displayName, agent.providerId, agent.modelId])).toEqual([
     ['林舟', provider.id, 'mock'], ['阿哲', provider.id, 'mock'], ['小雨', provider.id, 'mock']]);
   expect((screen.getByRole('textbox', { name: /第一条消息/u }) as HTMLTextAreaElement).value).toBe(DEMO_GOAL);
   expect(f.api.run.start).not.toHaveBeenCalled(); expect(f.network).not.toHaveBeenCalled();
 });
 
-it('D6-A connecting the first real service creates 我的第一场讨论 on its usable default model', async () => {
+it('D6-A, D167 connecting the first real service opens a new 独立讨论 with the lineup on its usable default model', async () => {
   const f = fixture(); render(<App />);
   fireEvent.click(await screen.findByRole('button', { name: '连接…' }));
   const wizard = screen.getByRole('dialog');
   fireEvent.click(within(wizard).getByRole('button', { name: /^DeepSeek/u }));
   fireEvent.change(within(wizard).getByLabelText('API Key'), { target: { value: 'owned-fake-key' } });
   fireEvent.click(within(wizard).getByRole('button', { name: '保存' }));
-  // Saving is the last step: the wizard closes on the new room's first discussion.
+  // Saving is the last step: the wizard closes on a new discussion, with no project to make first.
   await screen.findByRole('heading', { name: '想和大家聊点什么？' });
-  const [room] = f.db.listRooms();
-  expect(f.db.listAgentConfigurations(room.id).every(agent => agent.modelId === 'deepseek-flash')).toBe(true);
-  await waitFor(() => expect(screen.getByRole('status', { name: '运行状态' }).textContent).toContain('我的第一场讨论'));
+  expect(f.db.listRooms()).toEqual([]);
+  const rooms = (f.db as unknown as { db: { prepare(sql: string): { pluck(): { all(): string[] } } } }).db.prepare("SELECT id FROM rooms WHERE kind='standalone'").pluck().all();
+  expect(rooms).toHaveLength(1);
+  expect(f.db.listAgentConfigurations(rooms[0]!).map(agent => [agent.displayName, agent.modelId])).toEqual([['林舟', 'deepseek-flash'], ['阿哲', 'deepseek-flash'], ['小雨', 'deepseek-flash']]);
+  // The lineup itself is untouched: its members still have no model of their own.
+  expect(f.db.listAgentConfigurations(f.db.getLineup().id).every(agent => agent.modelId === null)).toBe(true);
+  await waitFor(() => expect(screen.getByRole('status', { name: '运行状态' }).textContent).toContain('独立讨论'));
   // Nothing is generated: the only request is the service's model list (D143).
   await waitFor(() => expect(f.network).toHaveBeenCalledTimes(1));
   expect(f.network.mock.calls[0]).toMatchObject([expect.stringMatching(/\/models$/u), { method: 'GET' }]);

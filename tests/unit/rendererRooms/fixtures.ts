@@ -2,7 +2,7 @@ import { vi } from 'vitest';
 import type { AgentConfiguration, RoomConfiguration, RoomsFeatureProps, ProviderSummary, RoomManagementApiContract } from '../../../src/shared/contracts/configuration';
 export const timestamp = '2026-10-16T00:00:00.000Z';
 export function room(id = 'r1', name = '项目讨论'): RoomConfiguration {
-  return { id, name, objective: '检验证据', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
+  return { id, name, objective: '检验证据', kind: 'project', brief: '', defaultMode: 'group-chat', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
 }
 export function agent(id = 'a1', displayName = '构思员'): AgentConfiguration {
   return { id, roomId: 'r1', displayName, roleTemplateId: 'Drafter', systemPrompt: '先列证据', enabled: true, displayOrder: 0, providerId: 'p', modelId: 'mock', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
@@ -20,6 +20,9 @@ export function props(): RoomsFeatureProps {
     archiveAgent: vi.fn(async ({ id, archived = true }) => ({ ...agent(id), archivedAt: archived ? timestamp : null })), deleteAgent: vi.fn(async () => {}),
     listRoomRuns: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false })),
     listRoomMessages: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false })),
+    getLineup: vi.fn(async () => ({ ...room('roundtable-lineup', '常用阵容'), objective: '', kind: 'lineup' as const })),
+    createStandalone: vi.fn(async () => ({ ...room('standalone-1', '独立讨论'), objective: '', kind: 'standalone' as const })),
+    listStandalone: vi.fn(async () => []),
   } satisfies RoomManagementApiContract;
   return { api, providers, providerLoadState: 'ready', onReloadProviders: vi.fn(), onSelectRoom: vi.fn(), onSelectRun: vi.fn(), onOpenSettings: vi.fn() };
 }

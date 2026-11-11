@@ -62,7 +62,10 @@ const quoted = name => `"${name.replaceAll('"', '""')}"`;
 // Contents that no migration or recovery step may change, compared by hash where the table and columns exist.
 // D133: migration 14 drops these on purpose; their token usage moves to request_usage and the rest stays in the verified backup.
 const retired = new Set(['controlled_trials', 'controlled_trial_reconciliations', 'run_budgets', 'run_budget_topups', 'request_charges', 'summary_charges', 'artifact_charges', 'charge_pricing', 'charge_writeoffs', 'provider_target_approvals', 'artifact_adoptions']);
-const unchanged = { rooms: ['id', 'name'], messages: ['id', 'sender_name', 'content'], key_records: ['id', 'provider_id', 'encrypted_value'] };
+const unchanged = { rooms: ['id', 'name'], agents: ['id', 'room_id', 'display_name'], workflow_runs: ['id', 'room_id'], messages: ['id', 'room_id', 'sender_name', 'content'], key_records: ['id', 'provider_id', 'encrypted_value'] };
+// D167: migration 17 adds the application's own 常用阵容 room and its three members. They are not the user's rows, so they are left
+// out on both sides: every room and member the user had must still be there, unchanged, and still in the same room.
+const applicationRows = { rooms: "id <> 'roundtable-lineup'", agents: "room_id <> 'roundtable-lineup'" };
 
 function inspect(Driver, path) {
   const db = new Driver(path, { readonly: true });
@@ -74,7 +77,7 @@ function inspect(Driver, path) {
     for (const [table, columns] of Object.entries(unchanged)) {
       if (!tables.includes(table)) continue;
       const hash = createHash('sha256');
-      for (const row of db.prepare(`SELECT ${columns.map(quoted).join(',')} FROM ${quoted(table)} ORDER BY id`).iterate()) hash.update(JSON.stringify(row));
+      for (const row of db.prepare(`SELECT ${columns.map(quoted).join(',')} FROM ${quoted(table)} ${applicationRows[table] ? `WHERE ${applicationRows[table]}` : ''} ORDER BY id`).iterate()) hash.update(JSON.stringify(row));
       hashes[table] = hash.digest('hex');
     }
     const statuses = tables.includes('workflow_runs') ? Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM workflow_runs GROUP BY status').all().map(row => [row.status, row.n])) : {};

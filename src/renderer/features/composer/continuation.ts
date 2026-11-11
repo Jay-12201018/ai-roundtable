@@ -53,7 +53,7 @@ export function useContinuation(api: Pick<RunApiContract, 'previewContinuation' 
 export function continuationSummary(preview: ContinuationPreview | undefined, names: (agentId: string) => string): { text: string; warn?: string } | undefined {
   if (!preview) return undefined;
   const who = preview.agentIds.length === 1 ? `只由${names(preview.agentIds[0])}回应一次` : `${preview.agentIds.map(names).join(' → ')} 各回应一次`;
-  if (preview.reason === 'member_unavailable') return { text: '没有可以回应的成员。', warn: '点名的成员（或全部成员）已在房间里停用或归档，不能回应。改点其他成员，或去「管理房间与成员」重新启用。' };
+  if (preview.reason === 'member_unavailable') return { text: '没有可以回应的成员。', warn: '点名的成员（或全部成员）已停用或归档，不能回应。改点其他成员，或去「管理房间与成员」重新启用。' };
   if (preview.reason === 'context_exceeds') return { text: who, warn: '讨论已经太长，放不进成员模型的上下文：先在「本场信息 › 进度」生成讨论摘要，再继续。' };
   if (preview.reason === 'unsupported') return { text: who, warn: '有成员的模型现在不能使用（例如服务已停用或地址未确认），暂时不能继续。' };
   if (preview.reason === 'busy' || preview.reason === 'not_finished') return { text: '等当前请求结束后，可以在这场讨论里继续。' };

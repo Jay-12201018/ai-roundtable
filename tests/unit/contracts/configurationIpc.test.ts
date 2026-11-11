@@ -3,7 +3,7 @@ import { parseIpcOutput } from '../../../src/shared/contracts/ipc';
 
 const parse = parseIpcOutput as (channel: string, input: unknown, output: unknown) => unknown;
 const timestamp = '2026-10-17T00:00:00.000Z';
-const room = { id: 'r', name: 'Room', objective: '', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
+const room = { id: 'r', name: 'Room', objective: '', kind: 'project', brief: '', defaultMode: 'group-chat', archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const agent = { id: 'a', roomId: 'r', displayName: 'Agent', roleTemplateId: 'draft', systemPrompt: '', providerId: null, modelId: null, enabled: true, displayOrder: 0, archivedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const provider = { id: 'p', name: 'Provider', kind: 'compatible', baseUrl: 'https://service.example/v1', enabled: true, isDefault: false, defaultModelId: null, customModels: [], keyReference: null, createdAt: timestamp, updatedAt: timestamp };
 const storage = { mode: 'memory', backend: 'memory', persistent: false, message: '当前系统没有可靠的安全存储，密钥仅在本次会话有效。' };

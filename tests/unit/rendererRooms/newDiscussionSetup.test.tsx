@@ -47,7 +47,7 @@ describe('新讨论 › 三步', () => {
     expect(rowsShown()).toEqual(['起草者', '审查者', '综合者']);
     expect(screen.queryByRole('switch')).toBeNull();
     expect(screen.getByRole('button', { name: '编辑「审查者」' })).toBeTruthy();
-    expect(document.body.textContent).toContain('每位成员可以用不同的模型。改动对这场和之后的讨论生效，已有讨论不变。');
+    expect(document.body.textContent).toContain('每位成员可以用不同的模型。这里改的是项目的成员和默认讨论方式，对这场和之后的讨论生效，已有讨论不变。');
   });
   it('fewer members steps the last out and keeps its settings; coming back restores them', async () => {
     const spy = show({ initial: [...starters().slice(0, 2), member('c', '综合者', '综合', 2, { modelId: 'deepseek-v4-pro', systemPrompt: '我的设定' })] });

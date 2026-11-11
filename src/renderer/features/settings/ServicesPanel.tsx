@@ -35,7 +35,7 @@ export function ServicesPanel({ api, providers, loadState, readiness, onChanged,
   const looked = useRef(false);
   useEffect(() => { if (!looked.current && loadState === 'ready') { looked.current = true; refreshStaleModels(api, providers); } }, [api, loadState, providers]);
   return <>
-    <div className="page-head"><div className="grow"><h1>模型服务</h1><p>成员用哪个服务、哪个模型，在房间里为每位成员选。这里管理连接和 Key。</p></div>
+    <div className="page-head"><div className="grow"><h1>模型服务</h1><p>成员用哪个服务、哪个模型，在项目或新讨论页里为每位成员选。这里管理连接和 Key。</p></div>
       <div className="actions"><Button variant="primary" icon={Plus} onClick={onAdd}>添加服务</Button></div></div>
     {loadState === 'loading' && providers.length === 0 && <p role="status" className="muted">正在读取…</p>}
     {loadState === 'error' && <p role="alert" className="field-error">服务列表没有读出来，请稍后重试。<button type="button" className="link-btn" onClick={onChanged}>重试</button></p>}
@@ -152,7 +152,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
             : <>还没填写 <Button size="sm" variant="primary" onClick={() => onRekey(config)}>填写 Key</Button></>}</dd>
       </dl>}
       {config && !mock && !outside && <div className="svc-models">
-        <p className="small muted svc-pad">默认模型只影响之后新建的成员，已有成员的选择不变。每位成员的模型在房间里单独选。{preset?.models.some(model => model.multimodal) ? multimodalText : ''}</p>
+        <p className="small muted svc-pad">默认模型只影响之后新建的成员，已有成员的选择不变。每位成员的模型在项目或新讨论页里单独选。{preset?.models.some(model => model.multimodal) ? multimodalText : ''}</p>
         <div className="model-row svc-discovery"><Button size="sm" disabled={busy || !keySaved || !config.enabled} title={keySaved ? '向服务商查一次模型列表，不生成内容' : '先填写 Key'} onClick={refreshList}>刷新模型列表</Button>
           <span className="small muted" role="status">{discoveryText(readiness?.discovery)}</span></div>
         {models.map(model => {
@@ -187,7 +187,7 @@ function ServiceCard({ api, summary, readiness, expanded, onToggle, onChanged, o
           <div className="inline-fields"><Button size="sm" disabled={busy || !draft.name.trim() || draft.name === config.name} onClick={() => void save({ name: draft.name.trim() }, '已保存。')}>保存名称</Button></div>
           <div className="card-row svc-switch"><span className="grow"><b>启用这个服务</b><small>停用后不会发送任何请求，成员也不能选用它。</small></span>
             <Switch label="启用这个服务" checked={config.enabled} disabled={busy} onChange={value => void save({ enabled: value, ...(value ? {} : { isDefault: false }) }, value ? '已启用。' : '已停用。')} /></div>
-          {!mock && <div className="card-row svc-switch"><span className="grow"><b>设为默认服务</b><small>新房间的成员默认用它的默认模型；已有成员的选择不变。</small></span>
+          {!mock && <div className="card-row svc-switch"><span className="grow"><b>设为默认服务</b><small>新项目和新讨论里没有指定模型的成员，默认用它的默认模型；已有成员的选择不变。</small></span>
             <Switch label="设为默认服务" checked={config.isDefault} disabled={busy || !config.enabled} onChange={value => void save({ isDefault: value }, value ? '已设为默认服务。' : '已取消默认。')} /></div>}
         </>}
         {!mock && config && (!outside || keySaved || keyNow === 'unavailable') && <div className="danger-zone"><div className="grow"><b>删除 Key</b><small>{outside ? '这个服务已不再使用，Key 留着也用不上。' : '删除后这个服务不能再发请求，直到重新填写。'}</small></div>

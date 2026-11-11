@@ -93,7 +93,7 @@ export class UsageService {
   /** One row per request, with the tokens the provider reported. */
   csv(range?: UsageRange): { text: string; rows: number } {
     const { rows, runs, providers, speaker } = this.load(range);
-    const header = ['请求ID', '类型', '运行ID', '房间', '任务', '成员', 'Provider', '模型', `发出时间（${this.timeZone}）`, '状态', '输入tokens', '其中缓存命中tokens', '输出tokens'];
+    const header = ['请求ID', '类型', '运行ID', '项目', '任务', '成员', 'Provider', '模型', `发出时间（${this.timeZone}）`, '状态', '输入tokens', '其中缓存命中tokens', '输出tokens'];
     const lines = rows.map(row => {
       const { usage } = row; const run = runs.get(row.runId);
       return [usage.requestId, kindLabels[usage.kind], row.runId, run?.roomName, run?.task, speaker(row), providers.get(usage.providerId) ?? 'Provider 已删除', usage.modelId,

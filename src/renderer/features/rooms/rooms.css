@@ -1,4 +1,4 @@
-/* 房间 page: members (drag or keys to reorder, on/off, menu), discussion mode, discussions, archive or delete. */
+/* 项目 page (and, as .lineup-page, the 常用阵容 in 设置): members (drag or keys to reorder, on/off, menu), discussion mode, discussions, archive or delete. */
 .room-page .page-head h1 .pill { vertical-align: 4px; }
 .room-notice { margin: -12px 0 16px; }
 .member-list { list-style: none; margin: 0; padding: 0; }
@@ -14,6 +14,14 @@
 .run-list .run-dot.is-live { background: var(--accent); }
 .run-list .run-dot.is-warn { background: var(--warn); }
 .model-state { margin: -8px 0 0; }
+.brief-form { display: grid; gap: 8px; }
+.brief-form .textarea { min-height: 120px; resize: vertical; }
+.brief-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.brief-foot .actions { display: inline-flex; gap: 8px; }
+.brief-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 22px; max-height: 220px; overflow-y: auto; }
+.mode-card { padding: 12px; display: grid; gap: 8px; }
+.mode-detail { margin: 0; }
+.setup-link-first { margin-left: 4px; }
 
 /* 新讨论: one column, one title, thin lines, right above the goal. Below this width the model list takes a line of its own. */
 .discussion-empty.is-new { display: flex; }

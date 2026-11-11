@@ -60,3 +60,17 @@ export function readRoomCount(roomId: string): number | undefined {
 export function writeRoomCount(roomId: string, count: number): void {
   try { localStorage.setItem(countKey(roomId), String(count)); } catch { /* Only a convenience: the default applies instead. */ }
 }
+
+/**
+ * D169: the mode now lives in the database. What this profile remembered before that is read once, so a room keeps the mode
+ * its host chose; undefined when the profile remembers nothing about the room.
+ */
+export function legacyRoomMode(roomId: string): DiscussionMode | undefined {
+  try { if ([key(roomId), modeKey(roomId), countKey(roomId)].every(name => localStorage.getItem(name) === null)) return undefined; } catch { return undefined; }
+  return readRoomMode(roomId);
+}
+const adoptedKey = 'roundtable.modesInDatabase';
+/** True once per profile: the first time the version that keeps modes in the database looks at this profile. */
+export function claimLegacyModes(): boolean {
+  try { if (localStorage.getItem(adoptedKey) !== null) return false; localStorage.setItem(adoptedKey, '1'); return true; } catch { return false; }
+}

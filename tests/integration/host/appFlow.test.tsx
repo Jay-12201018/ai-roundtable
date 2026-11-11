@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { landInProject } from '../../support/landing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../../src/renderer/App';
 import { Database } from '../../../src/main/database/Database';
@@ -15,7 +16,7 @@ describe('R12 App with the real Main services', () => {
     const provider = new ScriptedProvider();
     const service = new RunService(db, provider, createPublicMessagesBuilder());
     window.roundtable = appApiFor(service, db);
-    localStorage.setItem(`roundtable.mode.${service.createDemoRoom('主持人联合测试')}`, 'free-chat');
+    landInProject(window.roundtable, db, service.createDemoRoom('主持人联合测试'));
     provider.hold.add(0);
     provider.answers.set(0, '开场观点 @Override 审查者');
     provider.answers.set(1, '综合者被点名发言');

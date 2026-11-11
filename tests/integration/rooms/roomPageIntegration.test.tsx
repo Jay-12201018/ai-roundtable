@@ -15,13 +15,13 @@ it('operates the room page against RoomService and SQLite: starter members, edit
   expect(db.listAgentConfigurations(created.id).map(agent => [agent.displayName, agent.roleTemplateId, agent.providerId, agent.modelId])).toEqual([
     ['林舟', '产品', null, null], ['阿哲', '工程', null, null], ['小雨', '总结', null, null]]);
   const onDeleted = vi.fn(); const onChanged = vi.fn();
-  const view = (room = db.getRoomConfiguration(created.id)!) => <RoomPage api={api} room={room} providers={[]} readiness={[]} runs={[]} workflow={{ label: '自由讨论 · 3 回合', detail: '', onChange: () => {} }}
+  const view = (room = db.getRoomConfiguration(created.id)!) => <RoomPage api={api} room={room} providers={[]} readiness={[]} runs={[]} mode={{ value: 'free-chat', detail: '', onPick: () => {}, onCustomize: () => {} }}
     onNewDiscussion={() => {}} onOpenRun={() => {}} onOpenSettings={() => {}} onChanged={onChanged} onDeleted={onDeleted} />;
   const { rerender } = render(view());
   await screen.findByText('林舟');
   expect(document.body.textContent!.match(/还没选模型，暂时不会参与讨论/gu)).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-  fireEvent.change(screen.getByLabelText('房间名称'), { target: { value: '改名后的房间' } });
+  fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '改名后的房间' } });
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(db.getRoomConfiguration(created.id)?.name).toBe('改名后的房间'));
   rerender(view());

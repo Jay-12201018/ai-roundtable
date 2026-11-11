@@ -66,6 +66,8 @@ it('rejects an old subscription and its deltas after selecting a different room 
   const late = deferred<RunSubscription>(); vi.mocked(f.api.run.subscribe).mockReturnValue(late.promise);
   vi.spyOn(f.api.rooms, 'listRoomRuns').mockImplementation(async ({ roomId }) => ({ items: roomId === 'r1' ? [{ id: 'old', roomId: 'r1', task: '旧 Run', status: 'completed', createdAt: time, updatedAt: time }] : [], nextCursor: null, hasMore: false }));
   render(<App />);
+  // D167: the app opens on a new discussion; a project's discussions show once the project is opened.
+  await openRoom('原房间');
   fireEvent.click((await screen.findAllByRole('button', { name: /^旧 Run/u }))[0]);
   await openRoom('新房间'); await screen.findAllByRole('heading', { name: '新房间' });
   await act(async () => late.resolve(subscription(completed('old', 'r1'))));
@@ -140,7 +142,7 @@ it.each(['archive', 'delete'] as const)('clears restored messages and rejects la
   localStorage.setItem('roundtable.runId', 'saved'); render(<App />);
   await screen.findByText('持久历史正文'); await openRoom('唯一房间');
   await screen.findAllByRole('heading', { name: '唯一房间' });
-  if (action === 'archive') { fireEvent.click(screen.getByRole('button', { name: '归档' })); await screen.findByRole('button', { name: '恢复房间' }); }
+  if (action === 'archive') { fireEvent.click(screen.getByRole('button', { name: '归档' })); await screen.findByRole('button', { name: '恢复项目' }); }
   else { fireEvent.click(screen.getByRole('button', { name: '删除…' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '删除' })); await screen.findByRole('heading', { name: '让几位 AI 围坐一桌，替你把问题讨论透' }); }
   act(() => f.emit({ version: 1, runId: 'saved', turnId: 'saved-turn', requestId: 'saved-request', sequence: 5, type: 'text_delta', timestamp: time, payload: { turnId: 'saved-turn', messageId: 'saved-message', senderName: '起草者', text: '旧选择的迟到内容' } }));
   expect(screen.queryByText('持久历史正文')).toBeNull(); expect(screen.queryByText('旧选择的迟到内容')).toBeNull();

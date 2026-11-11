@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { landInProject } from '../../support/landing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../../../src/renderer/App';
 import { Database } from '../../../src/main/database/Database';
@@ -18,7 +19,7 @@ function setup(name: string) {
   const service = new RunService(db, provider, createPublicMessagesBuilder());
   window.roundtable = appApiFor(service, db);
   // These tests are about the stricter modes' controls; the group chat's are in tests/integration/groupChat.
-  localStorage.setItem(`roundtable.mode.${service.createDemoRoom(name)}`, 'free-chat');
+  landInProject(window.roundtable, db, service.createDemoRoom(name));
   const runId = () => db.getAttempt(provider.inputs[0].requestId)!.runId;
   return { db, provider, service, runId, close: async () => { cleanup(); await service.shutdown(); db.close(); } };
 }

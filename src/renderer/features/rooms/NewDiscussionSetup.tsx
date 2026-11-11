@@ -26,6 +26,8 @@ export type NewDiscussionSetupProps = {
   onOpenSettings: () => void; onConnectMore: () => void; onCustomFlow: () => void;
   /** This page shows models: a moment a service's list may be looked at again. */
   onShown?: () => void;
+  /** D167: a 独立讨论. Its members are its own copy of the 常用阵容, so what is changed here stays in this discussion. */
+  standalone?: boolean; onOpenLineup?: () => void;
 };
 
 const byOrder = (members: readonly AgentConfiguration[]) => [...members].sort((a, b) => a.displayOrder - b.displayOrder);
@@ -35,7 +37,7 @@ const asWorkflowMembers = (members: readonly AgentConfiguration[]) => members.ma
  * 新讨论: how it runs, how many take part, and each one's model, right above the goal. Saved as it changes. A discussion takes
  * its members when it starts, so this applies to the next one and those after it, never to one that already ran.
  */
-export function NewDiscussionSetup({ api, roomId, members, draft, mode, providers, readiness, readOnly, reload, onDraft, onOpenSettings, onConnectMore, onCustomFlow, onShown }: NewDiscussionSetupProps) {
+export function NewDiscussionSetup({ api, roomId, members, draft, mode, providers, readiness, readOnly, reload, onDraft, onOpenSettings, onConnectMore, onCustomFlow, onShown, standalone, onOpenLineup }: NewDiscussionSetupProps) {
   const [changing, setChanging] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState<Record<string, Partial<AgentInput>>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -109,7 +111,7 @@ export function NewDiscussionSetup({ api, roomId, members, draft, mode, provider
             <IconButton size="sm" icon={Plus} label="增加一位成员" disabled={disabled || count >= MAX_PARTICIPANTS} onClick={() => void arrange(template, count + 1)} /></span>}
       </div></div>
     <div className="setup-members"><span className="setup-label">成员和模型</span>
-      {shown.length === 0 ? <p className="small muted">{fixed ? '这个方式需要两位成员。' : '这个房间还没有参与讨论的成员，点上面的加号添加。'}</p>
+      {shown.length === 0 ? <p className="small muted">{fixed ? '这个方式需要两位成员。' : '还没有参与讨论的成员，点上面的加号添加。'}</p>
         : <ol className="setup-list" aria-label="成员和模型">{speakingOrder(shown, draft).map(agent => {
           const current = { ...agent, ...saving[agent.id] } as AgentConfiguration;
           const value = modelValue(current); const busy = agent.id in saving; const role = roleShown(agent);
@@ -131,7 +133,8 @@ export function NewDiscussionSetup({ api, roomId, members, draft, mode, provider
     </div>
     {error && <p className="field-error setup-message" role="alert">{error}</p>}
     {notice && <p className="small muted setup-message" role="status">{notice}</p>}
-    <p className="small muted setup-foot">每位成员可以用不同的模型。改动对这场和之后的讨论生效，已有讨论不变。
+    <p className="small muted setup-foot">{standalone ? <>成员来自常用阵容，这里的改动只用于这一场。{onOpenLineup && <button type="button" className="link-btn setup-link setup-link-first" onClick={onOpenLineup}>修改常用阵容</button>}</>
+      : '每位成员可以用不同的模型。这里改的是项目的成员和默认讨论方式，对这场和之后的讨论生效，已有讨论不变。'}
       {!readOnly && realServices <= 1 && <button type="button" className="link-btn setup-link" onClick={onConnectMore}>连接更多模型服务</button>}</p>
     {editor && <MemberDialog key={editor.id} agent={editor} roomId={roomId} order={editor.displayOrder} providers={providers} readiness={readiness} onOpenSettings={onOpenSettings}
       onClose={() => setEditor(undefined)} onSave={async (input: CreateAgentInput) => {

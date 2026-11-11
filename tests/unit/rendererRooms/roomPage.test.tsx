@@ -18,9 +18,9 @@ const member = (id: string, displayName: string, role: string, extra: Partial<Ag
 function show(agents: AgentConfiguration[], extra: { runs?: RunSummary[]; api?: RoomManagementApiContract; providers?: ProviderSummary[] } = {}) {
   const api = extra.api ?? roomProps().api;
   vi.mocked(api.listAgentConfigurations).mockResolvedValue(agents);
-  const callbacks = { onNewDiscussion: vi.fn(), onOpenRun: vi.fn(), onOpenSettings: vi.fn(), onChanged: vi.fn(), onDeleted: vi.fn(), change: vi.fn() };
+  const callbacks = { onNewDiscussion: vi.fn(), onOpenRun: vi.fn(), onOpenSettings: vi.fn(), onChanged: vi.fn(), onDeleted: vi.fn(), change: vi.fn(), pick: vi.fn() };
   const view = render(<RoomPage api={api} room={room()} providers={extra.providers ?? [deepseek, kimi, mock]} readiness={readiness} runs={extra.runs ?? []}
-    workflow={{ label: '自由讨论 · 3 回合', detail: '没有单独设置', onChange: callbacks.change }} {...callbacks} />);
+    mode={{ value: 'free-chat', detail: '没有单独设置', onPick: callbacks.pick, onCustomize: callbacks.change }} {...callbacks} />);
   return { api, view, ...callbacks };
 }
 const row = (name: string) => screen.getByRole('switch', { name: `${name} 参与讨论` }).closest('li')!;
@@ -72,9 +72,9 @@ describe('房间页: members', () => {
     const api = roomProps().api; const late = deferred<AgentConfiguration[]>();
     vi.mocked(api.listAgentConfigurations).mockReturnValueOnce(late.promise).mockResolvedValue([member('n', '新房间成员', '起草')]);
     const callbacks = { onNewDiscussion: vi.fn(), onOpenRun: vi.fn(), onOpenSettings: vi.fn(), onChanged: vi.fn(), onDeleted: vi.fn() };
-    const workflow = { label: 'x', detail: 'y', onChange: vi.fn() };
-    const view = render(<RoomPage api={api} room={room()} providers={[deepseek]} readiness={readiness} runs={[]} workflow={workflow} {...callbacks} />);
-    view.rerender(<RoomPage api={api} room={room('r2', '另一个房间')} providers={[deepseek]} readiness={readiness} runs={[]} workflow={workflow} {...callbacks} />);
+    const workflow = { value: 'group-chat' as const, detail: 'y', onPick: vi.fn(), onCustomize: vi.fn() };
+    const view = render(<RoomPage api={api} room={room()} providers={[deepseek]} readiness={readiness} runs={[]} mode={workflow} {...callbacks} />);
+    view.rerender(<RoomPage api={api} room={room('r2', '另一个房间')} providers={[deepseek]} readiness={readiness} runs={[]} mode={workflow} {...callbacks} />);
     await screen.findByText('新房间成员');
     await act(async () => late.resolve([member('old', '旧房间成员', '审查')]));
     expect(screen.queryByText('旧房间成员')).toBeNull();
@@ -88,7 +88,7 @@ describe('房间页: archive and delete', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除…' }));
     expect(api.deleteRoom).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByRole('heading').textContent).toBe('删除房间「项目讨论」？');
+    expect(within(dialog).getByRole('heading').textContent).toBe('删除项目「项目讨论」？');
     fireEvent.click(within(dialog).getByRole('button', { name: '删除' }));
     await waitFor(() => expect(api.deleteRoom).toHaveBeenCalledWith({ id: 'r1' })); expect(onDeleted).toHaveBeenCalled();
   });
@@ -96,7 +96,7 @@ describe('房间页: archive and delete', () => {
     const { api } = show([member('a', '起草者', '起草')], { runs: [{ id: 'run', roomId: 'r1', status: 'completed', task: '旧讨论', createdAt: timestamp, updatedAt: timestamp }] });
     await screen.findByText('起草者');
     expect((screen.getByRole('button', { name: '删除…' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(document.body.textContent).toContain('这个房间已经有讨论记录，不能删除；可以归档。');
+    expect(document.body.textContent).toContain('这个项目已经有讨论记录，不能删除；可以归档。');
     fireEvent.click(screen.getByRole('button', { name: '归档' }));
     await waitFor(() => expect(api.archiveRoom).toHaveBeenCalledWith({ id: 'r1', archived: true }));
     fireEvent.click(screen.getByRole('button', { name: '打开' }));

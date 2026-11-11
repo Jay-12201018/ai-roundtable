@@ -29,15 +29,15 @@ describe('讨论方式 dialog', () => {
     await screen.findByText('已核对：预计 3 回合。', undefined, { timeout: 2000 });
     expect(onCheck).toHaveBeenLastCalledWith(expect.objectContaining({ template: 'free-chat', phases: [expect.objectContaining({ participants: ['a', 'b', 'c'] })] }));
     fireEvent.click(screen.getByRole('button', { name: /^审查修订链/u }));
-    expect((screen.getByRole('button', { name: '用于这个房间' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '用这个流程' }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect(onCheck).toHaveBeenLastCalledWith(expect.objectContaining({ template: 'review-revision' })), { timeout: 2000 });
     // The last stage ends the plan anyway: only the four earlier ones offer to end there.
     expect(within(screen.getByRole('list', { name: '阶段与成员' })).getAllByRole('button', { name: '在此结束' })).toHaveLength(4);
     fireEvent.click(within(screen.getByRole('list', { name: '阶段与成员' })).getAllByRole('button', { name: '在此结束' })[3]);
     expect(document.body.textContent).toContain('复审后结束');
     expect(document.body.textContent).toContain('综合者不在这个流程里，这次不会发言；需要时可以在讨论中生成摘要。');
-    await waitFor(() => expect((screen.getByRole('button', { name: '用于这个房间' }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
-    fireEvent.click(screen.getByRole('button', { name: '用于这个房间' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: '用这个流程' }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+    fireEvent.click(screen.getByRole('button', { name: '用这个流程' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ template: 'review-revision', finishAt: 'rereview' }));
   });
   it('says what is wrong locally without asking Main, and shows Main’s refusal in words', async () => {
@@ -48,7 +48,7 @@ describe('讨论方式 dialog', () => {
     fireEvent.change(screen.getByLabelText('最多回合'), { target: { value: '12' } });
     await screen.findByText('按现在的成员和限制排不出这个流程。', undefined, { timeout: 2000 });
     expect(onCheck.mock.calls.length).toBe(calls + 1);
-    expect((screen.getByRole('button', { name: '用于这个房间' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '用这个流程' }) as HTMLButtonElement).disabled).toBe(true);
   });
   it('ignores a check that answers after the draft changed', async () => {
     const first = deferred<WorkflowCheck>(); let calls = 0;

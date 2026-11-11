@@ -89,7 +89,7 @@ function MembersTab({ snapshot, commands, providers }: { snapshot: RunSnapshot; 
     })}
     {override && directable && <Button size="sm" disabled={disabled} onClick={() => void commands.send('cancelOverride', { kind: 'cancelOverride' }, '已取消点名，恢复按计划发言。')}>取消点名</Button>}
     {directable && <p className="small muted">点名是在下一回合插入一轮：不占用计划的回合{snapshot.workflow ? '和步骤' : ''}，之后回到原计划，原计划的成员不会被跳过。按计划的下一位不用点名，直接在下方插话即可。{snapshot.workflow ? '按讨论方式进行时只能点名当前阶段的成员。' : ''}</p>}
-    <p className="small muted">成员名单在讨论开始时固定；在「房间」里改成员，只影响之后的讨论。{chat ? '' : '也可以在下方输入框里输入 @ 点名。'}</p>
+    <p className="small muted">成员名单在讨论开始时固定；之后再改成员，只影响之后的讨论。{chat ? '' : '也可以在下方输入框里输入 @ 点名。'}</p>
   </section>;
 }
 

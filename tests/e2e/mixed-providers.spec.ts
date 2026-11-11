@@ -552,9 +552,9 @@ test('new discussion: choose how it runs and how many, give each one a model, an
   await expect(dialog.getByLabel('最多回合')).toHaveValue('20');
   await expect(dialog).toContainText('立论');
   await dialog.getByLabel('最多回合').fill('24');
-  await expect(dialog.getByRole('button', { name: '用于这个房间' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: '用这个流程' })).toBeEnabled();
   await capture(running, 'setup-custom', '“自定义流程”打开原来的细调：阶段、轮数、上限一个都没少。');
-  await dialog.getByRole('button', { name: '用于这个房间' }).click();
+  await dialog.getByRole('button', { name: '用这个流程' }).click();
   await page.getByRole('button', { name: '减少一位成员' }).click();
   await expect(count).toHaveText('4');
   const stored = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith('roundtable.workflow.'))?.[1]);
@@ -617,8 +617,8 @@ test('D146 a discussion that reaches its duration limit says so and carries on i
   const dialog = page.getByRole('dialog', { name: '讨论方式' });
   await expect(dialog.getByLabel('时长上限'), 'Two hours unless changed').toHaveValue('120');
   await dialog.getByLabel('时长上限').fill('1');
-  await expect(dialog.getByRole('button', { name: '用于这个房间' })).toBeEnabled();
-  await dialog.getByRole('button', { name: '用于这个房间' }).click();
+  await expect(dialog.getByRole('button', { name: '用这个流程' })).toBeEnabled();
+  await dialog.getByRole('button', { name: '用这个流程' }).click();
   await page.getByRole('button', { name: '开始讨论' }).click();
 
   // Still waiting: it says so, for how long, and how to leave.

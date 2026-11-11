@@ -22,12 +22,13 @@ import { migration13 } from '../../../src/main/database/migrations/v13';
 import { migration14 } from '../../../src/main/database/migrations/v14';
 import { migration15 } from '../../../src/main/database/migrations/v15';
 import { migration16 } from '../../../src/main/database/migrations/v16';
+import { migration17 } from '../../../src/main/database/migrations/v17';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const script = join(root, 'scripts/rehearse-upgrade.cjs');
 // The original schema is the first entry of the migration list; published migrations are never edited.
 const v1 = readFileSync(join(root, 'src/main/database/Database.ts'), 'utf8').match(/const migrations = \[\s*`([\s\S]*?)`/u)![1]!;
-const later = [migration2, migration3, migration4, migration5, migration6, migration7, migration8, migration9, migration10, migration11, migration12, migration13, migration14, migration15, migration16];
+const later = [migration2, migration3, migration4, migration5, migration6, migration7, migration8, migration9, migration10, migration11, migration12, migration13, migration14, migration15, migration16, migration17];
 
 const directories: string[] = [];
 const temp = () => { const directory = realpathSync(mkdtempSync(join(tmpdir(), 'roundtable-rehearse-test-'))); directories.push(directory); return directory; };
@@ -63,7 +64,7 @@ const run = (input: string, extra: string[] = [], env: NodeJS.ProcessEnv = {}) =
 const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 describe('rehearse-upgrade', () => {
-  it.each([5, 9, 12, 13, 14])('upgrades a v%i copy to the current version, recovers it, and leaves the input alone', version => {
+  it.each([5, 9, 12, 13, 14, 16])('upgrades a v%i copy to the current version, recovers it, and leaves the input alone', version => {
     const folder = temp();
     const input = join(folder, 'copy.db');
     historical(input, version);
@@ -91,7 +92,7 @@ describe('rehearse-upgrade', () => {
     historical(input, later.length + 1);
     const { status, report } = run(input);
     expect(status).toBe(0);
-    expect(report).toMatchObject({ from: 16, to: 16, interruptedRuns: 1, backupRestoreChecked: false });
+    expect(report).toMatchObject({ from: 17, to: 17, interruptedRuns: 1, backupRestoreChecked: false });
   });
 
   it('prints no row contents', () => {

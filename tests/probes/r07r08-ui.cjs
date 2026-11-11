@@ -168,7 +168,7 @@ async function page(stage, saved) {
     await openRoom('我的第一场讨论'); await click('删除…'); await clickIn('dialog[open]', '删除');
     await wait(roomList, values => !values.some(value => value.name === '我的第一场讨论'), 'Starter room not deleted');
     async function createRoom(name) {
-      await click('新建房间'); await fill('房间名称', name); await fill('默认目标可选', name + ' public goal'); await click('新建');
+      await click('新建项目'); await fill('项目名称', name); await fill('默认目标可选', name + ' public goal'); await click('新建');
       const rooms = await wait(roomList, values => values.some(value => value.name === name), 'Room not saved: ' + name);
       await wait(roomTitle, value => value === name, 'Created room not opened');
       const created = rooms.find(value => value.name === name).id;
@@ -245,8 +245,8 @@ async function page(stage, saved) {
     check(document.querySelector('.msg-details').textContent.includes('Drafter') && !document.querySelector('.msg-details').textContent.includes('New Current Role'), 'Historical role replaced');
     // A room with discussions cannot be deleted at all (no request is offered); it can be archived.
     await openRoom('Smoke Roundtable');
-    check(findButton('删除…').disabled && document.body.innerText.includes('这个房间已经有讨论记录，不能删除；可以归档。'), 'Historical room deletion not protected');
-    await click('归档'); await wait(() => findButton('恢复房间'), Boolean, 'Archive did not finish');
+    check(findButton('删除…').disabled && document.body.innerText.includes('这个项目已经有讨论记录，不能删除；可以归档。'), 'Historical room deletion not protected');
+    await click('归档'); await wait(() => findButton('恢复项目'), Boolean, 'Archive did not finish');
     check((await roomList()).find(room => room.id === saved.roomId).archivedAt !== null, 'Room not archived');
     await openRoom('Smoke Disposable'); await click('删除…'); await clickIn('dialog[open]', '删除');
     await wait(() => document.querySelector('.room-page'), value => !value, 'Deleted room page still shown');
@@ -254,7 +254,7 @@ async function page(stage, saved) {
     // The archived room stays reachable from the folded list, with its history.
     await click('已归档（1）'); await openRoom('Smoke Roundtable');
     await openRun('R78 public three Agent collaboration'); await settle(saved.runId, 'completed', 3);
-    await openRoom('Smoke Roundtable'); await click('恢复房间');
+    await openRoom('Smoke Roundtable'); await click('恢复项目');
     await wait(() => findButton('归档'), Boolean, 'Room restore failed');
     await memberAction('Smoke Current Renamed', '归档'); await wait(() => findButton('已归档的成员（1）'), Boolean, 'Archived member not visible');
     await click('已归档的成员（1）'); await click('恢复');
