@@ -18,6 +18,7 @@ import { migration13 } from './migrations/v13';
 import { migration14 } from './migrations/v14';
 import { migration15 } from './migrations/v15';
 import { migration16 } from './migrations/v16';
+import { migration17 } from './migrations/v17';
 import type { GroupChatClassification, GroupChatIntent, GroupChatLength, GroupChatRoundState, GroupChatScheduleStatus, GroupChatSpeakerSource, GroupChatSpeakerState } from '../../shared/schemas/groupChat';
 import { attachmentIdsSchema, imageAttachmentSchema, type ImageAttachment } from '../../shared/schemas/attachment';
 import { requestUsageSchema, type RequestUsage, type UsageKind } from '../../shared/schemas/usage';
@@ -25,8 +26,8 @@ import type { StreamChatInput as StreamChatInputRecord } from '../../shared/cont
 import { ContractError } from '../../shared/contracts/errors';
 import type { ArtifactIssue, ArtifactKind } from '../../shared/schemas/artifact';
 import { apiErrorSchema, errorCodeSchema, type ApiError, type ErrorCode } from '../../shared/schemas/error';
-import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions } from '../../shared/schemas/configuration';
-import type { RoomInput,RoomConfiguration,AgentInput,AgentConfiguration,ProviderInput,ProviderConfiguration,ProviderSummary,RoomMessagePageInput,RoomMessagePage,RoomRunPageInput,RoomRunPage } from '../../shared/contracts/configuration';
+import { roomInputSchema,roomConfigurationSchema,agentInputSchema,agentConfigurationSchema,providerInputSchema,providerConfigurationSchema,providerSummarySchema,listRoomsInputSchema,reorderAgentsInputSchema,roomMessagePageInputSchema,roomMessagePageSchema,roomRunPageInputSchema,roomRunPageSchema, compareRunPositions, createStandaloneInputSchema, standaloneDiscussionsSchema } from '../../shared/schemas/configuration';
+import type { RoomInput,RoomConfiguration,AgentInput,AgentConfiguration,ProviderInput,ProviderConfiguration,ProviderSummary,RoomMessagePageInput,RoomMessagePage,RoomRunPageInput,RoomRunPage,CreateStandaloneInput,StandaloneDiscussion } from '../../shared/contracts/configuration';
 import { migration2 } from './migrations/v2';
 import { createVerifiedBackup, type VerifiedBackup } from './backup/createVerifiedBackup';
 import { prepareRestore } from './recovery/prepareRestore';
@@ -46,6 +47,10 @@ export type RoomRecord = {
 };
 
 export type RunRecord = StoredRun;
+
+/** D167: the one 常用阵容 room, made by migration 17. */
+export const LINEUP_ROOM_ID = 'roundtable-lineup';
+const STANDALONE_ROOM_NAME = '独立讨论';
 
 /** D149: one place in a group-chat round's queue. */
 export type GroupChatSpeaker = { roundId: string; position: number; agentId: string; intent: GroupChatIntent; length: GroupChatLength; source: GroupChatSpeakerSource; assignment?: string; state: GroupChatSpeakerState; turnId?: string };
@@ -248,6 +253,7 @@ const migrations = [
   migration14,
   migration15,
   migration16,
+  migration17,
 ];
 
 export type ModelDiscovery = { modelIds: string[]; outcome: 'listed' | 'unsupported' | 'authentication_failed' | 'failed'; checkedAt: string; listedAt: string | null };
@@ -373,7 +379,9 @@ export class Database {
 
   listAgents(roomId: string, validateRealSelection?: (providerId: string, modelId: string) => void): Array<{ id: string; roomId: string; displayName: string; roleTemplateId: string; displayOrder: number; systemPrompt: string; providerId: string | null; modelId: string | null }> {
     this.assertInitialized();
-    if (this.getRoomConfiguration(roomId)?.archivedAt) throw new ContractError('invalid_state');
+    const room = this.getRoomConfiguration(roomId);
+    // D167: the 常用阵容 only lends its members to new discussions; nothing is ever discussed in it.
+    if (room?.archivedAt || room?.kind === 'lineup') throw new ContractError('invalid_state');
     const rows = this.db.prepare('SELECT id, room_id, display_name, role_template_id, display_order,system_prompt,provider_id,model_id,configuration_version FROM agents WHERE room_id = ? AND enabled=1 AND archived_at IS NULL ORDER BY display_order,id').all(roomId) as Array<{ id: string; room_id: string; display_name: string; role_template_id: string; display_order: number; system_prompt: string; provider_id: string | null; model_id: string | null; configuration_version: number }>;
     for (const row of rows) {
       // Only untouched pre-configuration Demo rows retain the legacy null-to-Mock path.
@@ -1194,7 +1202,10 @@ export class Database {
       if (!run) throw new Error('Run not found');
       const ids = this.db.prepare('SELECT id FROM messages WHERE run_id=? ORDER BY sort_key').pluck().all(runId) as string[];
       const taskAttachments=this.getTaskAttachments(runId);
-      return {run,turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),...(taskAttachments.length?{taskAttachments}:{}),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
+      // D168: the 项目说明 as it reads now, so a change reaches the next request of a discussion that is still going.
+      const room=this.getRoomConfiguration(run.roomId);
+      const projectBrief=room?.kind==='project'?room.brief.trim():'';
+      return {run,...(projectBrief?{projectBrief}:{}),turns:this.listTurns(runId),messages:ids.map(id=>this.getMessage(id)!),...(taskAttachments.length?{taskAttachments}:{}),attempts:this.listAttempts(runId),sequence:this.getRunEventSequence(runId),
         versions:this.listVersions(runId),hostActions:this.listHostActions(runId),instructions:this.listInstructionRevisions(runId),
         usage:this.listRunUsage(runId),summaries:this.listSummaries(runId),continuations:this.listContinuations(runId),
         artifactRequestIds:this.db.prepare('SELECT request_id FROM artifact_requests WHERE run_id=? ORDER BY created_at,rowid').pluck().all(runId) as string[],
@@ -1282,35 +1293,103 @@ export class Database {
 
   createRoom(input: RoomInput): RoomConfiguration {
     const room = configurationInput(roomInputSchema, input);
-    return this.transaction(() => { this.insertRoom(room); return this.getRoomConfiguration(room.id)!; });
+    return this.transaction(() => {
+      this.insertRoom(room);
+      if (room.brief || room.defaultMode) this.db.prepare('UPDATE rooms SET brief=?,default_mode=? WHERE id=?').run(room.brief ?? '', room.defaultMode ?? 'group-chat', room.id);
+      return this.getRoomConfiguration(room.id)!;
+    });
   }
 
   updateRoom(input: RoomInput): RoomConfiguration {
     const room = configurationInput(roomInputSchema, input);
     return this.transaction(() => {
-      if (!this.getRoom(room.id)) throw new ContractError('not_found');
-      this.db.prepare('UPDATE rooms SET name=?,objective=?,updated_at=? WHERE id=?').run(room.name, room.objective, now(), room.id);
+      const previous = this.getRoomConfiguration(room.id);
+      if (!previous) throw new ContractError('not_found');
+      if (previous.kind === 'lineup') throw new ContractError('invalid_state');
+      this.db.prepare('UPDATE rooms SET name=?,objective=?,brief=?,default_mode=?,updated_at=? WHERE id=?')
+        .run(room.name, room.objective, room.brief ?? previous.brief, room.defaultMode ?? previous.defaultMode, now(), room.id);
       return this.getRoomConfiguration(room.id)!;
     });
   }
 
   getRoomConfiguration(id: string): RoomConfiguration | undefined {
     this.assertInitialized(); configurationInput(idSchema, id);
-    const row = this.db.prepare('SELECT id,name,objective,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM rooms WHERE id=?').get(id);
+    const row = this.db.prepare('SELECT id,name,objective,kind,brief,default_mode AS defaultMode,archived_at AS archivedAt,created_at AS createdAt,updated_at AS updatedAt FROM rooms WHERE id=?').get(id);
     return row ? configurationOutput(roomConfigurationSchema, row) : undefined;
   }
 
   listRooms(input: { includeArchived?: boolean } = {}): RoomConfiguration[] {
     this.assertInitialized();
     const { includeArchived } = configurationInput(listRoomsInputSchema, input);
-    const ids = this.db.prepare(`SELECT id FROM rooms ${includeArchived ? '' : 'WHERE archived_at IS NULL'} ORDER BY created_at,id`).pluck().all() as string[];
+    // D167: the rooms a host makes and names are the projects; 独立讨论 and the 常用阵容 have their own reads below.
+    const ids = this.db.prepare(`SELECT id FROM rooms WHERE kind='project' ${includeArchived ? '' : 'AND archived_at IS NULL'} ORDER BY created_at,id`).pluck().all() as string[];
     return ids.map(id => this.getRoomConfiguration(id)!);
+  }
+
+  /** D167: the 常用阵容. Migration 17 made it; it is never archived, renamed or deleted. */
+  getLineup(): RoomConfiguration {
+    const room = this.getRoomConfiguration(LINEUP_ROOM_ID);
+    if (!room || room.kind !== 'lineup') throw new ContractError('not_found');
+    return room;
+  }
+
+  /**
+   * D167: a new 独立讨论: a room of its own with a copy of the 常用阵容 (or of another 独立讨论, to carry on with the same people). The
+   * copy is what the discussion runs on, so changing members before it starts never changes the 常用阵容. A 独立讨论 that never
+   * started holds nothing worth keeping and is removed here, so going back and forth leaves no empty rooms behind.
+   */
+  createStandalone(input: CreateStandaloneInput, newId: () => string): RoomConfiguration {
+    const { fromRoomId, fallbackModel } = configurationInput(createStandaloneInputSchema, input);
+    return this.transaction(() => {
+      const source = fromRoomId ? this.getRoomConfiguration(fromRoomId) : this.getLineup();
+      if (!source) throw new ContractError('not_found');
+      if (source.kind === 'project') throw new ContractError('invalid_input');
+      if (fallbackModel) this.assertModelChoice(fallbackModel.providerId, fallbackModel.modelId);
+      const members = this.listAgentConfigurations(source.id);
+      const unused = this.db.prepare(`SELECT id FROM rooms m WHERE m.kind='standalone' AND NOT EXISTS(SELECT 1 FROM workflow_runs r WHERE r.room_id=m.id)
+        AND NOT EXISTS(SELECT 1 FROM messages g WHERE g.room_id=m.id)`).pluck().all() as string[];
+      for (const id of unused) this.deleteRoom(id);
+      const id = newId(); const timestamp = now();
+      this.db.prepare("INSERT INTO rooms(id,name,objective,kind,default_mode,created_at,updated_at) VALUES(?,?,'','standalone',?,?,?)")
+        .run(id, STANDALONE_ROOM_NAME, source.kind === 'standalone' ? source.defaultMode : 'group-chat', timestamp, timestamp);
+      members.forEach((member, index) => {
+        // A service removed since, or a withheld model name, leaves the member without a model rather than failing the whole copy.
+        const own = member.providerId !== null && member.modelId !== null && this.getProviderConfiguration(member.providerId) ? { providerId: member.providerId, modelId: member.modelId } : undefined;
+        const model = own ?? fallbackModel;
+        this.createAgent({ id: newId(), roomId: id, displayName: member.displayName, roleTemplateId: member.roleTemplateId, systemPrompt: member.systemPrompt,
+          providerId: model?.providerId ?? null, modelId: model?.modelId ?? null, enabled: member.enabled, displayOrder: index });
+      });
+      return this.getRoomConfiguration(id)!;
+    });
+  }
+
+  private assertModelChoice(providerId: string, modelId: string): void {
+    const provider = this.getProviderConfiguration(providerId);
+    if (!provider) throw new ContractError('not_found');
+    if (provider.kind === 'mock' && modelId !== 'mock') throw new ContractError('invalid_input');
+  }
+
+  /** D167: every 独立讨论 that has started, by when something last happened in it, with who took part. */
+  listStandalone(input: { includeArchived?: boolean } = {}): StandaloneDiscussion[] {
+    this.assertInitialized();
+    const { includeArchived } = configurationInput(listRoomsInputSchema, input);
+    const rows = this.db.prepare(`SELECT r.id,r.room_id AS roomId,r.status,r.task,r.created_at AS createdAt,r.updated_at AS updatedAt,r.members_snapshot AS members,
+        json_extract(r.workflow_snapshot,'$.templateId') AS templateId
+      FROM workflow_runs r JOIN rooms m ON m.id=r.room_id WHERE m.kind='standalone' ${includeArchived ? '' : 'AND m.archived_at IS NULL'}
+      ORDER BY r.updated_at DESC, r.created_at DESC, r.id DESC`).all() as Array<{ id: string; roomId: string; status: string; task: string | null; createdAt: string; updatedAt: string; members: string | null; templateId: unknown }>;
+    return configurationOutput(standaloneDiscussionsSchema, rows.map(({ members, templateId, ...run }) => {
+      const snapshot = members === null ? [] : JSON.parse(members) as Array<{ displayName?: unknown; displayOrder?: unknown }>;
+      const names = [...snapshot].sort((a, b) => Number(a.displayOrder) - Number(b.displayOrder)).map(member => String(member.displayName ?? '')).filter(Boolean);
+      return { room: this.getRoomConfiguration(run.roomId)!, members: names,
+        run: { ...run, ...(run.status === 'error' && this.stoppedAtDurationLimit(run.id) ? { durationStop: true as const } : {}), ...(templateId === 'group-chat' ? { groupChat: true as const } : {}) } };
+    }));
   }
 
   archiveRoom(id: string, archived = true): RoomConfiguration {
     configurationInput(idSchema, id); configurationInput(z.boolean(), archived);
     return this.transaction(() => {
       if (!this.getRoom(id)) throw new ContractError('not_found');
+      if (id === LINEUP_ROOM_ID) throw new ContractError('invalid_state');
       if (archived && this.db.prepare("SELECT 1 FROM workflow_runs WHERE room_id=? AND status IN ('running','pausing','paused','cancelling') LIMIT 1").get(id)) throw new ContractError('invalid_state');
       this.db.prepare('UPDATE rooms SET archived_at=?,updated_at=? WHERE id=?').run(archived ? now() : null, now(), id);
       return this.getRoomConfiguration(id)!;
@@ -1321,6 +1400,7 @@ export class Database {
     configurationInput(idSchema, id);
     this.transaction(() => {
       if (!this.getRoom(id)) throw new ContractError('not_found');
+      if (id === LINEUP_ROOM_ID) throw new ContractError('invalid_state');
       if (this.db.prepare('SELECT 1 FROM workflow_runs WHERE room_id=? LIMIT 1').get(id) || this.db.prepare('SELECT 1 FROM messages WHERE room_id=? LIMIT 1').get(id)) throw new ContractError('invalid_state');
       for (const agent of this.listAgentConfigurations(id, true)) this.assertAgentUnreferenced(agent.id);
       this.db.prepare('DELETE FROM rooms WHERE id=?').run(id);

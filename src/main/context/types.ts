@@ -3,6 +3,7 @@ import { idSchema, sequenceSchema } from '../../shared/schemas/common';
 import { storedRunSchema, requestAttemptSchema } from '../../shared/schemas/persistence';
 import type { ProviderMessage } from '../providers/types';
 import { imageAttachmentsSchema } from '../../shared/schemas/attachment';
+import { PROJECT_BRIEF_MAX_CHARS } from '../../shared/schemas/configuration';
 import { GROUP_CHAT_NOTE_CHARS, groupChatIntentSchema, groupChatLengthSchema, groupChatRelationValues, groupChatSpeakerSourceValues } from '../../shared/schemas/groupChat';
 
 const instructionSchema = z.object({ id: idSchema, content: z.string().min(1) }).strict();
@@ -36,6 +37,8 @@ export const contextInputSchema = z.object({
   visibleMessageIds: z.array(idSchema), applicationInstructions: z.array(instructionSchema),
   hostInstructions: z.array(instructionSchema.extend({ roomId: idSchema, runId: idSchema }).strict()),
   contextWindowTokens: sequenceSchema.refine(n => n > 0),
+  // D168: the project's 项目说明, when this discussion belongs to a project that has one.
+  projectBrief: z.string().min(1).max(PROJECT_BRIEF_MAX_CHARS).optional(),
   // D147: the goal's images, and whether this member's model gets images at all. Without a word on it, it does not.
   taskImages: imageAttachmentsSchema.optional(), imagesVisible: z.boolean().optional(),
   // D153: this request is a group-chat reply, and what the program asks of it.
@@ -59,7 +62,7 @@ export interface ModelTokenCounter {
   countMessages(messages: readonly Readonly<ProviderMessage>[]): number | undefined;
 }
 export interface ContextSource {
-  kind: 'boundary' | 'application' | 'host' | 'agent' | 'task' | 'history' | 'summary';
+  kind: 'boundary' | 'application' | 'host' | 'agent' | 'project' | 'task' | 'history' | 'summary';
   runId: string;
   roomId: string;
   sourceId: string;

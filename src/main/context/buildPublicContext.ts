@@ -2,7 +2,7 @@ import { contextInputSchema } from './types';
 import type { ContextInput, ContextReport, ContextRejection, ContextResult, ContextSource, ModelTokenCounter } from './types';
 import type { ProviderMessage } from '../providers/types';
 import { selectHistory, type HistoryCandidate } from './selectHistory';
-import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText, groupChatBoundaryText, groupChatBriefText, groupChatRulesText, hasRevisionNote, withImages, type TranscriptEntry } from './transcript';
+import { agentBriefText, assembleDiscussion, boundaryText, contextFormatVersion, discussionRulesText, groupChatBoundaryText, groupChatBriefText, groupChatRulesText, hasRevisionNote, projectBriefText, withImages, type TranscriptEntry } from './transcript';
 
 /** Main-only: accepts explicit safe projections, never a Renderer draft, database handle or SDK object. */
 export function buildPublicContext(input: ContextInput, counter?: ModelTokenCounter): ContextResult {
@@ -42,6 +42,8 @@ export function buildPublicContext(input: ContextInput, counter?: ModelTokenCoun
   // D112: the rules are finalized per assembly below, with the revision rule only when a sent entry carries a note.
   const rulesIndex = prefix.length;
   append({ role: 'system', content: rulesText(false) }, 'application', chat ? 'group-chat-rules-v1' : 'discussion-rules-v2');
+  // D168: right after the rules and before anything that differs by day, stage or member, so members of one project share the longest prefix.
+  if (input.projectBrief?.trim()) append({ role: 'system', content: projectBriefText(input.projectBrief.trim()) }, 'project', run.roomId);
   for (const instruction of input.applicationInstructions) append({ role: 'system', content: instruction.content }, 'application', instruction.id);
   for (const instruction of input.hostInstructions) append({ role: 'system', content: instruction.content }, 'host', instruction.id);
   append({ role: 'system', content: chat ? groupChatBriefText(member, run.membersSnapshot) : agentBriefText(member, run.membersSnapshot) }, 'agent', member.agentId);

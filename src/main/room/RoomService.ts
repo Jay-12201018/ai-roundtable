@@ -4,7 +4,7 @@ import { roomManagementContracts as contracts } from '../../shared/contracts/con
 import type {
   RoomManagementApiContract, CreateRoomInput, RoomInput, ConfigurationIdInput, ListRoomsInput,
   ArchiveConfigurationInput, CreateAgentInput, AgentInput, ListAgentConfigurationsInput,
-  ReorderAgentsInput, RoomMessagePageInput, RoomRunPageInput,
+  ReorderAgentsInput, RoomMessagePageInput, RoomRunPageInput, CreateStandaloneInput,
 } from '../../shared/contracts/configuration';
 import { ContractError, toPublicError } from '../../shared/contracts/errors';
 import type { Database } from '../database/Database';
@@ -36,6 +36,9 @@ export class RoomService implements RoomManagementApiContract {
   deleteAgent = (input: ConfigurationIdInput) => this.call(contracts.deleteAgent, input, ({ id }) => this.database.deleteAgent(id));
   listRoomMessages = (input: RoomMessagePageInput) => this.call(contracts.listRoomMessages, input, value => this.database.listRoomMessages(value));
   listRoomRuns = (input: RoomRunPageInput) => this.call(contracts.listRoomRuns, input, value => this.database.listRoomRuns(value));
+  getLineup = () => this.call(contracts.getLineup, undefined, () => this.database.getLineup());
+  createStandalone = (input?: CreateStandaloneInput) => this.call(contracts.createStandalone, input, value => this.database.createStandalone(value, randomUUID));
+  listStandalone = (input?: ListRoomsInput) => this.call(contracts.listStandalone, input, value => this.database.listStandalone(value));
 
   private required<T>(value: T | undefined): T {
     if (value === undefined) throw new ContractError('not_found');

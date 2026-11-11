@@ -53,11 +53,24 @@ export const providerSummarySchema = z.object({
   configurationValid: z.boolean(), hasStoredKey: z.boolean(),
 }).strict();
 
-export const roomInputSchema = z.object({ id: idSchema, name: z.string().trim().min(1), objective: z.string().default('') }).strict();
+/**
+ * D167: what a room is. Every room from before is a 项目. A 独立讨论 is a room that holds one discussion, started from the 常用阵容;
+ * the 常用阵容 is the one room whose members a new 独立讨论 starts with, and it never holds a discussion itself.
+ */
+export const roomKindSchema = z.enum(['project', 'standalone', 'lineup']);
+/** D169: how a room's new discussions talk: the group chat, or one of the four stricter flows. */
+export const discussionModeSchema = z.enum(['group-chat', 'free-chat', 'two-model-dialogue', 'review-revision', 'deep-debate']);
+/** D168: the 项目说明 goes with every request of the project's discussions, so it is kept to a size every model has room for. */
+export const PROJECT_BRIEF_MAX_CHARS = 4000;
+export const projectBriefSchema = z.string().max(PROJECT_BRIEF_MAX_CHARS);
+// `brief` and `defaultMode` left out of an update stay as they are, so a caller that only knows the name cannot erase them.
+export const roomInputSchema = z.object({ id: idSchema, name: z.string().trim().min(1), objective: z.string().default(''),
+  brief: projectBriefSchema.optional(), defaultMode: discussionModeSchema.optional() }).strict();
 export const createRoomInputSchema = roomInputSchema.omit({ id: true });
-export const roomConfigurationSchema = roomInputSchema.extend({
+export const roomConfigurationSchema = z.object({
+  id: idSchema, name: z.string().trim().min(1), objective: z.string(), kind: roomKindSchema, brief: projectBriefSchema, defaultMode: discussionModeSchema,
   archivedAt: timestampSchema.nullable(), createdAt: timestampSchema, updatedAt: timestampSchema,
-});
+}).strict();
 const agentInputObject = z.object({
   id: idSchema, roomId: idSchema, displayName: z.string().trim().min(1), roleTemplateId: z.string().trim().min(1),
   systemPrompt: z.string().default(''), providerId: idSchema.nullable().default(null), modelId: modelIdSchema.nullable().default(null),
@@ -80,6 +93,14 @@ export const archiveConfigurationInputSchema = configurationIdInputSchema.extend
 export const reorderAgentsInputSchema = z.object({ roomId: idSchema, agentIds: z.array(idSchema) }).strict()
   .refine((input) => new Set(input.agentIds).size === input.agentIds.length, 'Agent identities must be unique');
 export const roomConfigurationsSchema = z.array(roomConfigurationSchema);
+/**
+ * D167: a new 独立讨论. Its members are copied from the 常用阵容, or from another 独立讨论 to carry on with the same people. A member
+ * with no model of their own gets `fallbackModel`, which Main checks like any other choice.
+ */
+export const createStandaloneInputSchema = z.object({
+  fromRoomId: idSchema.optional(),
+  fallbackModel: z.object({ providerId: idSchema, modelId: modelIdSchema }).strict().optional(),
+}).strict();
 export const agentConfigurationsSchema = z.array(agentConfigurationSchema);
 export const providerSummariesSchema = z.array(providerSummarySchema);
 
@@ -155,6 +176,10 @@ export const runSummarySchema = z.object({
   /** D149: a group chat, which waits for the host when it has nothing to say. */
   groupChat: z.literal(true).optional(),
 }).strict();
+/** D167: one 独立讨论 as the sidebar lists it: its room, its discussion and who took part, in speaking order. */
+export const standaloneDiscussionSchema = z.object({ room: roomConfigurationSchema, run: runSummarySchema, members: z.array(z.string()).max(64) }).strict()
+  .refine(item => item.room.kind === 'standalone' && item.run.roomId === item.room.id, 'Inconsistent standalone discussion');
+export const standaloneDiscussionsSchema = z.array(standaloneDiscussionSchema);
 export const roomRunPageSchema = z.object({ items: z.array(runSummarySchema), nextCursor: roomRunCursorSchema.nullable(), hasMore: z.boolean() }).strict()
   .refine((page) => (page.hasMore === (page.nextCursor !== null))
     && (page.nextCursor === null || page.items.length > 0 && compareRunPositions(page.items.at(-1)!,page.nextCursor.after) === 0)

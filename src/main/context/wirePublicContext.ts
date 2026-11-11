@@ -35,6 +35,7 @@ function contextFor({run:frozen,member,turnIndex,preparation:{snapshot,current,w
       current:{agentId:current.agentId,turnId:current.turnId,requestId:current.requestId,turnIndex,...(regenerate?{mode:'regenerate' as const}:{})},
       snapshot:{messages:snapshot.messages,turns:snapshot.turns.map(t=>({id:t.id,runId:t.runId,agentId:t.agentId,status:t.status,requestId:t.requestId,turnIndex:t.turnIndex})),attempts:snapshot.attempts.map(a=>({requestId:a.requestId,runId:a.runId,turnId:a.turnId,messageId:a.messageId,attemptIndex:a.attemptIndex,status:a.status,...(a.finishReason?{finishReason:a.finishReason}:{})})),
         ...(versions.length?{versions:versions.map(v=>({messageId:v.messageId,slotId:v.slotId,versionNumber:v.versionNumber,active:v.active,origin:v.origin,affected:(affected.get(v.messageId)?.length??0)>0}))}:{})},
+      ...(snapshot.projectBrief?{projectBrief:snapshot.projectBrief}:{}),
       ...(snapshot.taskAttachments?{taskImages:snapshot.taskAttachments}:{}),imagesVisible:(budget.imageSupport??'no')!=='no',...(groupChat?{groupChat}:{}),
       visibleMessageIds:visible,applicationInstructions:groupChat?[{id:'group-chat-date',content:groupChatDateText(new Date())}]:workflowStep?[{id:`workflow-${workflowStep.stageId}`,content:workflowStageInstruction(workflowStep.kind)}]:[],hostInstructions,contextWindowTokens:budget.contextWindowTokens,
       ...(summary?{summary:{messageId:summary.message.id,content:summary.message.content,firstNumber:summary.firstNumber,lastNumber:summary.lastNumber,

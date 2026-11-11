@@ -82,6 +82,9 @@ const api: RoundtableApiContract = {
     deleteAgent: (input) => invoke('rooms.deleteAgent', input),
     listRoomMessages: (input) => invoke('rooms.listRoomMessages', input),
     listRoomRuns: (input) => invoke('rooms.listRoomRuns', input),
+    getLineup: () => invoke('rooms.getLineup', undefined),
+    createStandalone: (input) => invoke('rooms.createStandalone', input ?? {}),
+    listStandalone: (input) => invoke('rooms.listStandalone', input ?? {}),
   },
   settings: {
     createProvider: (input) => invoke('settings.createProvider', input),

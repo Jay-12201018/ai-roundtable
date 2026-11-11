@@ -12,6 +12,10 @@ export type ProviderSummary = z.infer<typeof schemas.providerSummarySchema>;
 export type RoomInput = z.input<typeof schemas.roomInputSchema>;
 export type CreateRoomInput = z.input<typeof schemas.createRoomInputSchema>;
 export type RoomConfiguration = z.infer<typeof schemas.roomConfigurationSchema>;
+export type RoomKind = z.infer<typeof schemas.roomKindSchema>;
+export type RoomDiscussionMode = z.infer<typeof schemas.discussionModeSchema>;
+export type CreateStandaloneInput = z.input<typeof schemas.createStandaloneInputSchema>;
+export type StandaloneDiscussion = z.infer<typeof schemas.standaloneDiscussionSchema>;
 export type AgentInput = z.input<typeof schemas.agentInputSchema>;
 export type CreateAgentInput = z.input<typeof schemas.createAgentInputSchema>;
 export type AgentConfiguration = z.infer<typeof schemas.agentConfigurationSchema>;
@@ -58,6 +62,12 @@ export interface RoomManagementApiContract {
   deleteAgent(input: ConfigurationIdInput): Promise<void>;
   listRoomMessages(input: RoomMessagePageInput): Promise<RoomMessagePage>;
   listRoomRuns(input: RoomRunPageInput): Promise<RoomRunPage>;
+  /** D167: the 常用阵容, whose members are read and changed like any room's. */
+  getLineup(): Promise<RoomConfiguration>;
+  /** D167: a new 独立讨论 with its own copy of the members; one that never started is replaced by the next. */
+  createStandalone(input?: CreateStandaloneInput): Promise<RoomConfiguration>;
+  /** D167: every 独立讨论 that has started, the most recently active first. */
+  listStandalone(input?: ListRoomsInput): Promise<StandaloneDiscussion[]>;
 }
 
 export interface ProviderSettingsApiContract {
@@ -111,6 +121,9 @@ export const roomManagementContracts = {
   deleteAgent: { input: schemas.configurationIdInputSchema, output: z.undefined() },
   listRoomMessages: { input: schemas.roomMessagePageInputSchema, output: schemas.roomMessagePageSchema },
   listRoomRuns: { input: schemas.roomRunPageInputSchema, output: schemas.roomRunPageSchema },
+  getLineup: { input: z.undefined(), output: schemas.roomConfigurationSchema },
+  createStandalone: { input: schemas.createStandaloneInputSchema.default({}), output: schemas.roomConfigurationSchema },
+  listStandalone: { input: schemas.listRoomsInputSchema.default({ includeArchived: false }), output: schemas.standaloneDiscussionsSchema },
 } as const;
 export const providerSettingsContracts = {
   createProvider: { input: schemas.createProviderInputSchema, output: schemas.providerConfigurationSchema },
