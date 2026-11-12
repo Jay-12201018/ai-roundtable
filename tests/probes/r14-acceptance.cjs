@@ -324,7 +324,7 @@ async function main() {
   const Sqlite = require('better-sqlite3');
   const db = new Sqlite(join(probe.paths.userData, 'ai-roundtable.db'), { readonly: true });
   try {
-    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 16, 'Migration 16');
+    check(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get() === 17, 'Migration 17');
     check(db.prepare('SELECT COUNT(*) FROM artifact_versions').pluck().get() === 8 && db.prepare('SELECT COUNT(*) FROM artifact_requests').pluck().get() === 7
       && db.prepare("SELECT COUNT(*) FROM request_usage WHERE kind='artifact' AND state='reported'").pluck().get() === 6 && db.prepare("SELECT COUNT(*) FROM request_usage WHERE kind='artifact' AND state='unknown'").pluck().get() === 1,
       'Eight versions; six artifact requests with usage and the stopped one unknown');

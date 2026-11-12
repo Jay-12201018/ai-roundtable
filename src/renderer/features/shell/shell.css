@@ -36,7 +36,9 @@
 .sb-recent .sb-item { min-height: 36px; font-size: 13px; }
 .sb-faces { flex: none; min-width: 22px; }
 .sb-faces .avatar { box-shadow: 0 0 0 2px var(--sidebar); }
-.sb-faces .avatar + .avatar { margin-left: -8px; }
+.sb-faces .avatar + .avatar { margin-left: -4px; }
+/* The ring is the gap between faces: it takes the row's own background when the row is selected or pointed at. */
+.sb-item[aria-current] .sb-faces .avatar, .sb-item:hover .sb-faces .avatar { background: var(--surface); box-shadow: 0 0 0 2px var(--surface-3); }
 .sb-faces-more { font-size: 10px; font-weight: 500; color: var(--text-2); }
 .sb-faces.is-empty { width: 22px; height: 22px; border-radius: 50%; border: 1px dashed var(--line-strong); box-sizing: border-box; }
 .sb-row-act { position: absolute; right: 3px; top: 4px; opacity: 0; background: var(--surface-3); }

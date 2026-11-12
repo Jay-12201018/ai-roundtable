@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../../src/renderer/App';
 import type { RoomConfiguration, StandaloneDiscussion } from '../../../src/shared/contracts/configuration';
@@ -87,6 +87,18 @@ describe('独立讨论 in the app (D167)', () => {
     fireEvent.click(screen.getByRole('button', { name: '再试一次' }));
     await screen.findByRole('heading', { name: '想和大家聊点什么？' });
     expect(f.rooms.createStandalone).toHaveBeenCalledTimes(2);
+  });
+
+  it('a project the host opens while the opening discussion is still being made stays open', async () => {
+    const f = apis(); let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    const made = vi.mocked(f.rooms.createStandalone).getMockImplementation()!;
+    vi.mocked(f.rooms.createStandalone).mockImplementationOnce(async input => { await gate; return made(input); });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: '跑腿项目' }));
+    await screen.findAllByRole('heading', { level: 1, name: '跑腿项目' });
+    await act(async () => { release(); await gate; await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(screen.getAllByRole('heading', { level: 1, name: '跑腿项目' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: '想和大家聊点什么？' })).toBeNull();
   });
 
   it('lists started discussions under 最近讨论 and archives one from its row', async () => {

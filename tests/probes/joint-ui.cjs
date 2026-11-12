@@ -34,11 +34,14 @@ async function page(stage) {
     const rooms = await api.rooms.listRooms();
     const index = rooms.findIndex(room => room.id === roomId);
     check(index >= 0, 'Fresh demo room absent');
-    const items = () => document.querySelectorAll('.sidebar .sb-rooms > li > button.sb-item');
+    // D171: the 项目 list only; 最近讨论 sits beside it with rows of its own.
+    const items = () => document.querySelectorAll('.sidebar .sb-rooms:not(.sb-recents) > li > button.sb-item');
     await wait(items, buttons => buttons.length === rooms.length, 'Rooms projection stale');
     items()[index].click();
     await wait(() => document.querySelector('.room-page h1')?.textContent, value => value === 'Mock 圆桌', 'Room page not opened');
-    await click('新讨论');
+    // D171: the sidebar's 新讨论 starts a 独立讨论; the project's own is the one on its page.
+    await wait(() => document.querySelector('.room-page .page-head button.is-primary'), b => b && !b.disabled && b.textContent === '新讨论', 'Project 新讨论 unavailable');
+    document.querySelector('.room-page .page-head button.is-primary').click();
   };
   let id;
   const read = () => api.run.getSnapshot(id);
