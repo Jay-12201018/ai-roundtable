@@ -8,6 +8,7 @@ const { tmpdir } = require('node:os');
 const { join, resolve, dirname, basename } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { app, session, safeStorage } = require('electron');
+const { starterProjectScript } = require('./starter-project.cjs');
 
 const args = process.argv.slice(2);
 assert.ok(args.length === 0 || args.length === 2 && args[0] === '--restart', 'Usage: electron premerge-quality-acceptance.cjs [--restart private-manifest.json]');
@@ -263,6 +264,8 @@ async function main() {
   check(!(await text()).includes(fakeKey), 'The Key is never echoed in the page');
   await capture('key-saved-last-step', '按 Enter 保存：向导关闭，直接到第一场讨论，房间和三位成员已经建好。');
 
+  // D167: the wizard opens a new 独立讨论 and makes no project; this walk is about a project, so one is made as 新建项目 makes it.
+  await js(starterProjectScript('我的第一场讨论'));
   // Step 4: the service card says it is ready; nothing is asked again at the next launch (D136).
   await click('设置');
   await until(`document.body.innerText.includes('可以使用')`, 'service ready');

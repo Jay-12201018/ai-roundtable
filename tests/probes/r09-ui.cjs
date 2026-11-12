@@ -70,6 +70,10 @@ async function page(stage, saved, endpoint) {
       noKey(await api.settings.getProviderConfiguration({id:p.id}));
     }
     // D6-A: the first real service got a room; it becomes the fixture room with three explicitly configured members.
+    // D167: the wizard makes no project; this one is made as 新建项目 makes it, and the sidebar reads the list again on a page change.
+    {const made=await api.rooms.createRoom({name:'我的第一场讨论',objective:''});const lineup=await api.rooms.getLineup();
+      for(const[index,member]of(await api.rooms.listAgentConfigurations({roomId:lineup.id})).entries())await api.rooms.createAgent({roomId:made.id,displayName:member.displayName,roleTemplateId:member.roleTemplateId,systemPrompt:member.systemPrompt,providerId:null,modelId:null,enabled:true,displayOrder:index});}
+    await clickIn('.sidebar','用量');
     await clickIn('.sidebar','我的第一场讨论');await wait(roomTitle,t=>t==='我的第一场讨论','Starter room absent');
     await click('编辑');await fill('项目名称','R09 fixture Room');await fill('默认目标可选','Local HTTP public collaboration');await clickIn('dialog[open]','保存');
     await wait(roomTitle,t=>t==='R09 fixture Room','Room not renamed');

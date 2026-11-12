@@ -164,9 +164,8 @@ async function page(stage, saved) {
     check(card('DeepSeek').textContent.includes('上下文 128,000 · 最大输出 8,192'), 'Model limits not stated');
     noKey(await api.settings.listProviderSummaries()); noKey(await api.settings.getProviderConfiguration({ id: saved.realProviderId }));
     noKey(await keyState(saved.realProviderId)); noKey(replacement);
-    // D6-A: the first real service got 我的第一场讨论; it never had a discussion, so it can be deleted.
-    await openRoom('我的第一场讨论'); await click('删除…'); await clickIn('dialog[open]', '删除');
-    await wait(roomList, values => !values.some(value => value.name === '我的第一场讨论'), 'Starter room not deleted');
+    // D167: the first real service opens a new 独立讨论 and makes no project.
+    check((await roomList()).length === 0, 'Connecting a service made a project');
     async function createRoom(name) {
       await click('新建项目'); await fill('项目名称', name); await fill('默认目标可选', name + ' public goal'); await click('新建');
       const rooms = await wait(roomList, values => values.some(value => value.name === name), 'Room not saved: ' + name);

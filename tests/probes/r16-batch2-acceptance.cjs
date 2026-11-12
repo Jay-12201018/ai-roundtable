@@ -99,7 +99,11 @@ async function main() {
     await has('想和大家聊点什么？');
     const ds = await deepseek();
     check(ds.isDefault, 'DeepSeek is the default service');
-    await until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes('我的第一场讨论')`, 'Saving opens the new room');
+    await until(`(document.querySelector('[role=status][aria-label="运行状态"]')?.textContent ?? '').includes('独立讨论')`, 'Saving opens a new discussion');
+    // D167: no project is made by the wizard; the rest of this walk is about a project, made as 新建项目 makes it. Going to
+    // another page and back is what makes the sidebar read the list again.
+    await js(require('./starter-project.cjs').starterProjectScript('我的第一场讨论'));
+    await click('用量', { selector: '.sb-item' });
 
     // ── F · room page, members, discussion mode ───────────────────────────────
     await click('我的第一场讨论', { selector: '.sb-item' });
