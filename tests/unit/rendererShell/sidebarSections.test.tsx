@@ -51,6 +51,26 @@ describe('the sidebar: 新讨论, 项目, 最近讨论 (D167)', () => {
     expect(screen.queryByRole('list', { name: '周报 的讨论' })).toBeNull();
   });
 
+  it('from a discussion the project row opens the project page; there a click folds its discussions away, and the next shows them again', () => {
+    const first = show();
+    fireEvent.click(within(screen.getByRole('list', { name: '项目' })).getByRole('button', { name: '跑腿项目' }));
+    expect(first.onOpenRoom).toHaveBeenCalledWith('p1');
+    expect(screen.getByRole('list', { name: '跑腿项目 的讨论' })).toBeTruthy();
+    cleanup();
+    const on = show({ page: 'rooms', runId: undefined });
+    const row = () => within(screen.getByRole('list', { name: '项目' })).getByRole('button', { name: '跑腿项目' });
+    fireEvent.click(row());
+    expect(row().getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('list', { name: '跑腿项目 的讨论' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '在「跑腿项目」里开新讨论' })).toBeNull();
+    expect(on.onOpenRoom).not.toHaveBeenCalled();
+    // Unfolding is opening it again: the page is the project's either way.
+    fireEvent.click(row());
+    expect(row().getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('list', { name: '跑腿项目 的讨论' })).toBeTruthy();
+    expect(on.onOpenRoom).toHaveBeenCalledWith('p1');
+  });
+
   it('lists the discussions that belong to no project, newest first as given, each with who took part', () => {
     const on = show();
     const recent = screen.getByRole('list', { name: '最近讨论' });

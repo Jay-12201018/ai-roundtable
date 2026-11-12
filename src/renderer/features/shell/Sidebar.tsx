@@ -96,7 +96,10 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed
   const [showAll, setShowAll] = useState(false);
   const [showAllRecent, setShowAllRecent] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  useEffect(() => setShowAll(false), [roomId]);
+  // The open project's discussions show under it. From one of its discussions the row goes to the project page; on the project page a
+  // click folds the list away, and the next one shows it again.
+  const [folded, setFolded] = useState<string | undefined>();
+  useEffect(() => { setShowAll(false); setFolded(undefined); }, [roomId]);
   const shown = showAll ? runs : runs.slice(0, RUNS_SHOWN);
   const runItem = (run: RunSummary) => <li key={run.id}>
     <button type="button" className="sb-item" aria-current={run.id === runId && page === 'discussion' ? 'page' : undefined} onClick={() => onSelectRun(run.id)}
@@ -105,12 +108,12 @@ export function Sidebar({ rooms, archived = [], counts, runs, failed, runsFailed
       <span className="t">{taskOf(run)}</span><span className="sr-only">（{runStatusLabel(run)}）</span></button>
   </li>;
   const roomItem = (room: RoomConfiguration) => {
-    const current = room.id === roomId; const count = counts?.get(room.id); const open = current && !room.archivedAt;
+    const current = room.id === roomId; const count = counts?.get(room.id); const open = current && !room.archivedAt && folded !== room.id;
     const Icon = open ? FolderOpen : Folder;
     return <li key={room.id} className={cx('sb-project', open && onNewInRoom && 'has-act')}>
-      <button type="button" className="sb-item" aria-current={current && page === 'rooms' ? 'page' : undefined} aria-expanded={!room.archivedAt ? current : undefined}
+      <button type="button" className="sb-item" aria-current={current && page === 'rooms' ? 'page' : undefined} aria-expanded={!room.archivedAt ? open : undefined}
         aria-label={room.name} aria-describedby={count !== undefined ? `sb-count-${room.id}` : undefined}
-        disabled={!ready} onClick={() => onOpenRoom(room.id)} title={room.name}>
+        disabled={!ready} onClick={() => { if (current && !room.archivedAt && page === 'rooms' && open) setFolded(room.id); else { setFolded(undefined); onOpenRoom(room.id); } }} title={room.name}>
         <Icon aria-hidden size={16} /><span className="t">{room.name}</span>{count !== undefined && <span className="meta" id={`sb-count-${room.id}`} title={`${count} 位成员参与讨论（不含暂停参与的）`}>{count} 人</span>}</button>
       {open && onNewInRoom && <IconButton size="sm" className="sb-row-act is-shown" icon={Plus} label={`在「${room.name}」里开新讨论`} disabled={!ready} onClick={() => onNewInRoom(room.id)} />}
       {open && <ul className="sb-runs" aria-label={`${room.name} 的讨论`}>
