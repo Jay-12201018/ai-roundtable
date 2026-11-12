@@ -19,7 +19,7 @@ async function main() {
   const setWidth = async (width, height = 600) => { window.setContentSize(width, height); await until(`innerWidth === ${width}`, 'width ' + width, 10000); };
 
   const room = await api('rooms.createRoom', { name: '抽屉验收房间', objective: '' });
-  await js(`localStorage.setItem('roundtable.mode.${room.id}', 'free-chat')`);
+  await js(`window.roundtable.rooms.getRoomConfiguration({ id: ${JSON.stringify(room.id)} }).then(r => window.roundtable.rooms.updateRoom({ id: r.id, name: r.name, objective: r.objective, defaultMode: 'free-chat' })).then(() => true)`); // D169: the mode is the project's own, kept by Main
   await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded'); await ui.ensureLocator();
   await click('抽屉验收房间', { selector: '.sb-item' }); await click('新讨论', { scope: '.room-page' });
   await until(`document.querySelector('.composer')`, 'discussion page');

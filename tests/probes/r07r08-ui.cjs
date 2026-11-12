@@ -171,7 +171,7 @@ async function page(stage, saved) {
       const rooms = await wait(roomList, values => values.some(value => value.name === name), 'Room not saved: ' + name);
       await wait(roomTitle, value => value === name, 'Created room not opened');
       const created = rooms.find(value => value.name === name).id;
-      localStorage.setItem(`roundtable.mode.${created}`, 'free-chat');
+      /* D169: the mode is the project's own, kept by Main */ await window.roundtable.rooms.getRoomConfiguration({ id: created }).then(r => window.roundtable.rooms.updateRoom({ id: r.id, name: r.name, objective: r.objective, defaultMode: 'free-chat' }));
       return created;
     }
     saved.roomId = await createRoom('Smoke Roundtable');
@@ -249,7 +249,8 @@ async function page(stage, saved) {
     check((await roomList()).find(room => room.id === saved.roomId).archivedAt !== null, 'Room not archived');
     await openRoom('Smoke Disposable'); await click('删除…'); await clickIn('dialog[open]', '删除');
     await wait(() => document.querySelector('.room-page'), value => !value, 'Deleted room page still shown');
-    check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && findButton('开始讨论').disabled, 'Last-room clear kept old projection/start');
+    // D171: with nothing open the app opens a new 独立讨论; nothing of the deleted project is left on the page.
+    check(text().length === 0 && localStorage.getItem('roundtable.runId') === null && !document.body.innerText.includes('Smoke Disposable'), 'Last-room clear kept old projection/start');
     // The archived room stays reachable from the folded list, with its history.
     await click('已归档（1）'); await openRoom('Smoke Roundtable');
     await openRun('R78 public three Agent collaboration'); await settle(saved.runId, 'completed', 3);

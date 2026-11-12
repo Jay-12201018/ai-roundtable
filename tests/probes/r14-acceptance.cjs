@@ -95,7 +95,7 @@ async function main() {
     const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
     await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
     const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
-    await js(`localStorage.setItem('roundtable.mode.${room.id}', 'free-chat')`);
+    await js(`window.roundtable.rooms.getRoomConfiguration({ id: ${JSON.stringify(room.id)} }).then(r => window.roundtable.rooms.updateRoom({ id: r.id, name: r.name, objective: r.objective, defaultMode: 'free-chat' })).then(() => true)`); // D169: the mode is the project's own, kept by Main
     for (const [index, [name, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries())
       await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index });
     await js('location.reload(); true'); await until(`document.querySelector('.sidebar')`, 'reloaded'); await ui.ensureLocator();

@@ -183,7 +183,7 @@ async function probe() {
     const expected = ['continueDiscussion', 'continueMessage', 'getSnapshot', 'onEvent', 'pause', 'previewContinuation', 'previewWorkflow', 'recoverInterruptedRun', 'resumeRun', 'retryTurn', 'start', 'step', 'stop', 'subscribe'];
     check(JSON.stringify(Object.keys(api.run).sort()) === JSON.stringify(expected), 'Unexpected run API');
     const configurationKeys = {
-      rooms: ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'],
+      rooms: ['archiveAgent','archiveRoom','createAgent','createRoom','createStandalone','deleteAgent','deleteRoom','getAgentConfiguration','getLineup','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','listStandalone','reorderAgents','updateAgent','updateRoom'],
       settings: ['createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModelReadiness','listProviderSummaries','refreshModels','setKey','testConnection','updateProvider'],
     };
     for (const [group, methods] of Object.entries(configurationKeys)) {

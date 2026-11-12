@@ -58,7 +58,7 @@ async function main() {
   const provider = await api('settings.createProvider', { name: 'DeepSeek 直连', kind: 'compatible', baseUrl: 'https://api.deepseek.com', defaultModelId: 'deepseek-flash', customModels: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] });
   await api('settings.setKey', { providerId: provider.id, apiKey: fakeKey });
   const room = await api('rooms.createRoom', { name: '校园跑腿讨论', objective: '' });
-  await js(`localStorage.setItem('roundtable.mode.${room.id}', 'free-chat')`);
+  await js(`window.roundtable.rooms.getRoomConfiguration({ id: ${JSON.stringify(room.id)} }).then(r => window.roundtable.rooms.updateRoom({ id: r.id, name: r.name, objective: r.objective, defaultMode: 'free-chat' })).then(() => true)`); // D169: the mode is the project's own, kept by Main
   const agents = [];
   for (const [index, [name, role]] of [['起草者', '起草'], ['审查者', '审查'], ['综合者', '综合']].entries()) {
     agents.push(await api('rooms.createAgent', { roomId: room.id, displayName: name, roleTemplateId: role, systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: index }));
@@ -197,7 +197,8 @@ async function main() {
   await capture('summary-confirmed-light', '摘要生成后直接生效', '.summary-card');
 
   // ── 10. Truncated → 续写; stop from paused ──────────────────────────
-  await click('新讨论', { selector: '.sb-new' });
+  // D171: the sidebar's 新讨论 starts a 独立讨论; another discussion of this project starts from the + on its row.
+  await click('在「校园跑腿讨论」里开新讨论');
   await field('讨论目标'); await ime('dingjia', '把定价细化到每类订单');
   await click('每回合后暂停', { selector: 'input[type=checkbox]' });
   fixture.mode = 'length';
@@ -216,7 +217,7 @@ async function main() {
   await capture('stopped-light', '已停止');
 
   // ── 11. Step by step, then a reply that comes back without usage ─────
-  await click('新讨论', { selector: '.sb-new' });
+  await click('在「校园跑腿讨论」里开新讨论'); // D171: the sidebar's 新讨论 is a 独立讨论; this one is the project's
   await field('讨论目标'); await ime('baoxian', '骑手保险怎么买');
   await click('开始讨论');
   await statusHas('已暂停', 30000);
@@ -268,7 +269,7 @@ async function main() {
   await capture('summary-dark', '深色 摘要', '.summary-card');
   await js(`document.querySelectorAll('.thread-item')[2]?.scrollIntoView({ block: 'center' }); true`);
   await capture('table-dark', '深色 表格');
-  await click('新讨论', { selector: '.sb-new' });
+  await click('在「校园跑腿讨论」里开新讨论'); // D171: the sidebar's 新讨论 is a 独立讨论; this one is the project's
   await field('讨论目标'); await ime('pinggu', '评估一下试点的风险');
   // Main runs one discussion at a time; the paused one is named before 开始讨论, not after a refused start.
   await until(`document.querySelector('.composer-blocked')?.textContent.includes('骑手保险怎么买')`, 'another discussion still live');
@@ -278,7 +279,7 @@ async function main() {
   await statusHas('已暂停');
   await click('停止'); await click('停止讨论');
   await statusHas('已停止', 30000);
-  await click('新讨论', { selector: '.sb-new' });
+  await click('在「校园跑腿讨论」里开新讨论'); // D171: the sidebar's 新讨论 is a 独立讨论; this one is the project's
   await click('每回合后暂停', { selector: 'input[type=checkbox]' });
   await field('讨论目标'); await selectAll(); await ime('pinggu', '评估一下试点的风险');
   await capture('new-dark', '深色 新讨论');

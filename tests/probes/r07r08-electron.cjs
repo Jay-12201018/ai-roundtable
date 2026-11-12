@@ -161,7 +161,7 @@ async function main() {
     check(JSON.stringify(Object.keys(api.artifact)) === JSON.stringify(['preview','generate','list','getVersion','edit','export','listCodeCandidates']), 'Unexpected artifact surface');
     check(JSON.stringify(Object.keys(api.summary)) === JSON.stringify(['preview','generate','confirm','revoke']) && JSON.stringify(Object.keys(api.usage)) === JSON.stringify(['getReport','exportCsv']), 'Unexpected summary/usage surface');
     check(JSON.stringify(Object.keys(api.host)) === JSON.stringify(['command']) && typeof api.host.command === 'function', 'Unexpected host surface');
-    const rooms = ['archiveAgent','archiveRoom','createAgent','createRoom','deleteAgent','deleteRoom','getAgentConfiguration','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','reorderAgents','updateAgent','updateRoom'];
+    const rooms = ['archiveAgent','archiveRoom','createAgent','createRoom','createStandalone','deleteAgent','deleteRoom','getAgentConfiguration','getLineup','getRoomConfiguration','listAgentConfigurations','listRoomMessages','listRoomRuns','listRooms','listStandalone','reorderAgents','updateAgent','updateRoom'];
     const settings = ['createProvider','deleteKey','deleteProvider','getKeyStorageStatus','getProviderConfiguration','getProviderKeyState','listModelReadiness','listProviderSummaries','refreshModels','setKey','testConnection','updateProvider'];
     check(JSON.stringify(Object.keys(api.rooms).sort()) === JSON.stringify(rooms), 'Unexpected rooms surface');
     check(JSON.stringify(Object.keys(api.settings).sort()) === JSON.stringify(settings), 'Unexpected settings surface');

@@ -164,7 +164,7 @@ async function main() {
 
   // Setup only: a demo room with three Mock members (room management itself is R07, not under test here).
   const { roomId } = await js(`window.roundtable.room.createDemo('R12 实操验收')`);
-  await js(`localStorage.setItem('roundtable.mode.${roomId}', 'free-chat')`);
+  await js(`window.roundtable.rooms.getRoomConfiguration({ id: ${JSON.stringify(roomId)} }).then(r => window.roundtable.rooms.updateRoom({ id: r.id, name: r.name, objective: r.objective, defaultMode: 'free-chat' })).then(() => true)`); // D169: the mode is the project's own, kept by Main
   // R16: changing page refreshes the sidebar; the room opens on its page, where 新讨论 starts a discussion in it.
   await click('用量'); await click('Mock 圆桌', { scope: '.sidebar' }); await click('新讨论', { scope: '.room-page' });
 

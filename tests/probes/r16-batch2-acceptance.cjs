@@ -47,7 +47,7 @@ async function main() {
     // ── G · first use ──────────────────────────────────────────────────────────
     await has('让几位 AI 围坐一桌，替你把问题讨论透');
     const welcome = await text();
-    for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '写下目标，开始讨论', '所有数据只保存在这台电脑上', '还没有房间。连接模型或开始试玩后，会自动建好第一个房间。', '未连接模型',
+    for (const piece of ['连接模型服务', '先试玩演示', '回复是预先写好的示例，不代表真实模型的水平', '写下目标，开始讨论', '所有数据只保存在这台电脑上', '还没有项目。几场讨论要共用成员和背景时，点「+」建一个。', '不属于任何项目的讨论会列在这里。', '未连接模型',
       '支持国内主流大模型：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。'])
       check(welcome.includes(piece), 'Welcome says: ' + piece);
     check(!/价格|审核/u.test(welcome), 'The welcome page says nothing about prices');
@@ -127,7 +127,9 @@ async function main() {
     await has('老周 暂不参与之后的讨论。');
     await capture('room-page', '房间页（单页）：改名为“校园跑腿讨论”；成员行写模型与可用状态；老周用键盘（拖动柄上按两次 ↑）移到第 2 位，再关掉“参与讨论”（变灰，“已暂停参与”）；讨论方式、讨论记录、归档或删除（删除是红色描边，与普通操作分开）。侧栏房间旁显示人数。');
 
-    await click('更改');
+    // D169: the project page picks the default mode in place; 自定义流程 opens the dialog for the flow's details.
+    await click('审查修订链', { scope: '.mode-card' });
+    await click('自定义流程', { scope: '.mode-card' });
     await click('审查修订链', { selector: '.choice', prefix: true });
     await until(`(document.querySelector('dialog[open] [role=status]')?.textContent ?? '').startsWith('已核对：预计 5 回合')`, 'workflow checked');
     check((await js(`document.querySelector('dialog[open]').innerText`)).includes('小雨不在这个流程里'), 'The dialog says who is not in the flow');

@@ -28,7 +28,7 @@ async function page(stage) {
   const api = window.roundtable;
   const selectDemo = async () => {
     const { roomId } = await api.room.createDemo('R04-R06 regression fixture');
-    localStorage.setItem(`roundtable.mode.${roomId}`, 'free-chat');
+    /* D169: the mode is the project's own, kept by Main */ await window.roundtable.rooms.getRoomConfiguration({ id: roomId }).then(r => window.roundtable.rooms.updateRoom({ id: r.id, name: r.name, objective: r.objective, defaultMode: 'free-chat' }));
     // R16: rooms live in the sidebar; changing page refreshes it. The room opens on its page; 新讨论 starts there.
     await click('用量');
     const rooms = await api.rooms.listRooms();
