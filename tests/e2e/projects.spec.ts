@@ -7,13 +7,16 @@ import { memberOf, textIn } from './support/fixture';
 // 项目说明 and default mode, and the sidebar's three lists. A fixture proves the structure, not what real models say.
 const screens = join(root, 'docs/verification/projects-phase1-screens');
 const shots = Boolean(process.env.ROUNDTABLE_PROJECTS_SCREENS);
-let shot = 0;
+const shotsTaken = new Map<string, number>();
 const captions: Array<{ file: string; caption: string }> = [];
 /** Screenshots from the window itself (webContents.capturePage), light then dark, when this run is producing the record. */
 async function capture(running: RunningApp, name: string, caption: string, themes: ReadonlyArray<'light' | 'dark'> = ['light', 'dark']) {
   if (!shots) return;
   mkdirSync(screens, { recursive: true });
-  const number = String(++shot).padStart(2, '0');
+  // a = 独立讨论, b = 常用阵容, c = 项目: each walk numbers its own screens.
+  const walk = test.info().title.startsWith('独立讨论') ? 'a' : test.info().title.startsWith('常用阵容') ? 'b' : 'c';
+  shotsTaken.set(walk, (shotsTaken.get(walk) ?? 0) + 1);
+  const number = `${walk}${String(shotsTaken.get(walk)).padStart(2, '0')}`;
   for (const theme of themes) {
     await running.page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
     await running.page.waitForTimeout(200);
@@ -23,7 +26,7 @@ async function capture(running: RunningApp, name: string, caption: string, theme
     captions.push({ file, caption });
   }
   await running.page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
-  writeFileSync(join(screens, 'captions.json'), `${JSON.stringify(captions, null, 2)}\n`);
+  writeFileSync(join(screens, `captions-${walk}.json`), `${JSON.stringify(captions.filter(item => item.file.startsWith(walk)), null, 2)}\n`);
 }
 async function size(running: RunningApp, width: number, height = 800) {
   await running.app.evaluate(({ BrowserWindow }, [w, h]) => { BrowserWindow.getAllWindows()[0]!.setContentSize(w!, h!); }, [width, height]);
@@ -103,7 +106,8 @@ test('独立讨论: starts without a project on the lineup, continues, survives 
   await type(running, firstBox(running), 'liangwei', '两位说说第一步做什么');
   await firstBox(running).press('Enter');
   await waiting(running);
-  await expect(replies(page).locator('.msg-name')).toHaveText(['林舟', '阿哲']);
+  await expect(replies(page)).toHaveCount(2);
+  expect((await replies(page).locator('.msg-name').allTextContents()).sort(), 'Only the two who were left in').toEqual(['林舟', '阿哲'].sort());
   await expect(recent(page).locator('.t')).toHaveText(['两位说说第一步做什么', '大家觉得周末团建去哪里好']);
   await expect(recent(page).first().locator('.sb-faces .avatar')).toHaveText(['林', '阿']);
   // The lineup is as it was: three members, all taking part.
@@ -147,7 +151,7 @@ test('常用阵容 is changed in 设置; new discussions get it and earlier ones
   fixture.chunks = 1; fixture.chunkMs = 1;
   const running = await harness.launch(); const { page } = running;
   await connect(running);
-  await firstBox(running).fill('大家好，先认识一下');
+  await firstBox(running).fill('@所有人 先认识一下');
   await firstBox(running).press('Enter');
   await waiting(running);
   await expect(replies(page)).toHaveCount(3);
@@ -183,7 +187,9 @@ test('常用阵容 is changed in 设置; new discussions get it and earlier ones
   await expect(recent(page)).toHaveCount(1);
   await expect(recent(page).first().locator('.sb-faces .avatar')).toHaveText(['林', '阿', '小']);
   await recent(page).first().getByRole('button').first().click();
-  await expect(replies(page).locator('.msg-name')).toHaveText(['林舟', '阿哲', '小雨']);
+  // Who answers first is the chat's own business; who took part is what was kept.
+  await expect(replies(page)).toHaveCount(3);
+  expect((await replies(page).locator('.msg-name').allTextContents()).sort()).toEqual(['林舟', '阿哲', '小雨'].sort());
   await running.quit();
 });
 
@@ -203,7 +209,7 @@ test('项目: its 项目说明 goes with every member\'s reply, its default mode
   await page.getByRole('dialog').getByRole('button', { name: '新建' }).click();
   await expect(page.locator('.room-page h1')).toContainText('校园跑腿');
   await expect(page.locator('.member-list .card-row')).toHaveCount(3);
-  await expect(page.getByRole('list', { name: '项目' }).getByRole('button', { name: '校园跑腿' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('list', { name: '项目' }).getByRole('button', { name: '校园跑腿', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await capture(running, 'project-page-empty', '项目页：项目说明（还没有写，写明不写会怎样）、成员、默认讨论方式、讨论。侧栏“项目”一栏里它是展开的。');
 
   // 项目说明: written with an IME, saved on request, and the page says who will read it and what it costs.
@@ -278,7 +284,7 @@ test('项目: its 项目说明 goes with every member\'s reply, its default mode
   for (const request of memberRequests(fixture).slice(before)) { expect(briefIn(request)).toEqual([]); expect(JSON.stringify(request.messages)).not.toContain('校园跑腿'); }
   await expect(recent(page).locator('.t')).toHaveText(['大家随便聊聊周末']);
   // The project is still listed, closed now; opening it shows its three discussions again, newest first.
-  const project = page.getByRole('list', { name: '项目' }).getByRole('button', { name: '校园跑腿' });
+  const project = page.getByRole('list', { name: '项目' }).getByRole('button', { name: '校园跑腿', exact: true });
   await expect(project).toHaveAttribute('aria-expanded', 'false');
   await capture(running, 'sidebar-both-lists', '侧栏同时有项目和最近讨论：正在看的是独立讨论，项目收起。');
   await project.click();
@@ -301,7 +307,7 @@ test('项目: its 项目说明 goes with every member\'s reply, its default mode
   await expect(page.getByRole('button', { name: '恢复项目' })).toBeVisible();
   await expect(page.getByRole('list', { name: '项目' }).getByRole('listitem')).toHaveCount(0);
   await page.getByRole('button', { name: '已归档（1）' }).click();
-  await expect(page.getByRole('list', { name: '已归档的项目' }).getByRole('button', { name: '校园跑腿' })).toBeVisible();
+  await expect(page.getByRole('list', { name: '已归档的项目' }).getByRole('button', { name: '校园跑腿', exact: true })).toBeVisible();
   expect(harness.sql('SELECT COUNT(*) AS n FROM workflow_runs')[0][0].n).toBe(4);
   await running.expectNoNetwork();
   await running.quit();

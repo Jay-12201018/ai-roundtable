@@ -1,0 +1,26 @@
+[
+  {
+    "file": "b01-settings-lineup-light.png",
+    "caption": "设置 › 常用阵容：侧栏“新讨论”默认带的成员。没有指定模型的成员写明新讨论时用默认模型，不显示成故障。"
+  },
+  {
+    "file": "b01-settings-lineup-dark.png",
+    "caption": "设置 › 常用阵容：侧栏“新讨论”默认带的成员。没有指定模型的成员写明新讨论时用默认模型，不显示成故障。"
+  },
+  {
+    "file": "b02-settings-lineup-edited-light.png",
+    "caption": "改名并加了一位成员之后的常用阵容。"
+  },
+  {
+    "file": "b02-settings-lineup-edited-dark.png",
+    "caption": "改名并加了一位成员之后的常用阵容。"
+  },
+  {
+    "file": "b03-new-discussion-new-lineup-light.png",
+    "caption": "再点“新讨论”：成员就是刚改过的常用阵容。"
+  },
+  {
+    "file": "b03-new-discussion-new-lineup-dark.png",
+    "caption": "再点“新讨论”：成员就是刚改过的常用阵容。"
+  }
+]

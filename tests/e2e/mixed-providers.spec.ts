@@ -449,6 +449,11 @@ test('new discussion: choose how it runs and how many, give each one a model, an
   };
   const started = () => fixture.requests.filter(request => request.maxTokens !== 8);
 
+  // D167: this story is several discussions with the same members, so it happens in a project: its new-discussion page is the
+  // same page, and what is chosen there stays for the project's next discussion.
+  const roomName = (await starterProject(running)).name;
+  await page.locator('.sidebar .sb-item', { hasText: roomName }).first().click();
+  await page.locator('.room-page').getByRole('button', { name: '新讨论' }).click();
   // Opens with three; everything is on the page without a click. These checks are for free discussion, one click away.
   await expect(mode('群聊')).toHaveAttribute('aria-pressed', 'true');
   await mode('自由讨论').click();
@@ -488,7 +493,6 @@ test('new discussion: choose how it runs and how many, give each one a model, an
   expect(new Set(sent.map(request => `${memberOf(request as never)}|${request.service}|${request.raw.model}`))).toEqual(new Set(['林舟|deepseek|deepseek-v4-pro', '阿哲|kimi|kimi-k3']));
 
   // Free discussion with five: two more members are made from the role templates.
-  const roomName = (await starterProject(running)).name;
   await newDiscussion(running, roomName, '第二场：五个人讨论');
   await mode('自由讨论').click();
   await expect(count).toHaveText('3');
@@ -848,7 +852,7 @@ test('D143 a service\'s own list adds its new model: only its own, picked by the
   await theme(running, 'dark');
   await capture(running, 'discover-delisted-dark', '深色主题：模型可能已下线。');
   await theme(running, 'light');
-  const [agents] = harness.sql('SELECT DISTINCT model_id AS model FROM agents');
+  const [agents] = harness.sql("SELECT DISTINCT model_id AS model FROM agents WHERE room_id IN (SELECT id FROM rooms WHERE kind = 'project')");
   expect(agents).toEqual([{ model: 'deepseek-v9' }]);
 
   // A failure leaves the built-in list and says so plainly.

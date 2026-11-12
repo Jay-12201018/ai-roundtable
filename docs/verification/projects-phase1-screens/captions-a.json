@@ -1,0 +1,38 @@
+[
+  {
+    "file": "a01-landing-new-discussion-light.png",
+    "caption": "打开应用就是一场新讨论：不用先建项目，成员是常用阵容的三位，模型已经选好；侧栏三栏是新讨论、项目、最近讨论。"
+  },
+  {
+    "file": "a01-landing-new-discussion-dark.png",
+    "caption": "打开应用就是一场新讨论：不用先建项目，成员是常用阵容的三位，模型已经选好；侧栏三栏是新讨论、项目、最近讨论。"
+  },
+  {
+    "file": "a02-standalone-chat-light.png",
+    "caption": "第一条消息发出后，三位成员回应；这场讨论出现在“最近讨论”，前面是三位成员的小头像。"
+  },
+  {
+    "file": "a02-standalone-chat-dark.png",
+    "caption": "第一条消息发出后，三位成员回应；这场讨论出现在“最近讨论”，前面是三位成员的小头像。"
+  },
+  {
+    "file": "a03-new-discussion-two-members-light.png",
+    "caption": "从侧栏再开一场：这一场只留两位成员。页面写明“这里的改动只用于这一场”，并给出修改常用阵容的入口。"
+  },
+  {
+    "file": "a03-new-discussion-two-members-dark.png",
+    "caption": "从侧栏再开一场：这一场只留两位成员。页面写明“这里的改动只用于这一场”，并给出修改常用阵容的入口。"
+  },
+  {
+    "file": "a04-recent-row-archive-light.png",
+    "caption": "指到“最近讨论”的一行，右侧出现归档按钮；不提供删除，记录都保留。"
+  },
+  {
+    "file": "a05-archived-discussion-light.png",
+    "caption": "打开已归档的讨论：内容都在，输入框的位置写明只能查看，并原地给出“恢复这场讨论”。"
+  },
+  {
+    "file": "a05-archived-discussion-dark.png",
+    "caption": "打开已归档的讨论：内容都在，输入框的位置写明只能查看，并原地给出“恢复这场讨论”。"
+  }
+]

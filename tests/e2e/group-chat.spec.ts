@@ -265,6 +265,10 @@ test('twelve replies to one message is where it stops, it says so, and the next 
   const others = ['老周', '小唐', '阿成', '老陆', '苏苏'];
   for (const [index, displayName] of others.entries()) await running.api('rooms.createAgent', { roomId: room.id, displayName, roleTemplateId: '同事', systemPrompt: '', providerId: provider.id, modelId: 'deepseek-flash', enabled: true, displayOrder: agents.length + index });
   await page.reload(); await page.waitForSelector('.sidebar');
+  // A reload opens on a new 独立讨论 (D171); this chat is the project's, with its eight members.
+  await page.locator('.sidebar .sb-item', { hasText: '群聊房间' }).first().click();
+  await page.locator('.room-page').getByRole('button', { name: '新讨论' }).click();
+  await expect(page.locator('.setup-list .setup-row')).toHaveCount(8);
   fixture.chunks = 1; fixture.chunkMs = 1;
   const everyone = [...names.map(([name]) => name), ...others];
   fixture.reply = body => isSchedule(body) ? JSON.stringify({ speakers: everyone.map(name => ({ name, intent: 'reply', length: 'short' })), more: true }) : `${memberOf(body)}又说了一句`;

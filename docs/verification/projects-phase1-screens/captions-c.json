@@ -1,0 +1,74 @@
+[
+  {
+    "file": "c01-new-project-dialog-light.png",
+    "caption": "新建项目：一个名称，说明项目里的讨论共用什么，会带好三位成员。"
+  },
+  {
+    "file": "c02-project-page-empty-light.png",
+    "caption": "项目页：项目说明（还没有写，写明不写会怎样）、成员、默认讨论方式、讨论。侧栏“项目”一栏里它是展开的。"
+  },
+  {
+    "file": "c02-project-page-empty-dark.png",
+    "caption": "项目页：项目说明（还没有写，写明不写会怎样）、成员、默认讨论方式、讨论。侧栏“项目”一栏里它是展开的。"
+  },
+  {
+    "file": "c03-project-brief-editing-light.png",
+    "caption": "写项目说明：上面写明每位成员每次发言前都会读到、不是指令、会算进输入用量；右下是字数和保存。"
+  },
+  {
+    "file": "c04-project-page-filled-light.png",
+    "caption": "写好项目说明、默认讨论方式选了“自由讨论”的项目页。"
+  },
+  {
+    "file": "c04-project-page-filled-dark.png",
+    "caption": "写好项目说明、默认讨论方式选了“自由讨论”的项目页。"
+  },
+  {
+    "file": "c05-project-new-discussion-light.png",
+    "caption": "项目里的新讨论：默认就是项目定的“自由讨论”，标题下写着项目名，成员是项目的成员。"
+  },
+  {
+    "file": "c05-project-new-discussion-dark.png",
+    "caption": "项目里的新讨论：默认就是项目定的“自由讨论”，标题下写着项目名，成员是项目的成员。"
+  },
+  {
+    "file": "c06-project-discussion-done-light.png",
+    "caption": "项目里的一场讨论：状态行带着项目名；侧栏里它列在项目下面，不在“最近讨论”。"
+  },
+  {
+    "file": "c06-project-discussion-done-dark.png",
+    "caption": "项目里的一场讨论：状态行带着项目名；侧栏里它列在项目下面，不在“最近讨论”。"
+  },
+  {
+    "file": "c07-sidebar-both-lists-light.png",
+    "caption": "侧栏同时有项目和最近讨论：正在看的是独立讨论，项目收起。"
+  },
+  {
+    "file": "c07-sidebar-both-lists-dark.png",
+    "caption": "侧栏同时有项目和最近讨论：正在看的是独立讨论，项目收起。"
+  },
+  {
+    "file": "c08-project-page-with-discussions-light.png",
+    "caption": "回到项目页：三场讨论都在，默认讨论方式已是刚才在新讨论页改成的“群聊”。"
+  },
+  {
+    "file": "c08-project-page-with-discussions-dark.png",
+    "caption": "回到项目页：三场讨论都在，默认讨论方式已是刚才在新讨论页改成的“群聊”。"
+  },
+  {
+    "file": "c09-narrow-drawer-light.png",
+    "caption": "800×600：导航收进抽屉，三栏照旧。"
+  },
+  {
+    "file": "c09-narrow-drawer-dark.png",
+    "caption": "800×600：导航收进抽屉，三栏照旧。"
+  },
+  {
+    "file": "c10-narrow-project-page-light.png",
+    "caption": "800×600 的项目页。"
+  },
+  {
+    "file": "c10-narrow-project-page-dark.png",
+    "caption": "800×600 的项目页。"
+  }
+]
