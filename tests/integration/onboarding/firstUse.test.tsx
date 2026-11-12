@@ -37,6 +37,12 @@ it('D6-A 开始试玩 adds the demo service and a 演示项目 with three demo m
     ['林舟', provider.id, 'mock'], ['阿哲', provider.id, 'mock'], ['小雨', provider.id, 'mock']]);
   expect((screen.getByRole('textbox', { name: /第一条消息/u }) as HTMLTextAreaElement).value).toBe(DEMO_GOAL);
   expect(f.api.run.start).not.toHaveBeenCalled(); expect(f.network).not.toHaveBeenCalled();
+  // D171: the page is the demo project's own new discussion. The app's opening move (a new 独立讨论 when nothing is open) stays
+  // out of the way while the demo is being made, so there is one place to start and it is this one.
+  await waitFor(() => expect(screen.getByRole('status', { name: '运行状态' }).textContent).toContain('演示项目'));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(screen.getByRole('status', { name: '运行状态' }).textContent).toContain('演示项目');
+  expect((f.db as unknown as { db: { prepare(sql: string): { pluck(): { get(): number } } } }).db.prepare("SELECT COUNT(*) FROM rooms WHERE kind='standalone'").pluck().get()).toBe(0);
 });
 
 it('D6-A, D167 connecting the first real service opens a new 独立讨论 with the lineup on its usable default model', async () => {

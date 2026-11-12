@@ -417,7 +417,8 @@ export function App() {
   const firstUse = providerLoadState === 'ready' && providers.length === 0 && directory.rooms?.length === 0 && directory.archived.length === 0
     && directory.recent?.length === 0 && directory.archivedRecent.length === 0 && !snapshot && !runId && !standalone && page === 'discussion';
   // D167: with nothing open, the app opens a new 独立讨论, the way a chat app opens on a new chat.
-  const landingDue = bootReady && !runId && !roomId && page === 'discussion' && !connectOpen && !landingFailed && providerLoadState === 'ready'
+  // Not while 开始试玩 or the connect wizard is at work: each of them opens its own discussion when it is done.
+  const landingDue = bootReady && !runId && !roomId && page === 'discussion' && !connectOpen && !demo.busy && !landingFailed && providerLoadState === 'ready'
     && Boolean(directory.rooms) && Boolean(directory.recent) && !firstUse;
   useEffect(() => {
     if (landingDue) void newStandalone();

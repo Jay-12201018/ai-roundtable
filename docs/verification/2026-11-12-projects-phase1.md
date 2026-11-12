@@ -9,8 +9,9 @@
 | 检查 | 命令 | 结果 |
 | --- | --- | --- |
 | 类型 | `pnpm run typecheck` | exit 0 |
-| 单元和集成 | `pnpm test` | PROBE_TEST_RESULT |
+| 单元和集成 | `pnpm test` | 131 个文件 / 2240 项通过，exit 0（main 上是 125 / 2204） |
 | 桌面 e2e（真实 Electron，隔离 profile，回环夹具） | `pnpm e2e`（含前置的 `pnpm build`） | 54 项通过，exit 0（原 51 项加新增 3 项） |
+| 打包后的 e2e | `pnpm run pack`，`pnpm e2e:packaged` | 打包 exit 0；3 项通过，exit 0 |
 | 升级演练 | `pnpm rehearse:upgrade <试用库 v16 副本>` | 通过，见下 |
 
 新增和改动的测试：
@@ -93,10 +94,25 @@ turns: 331 → 331   run_events: 97746 → 97746   request_usage: 488 → 488（
 6. **项目的讨论列表第一行不是讨论**：最初把“在项目里开新讨论”做成列表第一行，重启后用户（和既有 e2e）点第一行会开出一场新讨论而不是打开上一场。改成项目行右侧的“+”，列表里只有讨论。
 7. **项目页有两个“新讨论”按钮**：讨论一节里又放了一个，和页头重复，去掉。
 8. **最近讨论里中断的讨论没有标记**：崩溃后中断的独立讨论现在和失败的一样带状态点。
+9. **“开始试玩”和自动落地抢跑**（打包后的 e2e 发现）：点“开始试玩”后演示服务一建好，“没有打开任何讨论就开一场新讨论”的规则就生效了，和试玩自己要打开的演示项目撞在一起，最后停在哪个页面看谁先完成；打包应用里停在了独立讨论，演示项目里没有讨论。试玩进行中不再自动落地，并在 `firstUse.test.tsx` 里加了断言（停在演示项目，且没有建出独立讨论）。
 
 ### 探针
 
-PROBE_SECTION
+逐个运行了 14 个探针的首次阶段（都在各自的临时 profile 里，`liveApi=false`），最后一遍全部 exit 0：`premerge-quality-acceptance`、`r07r08-electron`、`r09-electron`、`r10-r11-electron`、`r12-electron`、`r12-acceptance`、`r14-acceptance`、`r15-acceptance`、`r16-acceptance`、`r16-batch2-acceptance`、`r16-continuity-acceptance`、`r16-longhistory`、`r78-drawer-acceptance`、`r01-electron`（不带参数）。最后那处修正（见下面第 9 条）之后只重跑了涉及试玩和向导的三个（`r16-batch2-acceptance`、`premerge-quality-acceptance`、`r12-acceptance`），其余十一个是在那一行改动之前通过的。
+
+第一遍有 5 个失败，都是探针跟不上新导航，不是应用的缺陷，已改探针：
+
+- 靠本地存储 `roundtable.mode.<id>` 设“自由讨论”的 11 处，改为通过 `rooms.updateRoom` 设置项目的默认讨论方式（D169）。
+- 依赖“连接第一个服务后自动建好我的第一场讨论”的 4 个探针，改为像“新建项目”那样建一个项目（`tests/probes/starter-project.cjs`）；`r07r08-ui` 里“删除向导建的房间”一步改成核对向导没有建项目。
+- `r16-acceptance` 里 4 处点侧栏“新讨论”来在同一项目里再开一场的，改点项目行的“+”。
+- `r16-batch2-acceptance`：欢迎页侧栏的空状态文字；项目页的“更改”按钮换成就地选方式加“自定义流程”。
+- `r01-electron`、`r07r08-electron`：`rooms` 接口面清单加上三个新方法。
+
+探针会把截图写进以前各任务的截图目录；这些目录已恢复成运行前的内容，没有随本分支改动。
+
+**未运行**：各探针的重启阶段（`--restart`）、`focus-steal`、`window-condition`、`joint-ui`（r01 的 `--joint-ui`）、`r01 --r03-recovery`、`r01 --development`（按规定不运行）、`r09-native`、三个 `*-sqlite` 检查、`public-context`。
+
+**要说明的一次误操作**：第一遍我用一个循环不带参数地启动了每个探针，其中 `profile-guard.cjs` 不带参数时是它的总控模式：会列出正式数据目录里各文件的名字、大小和时间做前后对比，不读内容、不写入。它卡住后被我杀掉，没有跑完。这违反了“不读取正式数据目录”的要求，请总控按惯例核对正式目录的条目数和时间。
 
 ## 第 3 层：真实模型实测
 
@@ -105,7 +121,6 @@ PROBE_SECTION
 ## 未验证和已知限制
 
 - 真实模型下项目说明的效果（见上）。
-- 打包后的应用和 `pnpm e2e:packaged`：未运行，`walkthrough.packaged.ts` 按新导航改了两处点击，**未执行**。
 - 试用库当前状态（含未合并的 `-wal`）的升级：只在不含 `-wal` 的副本上演练过。正式数据库（版本 1）没有碰，也没有演练。
 - 对比度没有实际测量；深色主题只看了截图。1024×768、1600×1000 没有单独截图，只走了 1280×800 和 800×600。
 - 摘要、产物生成、群聊调度这三类请求不带项目说明（D168 写明是有意的）；它们整理项目讨论时不知道项目背景。
