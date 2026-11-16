@@ -15,7 +15,7 @@
   --text-2: #57534B;
   --text-3: #6B665D;
   --line: #E2DED5;
-  --line-strong: #8E897E;
+  --line-strong: #867E77;
   --accent: #2D6A55;
   --accent-hover: #245847;
   --on-accent: #FFFFFF;
@@ -39,7 +39,7 @@
 /* Dark: chosen explicitly, or following the system. Both blocks hold the same values. */
 :root[data-theme="dark"] {
   --bg: #1F1E1C; --sidebar: #181715; --surface: #292825; --surface-2: #302F2B; --surface-3: #3B3935;
-  --text: #EDEAE4; --text-2: #BDB8AE; --text-3: #A6A196; --line: #3A3834; --line-strong: #7F7A70;
+  --text: #EDEAE4; --text-2: #BDB8AE; --text-3: #A6A196; --line: #3A3834; --line-strong: #898578;
   --accent: #8FC5AC; --accent-hover: #A8D4BF; --on-accent: #10201A; --accent-soft: #263B32;
   --warn: #E6BE70; --warn-soft: #362D1E; --warn-line: #7C6331;
   --danger: #F2A096; --danger-soft: #3D2522; --danger-line: #84463F;
@@ -53,7 +53,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]), :root[data-theme="system"] {
     --bg: #1F1E1C; --sidebar: #181715; --surface: #292825; --surface-2: #302F2B; --surface-3: #3B3935;
-    --text: #EDEAE4; --text-2: #BDB8AE; --text-3: #A6A196; --line: #3A3834; --line-strong: #7F7A70;
+    --text: #EDEAE4; --text-2: #BDB8AE; --text-3: #A6A196; --line: #3A3834; --line-strong: #898578;
     --accent: #8FC5AC; --accent-hover: #A8D4BF; --on-accent: #10201A; --accent-soft: #263B32;
     --warn: #E6BE70; --warn-soft: #362D1E; --warn-line: #7C6331;
     --danger: #F2A096; --danger-soft: #3D2522; --danger-line: #84463F;

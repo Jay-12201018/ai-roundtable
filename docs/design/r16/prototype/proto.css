@@ -14,7 +14,7 @@
   --text-2: #57534B;      /* 辅助说明（对 --bg ≥ 7:1） */
   --text-3: #6B665D;      /* 元信息（对 --bg ≥ 5:1） */
   --line: #E2DED5;        /* 装饰分隔线，不承担控件边界 */
-  --line-strong: #8E897E; /* 必须被看见的控件边界（≥ 3:1） */
+  --line-strong: #867E77; /* 必须被看见的控件边界（≥ 3:1，含侧栏和选中底） */
   --accent: #2D6A55;      /* 主要操作、链接、焦点 */
   --accent-hover: #245847;
   --on-accent: #FFFFFF;
@@ -42,7 +42,7 @@
   --text-2: #BDB8AE;
   --text-3: #A6A196;
   --line: #3A3834;
-  --line-strong: #7F7A70;
+  --line-strong: #898578;
   --accent: #8FC5AC;
   --accent-hover: #A8D4BF;
   --on-accent: #10201A;

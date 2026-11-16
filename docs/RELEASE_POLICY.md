@@ -12,8 +12,9 @@
 
 - 计划公开的仓库是 `Jay-12201018/ai-roundtable`。源码和 macOS arm64 安装包通过 GitHub Releases 提供。尚未推送。
 - 不做 Apple Developer ID 签名，不做公证。macOS 安装包只做 ad-hoc 封装（`electron-builder.yml` 的 `identity: "-"`），否则 Apple Silicon 上的捆绑包无法通过校验。这是现行做法。第一次打开若被系统拦下，在「系统设置 → 隐私与安全性」里点「仍要打开」。
-- 仓库里没有公证脚本，也没有 CI。`pnpm-lock.yaml` 里的 `@electron/notarize` 是 `electron-builder` 自带的传递依赖，本项目没有调用它。
-- 目前只在 macOS arm64 上验证过安装包。Windows 和 Linux 的目标写在 `electron-builder.yml` 里，未验证就不能说已经支持。
+- 仓库里没有公证脚本。`.github/workflows/check.yml` 只跑 `pnpm typecheck` 和 `pnpm test`，不启动应用、不打开用户数据、不调用模型。仓库还没有远程，这份检查还没在 GitHub 上跑过。`pnpm-lock.yaml` 里的 `@electron/notarize` 是 `electron-builder` 自带的传递依赖，本项目没有调用它。
+- 首发只声明 macOS arm64。Windows 和 Linux 的目标写在 `electron-builder.yml` 里，未验证就不能说已经支持。
+- 真实讨论只验证过 DeepSeek 和豆包。其余 6 家服务还没有用真实 Key 跑过一场讨论。
 
 ## 公开前仍须另得授权的事
 

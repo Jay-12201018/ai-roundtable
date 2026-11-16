@@ -106,7 +106,9 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         request?.destroy(error); fail(error);
       }, NETWORK_CONNECT_TIMEOUT_MS);
       const connected = () => { clearTimeout(connecting); connecting = undefined; };
-      const cleanup = () => { connected(); signal?.removeEventListener('abort', abort); };
+      let awaitingHeaders: ReturnType<typeof setTimeout> | undefined;
+      const stopWaitingForHeaders = () => { clearTimeout(awaitingHeaders); awaitingHeaders = undefined; };
+      const cleanup = () => { connected(); stopWaitingForHeaders(); signal?.removeEventListener('abort', abort); };
       const fail = (error: Error) => { diagnose(error); markPhase(error, phase); cleanup(); reject(error); };
       const abort = () => {
         const error = abortReason();
@@ -120,6 +122,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         request = send(url, { method, headers: Object.fromEntries(headers), agent: false, lookup: pinned, family: selected.family,
           ...(local ? {} : { rejectUnauthorized: true, servername: isIP(hostname) ? '' : hostname }),
         }, incoming => {
+          stopWaitingForHeaders();
           response = incoming; phase = 'response';
           const status = incoming.statusCode ?? 0;
           incoming.once('close', cleanup);
@@ -159,6 +162,7 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
         });
         request.once('error', fail);
         request.once('upgrade', (incoming, socket) => {
+          stopWaitingForHeaders();
           phase = 'response';
           const status = incoming.statusCode ?? 0;
           if (status >= 100 && status <= 599) observe?.({ stage: 'response', evidence: 'http_response', httpStatus: status });
@@ -176,6 +180,13 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
               phase = 'request'; observe?.({ stage: 'request' });
               signal?.throwIfAborted(); guard?.(); signal?.throwIfAborted();
               request!.end(init.body as string | undefined);
+              // The handshake is done and the request is written. A service that never sends a status used to hold
+              // this try until the whole request's ten minutes. A minute of silence here is given up and tried again;
+              // a reply that has already started is not this timer.
+              awaitingHeaders = setTimeout(() => {
+                const error = Object.assign(new Error('The response did not start'), { code: 'ETIMEDOUT' });
+                request?.destroy(error); fail(error);
+              }, NETWORK_RESPONSE_TIMEOUT_MS);
             } catch (error) { diagnose(error); markPhase(error, phase); request?.destroy(); cleanup(); reject(error); }
           });
         });
@@ -208,6 +219,8 @@ export function createSafeFetch(guard?: () => void, lookup: typeof dnsLookup = d
 export const NETWORK_MAX_RETRIES = 2;
 /** D166: how long one try may take to reach the service and finish the handshake. */
 export const NETWORK_CONNECT_TIMEOUT_MS = 5_000;
+/** How long one try may wait for an HTTP status after the request has been written. Silence here is retried; a reply that has started is not. */
+export const NETWORK_RESPONSE_TIMEOUT_MS = 60_000;
 const RETRY_FIRST_MS = 500;
 const RETRY_LONGEST_MS = 8_000;
 const RETRY_AFTER_LONGEST_MS = 60_000;

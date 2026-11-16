@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream';
 import type { lookup as dnsLookup } from 'node:dns/promises';
 import type { RequestOptions } from 'node:https';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NETWORK_CONNECT_TIMEOUT_MS, NETWORK_MAX_RETRIES, createSafeFetch as catalogFetch, networkPhaseOf, retryDelayMs } from '../../../src/main/providers/network';
+import { NETWORK_CONNECT_TIMEOUT_MS, NETWORK_MAX_RETRIES, NETWORK_RESPONSE_TIMEOUT_MS, createSafeFetch as catalogFetch, networkPhaseOf, retryDelayMs } from '../../../src/main/providers/network';
 import { ContractError } from '../../../src/shared/contracts/errors';
 import { catalogServiceAt, serviceCatalog } from '../../../src/shared/serviceCatalog';
 
@@ -462,6 +462,85 @@ describe('D166 a try that got no answer is made again, twice at most; a reply th
     const resolver = (async () => { tries++; return [{ address: '10.0.0.1', family: 4 }]; }) as unknown as typeof dnsLookup;
     await expect(catalogFetch(undefined, resolver, undefined, { has: () => true })('https://provider.example/')).rejects.toMatchObject({ code: 'target_rejected' });
     expect(tries).toBe(1);
+  });
+  it('a handshake that never finishes is given up after five seconds, and only tried twice more', async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const requests: Array<{ end: ReturnType<typeof vi.fn> }> = [];
+      vi.mocked(https.request).mockImplementation((() => {
+        const socket = new EventEmitter();
+        const request = Object.assign(new EventEmitter(), { end: vi.fn(), destroy: vi.fn(() => request) });
+        requests.push(request);
+        queueMicrotask(() => request.emit('socket', socket));
+        return request;
+      }) as unknown as typeof https.request);
+      const pending = createSafeFetch(undefined, lookup([{ address: '8.8.8.8', family: 4 }]))('https://provider.example/models');
+      const settled = pending.then(() => ({ failed: false as const }), (error: unknown) => ({ failed: true as const, error }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(NETWORK_CONNECT_TIMEOUT_MS - 1);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(retryDelayMs(0) - 1);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(https.request).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(NETWORK_CONNECT_TIMEOUT_MS);
+      expect(https.request).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(retryDelayMs(1));
+      expect(https.request).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(NETWORK_CONNECT_TIMEOUT_MS);
+      const outcome = await settled;
+      expect(outcome.failed).toBe(true);
+      if (!outcome.failed) return;
+      expect(networkPhaseOf(outcome.error)).toBe('tcp');
+      expect(outcome.error).toMatchObject({ code: 'ETIMEDOUT' });
+      expect(https.request).toHaveBeenCalledTimes(3);
+      expect(requests.map(request => request.end.mock.calls.length)).toEqual([0, 0, 0]);
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+  it('a request that is written and then never answered is given up after a minute, and only tried twice more', async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const requests: Array<{ end: ReturnType<typeof vi.fn> }> = [];
+      vi.mocked(https.request).mockImplementation((() => {
+        const socket = new EventEmitter();
+        const request = Object.assign(new EventEmitter(), { end: vi.fn(), destroy: vi.fn(() => request) });
+        requests.push(request);
+        queueMicrotask(() => { request.emit('socket', socket); queueMicrotask(() => socket.emit('secureConnect')); });
+        return request;
+      }) as unknown as typeof https.request);
+      const pending = createSafeFetch(undefined, lookup([{ address: '8.8.8.8', family: 4 }]))('https://provider.example/models');
+      const settled = pending.then(() => ({ failed: false as const }), (error: unknown) => ({ failed: true as const, error }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      expect(requests[0]?.end).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(NETWORK_RESPONSE_TIMEOUT_MS - 1);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(retryDelayMs(0));
+      expect(https.request).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(NETWORK_RESPONSE_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(retryDelayMs(1));
+      expect(https.request).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(NETWORK_RESPONSE_TIMEOUT_MS);
+      const outcome = await settled;
+      expect(outcome.failed).toBe(true);
+      if (!outcome.failed) return;
+      expect(networkPhaseOf(outcome.error)).toBe('request');
+      expect(outcome.error).toMatchObject({ code: 'ETIMEDOUT' });
+      expect(requests.map(request => request.end.mock.calls.length)).toEqual([1, 1, 1]);
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
 

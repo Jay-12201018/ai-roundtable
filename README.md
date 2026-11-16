@@ -21,7 +21,8 @@ AI 圆桌不收费。调用模型的费用由服务商直接从你的账户收�
 
 ## 当前限制
 
-- 目前只在 macOS arm64 上验证过安装包，Windows 和 Linux 未验证。安装包按决定只做 ad-hoc 封装，不做 Apple Developer ID 签名，也不做公证。
+- 首发只准备 macOS arm64 安装包。`electron-builder.yml` 里还有 Windows 和 Linux 的打包目标，但没有在那两个系统上验证，不能当作已经支持。安装包按决定只做 ad-hoc 封装，不做 Apple Developer ID 签名，也不做公证。
+- 真实讨论只验证过 DeepSeek 和豆包。通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax 可以在目录里选择，自动测试覆盖了目录约束，但没有用真实 Key 跑过一场讨论。
 
 ## 安装（macOS arm64）
 
@@ -77,7 +78,7 @@ pnpm trial:reset
 
 ## 工程文档
 
-[V1 规格](SPEC.md) · [工程规范](AGENTS.md) · [任务清单](tasks/README.md) · [状态看板](docs/STATUS.md) · [接口登记](docs/CONTRACTS.md) · [架构决策](docs/DECISIONS.md) · [设计规范](docs/DESIGN_GUIDELINES.md)
+[V1 规格](SPEC.md) · [工程规范](AGENTS.md) · [变更记录](CHANGELOG.md) · [任务清单](tasks/README.md) · [状态看板](docs/STATUS.md) · [接口登记](docs/CONTRACTS.md) · [架构决策](docs/DECISIONS.md) · [设计规范](docs/DESIGN_GUIDELINES.md)
 
 ## 许可证 / License
 
