@@ -21,13 +21,13 @@ AI 圆桌不收费。调用模型的费用由服务商直接从你的账户收�
 
 ## 当前限制
 
-- 目前只在 macOS arm64 上验证过安装包，Windows 和 Linux 未验证。安装包未经 Apple 公证，见下方安装说明。
+- 目前只在 macOS arm64 上验证过安装包，Windows 和 Linux 未验证。安装包按决定只做 ad-hoc 封装，不做 Apple Developer ID 签名，也不做公证。
 
 ## 安装（macOS arm64）
 
 目前没有公开下载。从源码打包（`pnpm run pack`）后，在 `dist/` 里可以找到 `.dmg` 和 `.zip`。
 
-打开 `.dmg`，把 AI Roundtable 拖进“应用程序”。因为没有公证，第一次打开可能被系统拦下：在“系统设置 → 隐私与安全性”里点“仍要打开”。
+打开 `.dmg`，把 AI Roundtable 拖进“应用程序”。安装包不做公证，第一次打开可能被系统拦下：在“系统设置 → 隐私与安全性”里点“仍要打开”。
 
 第一次使用，可以先点“先试玩演示”：三位演示成员跑一场完整讨论，不联网、不需要 Key，回复是预先写好的示例。准备好真实讨论时，点“连接…”，选 DeepSeek，粘贴 API Key。
 
@@ -79,10 +79,10 @@ pnpm trial:reset
 
 [V1 规格](SPEC.md) · [工程规范](AGENTS.md) · [任务清单](tasks/README.md) · [状态看板](docs/STATUS.md) · [接口登记](docs/CONTRACTS.md) · [架构决策](docs/DECISIONS.md) · [设计规范](docs/DESIGN_GUIDELINES.md)
 
-## 发布与授权方向 / Distribution and licensing direction
+## 许可证 / License
 
-**免费、源码公开（Source Available）、非商业授权。** 未来将在作者个人 GitHub 公开仓库发布源码，通过 GitHub Releases 提供桌面安装包。软件本身免费，用户自行提供模型厂商 API Key 并承担厂商调用费用；不增加收费、会员订阅、激活码、商业支付或反盗版系统。优先考虑 **PolyForm Noncommercial 1.0.0**，禁止未经授权的商业使用；正式发布前须再次核对全文并由作者确认，当前尚未设置正式许可证。不得将此定位称为 OSI 标准开源；MIT、Apache-2.0 不作为项目默认候选。
+**MIT。** 全文见 [LICENSE](LICENSE)。软件本身免费，用户自行提供模型厂商 API Key 并承担厂商调用费用。不增加收费、会员订阅、激活码、商业支付或反盗版系统。计划公开的仓库是 `Jay-12201018/ai-roundtable`，尚未推送。安装包不做 Apple Developer ID 签名，也不做公证。
 
-**Free of charge, source available, licensed for noncommercial use.** Source code is planned for the author's personal public GitHub repository, with desktop installers distributed through GitHub Releases. Users supply their own model-provider API keys and pay any provider fees. No software fees, subscriptions, activation keys, commercial payment or DRM systems are planned. **PolyForm Noncommercial 1.0.0** is the preferred license, subject to review of its full text and the author's confirmation before release; no final license has been adopted yet. Unauthorized commercial use is outside the intended licensing scope. This is not OSI open source; MIT and Apache-2.0 are not default project-license candidates.
+**MIT licensed.** The full text is in [LICENSE](LICENSE). The application is free; users supply their own model-provider API keys and pay any provider fees. There are no software fees, subscriptions, activation keys, commercial payments, or DRM. The planned public repository is `Jay-12201018/ai-roundtable`; nothing has been pushed yet. macOS builds are ad-hoc signed and are not notarized.
 
-完整规划及外部贡献权利要求见 [发布与授权政策 / Release policy](docs/RELEASE_POLICY.md)。本轮只调整文档，不创建或公开 GitHub 仓库、不发布安装包；现有 R00–R18 技术路线与 Worktree 模式保持不变。
+细则见 [发布政策](docs/RELEASE_POLICY.md)。

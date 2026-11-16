@@ -2,6 +2,7 @@
   "name": "ai-roundtable",
   "version": "0.1.0",
   "description": "AI Roundtable desktop application",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",

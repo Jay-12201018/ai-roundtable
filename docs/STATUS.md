@@ -1,5 +1,16 @@
 # R00–R18 状态与授权看板
 
+## 现行决定（2026-11-17）
+
+以更晚的决定为准。下面按日期保留的段落是当时的记录；和本节冲突时以本节为准。Claude 导出里的旧记忆只作背景，不是现行要求。
+
+- **模型**：只接内置目录的 8 家：DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax。它们共用一个 OpenAI 兼容协议适配器。「OpenAI 兼容」是协议名，不是接入 OpenAI。OpenAI、Anthropic、Gemini 的适配器和产品支持已经删除，不恢复。目录在 `src/shared/serviceCatalog.ts`（D143）。
+- **许可证**：MIT。全文在根目录 `LICENSE`，`package.json` 的 `license` 为 `MIT`。软件免费，用户自备 API Key。不收费、不设订阅、激活码或反盗版。2026-10-16 的非商业许可方案作废。政策见 [RELEASE_POLICY](RELEASE_POLICY.md)。
+- **签名与公证**：不做 Apple Developer ID 签名，不做公证。macOS 包只保留 ad-hoc 封装（`electron-builder.yml` 的 `identity: "-"`），否则 Apple Silicon 上的捆绑包无法校验。这是现行做法，不是待办。仓库没有公证脚本，也没有 CI。
+- **界面**：以 R16 以及其后已合入的布局为准，包括 2026-11-13 的项目侧栏。2026-11-03 的「AI 圆桌界面方案」（方案 A/B/C）只在账号导出里，不在本仓库，不执行。
+- **大众化专项**：待定义。没有范围，不在当前待办里，也不据此实现功能。
+- **当前待办**（未授权前不改功能）：① 项目第二期，记忆和项目成果。② 群聊第二期，分工、各做、讨论、融合。③ 发布准备：仓库 `Jay-12201018/ai-roundtable` 尚未推送；正式库仍是版本 1，升级前先在副本上演练。④ 自用安装。⑤ 用户确认后删除 2026-11-05 事故留证目录。
+
 ## 当前状态（2026-11-13）
 
 - **项目与独立讨论 第一期：merged / verified。** 分支 `codex/projects-phase1`（`19c1dd0`，基于 main `9f97cd2`，12 个提交），用户试用后同意，以 ff-only 方式合入 main。决策 D167 到 D171，migration 17。记录见 [第一期](verification/2026-11-12-projects-phase1.md)，截图在 `docs/verification/projects-phase1-screens/`。
@@ -10,7 +21,7 @@
 - **这次的检查**：总控在 `19c1dd0` 上跑了完整检查：typecheck、131 个文件 / 2242 个测试、`pnpm e2e` 54 项、打包和 `pnpm e2e:packaged` 3 项、全部探针含重启阶段 41 步、试用库 v16 副本升到 v17 的演练（71 场讨论等行数不变）、公开内容扫描；正式目录跑前跑后没有变化。合并后在 main 上重跑 typecheck 和全量测试通过。第一次检查时 15 步探针失败（版本期望和旧导航），子会话修正时还修了一个应用自身的竞争问题（自动新建讨论会把刚打开的项目页拉走）。
 - **第 3 层**：用户在试用版里试用了侧栏和项目页，提出项目不能收起，已修。试用库已升到 v17，升级前备份在试用目录 `ai-roundtable.pre-v17-2026-11-13.sqlite3`。**未验证**：项目说明在真实模型下的效果；正式数据库（版本 1）的升级；对比度；1024 和 1600 宽的截图。摘要、产物生成和群聊调度请求不带项目说明，留到第二期。
 - **11 月 12 日 21:48 正式目录被改动**：仓库里 10 月 13 日打包的旧应用 `dist/mac-arm64/AI Roundtable.app` 被直接打开约 40 秒，那段时间没有会话执行命令。它和正式库同为版本 1，数据库没有被写（仍是 10 月 17 日、大小不变），只改动了浏览器缓存类文件，条目数从 297 变为 296。子会话误跑一次 `profile-guard` 是 13:05 的事，那时正式目录没有改动。
-- **下一步路线**：① 项目与独立讨论第二期（记忆和项目成果：只记主持人说过和认可的，项目记忆只在本项目可见，关于主持人的记忆全局可见），等用户说开始。② 群聊第二期。③ 大众化专项。④ 发布。⑤ 自用安装。⑥ 用户确认后删除事故留证目录。
+- **下一步路线**：见文首「现行决定」。当时列在第③项的「大众化专项」没有范围，已移出待办。
 
 ## 2026-11-11 的状态
 
@@ -25,7 +36,7 @@
 - **这次的检查**：总控在 `0124403` 上跑了完整检查：typecheck、125 个文件 / 2204 个测试、`pnpm e2e` 51 项、打包和 `pnpm e2e:packaged` 3 项、全部探针含重启阶段 41 步、v15 副本升级演练、公开内容扫描；正式目录 297 个条目跑前跑后没有变化。合并后在 main 的检出里重跑了 typecheck 和全量测试，同样通过。`r01 --development` 按规定未运行。
 - **第 3 层**：用户亲手试用八次（试用版，开着网络工具），每次的发现和修正记在 D154 到 D166；回归脚本在两个讨论组里共跑五遍，最后一遍（`a8f1bba`）27 条里 26 条通过，剩下 1 条是脚本预期没跟上。用户在 `3dccb49` 上照着 12 条消息试用，内容全部符合预期。**未验证**：`3dccb49` 之后的网络层改动（连接超时、新的重试、停顿一分钟结束）在真实网络下的表现，其中连接超时没有单元测试；不开网络工具的情况；DeepSeek 和豆包以外的 6 家服务；连接时快时慢、偶尔成串失败的原因；群聊和“审查修订链”的深度对比（第二期合并前做）。
 - **已知未处理**：产物生成请求曾挂约 7 分钟才失败（D159），停顿上限应能缩短到一分钟左右，未单独验证；成员偶尔编个人经历（“我用过”）；调度失败的原因只记在调度请求记录里，界面只说“没能用模型读懂”。
-- **下一步路线**：① 群聊第二期（分工 → 各做 → 讨论 → 融合，合并前和“审查修订链”对比深度），等用户说开始。② 大众化专项。③ 更新发布政策，清理公开内容，做公开副本并发布（`Jay-12201018/ai-roundtable`，推送前确认一次）；发布前补测不开网络工具的情况和尽量多的服务。④ 自用安装（备份真实数据库并在副本上演练，真实库目前是版本 1，先问用户）。⑤ 用户确认后删除事故留证目录。
+- **当时的下一步**（现以文首为准）：① 群聊第二期（分工 → 各做 → 讨论 → 融合，合并前和“审查修订链”对比深度）。② 发布准备，含更新发布政策；政策已在 2026-11-17 改成 MIT。③ 自用安装（备份真实数据库并在副本上演练，真实库目前是版本 1，先问用户）。④ 用户确认后删除事故留证目录。当时写的「大众化专项」没有范围，已移出待办。
 
 ## 2026-11-05 的状态
 
@@ -35,7 +46,7 @@
   - 抽屉修复：布局切换时关闭抽屉改为在渲染时做，窄屏点菜单不再被 effect 抵消。根因是最可能的解释，原来两次失败没有在非最小化条件下复现，尚未证实。
 - **这次的检查**：总控在 `9981f62` 上跑了完整检查：typecheck、122 个文件 / 1953 个测试、`pnpm e2e` 35 项、打包和 `pnpm e2e:packaged` 3 项、全部探针含重启阶段（含 `profile-guard`、`r78-drawer-acceptance`）、v14 副本升级演练；正式目录 297 个条目跑前跑后没有变化。build 由 `pnpm e2e` 前置步骤和打包执行。`r01 --development` 依赖开发服务器，按新规定未运行。
 - **第 3 层（用户亲手，试用版，`66733bc`，开着网络工具）**：一张 PNG。DeepSeek Flash 和豆包 Evolving 都读对图上数字；DeepSeek V4 Pro 没收到图，没有编造（目标里没要求它说明看不到，所以未验证它是否会明说）。**未验证**：JPEG、WebP、接近 10 MB 的大图、一次 4 张；拖入和真实 ⌘V；`66733bc` 之后的提交（保护、探针、抽屉）没有再做真实模型实测。
-- **下一步路线**：① 大众化专项（等用户说开始）。② 更新发布政策和 AGENTS.md，清理公开内容，做公开副本并发布（`Jay-12201018/ai-roundtable`，推送前确认一次）；发布前补测不开网络工具的情况和尽量多的服务。③ 自用安装（备份真实数据库并在副本上演练，真实库目前是版本 1，先问用户）。④ 用户确认后删除事故留证目录。
+- **当时的下一步**（现以文首为准）：发布准备（政策与 AGENTS.md 已在 2026-11-17 更新）、自用安装、用户确认后删除事故留证目录。当时写的「大众化专项」没有范围，已移出待办。
 
 - **事故：migration 15 误作用到真实数据库（已恢复）。** 2026-11-05 12:57:40，发图片子会话为跑探针执行 `electron-vite dev --rendererOnly`，它实际启动了未隔离的 Electron，打开正式数据目录。进程在约 1 分钟后被 `kill -9` 杀掉，迁移只写进了 `-wal`（137 帧，1 个提交，checkpoint 序号 0），主库未变。用户同意后，总控先把整个目录复制到 `~/Library/Application Support/ai-roundtable-incident-2026-11-05/`，确认主库和迁移前备份的 `.dump` 哈希相同（只有文件头 5 个字节不同），再把 `-wal`、`-shm`、Singleton 文件、`attachments`、`backups` 移到留证目录的 `moved-from-real/`。恢复后主库的 SHA-256 未变（`7cc10013…`），副本检查 `quick_check` 为 ok，版本 1，13 场讨论、38 条消息、5 个房间、无新表。Cookies、DIPS、Session Storage 等浏览器文件被更新，未回退；旧库 `key_records` 为 0，钥匙串未检查。留证目录保留，由用户决定何时删除。漏洞已由 D148 修复并合入 main。
 
@@ -51,7 +62,7 @@
 ## 较早状态（2026-11-03）
 
 - **R17A 真实 Electron E2E 与 Mac 自用包：merged。** 分支 `codex/r17a-e2e-macpack`（`286da03`，基于 main `af5bffb`），以 ff-only 方式合入 main。`pnpm e2e` 在真实 Electron 里跑 V1 验收场景（23 项，连续 3 次通过，空测试集失败）；`pnpm e2e:packaged` 验证打包应用；新增 `pnpm rehearse:upgrade`（只在数据库副本上演练升级，已用夹具测试，未碰真实数据）；README 按当前能力重写；探针改为等实际窗口尺寸；Mac arm64 安装包（dmg / zip，ad-hoc 签名，未公证）。子会话在 `422f923` 上跑了 typecheck、143 个文件 / 2209 个测试、build、37 个探针阶段，之后只改探针和文档，总控审查后未重跑全量。`rendererSelection` 的超时没能复现，延长等待属推断。第 3 层（真实模型、真实钥匙串、真实数据库升级）未验证。记录见 [R17A](verification/2026-11-03-r17a.md)。
-- **发布方向变更（用户 2026-11-03 决定，取代 [发布政策](RELEASE_POLICY.md) 和 AGENTS.md 的非商业授权规定，这两份文件待更新）**：MIT 开源，不做签名和公证；仓库已由用户创建（用户名后来改了，现在是 `Jay-12201018/ai-roundtable`）；首发源码加 Mac 安装包，按常见开源项目的做法，精简公开内容。尚未推送代码。
+- **发布方向变更（用户 2026-11-03 决定）**：MIT，不做 Apple Developer ID 签名，不做公证；仓库已由用户创建（`Jay-12201018/ai-roundtable`）；首发源码加 Mac 安装包。尚未推送代码。发布政策和 AGENTS.md 已在 2026-11-17 按这个决定改完。
 - **发布前要处理（①②③④ 已由移除费用分支解决，留作记录）**：① DeepSeek 价格审核 2026-11-21 到期，到期后真实讨论会被拒绝（`validPrice`），公开发布后所有用户都会受影响，需改到期行为或重新核价。② 4 个旧探针失败（`deepseek-trial-electron`、`deepseek-diagnostics-electron`、`deepseek-final-readiness`、`controlled-launcher-electron`），都涉及 Codex 时期的“受控单次试用”菜单，未确认 main 上是否早已失败；总控建议退役该菜单。③ `legacyMigration.test.ts`、`migrationV2.test.ts` 用 `git show 135bf82` 读原始表结构，重写历史后会失败，要改成固定夹具。④ 待用户决定：发布前是否开放多家模型（目前只有 DeepSeek Flash 能用于真实讨论）。
 - **自用安装（待用户同意）**：安装包使用正式数据目录，装之前要先备份真实数据库并在副本上演练升级；步骤见 R17A 记录。
 
@@ -170,9 +181,9 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 | R06 | Renderer 状态与订阅 | R03 已合main verified；R02契约 | 原模块交付后由总控唯一联合接线 | verified | 用户已批准最终合并；本次main复验通过 | 已合main；联合/原分支和全部WT保留 | 原ed6d659734cea4169fb54a66bdb257439d6daa39；引入6fe8805bb96c6c41d9f4671260c64ed13c47a275；接线/fast-forward入站d4a0d2742eb28d2441e4d06e8154b8cdd6955336 | [本次main证据](verification/2026-10-16-r04-r05-r06-main.md)：534完整/265专项/112 Electron、类型/构建、Node压力5次、ABI139、隔离UI/恢复/退出均exit0；正式E2E等未验证 |
 | R07 | 房间、成员、历史 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d991178；引入f718f829；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
 | R08 | Key 与 Provider 设置 | R04/R05/R06及SHARED-R07-R08-01已合main且verified | 原模块交付；总控联合接线 | verified | 最终合并及补充探针修复已授权；全部必要验收完成 | 已合main；集成及原分支/WT全部保留 | 原d2aed6c；引入5f01e978；接线64ac8ce5038813cc60374573dc8871da30d1eeb0 ；ff入站d3205b2c3fba2061437150e87a87508d44fbb660 | [主线及补充记录](verification/2026-10-17-r07-r08-main.md)：原846/292/111/393、strict/build及UI/重启/退出证据按同业务版本复用；本次18/18真桥断言、生产探针自然exit0及退出SQLite审计通过 |
-| R09 | OpenAI 与兼容端点 | R07/R08已合main verified；Mock联合验收 | 原模块交付；总控独占联合接线 | verified（fixture） | 用户批准最终合main及主线独立验收；真实付费测试未授权 | 已合main；codex/integrate-r09与原分支/WT保留 | 原2d97af571debf106aadad708a2c0418f299c6eef；唯一引入f5baaf07e1603a7c356fb0c9cedeb131977307ba；接线da512e7a64a6ec4a596b0f7fda820b3d62b04e42；ff入站f3a8fee38f5b7d75b5144c2997d72373fda6ddd6 | [本轮main报告](verification/2026-10-17-r09-main.md)/[台账](verification/2026-10-17-r09-main-commands.md)：Node/Electron各1073、R09专项227、strict/build、双ABI/SQLite、真实生产fixture12请求/重启HTTP0及退出审计；旧探针白名单一行修复，原失败保留 |
-| R10A | Anthropic | R09 fixture已合main verified | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main；真实调用需获审价格策略 | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 1732测试、build、生产探针fixture通过 |
-| R10B | Gemini | R09 fixture已合main verified | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main；真实调用需获审价格策略 | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 1732测试、build、生产探针fixture通过 |
+| R09 | 兼容端点（协议保留；不接入 OpenAI 产品） | R07/R08已合main verified；Mock联合验收 | 原模块交付；总控独占联合接线 | verified（fixture） | 用户批准最终合main及主线独立验收；真实付费测试未授权 | 已合main；codex/integrate-r09与原分支/WT保留 | 原2d97af571debf106aadad708a2c0418f299c6eef；唯一引入f5baaf07e1603a7c356fb0c9cedeb131977307ba；接线da512e7a64a6ec4a596b0f7fda820b3d62b04e42；ff入站f3a8fee38f5b7d75b5144c2997d72373fda6ddd6 | [本轮main报告](verification/2026-10-17-r09-main.md)/[台账](verification/2026-10-17-r09-main-commands.md)：Node/Electron各1073、R09专项227、strict/build、双ABI/SQLite、真实生产fixture12请求/重启HTTP0及退出审计；旧探针白名单一行修复，原失败保留 |
+| R10A | Anthropic（适配器已于 2026-11-03 删除） | R09 fixture已合main verified | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main；真实调用需获审价格策略 | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 1732测试、build、生产探针fixture通过 |
+| R10B | Gemini（适配器已于 2026-11-03 删除） | R09 fixture已合main verified | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main；真实调用需获审价格策略 | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 1732测试、build、生产探针fixture通过 |
 | R11 | 声明式工作流 | R07/R04–R06 | 总控（Claude Code） | merged / verified（fixture） | 用户批准合main | codex/integrate-r10a-r10b-r11 | 接线8a7f293；合main 66017c0 | 四种模板经生产入口fixture完整运行与重启验证；真实模型工作流待测 |
 | R12 | 主持人与消息版本 | R11 | R12子会话；总控集成 | merged / verified | 用户批准合main | codex/r12-host-message-versions → codex/integrate-r12-r13a | 15e2e30；合并见顶部 | 自动化、实操、DeepSeek真实模型三层通过 |
 | R13 | 摘要、usage、费用预算 | R05/R09/R11 | R13A/R13B子会话；总控集成 | merged / verified | 用户批准合main | codex/r13a-real-model-enable、codex/r13a-premerge-quality、codex/r13b-usage-summary | b3e3324、0ccb49c、a96d4fe | 预算、账本、按时段与缓存结算、摘要均经DeepSeek真实账单核对 |
@@ -199,7 +210,7 @@ main 本轮新跑 Electron86文件1292/1292、受影响12文件279/279、Node/El
 
 ## 发布与授权方向确认（2026-10-16，仅规划）
 
-用户已确认免费、源码公开（Source Available）、非商业授权，未来由个人 GitHub 公开仓库及 Releases 分发，用户自备 API Key/承担厂商费用。优先考虑 PolyForm Noncommercial 1.0.0，正式发布前重新核对并由用户确认；不默认 MIT/Apache-2.0，不称 OSI 标准开源，不增加收费/订阅/激活/支付/反盗版系统。统一门槛与外部贡献权利要求见 [发布政策](RELEASE_POLICY.md)及 [R17](../tasks/R17-e2e-release.md)。
+2026-10-16 曾把许可证定为非商业方案。该决定已在 2026-11-03 作废，现行许可证是 MIT，见文首和 [发布政策](RELEASE_POLICY.md)。
 
 本轮仅由总控调整规划文档，不修改业务/契约/数据库/依赖、不创建 Worktree 或 GitHub 仓库、不公开或发布软件。R00–R18 功能、依赖、负责人及状态不变：R07/R08 仅 ready，R17 仍 blocked/未授权实施；许可证尚未正式采用，权属、历史敏感信息及跨平台发布审查仍待 R17 实际执行。
 

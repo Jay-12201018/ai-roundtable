@@ -1,6 +1,8 @@
 # AI Roundtable 任务索引
 
-原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出批准路线的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。R00/R01/R02/R03 已验收；R03已合main并通过[本次主线复验](../docs/verification/2026-10-15-r03-main.md)。R04/R05/R06已按用户批准fast-forward合main并通过[本次主线验收](../docs/verification/2026-10-16-r04-r05-r06-main.md)，均verified；R07/R08已按最终授权ff-only合main，补充桥探针现按新授权修复并实际18/18及退出审计通过，最终merged/verified，R09仅ready、未授权启动；见[实际主线记录](../docs/verification/2026-10-17-r07-r08-main.md)。其他任务仍是范围/归属/验收定义，不代表已启动。状态、授权和真实结果以 [STATUS](../docs/STATUS.md) 为准；历史交接与验证记录保留。
+原始基线：main / `135bf82c6462ade6dd5300717d6f0102ce4a660c`。本文列出当时批准的 **20 个任务**（R00–R18，R10 拆为 R10A/R10B）。任务后来大多已经合入；真实进度以 [STATUS](../docs/STATUS.md) 文首为准。
+
+2026-11-17 补充：产品不再提供 OpenAI、Anthropic、Gemini 服务。R09 留下的是兼容协议适配器，现供目录中的 8 家服务使用；「OpenAI 兼容」是协议名。R10A、R10B 的适配器已于 2026-11-03 删除。下面表格里的旧状态句是任务索引写成那样，不代表这些厂商仍在产品里。
 
 ## 入口与共同约束
 
@@ -23,9 +25,9 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 | [R06-renderer-subscriptions.md](R06-renderer-subscriptions.md) | Renderer 状态与一致订阅 | R03 | 已合main并verified；后续App/公共投影接线归总控 |
 | [R07-rooms-agents-history.md](R07-rooms-agents-history.md) | 房间、成员与公共历史 | R04/R05/R06 | 已merged/verified，补充18/18真桥验证及退出审计通过；原分支/WT保留 |
 | [R08-key-provider-settings.md](R08-key-provider-settings.md) | Key 与 Provider 设置 | R04/R05/R06 | 已merged/verified；fake不证明真实Keychain/鉴权 |
-| [R09-openai-compatible-provider.md](R09-openai-compatible-provider.md) | OpenAI 与兼容端点真实闭环 | R07/R08 | ready仅依赖满足；未授权实施/创建Worktree，未启动 |
-| [R10A-anthropic-provider.md](R10A-anthropic-provider.md) | Anthropic Provider | R09 | 可与 R10B/R11 并行 |
-| [R10B-gemini-provider.md](R10B-gemini-provider.md) | Gemini Provider | R09 | 可与 R10A/R11 并行 |
+| [R09-openai-compatible-provider.md](R09-openai-compatible-provider.md) | 兼容协议适配器（历史任务名含 OpenAI；不接入 OpenAI 产品） | R07/R08 | 已合入；现行只服务目录中的 8 家 |
+| [R10A-anthropic-provider.md](R10A-anthropic-provider.md) | Anthropic Provider（适配器已删除） | R09 | 历史任务；2026-11-03 起不在产品中 |
+| [R10B-gemini-provider.md](R10B-gemini-provider.md) | Gemini Provider（适配器已删除） | R09 | 历史任务；2026-11-03 起不在产品中 |
 | [R11-declarative-workflows.md](R11-declarative-workflows.md) | 声明式工作流 | R07；真实验收另需 R09 | 先 Mock，再经明确触发真实验收 |
 | [R12-host-message-versions.md](R12-host-message-versions.md) | 主持人指令与消息版本 | R11 | 可与 R13/R14 分模块并行 |
 | [R13-summary-usage-budget.md](R13-summary-usage-budget.md) | 摘要、usage 与费用预算 | R05/R09/R11 | 可与 R12/R14 分模块并行 |
@@ -36,6 +38,8 @@ Main 是调度、SQLite、Key 与写盘权威；Renderer 只投影。Agent 串�
 | [R18-v1-1-evaluations-adrs.md](R18-v1-1-evaluations-adrs.md) | V1.1 评测与 ADR 决策追踪 | R17 最终 V1 验收 | V1.1 可选，须另行明确选择与授权 |
 
 ## 实施顺序与联合门槛
+
+以下是当时的实施顺序，不是现行产品范围。R10A、R10B 不再表示要做 Anthropic 或 Gemini。
 
 1. R00 → R01 → R02 → R03 串行。R01 会涉及 IPC 来源与 Preload 构建，R02 随后统一契约，不能同时写这些公共文件。
 2. R03 数据/迁移接口先合入后，R04/R05/R06 可分模块并行。总控联合验收三个 Agent 的实际公共输入、限制、控制、状态投影与落库；固定 Mock 回答本身不足以证明协作。
@@ -49,9 +53,7 @@ ready 只表示前置满足；执行授权须用户明确给出。总控完成�
 
 ## R08/R09 后续增强：多服务商目录（2026-10-20）
 
-需求已纳入 [SPEC](../SPEC.md) 和[Provider Preset Catalog 规划](../docs/PROVIDER_CATALOG_PLAN.md)，是 R08/R09 后续增强，不增加 R 编号、不重做已验收模块。保留原生 Adapter，兼容服务复用 R09；预设/自定义创建独立 providerId，Model 仍以 (providerId, modelId) 区分。
-
-用户本轮确认当前 R10A/R10B/R11 按各自已批准任务书继续；本项不是它们的新前置或交付条件，不修改其任务文件、代码/测试归属和现有 Worktree。上方及历史段落的旧 ready/授权登记不否定用户后续明确授权，也不构成已完成证据。
+这段是 2026-10-20 的设想，厂商范围已被取代。现行目录是 8 家国内服务和一个兼容协议适配器，没有原生 OpenAI、Anthropic、Gemini，也没有自定义服务。草案原文在 [PROVIDER_CATALOG_PLAN](../docs/PROVIDER_CATALOG_PLAN.md)。
 
 推荐在当前三模块完成必要集成、公共契约稳定且总控共享文件空闲后，单独授权安排 R08/R09 目录增强；R12–R18 仍按原依赖和授权推进，不把目录设成新的开工前置，不改变依赖图。配置/协议/Key 对接 R08/R09，同房间联合验收对接 R07及运行/上下文模块，费用/usage 对接 R13，界面精修 R16，V1 最终验收 R17；目录不擅自延期为 V1.1，也不授权真实付费测试。
 

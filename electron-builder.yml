@@ -24,7 +24,7 @@ beforeBuild: scripts/rebuild-native.cjs
 afterPack: scripts/verify-native.cjs
 mac:
   category: public.app-category.productivity
-  # Ad-hoc: seals the bundle so it verifies and Apple Silicon runs it; not Developer ID, not notarized (D132).
+  # Ad-hoc only (D132, D172): seals the bundle so Apple Silicon can verify it. No Developer ID, no notarization.
   identity: "-"
   hardenedRuntime: false
   target:

@@ -1,16 +1,20 @@
-# Provider Preset Catalog — R08/R09 后续增强规划
+# Provider 目录规划（2026-10-20 草案，范围已被取代）
 
-2026-10-20 用户追加产品需求；**需求已记录，目录实现未启动**。不新增 R 编号，不更改 R00–R18（含 R10A/R10B）的依赖表，不扩充当前 R10A、R10B、R11 的任务书、代码或测试归属。本文件是未来实施和验收依据，不是已实现的 Shared DTO、可用服务商清单或付费测试授权。
+**不要按本文的厂商范围实施。** 现行支持以 `src/shared/serviceCatalog.ts` 和 [STATUS](STATUS.md) 文首为准：只有 DeepSeek、豆包、通义千问、Kimi、智谱 GLM、百度文心、腾讯混元、MiniMax，共用一个兼容协议适配器。没有 OpenAI、Anthropic、Gemini 适配器，没有自定义服务，也没有 OpenRouter 或硅基流动。下文是 2026-10-20 的草案原文，仅供对照当时想过什么。
 
-## 产品目标与身份
+# 2026-10-20 草案原文
 
-在保留 OpenAI、Anthropic、Gemini 原生适配的基础上，允许使用官方 API、已核实的兼容 API 以及用户自定义 OpenAI-compatible 接入。Kimi、豆包、通义千问、智谱 GLM、MiniMax、OpenRouter、硅基流动、DeepSeek 等是拟核验的服务商/渠道目标，**不是本次已验证的预设**；未来逐项依据官方 API 文档录入。不得把 Coding 套餐、网页订阅账号或未经核实的第三方渠道当作可用 API 或 API Key。
+2026-10-20 用户追加产品需求；当时目录尚未按本文实现。不新增 R 编号。本文不是现行可用服务商清单。
+
+## 产品目标与身份（草案，未采用）
+
+草案曾打算保留 OpenAI、Anthropic、Gemini 原生适配，并允许自定义兼容接入。Kimi、豆包、通义千问、智谱 GLM、MiniMax、OpenRouter、硅基流动、DeepSeek 在草案里只是待核验目标。这项范围后来被收窄，见文首。不得把 Coding 套餐、网页订阅账号或未经核实的第三方渠道当作可用 API 或 API Key。
 
 | 概念 | 定义与沿用规则 |
 | --- | --- |
 | Provider / 配置实例 | 服务商或接入渠道在本地的一个独立配置；沿用稳定 providerId。相同厂商/预设可以创建多个实例，各有目标、模型、Key 引用及确认状态 |
 | Model | 服务商/渠道实际接受的模型 ID；运行身份是 (providerId, modelId)，保留完整原始 ID，不以同名、别名或底层模型相同合并不同渠道 |
-| Adapter | 协议实现；保留原生 OpenAI/Anthropic/Gemini，兼容服务尽量复用 R09 OpenAI-compatible，不按品牌复制 SDK/HTTP/SSE/重试代码 |
+| Adapter | 草案：保留多套原生协议，兼容服务复用当时的兼容实现，不按品牌复制 SDK。现行只有一个兼容协议适配器 |
 | Preset / Catalog | 经核验的创建配置用元数据模板，独立 preset 标识和修订；不是 Provider 实例、Key、可执行插件或授权凭证。选中后生成新实例，不能共享凭据或覆盖既有实例/历史 |
 
 当前源码依据：`src/shared/schemas/configuration.ts` 已有独立 ProviderConfiguration、协议 kind、customModels 和成员 providerId/modelId；`src/main/providers/ProviderRegistry.ts` 已有 Main-only policyResolver/capabilitiesResolver 与未知能力拒绝。以上是复用位置，不表示目录已经存在。品牌名称不逐个加入现有 ProviderKind 协议枚举。
@@ -37,7 +41,7 @@
 | --- | --- | --- |
 | R08 | 预设与自定义配置入口、独立实例、模型选择、安全摘要与 Key 生命周期 | 后续增强单独授权，当前设置/Key 规则不重写 |
 | R09 | 目录协议映射、兼容 Adapter 复用、能力和模型政策解析、分级测试语义 | 不为每个品牌新增网络实现；目录不自动授予普通生成权限 |
-| R10A / R10B | 原生协议实现完成后可由目录引用其已集成能力 | 两个现有 Worktree 只做已批准 Anthropic/Gemini 任务；不塞目录数据或大量预设 UI |
+| R10A / R10B | 草案曾打算等原生协议做完再由目录引用 | 草案写过 Anthropic、Gemini 任务。这两套适配器后来已删除，本行不再生效 |
 | R11 | 继续按公共 Provider/Model 协议调度成员 | 目录不是 R11 当前前置、交付门槛或本轮文件范围；本轮不要求其实现目录消费 |
 | R07、R04/R05/R06 | 后续联合验证同房间多个 Provider/模型实例、公共上下文、运行投影及历史快照 | 不因换预设重写成员历史或调度权限 |
 | R13 | 多币种、价格有效期、usage 实际核算与未知费用/预算保护 | 目录可先配置；价格/计数未知时普通真实生成仍拒绝，不提前实施完整 R13 |
